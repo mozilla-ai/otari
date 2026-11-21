@@ -14,6 +14,7 @@ import {
   FiLogIn,
   FiMessageSquare,
   FiRepeat,
+  FiServer,
   FiShield,
   FiShuffle,
   FiSliders,
@@ -217,6 +218,17 @@ const ORGANIZATION_NAV_SECTIONS = [
             icon: FiGlobe,
           },
         ],
+      },
+      // The organization's own MCP servers, which every workspace of it
+      // reaches. Beside Providers and gated as they are: like the provider
+      // keys, these are the organization's own connections to an outside
+      // service, which its workspaces use. Not the workspace rail's
+      // `/tools/mcp-servers`, which lists one workspace's own.
+      {
+        to: "/organization/mcp-servers",
+        label: "MCP servers",
+        surface: "organization_providers",
+        icon: FiServer,
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own

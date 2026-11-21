@@ -11,7 +11,9 @@ import {
 import { McpNotice } from "@/features/tools/McpNotice"
 import type { McpSettingsFocus } from "@/features/tools/McpServerSettingsDialog"
 import { asksForOAuthClient } from "@/features/tools/mcpErrors"
+import { mcpServerPagePath } from "@/features/tools/mcpServerPage"
 import { useMcpSignIn } from "@/features/tools/useMcpSignIn"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
 import { useEndMcpSharedAccount } from "@/shared/api/tools"
 import { formatDate } from "@/shared/helpers/format"
 
@@ -40,8 +42,24 @@ export function sharedAccountState(
   return server.health?.status === "healthy" ? "open" : "unchecked"
 }
 
-const MEANING =
-  "Shared: everyone in this workspace uses one account on this server."
+// Who "everyone" is: one workspace, or every workspace of the organization.
+const COPY: Record<
+  McpServerScope["kind"],
+  { meaning: string; actsAs: string }
+> = {
+  workspace: {
+    meaning:
+      "Shared: everyone in this workspace uses one account on this server.",
+    actsAs:
+      "Everyone in the workspace acts as the account you sign in with, so use a service account rather than your own.",
+  },
+  organization: {
+    meaning:
+      "Shared: everyone in every workspace of your organization uses one account on this server.",
+    actsAs:
+      "Everyone in your organization acts as the account you sign in with, so use a service account rather than your own.",
+  },
+}
 
 /**
  * A Shared server's account, at the top of its page: what everyone's calls
@@ -51,14 +69,14 @@ const MEANING =
  * opens on the field a press is about.
  */
 export function McpSharedAccount({
-  workspaceId,
+  scope,
   server,
   canManage,
   onOpenSettings,
   onLeave,
   openWindow,
 }: {
-  workspaceId: string
+  scope: McpServerScope
   server: WorkspaceMcpServer
   canManage: boolean
   /** Opens Settings, where a token is pasted, the mode changed and an OAuth client entered. */
@@ -70,9 +88,10 @@ export function McpSharedAccount({
 }) {
   const end = useEndMcpSharedAccount()
   const [isEnding, setEnding] = useState(false)
+  const { meaning, actsAs } = COPY[scope.kind]
   const signIn = useMcpSignIn({
-    workspaceId,
-    returnTo: `/tools/mcp-servers/${server.id}`,
+    scope,
+    returnTo: mcpServerPagePath(scope, server.id),
     onLeave,
     openWindow,
   })
@@ -86,7 +105,7 @@ export function McpSharedAccount({
       <SettingsGroup title="Shared account" isBounded>
         <SettingsBlock>
           <p className="text-body">
-            {MEANING}{" "}
+            {meaning}{" "}
             {state === "not_set_up"
               ? "An admin has not set up an account yet, so requests skip this server until one is."
               : state === "open"
@@ -116,7 +135,7 @@ export function McpSharedAccount({
       title="Shared account"
       description={
         <>
-          {MEANING} To let each member use their own,{" "}
+          {meaning} To let each member use their own,{" "}
           <button
             type="button"
             onClick={() => onOpenSettings("mode")}
@@ -214,9 +233,7 @@ export function McpSharedAccount({
                 : state === "token"
                   ? "Signing in for everyone replaces the token. "
                   : ""}
-          {state === "token"
-            ? null
-            : "Everyone in the workspace acts as the account you sign in with, so use a service account rather than your own."}
+          {state === "token" ? null : actsAs}
         </p>
         {account && !account.renewable ? (
           <p className="text-caption">
@@ -236,7 +253,7 @@ export function McpSharedAccount({
           error={end.error}
           onConfirm={() =>
             end.mutate(
-              { workspaceId, serverId: server.id },
+              { scope, serverId: server.id },
               { onSuccess: () => setEnding(false) },
             )
           }

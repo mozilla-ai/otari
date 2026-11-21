@@ -146,6 +146,11 @@ export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
 // reads them. A write also moves each workspace's view of them, which sits
 // under WORKSPACES, so the hooks invalidate that view by name.
 export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
+// The organization's own MCP servers, and below each one its connected users
+// and how each workspace reaches it. Its own root for the reason the keys above
+// have one; a write also moves what each workspace reaches, which sits under
+// WORKSPACES and PLAYGROUND, so the hooks invalidate that view by name.
+export const ORGANIZATION_MCP_SERVERS = "organization-mcp-servers"
 // The models an organization offers on one of its provider keys. Its own root
 // key rather than a child of ORGANIZATION_PROVIDER_KEYS: making a key default or
 // archiving one does not move a model row, and nesting would refetch every open

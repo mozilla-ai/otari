@@ -51,6 +51,19 @@ import type {
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { invalidateWorkspaceMcpCatalog } from "@/shared/api/mcpCatalog"
+import {
+  invalidateEveryWorkspaceMcpView,
+  invalidateMcpServers,
+  type McpServerScope,
+  mcpScopeMeta,
+  mcpServerConnectionsKey,
+  mcpServerKey,
+  mcpServerPath,
+  mcpServersKey,
+  mcpServersPath,
+  ORGANIZATION_MCP_SCOPE,
+  workspaceMcpScope,
+} from "@/shared/api/mcpServerScope"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   GUARDRAIL_PROFILES,
@@ -558,7 +571,7 @@ export function useWorkspaceMcpServer(
     meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServer>(
-        mcpServerPath(workspaceId as string, serverId),
+        workspaceServerPath(workspaceId as string, serverId),
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
@@ -606,7 +619,7 @@ export function useSetWorkspaceMcpServerLogo() {
       body.set("tile", tile)
       if (png) body.set("file", png, "logo.png")
       return apiFetch<WorkspaceMcpServerLogo>(
-        `${mcpServerPath(workspaceId, serverId)}/logo`,
+        `${workspaceServerPath(workspaceId, serverId)}/logo`,
         { method: "PUT", body },
       )
     },
@@ -629,7 +642,7 @@ export function useRemoveWorkspaceMcpServerLogo() {
       serverId: string
     }) =>
       apiFetch<WorkspaceMcpServerLogo>(
-        `${mcpServerPath(workspaceId, serverId)}/logo`,
+        `${workspaceServerPath(workspaceId, serverId)}/logo`,
         { method: "DELETE" },
       ),
     onSuccess: (_logo, { workspaceId }) =>
@@ -639,8 +652,8 @@ export function useRemoveWorkspaceMcpServerLogo() {
   })
 }
 
-function mcpServerPath(workspaceId: string, serverId: string): string {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`
+function workspaceServerPath(workspaceId: string, serverId: string): string {
+  return mcpServerPath(workspaceMcpScope(workspaceId), serverId)
 }
 
 function mcpAccessKey(workspaceId: string, serverId: string) {
@@ -666,7 +679,7 @@ export function useWorkspaceMcpServerAccess(
     meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServerAccess>(
-        `${mcpServerPath(workspaceId as string, serverId)}/access`,
+        `${workspaceServerPath(workspaceId as string, serverId)}/access`,
       ),
     enabled: enabled && workspaceId !== null,
     staleTime: 30_000,
@@ -691,7 +704,7 @@ export function useWorkspaceMcpServerAccessCheck({
     meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<WorkspaceMcpServerAccessCheck>(
-        `${mcpServerPath(workspaceId, serverId)}/access/check?api_key_id=${encodeURIComponent(apiKeyId)}&tool=${encodeURIComponent(tool)}`,
+        `${workspaceServerPath(workspaceId, serverId)}/access/check?api_key_id=${encodeURIComponent(apiKeyId)}&tool=${encodeURIComponent(tool)}`,
       ),
     enabled: apiKeyId !== "" && tool !== "",
     staleTime: 0,
@@ -752,7 +765,7 @@ export function useAddWorkspaceMcpServerGrants() {
       body: CreateWorkspaceMcpServerGrantsRequest
     }) =>
       apiFetch<WorkspaceMcpServerAccess>(
-        `${mcpServerPath(workspaceId, serverId)}/access/grants`,
+        `${workspaceServerPath(workspaceId, serverId)}/access/grants`,
         { method: "POST", body: JSON.stringify(body) },
       ),
   )
@@ -772,7 +785,7 @@ export function useUpdateWorkspaceMcpServerGrant() {
       tools: string[]
     }) =>
       apiFetch<WorkspaceMcpServerAccess>(
-        `${mcpServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
+        `${workspaceServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
         { method: "PATCH", body: JSON.stringify({ tools }) },
       ),
   )
@@ -790,7 +803,7 @@ export function useDeleteWorkspaceMcpServerGrant() {
       grantId: string
     }) =>
       apiFetch<WorkspaceMcpServerAccess>(
-        `${mcpServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
+        `${workspaceServerPath(workspaceId, serverId)}/access/grants/${encodeURIComponent(grantId)}`,
         { method: "DELETE" },
       ),
   )
@@ -826,34 +839,31 @@ export function useCreateWorkspaceMcpServer() {
 
 // A partial update, which is what keeps the write-only token's three states
 // expressible. See `McpServerSettings` for the rule and how the form maps onto it.
-export function useUpdateWorkspaceMcpServer() {
+export function useUpdateMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
       body,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
       body: UpdateWorkspaceMcpServerRequest
     }) =>
-      apiFetch<WorkspaceMcpServer>(mcpServerPath(workspaceId, serverId), {
+      apiFetch<WorkspaceMcpServer>(mcpServerPath(scope, serverId), {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: (server, { workspaceId, serverId }) => {
-      queryClient.setQueryData(
-        [WORKSPACES, workspaceId, "mcp-servers", serverId],
-        server,
-      )
+    onSuccess: (server, { scope, serverId }) => {
+      queryClient.setQueryData(mcpServerKey(scope, serverId), server)
       // The prefix covers the server's access list and every key's view of it,
       // which `everyone_tools` and `enabled` both move.
-      void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
-      })
+      invalidateMcpServers(queryClient, scope)
       // A new URL changes which catalog server the workspace has.
-      void invalidateWorkspaceMcpCatalog(queryClient, workspaceId)
+      if (scope.kind === "workspace") {
+        void invalidateWorkspaceMcpCatalog(queryClient, scope.workspaceId)
+      }
     },
   })
 }
@@ -861,43 +871,38 @@ export function useUpdateWorkspaceMcpServer() {
 // Connects to a stored server now and records the outcome as its `health`. A
 // server that fails answers 200 like one that passes; only a busy gateway (429)
 // is an error here.
-export function useCheckWorkspaceMcpServer() {
+export function useCheckMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
     }) =>
-      apiFetch<WorkspaceMcpServer>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}/check`,
-        { method: "POST" },
-      ),
-    onSuccess: (_data, { workspaceId }) => {
-      void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
-      })
-    },
+      apiFetch<WorkspaceMcpServer>(`${mcpServerPath(scope, serverId)}/check`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, { scope }) => invalidateMcpServers(queryClient, scope),
   })
 }
 
 // Checks connection details without storing anything: the dialog's Test
 // button. Nothing to invalidate, since nothing was written.
-export function useTestWorkspaceMcpServerConnection() {
+export function useTestMcpServerConnection() {
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       body,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       body: CheckWorkspaceMcpServerRequest
     }) =>
-      apiFetch<WorkspaceMcpServerHealth>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/check`,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+      apiFetch<WorkspaceMcpServerHealth>(`${mcpServersPath(scope)}/check`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   })
 }
 
@@ -957,16 +962,6 @@ function mcpMyToolsKey(workspaceId: string, serverId: string) {
   return [WORKSPACES, workspaceId, "mcp-servers", serverId, "my-tools"] as const
 }
 
-function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
-  return [
-    WORKSPACES,
-    workspaceId,
-    "mcp-servers",
-    serverId,
-    "connections",
-  ] as const
-}
-
 /** The caller's own sign-ins to this workspace's per-user servers. */
 export function useMyMcpConnections(workspaceId: string | null) {
   return useQuery({
@@ -1000,7 +995,7 @@ export function useMyMcpServerTools(
     staleTime: 60_000,
     queryFn: ({ signal }) =>
       apiFetch<WorkspaceMcpServerMyTools>(
-        `${mcpServerPath(workspaceId as string, serverId)}/my-tools`,
+        `${workspaceServerPath(workspaceId as string, serverId)}/my-tools`,
         { signal },
       ),
   })
@@ -1014,16 +1009,16 @@ export function useMyMcpServerTools(
 export function useStartMcpCheckSignIn() {
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
       returnTo,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
       returnTo: string
     }) =>
       apiFetch<McpConnectionStarted>(
-        `${mcpServerPath(workspaceId, serverId)}/check/sign-in`,
+        `${mcpServerPath(scope, serverId)}/check/sign-in`,
         { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
       ),
   })
@@ -1037,16 +1032,16 @@ export function useStartMcpCheckSignIn() {
 export function useStartMcpSharedSignIn() {
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
       returnTo,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
       returnTo: string
     }) =>
       apiFetch<McpConnectionStarted>(
-        `${mcpServerPath(workspaceId, serverId)}/shared-account`,
+        `${mcpServerPath(scope, serverId)}/shared-account`,
         { method: "POST", body: JSON.stringify({ return_to: returnTo }) },
       ),
   })
@@ -1057,23 +1052,23 @@ export function useEndMcpSharedAccount() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
     }) =>
       apiFetch<WorkspaceMcpServer>(
-        `${mcpServerPath(workspaceId, serverId)}/shared-account`,
+        `${mcpServerPath(scope, serverId)}/shared-account`,
         { method: "DELETE" },
       ),
-    onSuccess: (_data, { workspaceId }) => {
-      void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
-      })
-      void queryClient.invalidateQueries({
-        queryKey: playgroundToolsKey(workspaceId),
-      })
+    onSuccess: (_data, { scope }) => {
+      invalidateMcpServers(queryClient, scope)
+      if (scope.kind === "workspace") {
+        void queryClient.invalidateQueries({
+          queryKey: playgroundToolsKey(scope.workspaceId),
+        })
+      }
     },
   })
 }
@@ -1086,12 +1081,14 @@ export function useEndMcpSharedAccount() {
  */
 export function useRefreshAfterMcpSignIn() {
   const queryClient = useQueryClient()
-  return (workspaceId: string, serverId: string) => {
+  return (scope: McpServerScope, serverId: string) => {
+    // The organization's keys hold its servers and their connected users.
+    invalidateMcpServers(queryClient, scope)
+    if (scope.kind === "organization") return
     for (const queryKey of [
-      mcpConnectionsKey(workspaceId),
-      playgroundToolsKey(workspaceId),
-      [WORKSPACES, workspaceId, "mcp-servers"],
-      mcpServerConnectionsKey(workspaceId, serverId),
+      mcpConnectionsKey(scope.workspaceId),
+      playgroundToolsKey(scope.workspaceId),
+      mcpServerConnectionsKey(scope, serverId),
     ]) {
       void queryClient.invalidateQueries({ queryKey })
     }
@@ -1136,18 +1133,22 @@ export function useCompleteMcpConnection() {
         body: JSON.stringify({ state, code, iss }),
       }),
     onSuccess: (done) => {
+      // No workspace is an owner's sign-in to an organization's server.
+      const scope =
+        done.workspace_id === null
+          ? ORGANIZATION_MCP_SCOPE
+          : workspaceMcpScope(done.workspace_id)
       // Every finished sign-in lists the server's tools once, so its health moved.
+      invalidateMcpServers(queryClient, scope)
       void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, done.workspace_id, "mcp-servers"],
+        queryKey: mcpServerConnectionsKey(scope, done.server_id),
       })
+      if (done.workspace_id === null) return
       void queryClient.invalidateQueries({
         queryKey: mcpConnectionsKey(done.workspace_id),
       })
       void queryClient.invalidateQueries({
         queryKey: playgroundToolsKey(done.workspace_id),
-      })
-      void queryClient.invalidateQueries({
-        queryKey: mcpServerConnectionsKey(done.workspace_id, done.server_id),
       })
     },
   })
@@ -1176,7 +1177,10 @@ export function useDisconnectMcp() {
         queryKey: playgroundToolsKey(workspaceId),
       })
       void queryClient.invalidateQueries({
-        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
+        queryKey: mcpServerConnectionsKey(
+          workspaceMcpScope(workspaceId),
+          serverId,
+        ),
       })
       void queryClient.invalidateQueries({
         queryKey: mcpMyToolsKey(workspaceId, serverId),
@@ -1190,20 +1194,17 @@ export function useDisconnectMcp() {
   })
 }
 
-/** One page of who is connected to a per-user server. Workspace managers only. */
+/** One page of who is connected to a per-user server. Managers of its workspace or organization only. */
 export function useMcpServerConnections(
-  workspaceId: string,
+  scope: McpServerScope,
   serverId: string,
   { page, pageSize }: { page: number; pageSize: number },
   enabled: boolean,
 ) {
+  const serverKey = mcpServerConnectionsKey(scope, serverId)
   return useQuery({
-    queryKey: [
-      ...mcpServerConnectionsKey(workspaceId, serverId),
-      page,
-      pageSize,
-    ],
-    meta: workspaceMeta(workspaceId),
+    queryKey: [...serverKey, page, pageSize],
+    meta: mcpScopeMeta(scope),
     enabled,
     // Other people connect without this page hearing of it, so it is read again sooner.
     staleTime: 30_000,
@@ -1212,8 +1213,8 @@ export function useMcpServerConnections(
       previous: McpServerConnections | undefined,
       previousQuery,
     ) =>
-      previousQuery?.queryKey[1] === workspaceId &&
-      previousQuery.queryKey[3] === serverId
+      previousQuery !== undefined &&
+      serverKey.every((part, index) => previousQuery.queryKey[index] === part)
         ? previous
         : undefined,
     queryFn: ({ signal }) => {
@@ -1222,45 +1223,50 @@ export function useMcpServerConnections(
         limit: String(pageSize),
       })
       return apiFetch<McpServerConnections>(
-        `${mcpServerPath(workspaceId, serverId)}/connections?${params}`,
+        `${mcpServerPath(scope, serverId)}/connections?${params}`,
         { signal },
       )
     },
   })
 }
 
-/** Ends one user's connection to a server. Workspace managers only. */
+/** Ends one user's connection to a server. Managers of its workspace or organization only. */
 export function useRemoveMcpServerConnection() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
-      workspaceId,
+      scope,
       serverId,
       userId,
     }: {
-      workspaceId: string
+      scope: McpServerScope
       serverId: string
       userId: string
     }) =>
       apiFetch<void>(
-        `${mcpServerPath(workspaceId, serverId)}/connections/${encodeURIComponent(userId)}`,
+        `${mcpServerPath(scope, serverId)}/connections/${encodeURIComponent(userId)}`,
         { method: "DELETE" },
       ),
-    onSuccess: (_data, { workspaceId, serverId }) => {
+    onSuccess: (_data, { scope, serverId }) => {
       void queryClient.invalidateQueries({
-        queryKey: mcpServerConnectionsKey(workspaceId, serverId),
-      })
-      void queryClient.invalidateQueries({
-        queryKey: mcpConnectionsKey(workspaceId),
-      })
-      void queryClient.invalidateQueries({
-        queryKey: playgroundToolsKey(workspaceId),
+        queryKey: mcpServerConnectionsKey(scope, serverId),
       })
       // The list's `connected_users`; exact, as the keys under it are handled above.
       void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+        queryKey: mcpServersKey(scope),
         exact: true,
       })
+      if (scope.kind === "workspace") {
+        void queryClient.invalidateQueries({
+          queryKey: mcpConnectionsKey(scope.workspaceId),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: playgroundToolsKey(scope.workspaceId),
+        })
+      } else {
+        // The person stops reaching the server from every workspace.
+        invalidateEveryWorkspaceMcpView(queryClient)
+      }
     },
   })
 }
@@ -1275,7 +1281,7 @@ export function useDeleteWorkspaceMcpServer() {
       workspaceId: string
       serverId: string
     }) =>
-      apiFetch<void>(mcpServerPath(workspaceId, serverId), {
+      apiFetch<void>(workspaceServerPath(workspaceId, serverId), {
         method: "DELETE",
       }),
     onSuccess: (_data, { workspaceId, serverId }) => {

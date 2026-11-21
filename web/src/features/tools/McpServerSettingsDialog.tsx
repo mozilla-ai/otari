@@ -18,7 +18,8 @@ import {
   urlProblem,
 } from "@/features/tools/mcpServerForm"
 import { healthNeedsAttention } from "@/features/tools/mcpServerHealth"
-import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
+import { useUpdateMcpServer } from "@/shared/api/tools"
 
 // A stored server's own fields, in the one place they are changed.
 //
@@ -78,7 +79,7 @@ function Group({
 export function McpServerSettingsDialog({
   isOpen,
   onOpenChange,
-  workspaceId,
+  scope,
   server,
   focus = "none",
   onSaved,
@@ -86,7 +87,7 @@ export function McpServerSettingsDialog({
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
-  workspaceId: string
+  scope: McpServerScope
   server: WorkspaceMcpServer
   /** The field to land on, for a press that was about one. */
   focus?: McpSettingsFocus
@@ -98,7 +99,8 @@ export function McpServerSettingsDialog({
   /** Opens the page's own delete confirmation. */
   onDelete: () => void
 }) {
-  const update = useUpdateWorkspaceMcpServer()
+  const update = useUpdateMcpServer()
+  const isOrganization = scope.kind === "organization"
   const [name, setName] = useState(server.name)
   const [url, setUrl] = useState(server.url)
   const [token, setToken] = useState("")
@@ -209,7 +211,7 @@ export function McpServerSettingsDialog({
   const save = () => {
     if (isInvalid || !isChanged) return
     update.mutate(
-      { workspaceId, serverId: server.id, body },
+      { scope, serverId: server.id, body },
       {
         onSuccess: (saved) =>
           // A per-user server with no health was not checked because nobody
@@ -247,7 +249,11 @@ export function McpServerSettingsDialog({
           onChange={setName}
           isRequired
           autoFocus={focus === "none"}
-          description="Unique in this workspace."
+          description={
+            isOrganization
+              ? "Unique in your organization, its workspaces' servers included."
+              : "Unique in this workspace."
+          }
         />
         <Field
           label="URL"
@@ -398,8 +404,9 @@ export function McpServerSettingsDialog({
       <Group title="Delete server">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="min-w-0 max-w-prose text-sm text-muted">
-            Removes the server for everyone in the workspace and ends every
-            connection to it.
+            {isOrganization
+              ? "Removes the server from every workspace in your organization and ends every connection to it."
+              : "Removes the server for everyone in the workspace and ends every connection to it."}
           </p>
           <Button
             variant="danger"

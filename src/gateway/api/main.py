@@ -222,6 +222,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     workspace_member_budget_policies.router,
     workspace_activation.router,
     workspace_mcp_servers.router,
+    workspace_mcp_servers.organization_router,
     mcp_connections.router,
     mcp_connections.session_router,
     mcp_connections.callback_router,

@@ -32,6 +32,7 @@ import type { CatalogPick } from "@/features/tools/mcpCatalog"
 import { hasToolListing } from "@/features/tools/mcpServerHealth"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { WorkspaceRequestMcpServers } from "@/features/tools/WorkspaceRequestMcpServers"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateWorkspaceMcpServer,
@@ -66,7 +67,7 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
  * How many tools a server exposes, never their names: the allow-list's length
  * where it has one, else what its last tool listing counted, else "All".
  */
-function toolsLabel(server: WorkspaceMcpServer): string {
+export function toolsLabel(server: WorkspaceMcpServer): string {
   const count =
     server.allowed_tools?.length ??
     (hasToolListing(server.health) ? server.health.tool_count : null)
@@ -75,7 +76,7 @@ function toolsLabel(server: WorkspaceMcpServer): string {
 }
 
 /** Whether a Shared server's one account is set up, in the list's Connections column. */
-function SharedAccountCell({ server }: { server: WorkspaceMcpServer }) {
+export function SharedAccountCell({ server }: { server: WorkspaceMcpServer }) {
   const state = sharedAccountState(server)
   if (state === "not_set_up") {
     return (
@@ -164,7 +165,7 @@ export function WorkspaceMcpServersCard() {
   const create = useCreateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const check = useMcpServerCheck({
-    workspaceId: selected?.workspace_id ?? "",
+    scope: workspaceMcpScope(selected?.workspace_id ?? ""),
     returnTo: "/tools/mcp-servers",
   })
   const navigate = useNavigate()
@@ -410,7 +411,7 @@ export function WorkspaceMcpServersCard() {
         key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
-        workspaceId={selected.workspace_id}
+        scope={workspaceMcpScope(selected.workspace_id)}
         isPending={create.isPending}
         error={create.error}
         onSubmit={submit}

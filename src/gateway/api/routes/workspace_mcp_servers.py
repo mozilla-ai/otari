@@ -1,6 +1,7 @@
-"""Workspace-scoped MCP server management.
+"""Workspace-scoped MCP server management, and the organization's own servers every workspace reaches.
 
-Thin composition over
+Two routers, as for web search keys: a workspace's servers under ``/workspaces/{workspace_id}/mcp-servers``,
+and the organization's own under ``/organizations/me/mcp-servers``, owners and admins only. Thin composition over
 `gateway.services.tenancy.workspace_mcp_server_service`, following
 `routes/workspace_member_budget_policies.py`'s shape: master key on the
 router, plus the caller's tenancy identity for the per-workspace role check
@@ -9,7 +10,7 @@ the service runs. A request reaches these servers by naming their ids in
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from starlette.datastructures import UploadFile
@@ -18,6 +19,7 @@ from starlette.requests import ClientDisconnect
 from gateway.api.deps import (
     CurrentIdentity,
     McpServerLogoServiceDep,
+    OrganizationMcpServerWorkspacesDep,
     PersonGrowthSignalPortDep,
     WorkspaceMcpServerServiceDep,
     verify_master_key,
@@ -25,9 +27,11 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._logo_response import LOGO_RESPONSES, logo_response
 from gateway.api.routes.organizations import Message
+from gateway.schemas.organizations import OrganizationRefusal
 from gateway.schemas.tools import (
     McpConnectionStart,
     McpConnectionStarted,
+    McpServerConnectionsPublic,
     WorkspaceMcpServerLogoPublic,
     WorkspaceMcpServerLogosPublic,
 )
@@ -44,6 +48,11 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerPublic,
     WorkspaceMcpServersPublic,
     WorkspaceMcpServerUpdate,
+)
+from gateway.services.tools import (
+    OrganizationMcpServerLimit,
+    OrganizationMcpServerWorkspace,
+    OrganizationMcpServerWorkspaces,
 )
 
 # Auth is declared on the router, matching `routes/workspaces.py`: every
@@ -496,3 +505,197 @@ async def remove_workspace_mcp_server_logo(
     Organization owners/admins or this workspace's owners/admins.
     """
     return await service.remove_upload(user=current_identity, workspace_id=workspace_id, server_id=server_id)
+
+
+organization_router = APIRouter(
+    prefix="/organizations/me/mcp-servers",
+    tags=["mcp-servers"],
+    dependencies=[Depends(verify_master_key)],
+)
+
+_BUSY: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+    }
+}
+
+
+@organization_router.get("")
+async def list_organization_mcp_servers(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of records to return")] = 100,
+) -> WorkspaceMcpServersPublic:
+    """List the organization's own MCP servers, oldest first. Organization owners and admins only."""
+    return await service.list_organization_servers(user=current_identity, skip=skip, limit=limit)
+
+
+@organization_router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": OrganizationRefusal,
+            "description": "Another server of the organization, its own or a workspace's, already has this name.",
+        }
+    },
+)
+async def create_organization_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    body: WorkspaceMcpServerCreate,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
+) -> WorkspaceMcpServerPublic:
+    """Add an MCP server every workspace of the organization reaches. Organization owners and admins only.
+
+    Its access rules, attach setting and tool list are the defaults each workspace starts from, and its tool
+    list is the most any workspace's callers reach. A name another server of the organization has, its own or a
+    workspace's, is refused with a 409.
+    """
+    return await service.create_server(
+        user=current_identity, workspace_id=None, request=body, growth=growth, background_tasks=background_tasks
+    )
+
+
+@organization_router.post(
+    "/check", responses={status.HTTP_400_BAD_REQUEST: {"description": "The URL failed the SSRF or TLS check"}}
+)
+async def check_organization_mcp_server_connection(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, body: WorkspaceMcpServerCheckRequest
+) -> WorkspaceMcpServerHealth:
+    """Check connection details without storing anything. Organization owners and admins only."""
+    return await service.check_connection(user=current_identity, workspace_id=None, request=body)
+
+
+@organization_router.get("/{server_id}")
+async def get_organization_mcp_server(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, server_id: uuid.UUID
+) -> WorkspaceMcpServerPublic:
+    """One of the organization's own MCP servers. Organization owners and admins only."""
+    return await service.get_organization_server(user=current_identity, server_id=server_id)
+
+
+@organization_router.patch("/{server_id}")
+async def update_organization_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    body: WorkspaceMcpServerUpdate,
+) -> WorkspaceMcpServerPublic:
+    """Change one of the organization's own MCP servers. Organization owners and admins only."""
+    return await service.update_server(user=current_identity, workspace_id=None, server_id=server_id, request=body)
+
+
+@organization_router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_organization_mcp_server(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, server_id: uuid.UUID
+) -> None:
+    """Delete one of the organization's own MCP servers, from every workspace. Organization owners and admins only.
+
+    Every sign-in to it ends, and its authorization server is asked to end their tokens once the deletion commits.
+    """
+    await service.delete_server(user=current_identity, workspace_id=None, server_id=server_id)
+
+
+@organization_router.post("/{server_id}/check", responses=_BUSY)
+async def check_organization_mcp_server(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, server_id: uuid.UUID
+) -> WorkspaceMcpServerPublic:
+    """Check the server's connection now and store the outcome as `health`. Organization owners and admins only."""
+    return await service.check_server(user=current_identity, workspace_id=None, server_id=server_id)
+
+
+@organization_router.post("/{server_id}/check/sign-in")
+async def start_organization_mcp_server_check_sign_in(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    body: McpConnectionStart,
+) -> McpConnectionStarted:
+    """Start a sign-in made only to check a per-user server. Organization owners and admins only."""
+    return await service.start_check_sign_in(
+        user=current_identity, workspace_id=None, server_id=server_id, return_to=body.return_to
+    )
+
+
+@organization_router.post("/{server_id}/shared-account")
+async def start_organization_mcp_server_shared_sign_in(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    body: McpConnectionStart,
+) -> McpConnectionStarted:
+    """Start a sign-in for everyone, which every workspace's calls then carry. Organization owners and admins only."""
+    return await service.start_shared_sign_in(
+        user=current_identity, workspace_id=None, server_id=server_id, return_to=body.return_to
+    )
+
+
+@organization_router.delete("/{server_id}/shared-account")
+async def end_organization_mcp_server_shared_account(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, server_id: uuid.UUID
+) -> WorkspaceMcpServerPublic:
+    """End the server's shared account, and check it again without one. Organization owners and admins only."""
+    return await service.disconnect_shared(user=current_identity, workspace_id=None, server_id=server_id)
+
+
+@organization_router.get("/{server_id}/connections")
+async def list_organization_mcp_server_connections(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of records to return")] = 100,
+) -> McpServerConnectionsPublic:
+    """Everyone signed in to the server, from any workspace. Organization owners and admins only."""
+    return await service.server_connections(
+        user=current_identity, workspace_id=None, server_id=server_id, skip=skip, limit=limit
+    )
+
+
+@organization_router.delete("/{server_id}/connections/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_organization_mcp_server_connection(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, server_id: uuid.UUID, user_id: str
+) -> None:
+    """End one person's sign-in to the server. Organization owners and admins only."""
+    await service.remove_connection(user=current_identity, workspace_id=None, server_id=server_id, user_id=user_id)
+
+
+@organization_router.get("/{server_id}/workspaces")
+async def list_organization_mcp_server_workspaces(
+    service: OrganizationMcpServerWorkspacesDep, current_identity: CurrentIdentity, server_id: uuid.UUID
+) -> OrganizationMcpServerWorkspaces:
+    """Each workspace of the organization, whether it reaches the server, and the limit set for it.
+
+    Organization owners and admins only.
+    """
+    return await service.workspaces(user=current_identity, server_id=server_id)
+
+
+@organization_router.put("/{server_id}/workspaces/{workspace_id}")
+async def set_organization_mcp_server_workspace_limit(
+    service: OrganizationMcpServerWorkspacesDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    body: OrganizationMcpServerLimit,
+) -> OrganizationMcpServerWorkspace:
+    """Limit the tools a workspace's callers reach on the server. Organization owners and admins only.
+
+    The workspace's own rules still apply under the limit, and its admins can narrow it but never raise it.
+    `[]` turns the server off for the workspace.
+    """
+    return await service.set_limit(user=current_identity, server_id=server_id, workspace_id=workspace_id, limit=body)
+
+
+@organization_router.delete("/{server_id}/workspaces/{workspace_id}")
+async def clear_organization_mcp_server_workspace_limit(
+    service: OrganizationMcpServerWorkspacesDep,
+    current_identity: CurrentIdentity,
+    server_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> OrganizationMcpServerWorkspace:
+    """Lift the organization's limit in a workspace. Organization owners and admins only. Idempotent."""
+    return await service.clear_limit(user=current_identity, server_id=server_id, workspace_id=workspace_id)

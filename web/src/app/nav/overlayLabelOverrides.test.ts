@@ -41,6 +41,7 @@ describe("a build that replaces the label-override module", () => {
   it("renames a base disclosure label", () => {
     expect(general()?.items.map((item) => item.label)).toEqual([
       "Provider keys",
+      "MCP servers",
       "Guardrails",
       "Org settings",
     ])

@@ -14840,6 +14840,16 @@
             "title": "Server Name",
             "type": "string"
           },
+          "server_scope": {
+            "default": "workspace",
+            "description": "Whose the server is: one workspace's own, or its organization's, which a member signs in to from a workspace that reaches it",
+            "enum": [
+              "workspace",
+              "organization"
+            ],
+            "title": "Server Scope",
+            "type": "string"
+          },
           "shared": {
             "default": false,
             "description": "The sign-in was a manager's for everyone: it is now the shared server's account",
@@ -14847,9 +14857,17 @@
             "type": "boolean"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace the sign-in started from; null for an owner's sign-in to an organization's server",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -19857,6 +19875,100 @@
           "count"
         ],
         "title": "OrganizationGuardrailsPublic",
+        "type": "object"
+      },
+      "OrganizationMcpServerLimit": {
+        "description": "The organization's limit on one workspace's callers of one of its servers.",
+        "properties": {
+          "tools": {
+            "description": "Tool patterns ('*', a name, 'prefix*', '@read') the workspace's callers may reach at most; [] turns the server off for the workspace, and its admins cannot turn it back on",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "OrganizationMcpServerLimit",
+        "type": "object"
+      },
+      "OrganizationMcpServerWorkspace": {
+        "description": "One workspace of the organization, as one of its servers reaches it.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "narrowed": {
+            "description": "The workspace's admins changed something of their own: turned the server off, or set its default access or whether it is attached",
+            "title": "Narrowed",
+            "type": "boolean"
+          },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's limit for the workspace; null sets none, [] turns the server off there",
+            "title": "Organization Tools"
+          },
+          "reached": {
+            "description": "The workspace's requests reach the server: neither the organization nor the workspace turned it off there, and the server itself is on",
+            "title": "Reached",
+            "type": "boolean"
+          },
+          "workspace_enabled": {
+            "description": "The workspace's own switch, which its admins set",
+            "title": "Workspace Enabled",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "name",
+          "reached",
+          "organization_tools",
+          "workspace_enabled",
+          "narrowed"
+        ],
+        "title": "OrganizationMcpServerWorkspace",
+        "type": "object"
+      },
+      "OrganizationMcpServerWorkspaces": {
+        "description": "Every workspace of the organization, as one of its servers reaches each, by name.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationMcpServerWorkspaces",
         "type": "object"
       },
       "OrganizationMembershipContextPublic": {
@@ -32949,6 +33061,15 @@
             "title": "Read Tools From Server",
             "type": "boolean"
           },
+          "scope": {
+            "description": "Who owns the server: one workspace, or its organization",
+            "enum": [
+              "workspace",
+              "organization"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
           "shared_account": {
             "anyOf": [
               {
@@ -32969,14 +33090,23 @@
             "type": "string"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace that owns the server; null for an organization's",
+            "title": "Workspace Id"
           }
         },
         "required": [
           "id",
           "workspace_id",
+          "scope",
           "name",
           "url",
           "purpose_hint",
@@ -47675,6 +47805,887 @@
         "summary": "Rotate Own Key",
         "tags": [
           "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers": {
+      "get": {
+        "description": "List the organization's own MCP servers, oldest first. Organization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_servers",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Servers",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Add an MCP server every workspace of the organization reaches. Organization owners and admins only.\n\nIts access rules, attach setting and tool list are the defaults each workspace starts from, and its tool\nlist is the most any workspace's callers reach. A name another server of the organization has, its own or a\nworkspace's, is refused with a 409.",
+        "operationId": "mcp-servers-create_organization_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "Another server of the organization, its own or a workspace's, already has this name."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/check": {
+      "post": {
+        "description": "Check connection details without storing anything. Organization owners and admins only.",
+        "operationId": "mcp-servers-check_organization_mcp_server_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "The URL failed the SSRF or TLS check"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Organization Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}": {
+      "delete": {
+        "description": "Delete one of the organization's own MCP servers, from every workspace. Organization owners and admins only.\n\nEvery sign-in to it ends, and its authorization server is asked to end their tokens once the deletion commits.",
+        "operationId": "mcp-servers-delete_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "get": {
+        "description": "One of the organization's own MCP servers. Organization owners and admins only.",
+        "operationId": "mcp-servers-get_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "patch": {
+        "description": "Change one of the organization's own MCP servers. Organization owners and admins only.",
+        "operationId": "mcp-servers-update_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check": {
+      "post": {
+        "description": "Check the server's connection now and store the outcome as `health`. Organization owners and admins only.",
+        "operationId": "mcp-servers-check_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check/sign-in": {
+      "post": {
+        "description": "Start a sign-in made only to check a per-user server. Organization owners and admins only.",
+        "operationId": "mcp-servers-start_organization_mcp_server_check_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Organization Mcp Server Check Sign In",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections": {
+      "get": {
+        "description": "Everyone signed in to the server, from any workspace. Organization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_server_connections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerConnectionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Server Connections",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections/{user_id}": {
+      "delete": {
+        "description": "End one person's sign-in to the server. Organization owners and admins only.",
+        "operationId": "mcp-servers-remove_organization_mcp_server_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Organization Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/shared-account": {
+      "delete": {
+        "description": "End the server's shared account, and check it again without one. Organization owners and admins only.",
+        "operationId": "mcp-servers-end_organization_mcp_server_shared_account",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "End Organization Mcp Server Shared Account",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Start a sign-in for everyone, which every workspace's calls then carry. Organization owners and admins only.",
+        "operationId": "mcp-servers-start_organization_mcp_server_shared_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Organization Mcp Server Shared Sign In",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces": {
+      "get": {
+        "description": "Each workspace of the organization, whether it reaches the server, and the limit set for it.\n\nOrganization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_server_workspaces",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspaces"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Server Workspaces",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces/{workspace_id}": {
+      "delete": {
+        "description": "Lift the organization's limit in a workspace. Organization owners and admins only. Idempotent.",
+        "operationId": "mcp-servers-clear_organization_mcp_server_workspace_limit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Organization Mcp Server Workspace Limit",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "put": {
+        "description": "Limit the tools a workspace's callers reach on the server. Organization owners and admins only.\n\nThe workspace's own rules still apply under the limit, and its admins can narrow it but never raise it.\n`[]` turns the server off for the workspace.",
+        "operationId": "mcp-servers-set_organization_mcp_server_workspace_limit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationMcpServerLimit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Organization Mcp Server Workspace Limit",
+        "tags": [
+          "mcp-servers"
         ]
       }
     },

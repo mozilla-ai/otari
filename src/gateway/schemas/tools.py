@@ -922,8 +922,15 @@ class McpConnectionCompleted(pydantic.BaseModel):
     """A finished sign-in: which server it connected, and where to land."""
 
     server_id: uuid.UUID
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID | None = pydantic.Field(
+        description="The workspace the sign-in started from; null for an owner's sign-in to an organization's server"
+    )
     server_name: str
+    server_scope: Literal["workspace", "organization"] = pydantic.Field(
+        default="workspace",
+        description="Whose the server is: one workspace's own, or its organization's, which a member signs in to "
+        "from a workspace that reaches it",
+    )
     return_to: str | None = pydantic.Field(description="The dashboard path the sign-in was started with, if any")
     checked: bool = pydantic.Field(
         default=False,

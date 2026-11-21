@@ -809,6 +809,15 @@ export type McpConnectionStarted = Schemas["McpConnectionStarted"]
 export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
 export type McpServerConnection = Schemas["McpServerConnectionPublic"]
 export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+// The organization's own servers share the shapes above (`scope` says whose a
+// server is). These say how each workspace reaches one, and set the
+// organization's limit for a workspace.
+export type OrganizationMcpServerWorkspace =
+  Schemas["OrganizationMcpServerWorkspace"]
+export type OrganizationMcpServerWorkspaces =
+  Schemas["OrganizationMcpServerWorkspaces"]
+export type OrganizationMcpServerLimitRequest =
+  Schemas["OrganizationMcpServerLimit"]
 
 // The catalog of remote MCP servers a workspace can add, the logos it knows,
 // and the sync that fills it from the MCP Registry.

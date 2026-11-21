@@ -10,6 +10,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { McpNotice } from "@/features/tools/McpNotice"
 import { asksForOAuthClient } from "@/features/tools/mcpErrors"
 import { useMcpSignIn } from "@/features/tools/useMcpSignIn"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useDisconnectMcp, useMyMcpConnections } from "@/shared/api/tools"
 
 /**
@@ -36,7 +37,7 @@ export function useOwnMcpAccount({
   const disconnect = useDisconnectMcp()
   const [isDisconnecting, setDisconnecting] = useState(false)
   const signIn = useMcpSignIn({
-    workspaceId: workspaceId ?? "",
+    scope: workspaceMcpScope(workspaceId ?? ""),
     returnTo: `/tools/mcp-servers/${server.id}`,
     onLeave,
     openWindow,
