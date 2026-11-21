@@ -93,10 +93,10 @@ limits under [Mail](https://docs.otari.ai/self-hosting/configuration#invitations
   are listed under **Invitations** in the dashboard to accept or decline. Someone
   with no organization yet is taken there after signing in.
 
-**Vouched addresses.** A password chosen through an invitation link counts as
-verified for signing in, but Otari records that the organization vouched for the
+**Addresses an organization recorded.** A password chosen through an invitation link counts as
+verified for signing in, but Otari records that the organization supplied the
 address rather than that the person proved it. Until the person proves it, by a
-Google or GitHub sign-in or a password reset by email, a vouched address does not
+Google or GitHub sign-in or a password reset by email, such an address does not
 trigger [email-domain auto-join](#email-domain-auto-join), and other
 organizations cannot add or invite it.
 
@@ -142,8 +142,8 @@ so it is deliberately limited.
   Verifying is refused while another organization's proof is current. An
   unproven claim therefore cannot stop the domain's real owner from proving it.
 - **Only Member and Viewer** can be granted, never organization management.
-- **Only verified addresses** join. An unverified address, or one only vouched
-  for through an invitation link, is skipped.
+- **Only proved addresses** join. An unverified address, or one an organization
+  only supplied through an invitation link, is skipped.
 - **Existing memberships are left alone.** A suspended membership is not revived,
   an existing role is not overwritten, and no workspace is granted, so somebody
   taken off a workspace on purpose is not put back by signing in.
