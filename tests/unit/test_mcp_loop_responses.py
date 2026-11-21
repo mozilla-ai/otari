@@ -410,6 +410,10 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
                 "cache_write_tokens_details": {"ttl_12h_tokens": 0, "ttl_30m_tokens": writes},
             }
         )
+    assert rounds[0].usage is not None
+    rounds[0].usage.output_tokens_details = OutputTokensDetails.model_validate(
+        {"reasoning_tokens": 1, "image_tokens": 2}
+    )
     responses = iter(rounds)
 
     async def fake_aresponses(**kwargs: Any) -> Response:
@@ -423,6 +427,7 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
         max_iterations=5,
     )
     assert out.usage is not None
+    assert getattr(out.usage.output_tokens_details, "image_tokens", None) == 2
     assert out.usage.input_tokens == 22
     assert out.usage.input_tokens_details.cached_tokens == 15
     assert out.usage.input_tokens_details.cache_write_tokens == 6

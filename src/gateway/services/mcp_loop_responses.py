@@ -189,6 +189,7 @@ _USAGE_COUNTS = (
     "cache_write_tokens",
     "output_tokens",
     "reasoning_tokens",
+    "image_tokens",
     "total_tokens",
 )
 
@@ -203,6 +204,7 @@ def _round_usage(usage: Any) -> dict[str, int]:
         "cache_write_tokens": getattr(input_details, "cache_write_tokens", 0) or 0,
         "output_tokens": getattr(usage, "output_tokens", 0) or 0,
         "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
+        "image_tokens": getattr(output_details, "image_tokens", 0) or 0,
         "total_tokens": getattr(usage, "total_tokens", 0) or 0,
     }
 
@@ -234,7 +236,10 @@ def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
                 }
             ),
             "output_tokens": counts["output_tokens"],
-            "output_tokens_details": output_details.model_copy(update={"reasoning_tokens": counts["reasoning_tokens"]}),
+            "output_tokens_details": output_details.model_copy(
+                update={"reasoning_tokens": counts["reasoning_tokens"]}
+                | ({"image_tokens": counts["image_tokens"]} if counts["image_tokens"] else {})
+            ),
             "total_tokens": counts["total_tokens"],
         }
     )

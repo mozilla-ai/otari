@@ -5,6 +5,7 @@ from any_llm.types.completion import ChatCompletionChunk, CompletionTokensDetail
 from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
 from gateway.api.routes.responses import _usage_to_completion_usage
+from gateway.core.metered_pricing import billable_usage_of
 from gateway.core.usage import GatewayUsage, reasoning_tokens_of
 from gateway.streaming import merge_stream_usage
 
@@ -89,3 +90,27 @@ def test_merge_usage_keeps_reasoning_tokens() -> None:
         merge_stream_usage(start, delta), GatewayUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     )
     assert reasoning_tokens_of(merged) == 12
+
+
+def test_chat_and_responses_usage_carry_image_output_tokens() -> None:
+    from openai.types.responses import ResponseUsage
+    from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+
+    chat = CompletionUsage(
+        prompt_tokens=20,
+        completion_tokens=1_440,
+        total_tokens=1_460,
+        completion_tokens_details=CompletionTokensDetails(image_tokens=1_120),
+    )
+    responses = _usage_to_completion_usage(
+        ResponseUsage(
+            input_tokens=20,
+            output_tokens=1_440,
+            total_tokens=1_460,
+            input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
+            output_tokens_details=OutputTokensDetails.model_validate({"reasoning_tokens": 0, "image_tokens": 1_120}),
+        )
+    )
+    assert responses is not None
+
+    assert [billable_usage_of(usage).image_output_tokens for usage in (chat, responses)] == [1_120, 1_120]
