@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select, update
+from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select, tuple_, update
+from sqlalchemy.engine import RowMapping
 
 from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
@@ -213,6 +214,19 @@ class RequestRows:
     tool_cost: Decimal | None
     # Priced rows that recorded how much of their cost is tool charges.
     tool_costed_rows: int
+
+
+@dataclass(frozen=True)
+class SummaryAggregates:
+    """A summary's grand totals and each requested breakdown, read together where the dialect allows.
+
+    ``groups`` maps a dimension name to its top groups, the same rows
+    :meth:`UsageLogRepository.groups` returns for that dimension. A dimension the
+    caller did not ask for is absent.
+    """
+
+    totals: UsageTotals
+    groups: dict[str, list[UsageGroupRow]]
 
 
 # The columns a breakdown can group by, named by the summary's dimension vocabulary.
@@ -442,6 +456,62 @@ def _billed_output_sum() -> Any:
     return func.coalesce(func.sum(_billed_expr("completion_tokens", UsageLog.completion_tokens)), 0)
 
 
+def _totals_aggregates(status_filter: str | None) -> list[Any]:
+    """The labeled aggregate columns a grand total is read from, in one place.
+
+    :meth:`UsageLogRepository.totals` and the single-pass summary read the same
+    columns, so a tile a summary draws and the totals endpoint agree by
+    construction rather than by two lists kept in step.
+    """
+    return [
+        func.coalesce(func.sum(UsageLog.cost), 0.0).label("cost"),
+        func.coalesce(func.sum(UsageLog.prompt_tokens), 0).label("prompt_tokens"),
+        func.coalesce(func.sum(UsageLog.completion_tokens), 0).label("completion_tokens"),
+        func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
+        func.coalesce(func.sum(UsageLog.cache_read_tokens), 0).label("cache_read_tokens"),
+        func.coalesce(func.sum(UsageLog.cache_write_tokens), 0).label("cache_write_tokens"),
+        func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0).label("cache_write_1h_tokens"),
+        _request_count_expr(status_filter).label("request_count"),
+        func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0).label("error_count"),
+        # Averaged over requests, not attempts: an absorbed row carries the
+        # time spent on a candidate that did not serve, and folding it in
+        # would make a policy that recovers quickly look slower than one
+        # that never fails.
+        func.avg(case((UsageLog.status != "absorbed", UsageLog.latency_ms))).label("avg_latency_ms"),
+        # Unpriced *served* rows only; see UsageTotals.unpriced_requests. The
+        # predicate is shared with the list filter so the tile and the rows it
+        # sends an operator to agree.
+        func.coalesce(
+            func.sum(case(((UsageLog.status == "success") & _needs_pricing_expr(), 1), else_=0)),
+            0,
+        ).label("unpriced_requests"),
+        _billed_input_sum().label("billed_input_tokens"),
+        _billed_output_sum().label("billed_output_tokens"),
+        func.coalesce(func.sum(UsageLog.reasoning_tokens), 0).label("reasoning_tokens"),
+    ]
+
+
+def _totals_from_mapping(row: RowMapping) -> UsageTotals:
+    """Build the totals from a row labeled by :func:`_totals_aggregates`."""
+    avg_latency = row["avg_latency_ms"]
+    return UsageTotals(
+        cost=float(row["cost"]),
+        prompt_tokens=int(row["prompt_tokens"]),
+        completion_tokens=int(row["completion_tokens"]),
+        total_tokens=int(row["total_tokens"]),
+        cache_read_tokens=int(row["cache_read_tokens"]),
+        cache_write_tokens=int(row["cache_write_tokens"]),
+        cache_write_1h_tokens=int(row["cache_write_1h_tokens"]),
+        request_count=int(row["request_count"]),
+        error_count=int(row["error_count"]),
+        avg_latency_ms=float(avg_latency) if avg_latency is not None else None,
+        unpriced_requests=int(row["unpriced_requests"]),
+        billed_input_tokens=int(row["billed_input_tokens"]),
+        billed_output_tokens=int(row["billed_output_tokens"]),
+        reasoning_tokens=int(row["reasoning_tokens"]),
+    )
+
+
 class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
     """Read usage rows inside a set of workspaces."""
 
@@ -650,51 +720,92 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
     async def totals(self, filters: UsageFilters, scope: UsageScope) -> UsageTotals:
         """Grand totals over the matching rows."""
         row = (
-            await self.db.execute(
-                select(
-                    func.coalesce(func.sum(UsageLog.cost), 0.0),
-                    func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
-                    func.coalesce(func.sum(UsageLog.completion_tokens), 0),
-                    func.coalesce(func.sum(UsageLog.total_tokens), 0),
-                    func.coalesce(func.sum(UsageLog.cache_read_tokens), 0),
-                    func.coalesce(func.sum(UsageLog.cache_write_tokens), 0),
-                    func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0),
-                    _request_count_expr(filters.status),
-                    func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
-                    # Averaged over requests, not attempts: an absorbed row carries the
-                    # time spent on a candidate that did not serve, and folding it in
-                    # would make a policy that recovers quickly look slower than one
-                    # that never fails.
-                    func.avg(case((UsageLog.status != "absorbed", UsageLog.latency_ms))),
-                    # Unpriced *served* rows only; see UsageTotals.unpriced_requests. The
-                    # predicate is shared with the list filter so the tile and the rows it
-                    # sends an operator to agree.
-                    func.coalesce(
-                        func.sum(case(((UsageLog.status == "success") & _needs_pricing_expr(), 1), else_=0)),
-                        0,
-                    ),
-                    _billed_input_sum(),
-                    _billed_output_sum(),
-                    func.coalesce(func.sum(UsageLog.reasoning_tokens), 0),
-                ).where(*usage_conditions(filters, scope))
-            )
+            await self.db.execute(select(*_totals_aggregates(filters.status)).where(*usage_conditions(filters, scope)))
         ).one()
-        return UsageTotals(
-            cost=float(row[0]),
-            prompt_tokens=int(row[1]),
-            completion_tokens=int(row[2]),
-            total_tokens=int(row[3]),
-            cache_read_tokens=int(row[4]),
-            cache_write_tokens=int(row[5]),
-            cache_write_1h_tokens=int(row[6]),
-            request_count=int(row[7]),
-            error_count=int(row[8]),
-            avg_latency_ms=float(row[9]) if row[9] is not None else None,
-            unpriced_requests=int(row[10]),
-            billed_input_tokens=int(row[11]),
-            billed_output_tokens=int(row[12]),
-            reasoning_tokens=int(row[13]),
+        return _totals_from_mapping(row._mapping)
+
+    async def summary_aggregates(
+        self, filters: UsageFilters, scope: UsageScope, *, dimensions: Mapping[str, int]
+    ) -> SummaryAggregates:
+        """The grand totals and each requested breakdown, in one pass where the dialect allows it.
+
+        PostgreSQL reads the totals and every breakdown in a single ``GROUPING
+        SETS`` scan of the window, so a summary that asks for several dimensions
+        scans the rows once rather than once per dimension. A dialect without
+        ``GROUPING SETS`` (SQLite) keeps one query per dimension. ``dimensions``
+        maps a dimension name to the number of top groups to keep, the cap
+        :meth:`groups` applies.
+        """
+        if not dimensions or dialect_name(self.db) != "postgresql":
+            totals = await self.totals(filters, scope)
+            return SummaryAggregates(
+                totals=totals,
+                groups={
+                    name: await self.groups(filters, scope, dimension=name, limit=limit)
+                    for name, limit in dimensions.items()
+                },
+            )
+        return await self._single_pass_aggregates(filters, scope, dimensions)
+
+    async def _single_pass_aggregates(
+        self, filters: UsageFilters, scope: UsageScope, dimensions: Mapping[str, int]
+    ) -> SummaryAggregates:
+        """The totals and every requested breakdown from one ``GROUPING SETS`` pass (PostgreSQL)."""
+        names = list(dimensions)
+        columns = [_GROUP_COLUMNS[name] for name in names]
+        # GROUPING() is 0 for the set that groups the column and 1 for every set
+        # that aggregates it away, so the tuple of indicators identifies each set:
+        # one dimension's breakdown, or the grand total where all are 1.
+        indicators = [func.grouping(column).label(f"grouping_{i}") for i, column in enumerate(columns)]
+        values = [column.label(f"value_{i}") for i, column in enumerate(columns)]
+        grouped = (
+            select(*indicators, *values, *_totals_aggregates(filters.status))
+            .where(*usage_conditions(filters, scope))
+            .group_by(func.grouping_sets(*[tuple_(column) for column in columns], tuple_()))
+            .subquery()
         )
+        indicator_columns = [grouped.c[f"grouping_{i}"] for i in range(len(names))]
+        # Rank inside each set and keep the cap there, so a high-cardinality
+        # dimension (sessions) is bounded in SQL rather than after the whole set
+        # has been read back. The grand total is the one set capped at a single row.
+        ranked = select(
+            grouped,
+            func.row_number().over(partition_by=indicator_columns, order_by=grouped.c.cost.desc()).label("rank"),
+        ).subquery()
+        cap = case(
+            *[(ranked.c[f"grouping_{i}"] == 0, dimensions[name]) for i, name in enumerate(names)],
+            else_=1,
+        )
+        rows = (
+            await self.db.execute(
+                select(ranked)
+                .where(ranked.c.rank <= cap)
+                .order_by(*[ranked.c[f"grouping_{i}"] for i in range(len(names))], ranked.c.rank)
+            )
+        ).all()
+
+        totals: UsageTotals | None = None
+        groups: dict[str, list[UsageGroupRow]] = {name: [] for name in names}
+        for row in rows:
+            mapping = row._mapping
+            grouped_away = [mapping[f"grouping_{i}"] for i in range(len(names))]
+            if all(one == 1 for one in grouped_away):
+                totals = _totals_from_mapping(mapping)
+                continue
+            index = grouped_away.index(0)
+            groups[names[index]].append(
+                UsageGroupRow(
+                    key=mapping[f"value_{index}"],
+                    cost=float(mapping["cost"]),
+                    tokens=int(mapping["billed_input_tokens"]) + int(mapping["billed_output_tokens"]),
+                    requests=int(mapping["request_count"]),
+                )
+            )
+        if totals is None:
+            # The empty grouping set always yields one row, even over no rows, so
+            # this is unreachable; read the totals plainly rather than fabricate them.
+            totals = await self.totals(filters, scope)
+        return SummaryAggregates(totals=totals, groups=groups)
 
     async def groups(
         self,
