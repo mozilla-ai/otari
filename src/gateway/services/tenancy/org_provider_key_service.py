@@ -470,10 +470,29 @@ def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: Endp
     )
 
 
-def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None) -> None:
-    """Refuse an endpoint credential a key may not carry, or one with no rotation date."""
-    refusals = (auth.refused_reason(has_api_base=bool(api_base)), auth.refused_expiry_reason(now=datetime.now(UTC)))
-    for reason in refusals:
+def _endpoint_secret_survives(stored: str | None, submitted: EndpointAuthRequest | None, *, sent: bool) -> bool:
+    """Whether a key's stored endpoint credential would follow it to another base URL.
+
+    A request that removes the credential, or supplies a new value for it,
+    carries nothing across. One that leaves the field out, or sends it without a
+    value, keeps what is stored.
+    """
+    if stored is None:
+        return False
+    if not sent:
+        return True
+    return submitted is not None and not submitted.secret
+
+
+def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, sent: bool) -> None:
+    """Refuse an endpoint credential a key may not carry, or one stored with no rotation date.
+
+    The rotation date is held to the future only on a credential the request
+    supplies. A stored date that has passed is a state the key reports, not a
+    reason to refuse an edit that leaves the credential alone.
+    """
+    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if sent else None
+    for reason in (auth.refused_reason(has_api_base=bool(api_base)), expiry):
         if reason is not None:
             raise OrgProviderKeyEndpointAuthRefusedError(reason)
 
@@ -650,7 +669,7 @@ class OrgProviderKeyService:
         await _gate_api_base(provider, request.api_base)
         _check_client_args(provider, request.client_args)
         endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=EndpointAuth())
-        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base)
+        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, sent=True)
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -768,8 +787,10 @@ class OrgProviderKeyService:
                     update_data.get("client_args"),
                     sent="client_args" in update_data,
                 )
-                endpoint_secret_follows = key.encrypted_endpoint_auth_secret is not None and not (
-                    request.endpoint_auth is not None and request.endpoint_auth.secret
+                endpoint_secret_follows = _endpoint_secret_survives(
+                    key.encrypted_endpoint_auth_secret,
+                    request.endpoint_auth,
+                    sent="endpoint_auth" in update_data,
                 )
                 if (
                     (key.encrypted_api_key is not None and "api_key" not in update_data)
@@ -796,7 +817,9 @@ class OrgProviderKeyService:
                 if "endpoint_auth" in update_data
                 else stored
             )
-            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base))
+            _gate_endpoint_auth(
+                auth, api_base=update_data.get("api_base", key.api_base), sent="endpoint_auth" in update_data
+            )
             update_data.pop("endpoint_auth", None)
             update_data["endpoint_auth_method"] = auth.method
             update_data["endpoint_auth_header_name"] = auth.header_name
