@@ -74,7 +74,7 @@ from gateway.exceptions.identity_exceptions import (
     VerificationPasswordIncorrectError,
     VerificationTokenInvalidError,
 )
-from gateway.models.tenancy import CallerIdentityPublic, User
+from gateway.models.tenancy import CallerIdentityPublic, SignInMeans, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.identity import WebAuthnCredentialRepository
@@ -468,9 +468,7 @@ async def create_user_for_signup(
         await verify_absent_password_async(password)
         return None
     identity = await UserRepository(db).get_by_email(address)
-    if identity is not None and (
-        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
-    ):
+    if identity is not None and (identity.sign_in_means is not SignInMeans.NONE or not identity.is_active):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
         # early return would be. Not a full equalization (the claim path also
@@ -732,7 +730,7 @@ async def request_password_reset(
     identity = (
         None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
     )
-    if identity is not None and identity.is_active and _signs_in_only_without_password(identity):
+    if identity is not None and identity.is_active and identity.sign_in_means is SignInMeans.WITHOUT_PASSWORD:
         await verify_absent_password_async(_TIMING_EQUALIZER)
         _schedule_account_exists_notice(mailer, identity, background_tasks=background_tasks, to=address)
         return
@@ -843,7 +841,7 @@ async def reset_password(
     if needs_terms:
         identity.terms_accepted_at = now
 
-    first_claim = identity.hashed_password is None and identity.email_verified_at is None
+    first_claim = identity.sign_in_means is SignInMeans.NONE
     if identity.email_proven_at is None:
         await forget_unproven_access(db, identity.id)
     else:
@@ -877,11 +875,6 @@ def _record_address(identity: User, *, now: datetime, authority: AddressAuthorit
     if identity.email_verified_at is None:
         identity.email_verified_at = now
     identity.email_proven_at = now if authority.proves_the_holder else None
-
-
-def _signs_in_only_without_password(identity: User) -> bool:
-    """Whether a verified identity has no password, so it signs in with a provider or a passkey."""
-    return identity.hashed_password is None and identity.email_verified_at is not None
 
 
 def _schedule_account_exists_notice(

@@ -11,6 +11,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthIdentityUnknownError,
 )
 from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.tenancy import SignInMeans
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.oauth_service import provider_label, trusts_email_claim
@@ -116,7 +117,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if not await unverified_identity_is_claimable(self._organizations, identity, open_signup=self._open_signup):
             raise OAuthIdentityUnknownError(label)
 
-        first_claim = identity.hashed_password is None and identity.email_verified_at is None
+        first_claim = identity.sign_in_means is SignInMeans.NONE
         if not created and await self._organizations.provision_tenancy_for_claim(
             identity,
             open_signup=self._open_signup,
