@@ -83,6 +83,13 @@ class OrgProviderKeyClientArgsUnreadableError(TenancyValidationError):
         )
 
 
+class OrgProviderKeyEndpointAuthRefusedError(TenancyValidationError):
+    """An endpoint credential a key may not carry, named by what is wrong with it."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"This key cannot carry {reason}")
+
+
 class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     """A new ``api_base`` on a key that holds a credential, sent without the credential.
 

@@ -58,6 +58,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyClientArgsUnreadableError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNameRequiredError,
     OrgProviderKeyNotArchivedError,
@@ -86,6 +87,7 @@ from gateway.repositories.tenancy import (
     resolve_active_key,
 )
 from gateway.schemas.providers import (
+    EndpointAuthRequest,
     OrgProviderKeyCreateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
@@ -107,6 +109,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
+from gateway.types.endpoint_auth import EndpointAuth
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -410,12 +413,15 @@ async def run_org_provider_refresher(interval: float = ORG_PROVIDER_CACHE_TTL_SE
             logger.warning("Organization provider key refresh failed; retrying in %ss", interval, exc_info=True)
 
 
-def _encrypt_api_key(api_key: str | None) -> tuple[str | None, str | None]:
-    """Encrypt a plaintext key for storage, or clear it. Never logs the plaintext."""
-    if not api_key:
+def _encrypt_secret_for_storage(secret: str | None) -> tuple[str | None, str | None]:
+    """Encrypt a plaintext secret for storage with its last four characters, or clear it.
+
+    NOTE: Callers must not log the plaintext they pass.
+    """
+    if not secret:
         return None, None
     try:
-        return encrypt_secret(api_key), api_key[-4:]
+        return encrypt_secret(secret), secret[-4:]
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError from None
 
@@ -426,6 +432,43 @@ def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
         return encrypt_mapping(client_args or None)
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError from None
+def _endpoint_auth_of(key: OrgProviderKey) -> EndpointAuth:
+    """The endpoint credential a stored row carries."""
+    return EndpointAuth(
+        method=key.endpoint_auth_method,
+        header_name=key.endpoint_auth_header_name,
+        encrypted_secret=key.encrypted_endpoint_auth_secret,
+        last4=key.endpoint_auth_last4,
+        expires_at=key.endpoint_auth_expires_at,
+    )
+
+
+def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: EndpointAuth) -> EndpointAuth:
+    """The endpoint credential to store, keeping the stored value where the caller sent none.
+
+    An editor is only ever shown the last four characters, so a form resubmitted
+    without the value keeps the one already held, as ``client_args`` does.
+    """
+    if sent is None:
+        return EndpointAuth()
+    encrypted, last4 = (
+        _encrypt_secret_for_storage(sent.secret) if sent.secret else (stored.encrypted_secret, stored.last4)
+    )
+    return EndpointAuth(
+        method=sent.method,
+        header_name=sent.header_name,
+        encrypted_secret=encrypted,
+        last4=last4,
+        expires_at=sent.expires_at,
+    )
+
+
+def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None) -> None:
+    """Refuse an endpoint credential a key may not carry, or one with no rotation date."""
+    refusals = (auth.refused_reason(has_api_base=bool(api_base)), auth.refused_expiry_reason(now=datetime.now(UTC)))
+    for reason in refusals:
+        if reason is not None:
+            raise OrgProviderKeyEndpointAuthRefusedError(reason)
 
 
 def _validated_provider(provider: str) -> str:
@@ -599,6 +642,8 @@ class OrgProviderKeyService:
         name = _validated_name(request.name)
         await _gate_api_base(provider, request.api_base)
         _check_client_args(provider, request.client_args)
+        endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=EndpointAuth())
+        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base)
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -609,7 +654,7 @@ class OrgProviderKeyService:
         ):
             raise OrgProviderKeyAlreadyExistsError(provider, name)
 
-        encrypted_api_key, last4 = _encrypt_api_key(request.api_key)
+        encrypted_api_key, last4 = _encrypt_secret_for_storage(request.api_key)
         try:
             key = await self.keys.create_key(
                 organization_id=organization.id,
@@ -621,6 +666,7 @@ class OrgProviderKeyService:
                 api_base=request.api_base,
                 encrypted_client_args=_encrypt_client_args(request.client_args),
                 zero_data_retention=request.zero_data_retention,
+                endpoint_auth=endpoint_auth,
             )
             await self.db.commit()
         except IntegrityError:
@@ -715,7 +761,14 @@ class OrgProviderKeyService:
                     update_data.get("client_args"),
                     sent="client_args" in update_data,
                 )
-                if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
+                endpoint_secret_follows = key.encrypted_endpoint_auth_secret is not None and not (
+                    request.endpoint_auth is not None and request.endpoint_auth.secret
+                )
+                if (
+                    (key.encrypted_api_key is not None and "api_key" not in update_data)
+                    or stored_args_follow
+                    or endpoint_secret_follows
+                ):
                     raise OrgProviderKeyCredentialRequiredError
         if "client_args" in update_data:
             # ``from_row`` masks a credential-shaped entry, so an editor
@@ -729,8 +782,22 @@ class OrgProviderKeyService:
             client_args = restore_redacted_values(update_data.pop("client_args"), stored_client_args)
             _check_client_args(key.provider, client_args)
             update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
+        if "endpoint_auth" in update_data or "api_base" in update_data:
+            stored = _endpoint_auth_of(key)
+            auth = (
+                _endpoint_auth_for_storage(request.endpoint_auth, stored=stored)
+                if "endpoint_auth" in update_data
+                else stored
+            )
+            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base))
+            update_data.pop("endpoint_auth", None)
+            update_data["endpoint_auth_method"] = auth.method
+            update_data["endpoint_auth_header_name"] = auth.header_name
+            update_data["encrypted_endpoint_auth_secret"] = auth.encrypted_secret
+            update_data["endpoint_auth_last4"] = auth.last4
+            update_data["endpoint_auth_expires_at"] = auth.expires_at
         if "api_key" in update_data:
-            encrypted_api_key, last4 = _encrypt_api_key(update_data.pop("api_key"))
+            encrypted_api_key, last4 = _encrypt_secret_for_storage(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key
             update_data["last4"] = last4
 

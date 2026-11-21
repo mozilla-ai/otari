@@ -28,6 +28,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyCreateRequest,
     OrgProviderKeyUpdateRequest,
 )
+from gateway.types.endpoint_auth import EndpointAuth
 
 # One (key, override) pair per candidate; the override is None when the
 # workspace has never departed from inheriting this key.
@@ -242,7 +243,9 @@ class OrgProviderKeyRepository(
         encrypted_client_args: str | None,
         zero_data_retention: bool = False,
         slug: str | None = None,
+        endpoint_auth: EndpointAuth | None = None,
     ) -> OrgProviderKey:
+        auth = endpoint_auth or EndpointAuth()
         key = OrgProviderKey(
             organization_id=organization_id,
             provider=provider,
@@ -253,6 +256,11 @@ class OrgProviderKeyRepository(
             api_base=api_base,
             encrypted_client_args=encrypted_client_args,
             zero_data_retention=zero_data_retention,
+            endpoint_auth_method=auth.method,
+            endpoint_auth_header_name=auth.header_name,
+            encrypted_endpoint_auth_secret=auth.encrypted_secret,
+            endpoint_auth_last4=auth.last4,
+            endpoint_auth_expires_at=auth.expires_at,
         )
         self.db.add(key)
         await self.db.flush()
@@ -303,13 +311,19 @@ class OrgProviderKeyRepository(
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing the API key and client arguments of every key these organizations hold."""
+        """Stage clearing every stored secret of every key these organizations hold."""
         if not organization_ids:
             return
         await self.db.execute(
             update(OrgProviderKey)
             .where(col(OrgProviderKey.organization_id).in_(list(organization_ids)))
-            .values(encrypted_api_key=None, last4=None, encrypted_client_args=None)
+            .values(
+                encrypted_api_key=None,
+                last4=None,
+                encrypted_client_args=None,
+                encrypted_endpoint_auth_secret=None,
+                endpoint_auth_last4=None,
+            )
             .execution_options(synchronize_session=False)
         )
 

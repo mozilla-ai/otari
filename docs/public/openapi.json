@@ -9025,6 +9025,101 @@
         "title": "EndUsersDeleted",
         "type": "object"
       },
+      "EndpointAuthPublic": {
+        "description": "What an endpoint credential reports. Never carries the value, only its last four characters.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "title": "Header Name",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last four characters of the stored value.",
+            "title": "Last4"
+          },
+          "method": {
+            "description": "How the credential is produced. Reported as plain text rather than a closed set, so a reader built before a later method still renders a key that uses one.",
+            "title": "Method",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EndpointAuthState",
+            "description": "How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request."
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "expires_at",
+          "state"
+        ],
+        "title": "EndpointAuthPublic",
+        "type": "object"
+      },
+      "EndpointAuthRequest": {
+        "description": "The credential an edge proxy in front of a key's base URL requires.\n\n``method`` is a closed set of ways to produce request headers. TLS client\nauthentication is not one of them: it is presented when the connection is\nmade, so it would be a field of its own rather than a method here.",
+        "properties": {
+          "expires_at": {
+            "description": "When the organization expects to rotate this credential. Must be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "description": "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.",
+            "maxLength": 64,
+            "title": "Header Name",
+            "type": "string"
+          },
+          "method": {
+            "const": "static_header",
+            "description": "How the credential is produced. `static_header` sends one stored value as one header.",
+            "title": "Method",
+            "type": "string"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value to send. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL.",
+            "title": "Secret"
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "expires_at"
+        ],
+        "title": "EndpointAuthRequest",
+        "type": "object"
+      },
+      "EndpointAuthState": {
+        "description": "How a stored credential stands against its own expiry.\n\nReported so every reader draws the line in the same place. None of the\nmembers refuses a request.",
+        "enum": [
+          "expired",
+          "expiring_soon",
+          "valid"
+        ],
+        "title": "EndpointAuthState",
+        "type": "string"
+      },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
         "enum": [
@@ -17845,6 +17940,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`."
+          },
           "name": {
             "maxLength": 255,
             "title": "Name",
@@ -18143,6 +18249,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -18272,6 +18388,17 @@
               }
             ],
             "title": "Client Args"
+          },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored."
           },
           "name": {
             "anyOf": [

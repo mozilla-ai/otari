@@ -13,7 +13,7 @@ the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, Self
 
 from pydantic import ValidationInfo, field_validator, model_validator
@@ -32,8 +32,84 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthState
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
+
+
+class EndpointAuthRequest(SQLModel):
+    """The credential an edge proxy in front of a key's base URL requires.
+
+    ``method`` is a closed set of ways to produce request headers. TLS client
+    authentication is not one of them: it is presented when the connection is
+    made, so it would be a field of its own rather than a method here.
+    """
+
+    method: Literal["static_header"] = Field(
+        description="How the credential is produced. `static_header` sends one stored value as one header."
+    )
+    header_name: str = Field(
+        max_length=64,
+        description=(
+            "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends "
+            "its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are "
+            "all refused."
+        ),
+    )
+    secret: str | None = Field(
+        default=None,
+        description=(
+            "The value to send. Write-only: responses report only its last four characters. Required when "
+            "the credential is first set, and on any change of base URL."
+        ),
+    )
+    expires_at: datetime = Field(
+        description=(
+            "When the organization expects to rotate this credential. Must be in the future. It is a "
+            "rotation date, not a switch: a request is never refused because it passed, since the proxy "
+            "answers that itself on every request."
+        )
+    )
+
+
+class EndpointAuthPublic(SQLModel):
+    """What an endpoint credential reports. Never carries the value, only its last four characters."""
+
+    method: str = Field(
+        description=(
+            "How the credential is produced. Reported as plain text rather than a closed set, so a reader "
+            "built before a later method still renders a key that uses one."
+        )
+    )
+    header_name: str
+    last4: str | None = Field(default=None, description="The last four characters of the stored value.")
+    expires_at: datetime
+    state: EndpointAuthState = Field(
+        description=(
+            "How the credential stands against its own expiry. Reported so every reader draws the line in "
+            "the same place. No value of it refuses a request: the proxy answers that on every request."
+        )
+    )
+
+    @classmethod
+    def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
+        """Read one row's endpoint credential for the API, or None where it carries none."""
+        auth = EndpointAuth(
+            method=key.endpoint_auth_method,
+            header_name=key.endpoint_auth_header_name,
+            last4=key.endpoint_auth_last4,
+            expires_at=key.endpoint_auth_expires_at,
+        )
+        state = auth.state(now=now)
+        if auth.method is None or auth.header_name is None or auth.expires_at is None or state is None:
+            return None
+        return cls(
+            method=auth.method,
+            header_name=auth.header_name,
+            last4=auth.last4,
+            expires_at=auth.expires_at,
+            state=state,
+        )
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -64,6 +140,10 @@ class OrgProviderKeyCreateRequest(SQLModel):
             "completion data. The catalog shows it and filters on it; nothing is enforced on it."
         ),
     )
+    endpoint_auth: EndpointAuthRequest | None = Field(
+        default=None,
+        description="The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`.",
+    )
 
 
 class OrgProviderKeyUpdateRequest(SQLModel):
@@ -74,6 +154,13 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
     zero_data_retention: bool | None = None
+    endpoint_auth: EndpointAuthRequest | None = Field(
+        default=None,
+        description=(
+            "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; "
+            "send an explicit null to remove one. Leave it out to keep what is stored."
+        ),
+    )
 
 
 class OrgProviderKeyPublic(SQLModel):
@@ -93,6 +180,7 @@ class OrgProviderKeyPublic(SQLModel):
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     last4: str | None = None
+    endpoint_auth: EndpointAuthPublic | None = None
     is_org_default: bool
     zero_data_retention: bool = False
     usable: bool = Field(
@@ -152,6 +240,7 @@ class OrgProviderKeyPublic(SQLModel):
             slug=key.slug,
             api_base=key.api_base,
             client_args=redact_secret_like_values(client_args),
+            endpoint_auth=EndpointAuthPublic.from_row(key, now=datetime.now(UTC)),
             last4=key.last4,
             is_org_default=key.is_org_default,
             zero_data_retention=key.zero_data_retention,

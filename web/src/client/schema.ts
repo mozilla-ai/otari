@@ -13555,6 +13555,72 @@ export interface components {
             deleted: number;
         };
         /**
+         * EndpointAuthPublic
+         * @description What an endpoint credential reports. Never carries the value, only its last four characters.
+         */
+        EndpointAuthPublic: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Header Name */
+            header_name: string;
+            /**
+             * Last4
+             * @description The last four characters of the stored value.
+             */
+            last4?: string | null;
+            /**
+             * Method
+             * @description How the credential is produced. Reported as plain text rather than a closed set, so a reader built before a later method still renders a key that uses one.
+             */
+            method: string;
+            /** @description How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request. */
+            state: components["schemas"]["EndpointAuthState"];
+        };
+        /**
+         * EndpointAuthRequest
+         * @description The credential an edge proxy in front of a key's base URL requires.
+         *
+         *     ``method`` is a closed set of ways to produce request headers. TLS client
+         *     authentication is not one of them: it is presented when the connection is
+         *     made, so it would be a field of its own rather than a method here.
+         */
+        EndpointAuthRequest: {
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the organization expects to rotate this credential. Must be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.
+             */
+            expires_at: string;
+            /**
+             * Header Name
+             * @description The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.
+             */
+            header_name: string;
+            /**
+             * Method
+             * @description How the credential is produced. `static_header` sends one stored value as one header.
+             * @constant
+             */
+            method: "static_header";
+            /**
+             * Secret
+             * @description The value to send. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL.
+             */
+            secret?: string | null;
+        };
+        /**
+         * EndpointAuthState
+         * @description How a stored credential stands against its own expiry.
+         *
+         *     Reported so every reader draws the line in the same place. None of the
+         *     members refuses a request.
+         * @enum {string}
+         */
+        EndpointAuthState: "expired" | "expiring_soon" | "valid";
+        /**
          * ExecutionState
          * @description Whether the remote tool may have run.
          *
@@ -17753,6 +17819,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name: string;
             /** Provider */
@@ -17882,6 +17950,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            endpoint_auth?: components["schemas"]["EndpointAuthPublic"] | null;
             /**
              * Id
              * Format: uuid
@@ -17941,6 +18010,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name?: string | null;
             /** Zero Data Retention */
