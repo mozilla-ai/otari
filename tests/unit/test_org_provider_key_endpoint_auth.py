@@ -7,7 +7,10 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from gateway.exceptions.providers_exceptions import OrgProviderKeyEndpointAuthRefusedError
+from gateway.exceptions.providers_exceptions import (
+    OrgProviderKeyCredentialRequiredError,
+    OrgProviderKeyEndpointAuthRefusedError,
+)
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.repositories.tenancy.org_provider_key_repository import OrgProviderKeyRepository
 from gateway.schemas.providers import EndpointAuthRequest
@@ -408,3 +411,7 @@ async def test_forgetting_an_organization_s_secrets_clears_the_endpoint_credenti
     cleared = [name for name in OrgProviderKey.model_fields if "endpoint_auth" in name]
     assert cleared
     assert [name for name in cleared if name not in assignments] == []
+
+
+def test_the_refusal_for_a_moved_address_names_every_credential_to_resend() -> None:
+    assert "endpoint credential" in str(OrgProviderKeyCredentialRequiredError())

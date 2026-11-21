@@ -101,7 +101,8 @@ class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__(
             "Changing a key's API base URL sends its credentials to the new host: "
-            "send api_key, and any hidden client_args credential, again in the same request"
+            "send api_key, the endpoint credential, and any hidden client_args credential, "
+            "again in the same request"
         )
 
 
