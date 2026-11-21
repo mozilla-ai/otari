@@ -64,8 +64,8 @@ class EndpointAuthState(StrEnum):
 class EndpointAuthMethod(StrEnum):
     """How the credential for one endpoint is produced.
 
-    Every member yields request headers, so a caller never branches on which
-    one ran.
+    Every member produces request headers, so what a dispatch or discovery
+    caller receives is a header mapping whichever member a key names.
     """
 
     STATIC_HEADER = "static_header"

@@ -13,7 +13,7 @@ export function toDatetimeLocal(iso: string | null): string {
 }
 
 /**
- * A key's expiry as a date and a time, with the time already at midnight.
+ * An expiry as a date and a time, with the time already at midnight.
  *
  * `value` is the datetime-local shape ("YYYY-MM-DDTHH:mm", local time), or ""
  * for no expiry. It is two inputs rather than one `datetime-local` because
