@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from gateway.exceptions.providers_exceptions import OrgProviderKeyEndpointAuthRefusedError
 from gateway.models.provider_keys import OrgProviderKey
+from gateway.repositories.tenancy.org_provider_key_repository import OrgProviderKeyRepository
 from gateway.schemas.providers import EndpointAuthRequest
 from gateway.services import model_discovery_service
 from gateway.services.catalog._served import _read_engine_settings
@@ -353,3 +354,22 @@ def test_a_key_skipped_for_its_provider_says_that_is_why() -> None:
         store._row_to_entry(row)
 
     assert "api_base" in str(refusal.value)
+
+
+@pytest.mark.asyncio
+async def test_forgetting_an_organization_s_secrets_clears_the_endpoint_credential_whole() -> None:
+    """Every column of the credential goes, so no declaration is left with no value behind it."""
+    statements: list[object] = []
+
+    class _Session:
+        async def execute(self, statement: object) -> None:
+            statements.append(statement)
+
+    repository = OrgProviderKeyRepository(_Session())  # type: ignore[arg-type]
+
+    await repository.forget_secrets([uuid.uuid4()], [])
+
+    assignments = str(statements[0])
+    cleared = [name for name in OrgProviderKey.model_fields if "endpoint_auth" in name]
+    assert cleared
+    assert [name for name in cleared if name not in assignments] == []

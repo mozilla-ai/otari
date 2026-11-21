@@ -311,7 +311,12 @@ class OrgProviderKeyRepository(
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing every stored secret of every key these organizations hold."""
+        """Stage clearing every stored credential of every key these organizations hold.
+
+        An endpoint credential is cleared whole. Its fields only mean anything
+        together, so a declaration left behind with no value makes the key
+        unservable rather than merely credential-free.
+        """
         if not organization_ids:
             return
         await self.db.execute(
@@ -323,6 +328,9 @@ class OrgProviderKeyRepository(
                 encrypted_client_args=None,
                 encrypted_endpoint_auth_secret=None,
                 endpoint_auth_last4=None,
+                endpoint_auth_method=None,
+                endpoint_auth_header_name=None,
+                endpoint_auth_expires_at=None,
             )
             .execution_options(synchronize_session=False)
         )
