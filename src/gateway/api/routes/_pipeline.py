@@ -3090,6 +3090,19 @@ async def resolve_request_context(
             refuse_unpriced = not await _a_later_candidate_is_priced(
                 db, prices, plan, require_pricing=config.require_pricing
             )
+        except DATABASE_ERRORS:
+            # The hold is committed, and a failed statement leaves the session unusable for its release,
+            # so the transaction is rolled back first.
+            await uow.abandon()
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await refund_reservation(db, reservation)
+            raise
+        except asyncio.CancelledError:
+            # Rolled back first for the same reason: an interrupted statement leaves the session unusable.
+            await uow.abandon()
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await refund_reservation(db, reservation)
+            raise
         except BaseException:
             # The hold is placed, and nothing after this would release it.
             await refund_reservation(db, reservation)
