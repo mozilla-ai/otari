@@ -363,3 +363,25 @@ async def test_a_hosted_candidate_with_no_rate_is_skipped_and_one_over_budget_st
         await credential(_attempt(2, "openai", "gpt-4o"))
 
     assert (exc_info.value.refusal if isinstance(exc_info.value, CandidateCannotServe) else exc_info.value) is refusal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("priced_when_deployment_paid", "admitted"), [(True, True), (False, False)])
+async def test_a_fallback_priced_only_at_the_deployments_rate_admits_the_plan(
+    monkeypatch: pytest.MonkeyPatch, priced_when_deployment_paid: bool, admitted: bool
+) -> None:
+    """Who pays for a fallback is known only once the walk resolves its credential, so either rate admits it."""
+
+    class _Prices:
+        async def resolve(self, _db: Any, _instance: str, _model: str, *, deployment_paid: bool) -> Any:
+            return SimpleNamespace(pricing=object() if deployment_paid and priced_when_deployment_paid else None)
+
+    monkeypatch.setattr(pipeline, "pricing_required_but_missing", lambda pricing, **_kwargs: pricing is None)
+    plan = SimpleNamespace(attempts=[_attempt(1, "openai", "brand-new"), _attempt(2, "openai", "hosted-only")])
+
+    assert (
+        await pipeline._a_later_candidate_is_priced(
+            cast(AsyncSession, object()), cast(Any, _Prices()), cast(Any, plan), require_pricing=True
+        )
+        is admitted
+    )

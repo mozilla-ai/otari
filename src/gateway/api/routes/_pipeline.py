@@ -1949,13 +1949,20 @@ _UNUSABLE_SESSION_ERRORS: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, a
 async def _a_later_candidate_is_priced(
     db: AsyncSession, prices: RequestPrices, plan: CompiledPlan | None, *, require_pricing: bool
 ) -> bool:
-    """Whether a candidate after ``plan``'s first has a price ``require_pricing`` accepts."""
+    """Whether a candidate after ``plan``'s first has a price ``require_pricing`` accepts.
+
+    Who pays for a candidate is known only once the walk resolves its credential,
+    and an organization's own override prices the request it pays for but not one
+    on the deployment's credential, so either rate admits the plan. The walk then
+    skips each candidate at the rate it settles at.
+    """
     for attempt in plan.attempts[1:] if plan is not None else ():
-        resolved = await prices.resolve(db, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
-        if not pricing_required_but_missing(
-            resolved.pricing if resolved is not None else None, require_pricing=require_pricing
-        ):
-            return True
+        for deployment_paid in dict.fromkeys((attempt.deployment_paid, True)):
+            resolved = await prices.resolve(db, attempt.instance, attempt.model, deployment_paid=deployment_paid)
+            if not pricing_required_but_missing(
+                resolved.pricing if resolved is not None else None, require_pricing=require_pricing
+            ):
+                return True
     return False
 
 
