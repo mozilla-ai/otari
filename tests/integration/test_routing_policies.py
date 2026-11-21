@@ -423,7 +423,7 @@ def test_a_policy_none_of_whose_candidates_is_priced_is_refused(routing_config: 
 
         assert resp.status_code == 402, resp.text
         assert resp.headers[ERROR_CODE_HEADER] == PRICING_REQUIRED
-        serve.assert_not_awaited()
+        serve.assert_not_called()
 
 
 def test_a_failed_lookup_of_the_later_candidates_prices_releases_the_hold(routing_config: GatewayConfig) -> None:
