@@ -433,7 +433,9 @@ A `tool_choice` that forces a tool (`required`, or one tool by name, such as
 `code_execution` for Otari's sandbox) applies to the first round only. Once that
 round has run the tool, the model is free to answer, so forcing the sandbox no
 longer makes it run on every round. A later round may still call the sandbox or
-another tool if the model chooses to.
+another tool if the model chooses to. A request that declares function tools of
+its own keeps a force on them (`required`, or one of those tools by name) on
+every round, so its response still ends in a call of one of those tools.
 
 A tool declared in a provider's own words is still [decided per
 attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the
