@@ -2,7 +2,7 @@
 
 import ipaddress
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -18,9 +18,10 @@ from gateway.models.provider_keys import OrgProviderKey
 from gateway.services import provider_kwargs
 from gateway.services.providers import owned_endpoint_sdk_client
 from gateway.services.providers._owned_endpoint_network import OwnedEndpointTransport
-from gateway.services.secret_box import encrypt_mapping, generate_secret_key
+from gateway.services.secret_box import encrypt_mapping, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.web_retrieval_network import PinnedTransportError, SystemAddressResolver
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
 
@@ -189,3 +190,79 @@ def test_a_stored_bedrock_key_keeps_its_credential_fields(monkeypatch: pytest.Mo
     assert store._row_to_entry(_row("bedrock", client_args={**args, "endpoint_url": "http://10.0.0.1"})) == {
         "client_args": args
     }
+
+
+def _key_with_endpoint_auth(**overrides: Any) -> OrgProviderKey:
+    fields: dict[str, Any] = {
+        "api_base": "https://proxy.example/v1",
+        "endpoint_auth_method": "static_header",
+        "endpoint_auth_header_name": "Fastly-Key",
+        "encrypted_endpoint_auth_secret": encrypt_secret("edge-s3cret"),
+        "endpoint_auth_last4": "cret",
+        "endpoint_auth_expires_at": datetime.now(UTC) + timedelta(days=30),
+    }
+    return _row("openai", **{**fields, **overrides})
+
+
+def test_a_stored_endpoint_credential_becomes_the_header_it_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    entry = store._row_to_entry(_key_with_endpoint_auth())
+
+    assert entry[ENDPOINT_AUTH_HEADERS_KEY] == {"Fastly-Key": "edge-s3cret"}
+
+
+# The proxy answers for the credential on every request, so a rotation date
+# Otari cannot verify must never take a working key out of service.
+def test_a_stored_endpoint_credential_past_its_expiry_is_still_served(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key_with_endpoint_auth(endpoint_auth_expires_at=datetime(2020, 1, 1, tzinfo=UTC))
+
+    assert store._row_to_entry(key)[ENDPOINT_AUTH_HEADERS_KEY] == {"Fastly-Key": "edge-s3cret"}
+    assert store.key_is_usable(key) is True
+
+
+@pytest.mark.parametrize("header_name", ["authorization", "x-api-key", "Otari-Key", "transfer-encoding"])
+def test_a_stored_credential_naming_a_header_a_tenant_may_not_set_refuses_the_key(
+    header_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key_with_endpoint_auth(endpoint_auth_header_name=header_name)
+
+    with pytest.raises(store.UnservableEndpointError):
+        store._row_to_entry(key)
+    assert store.key_is_usable(key) is False
+
+
+@pytest.mark.asyncio
+async def test_an_endpoint_credential_is_sent_as_a_default_header_and_never_to_the_provider() -> None:
+    _entry(
+        api_base="https://proxy.example/v1",
+        api_key="sk-1",
+        **{ENDPOINT_AUTH_HEADERS_KEY: {"Fastly-Key": "edge-s3cret"}},
+    )
+
+    kwargs = provider_kwargs.get_provider_kwargs(GatewayConfig(), LLMProvider.OPENAI, workspace_id=WORKSPACE_ID)
+
+    assert kwargs["client_args"]["default_headers"] == {"Fastly-Key": "edge-s3cret"}
+    assert kwargs["client_args"]["http_client"] is owned_endpoint_sdk_client(LLMProvider.OPENAI)
+    # any-llm forwards every kwarg but client_args to the completion call, so
+    # anything left at the top level reaches the model provider.
+    assert ENDPOINT_AUTH_HEADERS_KEY not in kwargs
+    assert "edge-s3cret" not in str({k: v for k, v in kwargs.items() if k != "client_args"})
+
+
+# The gateway builds this header itself from a validated field; a provider whose
+# SDK refuses the name would make the endpoint credential undeliverable there.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", sorted(TENANT_ENDPOINT_PROVIDERS))
+async def test_every_pinnable_provider_accepts_a_gateway_built_default_header(provider: str) -> None:
+    llm = AnyLLM.create(
+        provider,
+        api_key="k",
+        api_base="https://203.0.114.1/v1",
+        http_client=owned_endpoint_sdk_client(LLMProvider(provider)),
+        default_headers={"Fastly-Key": "edge-s3cret"},
+    )
+
+    assert _sdk_clients(llm), f"{provider} holds no SDK client this test can see"

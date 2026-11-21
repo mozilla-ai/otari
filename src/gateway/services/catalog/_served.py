@@ -186,6 +186,7 @@ async def read_engine_settings(
     api_base: str | None,
     api_key: str | None,
     client: httpx.AsyncClient | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> EngineSettings | None:
     """Ask the SGLang server behind ``models`` how it was started, or ``None`` when it is not one or will not say.
 
@@ -198,18 +199,20 @@ async def read_engine_settings(
         return None
     try:
         if client is not None:
-            return await _read_engine_settings(client, api_base=api_base, api_key=api_key)
+            return await _read_engine_settings(client, api_base=api_base, api_key=api_key, extra_headers=extra_headers)
         async with httpx.AsyncClient(timeout=_MODEL_INFO_TIMEOUT_SECONDS, follow_redirects=False) as own:
-            return await _read_engine_settings(own, api_base=api_base, api_key=api_key)
+            return await _read_engine_settings(own, api_base=api_base, api_key=api_key, extra_headers=extra_headers)
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("Could not read the SGLang server's model info (%s)", type(exc).__name__)
     return None
 
 
 async def _read_engine_settings(
-    client: httpx.AsyncClient, *, api_base: str, api_key: str | None
+    client: httpx.AsyncClient, *, api_base: str, api_key: str | None, extra_headers: Mapping[str, str] | None
 ) -> EngineSettings | None:
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    headers = dict(extra_headers or {})
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     root = _server_root(api_base)
     for path in _MODEL_INFO_PATHS:
         async with client.stream("GET", root + path, headers=headers, timeout=_MODEL_INFO_TIMEOUT_SECONDS) as response:

@@ -109,7 +109,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
-from gateway.types.endpoint_auth import EndpointAuth
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY, EndpointAuth
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -144,7 +144,7 @@ _org_slug_providers: dict[tuple[uuid.UUID, str], str] = {}
 
 
 class UnservableEndpointError(ValueError):
-    """A stored key's ``api_base`` is one its provider's client cannot be pinned to."""
+    """A stored key names an endpoint, or a credential for one, that cannot be served as stored."""
 
 
 def client_args_of(key: OrgProviderKey) -> dict[str, Any] | None:
@@ -161,7 +161,9 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
 
     A key stored before the write checks below existed is held to them here:
     ``client_args`` outside the provider's allow-list are dropped, and an
-    ``api_base`` on a provider that cannot be pinned refuses the key.
+    ``api_base`` on a provider that cannot be pinned, or an endpoint credential
+    a key may not carry, refuses the key. The credential's expiry is not read:
+    it is a rotation date, and the endpoint answers for the credential itself.
 
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the
     key cannot be decrypted, and ``UnservableEndpointError``; the caller
@@ -176,6 +178,11 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
         entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
+    auth = _endpoint_auth_of(key)
+    if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
+        raise UnservableEndpointError(reason)
+    if auth.encrypted_secret is not None:
+        entry[ENDPOINT_AUTH_HEADERS_KEY] = auth.headers(secret=decrypt_secret(auth.encrypted_secret))
     return entry
 
 

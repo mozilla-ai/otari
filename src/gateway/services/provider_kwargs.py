@@ -65,6 +65,7 @@ from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs, cached_org_slug_provider
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 if TYPE_CHECKING:
@@ -72,7 +73,14 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api", "request_fields")
+_INSTANCE_META_KEYS = (
+    "provider_type",
+    "models",
+    "max_retries",
+    "messages_api",
+    "request_fields",
+    ENDPOINT_AUTH_HEADERS_KEY,
+)
 
 # How long a Bedrock client waits for the next byte of a response. botocore's
 # default of 60s fails a stream whose model goes quiet for a minute, which a model
@@ -631,10 +639,18 @@ def get_provider_kwargs(
         # this module through model discovery.
         from gateway.services.providers import owned_endpoint_sdk_client
 
-        kwargs["client_args"] = {
+        pinned_args: dict[str, Any] = {
             **(kwargs.get("client_args") or {}),
             "http_client": owned_endpoint_sdk_client(provider),
         }
+        # Built by the gateway from a validated field, never taken from the
+        # tenant's own client_args, which may not name headers at all.
+        if endpoint_headers := (raw_config or {}).get(ENDPOINT_AUTH_HEADERS_KEY):
+            pinned_args["default_headers"] = {
+                **(pinned_args.get("default_headers") or {}),
+                **endpoint_headers,
+            }
+        kwargs["client_args"] = pinned_args
 
     return kwargs
 

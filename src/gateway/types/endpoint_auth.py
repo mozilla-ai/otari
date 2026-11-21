@@ -40,6 +40,11 @@ _FRAMING_HEADERS = frozenset(
 _CREDENTIAL_HEADERS = frozenset({"api-key", "authorization", "x-api-key", "x-goog-api-key"})
 
 
+# The overlay entry key the resolved headers travel under. They are instance
+# metadata rather than a provider argument, so the dispatch path strips the key
+# before the rest of the entry reaches the provider call.
+ENDPOINT_AUTH_HEADERS_KEY = "endpoint_auth_headers"
+
 # How long before its expiry a credential is reported as due for rotation.
 EXPIRY_WARNING_WINDOW = timedelta(days=14)
 

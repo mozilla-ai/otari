@@ -3,12 +3,16 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from gateway.exceptions.providers_exceptions import OrgProviderKeyEndpointAuthRefusedError
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.schemas.providers import EndpointAuthRequest
-from gateway.services.secret_box import decrypt_secret, generate_secret_key
+from gateway.services.catalog._served import _read_engine_settings
+from gateway.services.model_discovery_service import _default_headers
+from gateway.services.providers._org_provider_model_service import OrgProviderModelService
+from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthMethod
 
@@ -119,3 +123,61 @@ def test_a_row_carrying_no_credential_reports_none() -> None:
     row = OrgProviderKey(organization_id=uuid.uuid4(), provider="openai", name="k", created_at=datetime.now(UTC))
 
     assert store._endpoint_auth_of(row).declared is False
+
+
+@pytest.mark.asyncio
+async def test_the_engine_probe_sends_the_endpoint_credential_beside_the_api_key() -> None:
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(httpx.codes.OK, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await _read_engine_settings(
+            client,
+            api_base="https://proxy.example/v1",
+            api_key="sk-1",
+            extra_headers={"Fastly-Key": "edge-s3cret"},
+        )
+
+    assert seen
+    assert seen[0]["Fastly-Key"] == "edge-s3cret"
+    assert seen[0]["Authorization"] == "Bearer sk-1"
+
+
+def test_the_engine_probe_reads_its_headers_from_the_client_arguments() -> None:
+    assert _default_headers({"default_headers": {"Fastly-Key": "edge-s3cret"}}) == {"Fastly-Key": "edge-s3cret"}
+    assert _default_headers({"timeout": 5}) is None
+    assert _default_headers(None) is None
+
+
+def test_discovery_sends_the_endpoint_credential() -> None:
+    row = OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="https://proxy.example/v1",
+        endpoint_auth_method="static_header",
+        endpoint_auth_header_name="Fastly-Key",
+        encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret"),
+    )
+
+    assert OrgProviderModelService._endpoint_headers(row) == {"Fastly-Key": "edge-s3cret"}
+
+
+def test_discovery_sends_no_credential_it_cannot_decrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="https://proxy.example/v1",
+        endpoint_auth_method="static_header",
+        endpoint_auth_header_name="Fastly-Key",
+        encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret"),
+    )
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    assert OrgProviderModelService._endpoint_headers(row) == {}

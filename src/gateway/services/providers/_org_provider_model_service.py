@@ -104,6 +104,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.endpoint_auth import EndpointAuth
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
@@ -894,6 +895,21 @@ class OrgProviderModelService:
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
+    @staticmethod
+    def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
+        """The headers this key's endpoint credential adds, or none where it has one that will not decrypt."""
+        auth = EndpointAuth(
+            method=key.endpoint_auth_method,
+            header_name=key.endpoint_auth_header_name,
+            encrypted_secret=key.encrypted_endpoint_auth_secret,
+        )
+        if auth.encrypted_secret is None:
+            return {}
+        try:
+            return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
+        except (SecretBoxUnavailableError, SecretDecryptionError):
+            return {}
+
     async def _dial(self, key: OrgProviderKey, credential: _DialCredential, *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key, and keep what its engine says.
 
@@ -913,6 +929,8 @@ class OrgProviderModelService:
                 return ProviderDiscovery(provider=key.provider, models=[], error=refusal)
             client_args["http_client"] = owned_endpoint_sdk_client(LLMProvider(key.provider))
             engine_client = owned_endpoint_http_client()
+            if headers := self._endpoint_headers(key):
+                client_args["default_headers"] = headers
         discovery = await test_provider_credentials(
             key.provider,
             api_key=api_key if isinstance(api_key, str) else None,

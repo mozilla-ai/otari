@@ -597,6 +597,12 @@ async def discover_provider_models(
     )
 
 
+def _default_headers(client_args: Mapping[str, object] | None) -> dict[str, str] | None:
+    """The default headers in ``client_args``, where it names any."""
+    headers = (client_args or {}).get("default_headers")
+    return {str(k): str(v) for k, v in headers.items()} if isinstance(headers, Mapping) else None
+
+
 async def test_provider_credentials(
     impl_name: str,
     *,
@@ -618,7 +624,9 @@ async def test_provider_credentials(
     ``declared`` is whether the credentials will back a ``providers:`` entry, which
     a keyless or ambient-credential provider needs in place of a key.
     ``engine_client`` is what reads an SGLang server's settings where the
-    caller pinned the address; ``client_args`` then carries the SDK's own.
+    caller pinned the address; ``client_args`` then carries the SDK's own, and
+    any default headers in it go on that read as well, so a server behind a
+    proxy answers it.
     """
     if not _supports_list_models(impl_name):
         return ProviderDiscovery(
@@ -679,7 +687,13 @@ async def test_provider_credentials(
     return ProviderDiscovery(
         provider=impl_name,
         models=models,
-        engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key, client=engine_client),
+        engine_settings=await read_engine_settings(
+            models,
+            api_base=api_base,
+            api_key=api_key,
+            client=engine_client,
+            extra_headers=_default_headers(client_args),
+        ),
     )
 
 
