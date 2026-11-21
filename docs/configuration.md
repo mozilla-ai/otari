@@ -1364,7 +1364,10 @@ refuse the old names; see [Upgrading](#upgrading).
 The catalog prices each slot in its unit, so a catalog price reaches every
 endpoint: `whisper-1` is priced per minute of audio and `tts-1` per character
 of text, with no text token price at all, and a token-billed image or
-transcription model is priced on the tokens it reports.
+transcription model is priced on the tokens it reports. Where a token rate's
+block prices `image` output in tokens, as it does for Gemini's image models,
+the image tokens a provider reports bill at that price, on chat, Responses and
+image generation alike, and the rest of the output at the text price.
 
 Image generation reserves the images asked for, at the `size` asked for,
 before dispatch, and settles on the images returned. Speech reserves the

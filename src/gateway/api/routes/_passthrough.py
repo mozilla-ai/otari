@@ -1171,6 +1171,7 @@ def _billable_tokens(reported: ReportedUsage) -> BillableUsage | None:
         input_tokens=reported.input_tokens or 0,
         output_tokens=reported.output_tokens or 0,
         cache_tokens_included=True,
+        image_output_tokens=reported.image_output_tokens,
     )
 
 

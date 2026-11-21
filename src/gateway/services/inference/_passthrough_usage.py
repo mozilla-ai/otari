@@ -34,6 +34,7 @@ class ReportedUsage:
     total_tokens: int | None = None
     units: Mapping[str, int] = field(default_factory=dict)
     quantities: Quantities = field(default_factory=dict)
+    image_output_tokens: int = 0
 
 
 def embedding_usage(result: CreateEmbeddingResponse) -> ReportedUsage:
@@ -87,6 +88,7 @@ def image_usage(result: ImagesResponse, *, size: str | None = None) -> ReportedU
         total_tokens=usage.total_tokens,
         units=units,
         quantities=quantities,
+        image_output_tokens=(usage.output_tokens_details.image_tokens or 0) if usage.output_tokens_details else 0,
     )
 
 

@@ -29,7 +29,12 @@ from any_llm.types.completion import (
 )
 from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
-from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
+from gateway.core.usage import (
+    cache_write_1h_tokens_of,
+    image_output_tokens_of,
+    provider_web_searches_of,
+    reasoning_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services._tool_loop import (
@@ -1413,7 +1418,7 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
             cache_write_tokens=40,
             cache_creation_token_details=CacheCreationTokenDetails(ephemeral_1h_input_tokens=40),
         ),
-        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12),
+        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=12, image_tokens=6),
         server_tool_use=ServerToolUsage(web_search_requests=2),
     )
     round_two = CompletionUsage(
@@ -1462,6 +1467,7 @@ async def test_stream_loop_accumulates_usage_across_rounds(monkeypatch: pytest.M
     assert usages[0].prompt_tokens_details.cache_write_tokens == 40
     assert cache_write_1h_tokens_of(usages[0]) == 40
     assert reasoning_tokens_of(usages[0]) == 12
+    assert image_output_tokens_of(usages[0]) == 6
     assert provider_web_searches_of(usages[0]) == 3
 
 
