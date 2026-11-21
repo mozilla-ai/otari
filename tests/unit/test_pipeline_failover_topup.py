@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
+from gateway.core.error_codes import BUDGET_EXCEEDED, PRICING_REQUIRED, error_headers
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
 from gateway.log_config import logger as gateway_logger
 from gateway.services import pricing_service
@@ -333,3 +333,33 @@ async def test_a_database_failure_during_a_move_is_logged_without_its_message(
     assert record.getMessage().endswith(": OperationalError Exception")
     assert record.exc_info is None
     assert "Failing row" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("refusal", "skipped"),
+    [
+        (HTTPException(status_code=402, detail="no price", headers=error_headers(PRICING_REQUIRED)), True),
+        (HTTPException(status_code=403, detail="over budget", headers=error_headers(BUDGET_EXCEEDED)), False),
+    ],
+)
+async def test_a_hosted_candidate_with_no_rate_is_skipped_and_one_over_budget_stops_the_chain(
+    monkeypatch: pytest.MonkeyPatch, refusal: HTTPException, skipped: bool
+) -> None:
+    async def serve(*_args: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(instance="openai", provider=LLMProvider.OPENAI, kwargs={})
+
+    async def grow(*_args: Any, **_kwargs: Any) -> None:
+        raise refusal
+
+    monkeypatch.setattr(pipeline, "serve_on_hosted_provider", serve)
+    monkeypatch.setattr(pipeline, "_grow_reservation", grow)
+    ctx = _ctx()
+    ctx.workspace_id = None
+    ctx.country_gate = None
+    credential = pipeline._hosted_candidate(ctx, port=cast(Any, object()), billing=cast(Any, object()))
+
+    with pytest.raises(CandidateCannotServe if skipped else HTTPException) as exc_info:
+        await credential(_attempt(2, "openai", "gpt-4o"))
+
+    assert (exc_info.value.refusal if isinstance(exc_info.value, CandidateCannotServe) else exc_info.value) is refusal

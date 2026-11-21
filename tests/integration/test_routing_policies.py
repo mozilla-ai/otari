@@ -57,6 +57,7 @@ from gateway.core.error_codes import (
     ERROR_RETRYABLE_HEADER,
     ERROR_STATUS_HEADER,
     ERROR_TAG_HEADER,
+    PRICING_REQUIRED,
     PROVIDER_ERROR,
     UPSTREAM_RATE_LIMITED,
 )
@@ -409,6 +410,20 @@ def test_an_unpriced_first_candidate_is_skipped_for_a_priced_fallback(
         assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "1", "true")
         served = [r for r in _usage_rows(client) if r["status"] == "success"]
         assert [(r["model"], r["cost"] is not None) for r in served] == [("claude-haiku-4-5", True)]
+
+
+def test_a_policy_none_of_whose_candidates_is_priced_is_refused(routing_config: GatewayConfig) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    serve = AsyncMock(return_value=_completion("claude-haiku-4-5"))
+
+    for client in build_test_client(config):
+        _create_user(client)
+        with patch("gateway.api.routes.chat.acompletion", new=serve):
+            resp = _chat(client, "fast")
+
+        assert resp.status_code == 402, resp.text
+        assert resp.headers[ERROR_CODE_HEADER] == PRICING_REQUIRED
+        serve.assert_not_awaited()
 
 
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
