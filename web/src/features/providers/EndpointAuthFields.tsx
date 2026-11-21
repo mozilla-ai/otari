@@ -34,17 +34,26 @@ export function endpointAuthDraftFrom(
 /**
  * Whether this draft can be saved, given what the key already holds.
  *
- * Only the structure is checked here. Which header names a key may carry is the
+ * A stored value stands in for a retyped one, except where the key is moving to
+ * another address: the gateway refuses to send a value to a host the person
+ * saving it never proved they hold, so asking for it here is what keeps the
+ * dialog from offering a save the gateway will refuse.
+ *
+ * Only the structure is checked. Which header names a key may carry is the
  * gateway's rule, and it answers with the name of what is wrong, so a copy of
  * the list here would be a second authority on it that drifts from the first.
  */
 export function isEndpointAuthComplete(
   draft: EndpointAuthDraft,
-  { hasStoredSecret }: { hasStoredSecret: boolean },
+  {
+    hasStoredSecret,
+    addressMoved,
+  }: { hasStoredSecret: boolean; addressMoved: boolean },
 ): boolean {
   if (draft.headerName.trim() === "") return true
   if (draft.expiresAt === "") return false
-  return hasStoredSecret || draft.secret !== ""
+  if (draft.secret !== "") return true
+  return hasStoredSecret && !addressMoved
 }
 
 /**

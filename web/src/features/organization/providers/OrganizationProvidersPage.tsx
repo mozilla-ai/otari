@@ -223,6 +223,8 @@ function KeyForm({
     !(editing?.slug && draft.apiBase.trim() === "") &&
     isEndpointAuthComplete(endpointAuth, {
       hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
+      addressMoved:
+        editing !== null && draft.apiBase.trim() !== (editing.api_base ?? ""),
     })
 
   const submit = () => {

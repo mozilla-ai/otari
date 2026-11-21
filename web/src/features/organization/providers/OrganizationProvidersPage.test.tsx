@@ -568,6 +568,45 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  // The gateway refuses to carry a stored value to a host the person saving it
+  // never proved they hold, so the dialog asks rather than offering the save.
+  it("asks for the endpoint credential again when the key moves to another address", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "new-edge-s3cret",
+    )
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
   it("sends no endpoint credential once the key has no address of its own", async () => {
     const requests = mockApi({
       keys: [

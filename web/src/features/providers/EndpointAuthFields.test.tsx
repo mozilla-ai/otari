@@ -66,14 +66,20 @@ describe("isEndpointAuthComplete", () => {
 
   it("accepts a key that declares no endpoint credential", () => {
     expect(
-      isEndpointAuthComplete(EMPTY_ENDPOINT_AUTH, { hasStoredSecret: false }),
+      isEndpointAuthComplete(EMPTY_ENDPOINT_AUTH, {
+        hasStoredSecret: false,
+        addressMoved: false,
+      }),
     ).toBe(true)
   })
 
   it("accepts a complete credential", () => {
-    expect(isEndpointAuthComplete(complete, { hasStoredSecret: false })).toBe(
-      true,
-    )
+    expect(
+      isEndpointAuthComplete(complete, {
+        hasStoredSecret: false,
+        addressMoved: false,
+      }),
+    ).toBe(true)
   })
 
   it("refuses a header named with no value behind it", () => {
@@ -82,6 +88,7 @@ describe("isEndpointAuthComplete", () => {
         { ...complete, secret: "" },
         {
           hasStoredSecret: false,
+          addressMoved: false,
         },
       ),
     ).toBe(false)
@@ -95,8 +102,29 @@ describe("isEndpointAuthComplete", () => {
         { ...complete, secret: "" },
         {
           hasStoredSecret: true,
+          addressMoved: false,
         },
       ),
+    ).toBe(true)
+  })
+
+  // The gateway will not send a stored value to a host the person saving it
+  // never proved they hold, so the dialog asks rather than offering the save.
+  it("refuses a stored value kept while the key moves to another address", () => {
+    expect(
+      isEndpointAuthComplete(
+        { ...complete, secret: "" },
+        { hasStoredSecret: true, addressMoved: true },
+      ),
+    ).toBe(false)
+  })
+
+  it("accepts a retyped value while the key moves to another address", () => {
+    expect(
+      isEndpointAuthComplete(complete, {
+        hasStoredSecret: true,
+        addressMoved: true,
+      }),
     ).toBe(true)
   })
 
@@ -106,6 +134,7 @@ describe("isEndpointAuthComplete", () => {
         { ...complete, expiresAt: "" },
         {
           hasStoredSecret: true,
+          addressMoved: false,
         },
       ),
     ).toBe(false)
