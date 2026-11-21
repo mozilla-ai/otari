@@ -1235,6 +1235,9 @@ class McpConnectionService:
             # is not sent to the endpoints discovered then, and they are not recorded on a connection.
             logger.warning("MCP sign-in refused reason=token_endpoint_changed server_id=%s", pending.server_id)
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
+        if server.workspace_id is None:
+            # Nothing starts a sign-in to an organization server yet.
+            raise McpConnectionFlowError("This server's sign-in cannot be finished here. Start it again.")
         # Copied now: the row is read again below into this same object.
         url_before, workspace_id = server.url, server.workspace_id
         try:
@@ -1274,7 +1277,7 @@ class McpConnectionService:
                 pass
             elif pending.for_shared:
                 if pending.identity_id is None or not await self._eligibility.may_manage(
-                    current.workspace_id, pending.identity_id
+                    workspace_id, pending.identity_id
                 ):
                     logger.info("MCP shared sign-in refused reason=no_longer_manager server_id=%s", pending.server_id)
                     refusal = "You can no longer manage this server's workspace."
@@ -1297,7 +1300,7 @@ class McpConnectionService:
                     # the health recorded with it.
                     current.encrypted_token = None
                     current.health = None
-            elif not await self._eligibility.may_connect(current.workspace_id, pending.user_id):
+            elif not await self._eligibility.may_connect(workspace_id, pending.user_id):
                 logger.info("MCP sign-in refused reason=no_longer_eligible server_id=%s", pending.server_id)
                 refusal = "You no longer have access to this server's workspace."
             else:
@@ -1332,7 +1335,7 @@ class McpConnectionService:
             logger.info("MCP check sign-in finished server_id=%s", pending.server_id)
             return CompletedConnection(
                 server_id=server.id,
-                workspace_id=server.workspace_id,
+                workspace_id=workspace_id,
                 server_name=server.name,
                 return_to=pending.return_to,
                 server_url=url_before,
@@ -1349,7 +1352,7 @@ class McpConnectionService:
             logger.info("MCP shared sign-in finished server_id=%s", pending.server_id)
             return CompletedConnection(
                 server_id=server.id,
-                workspace_id=server.workspace_id,
+                workspace_id=workspace_id,
                 server_name=server.name,
                 return_to=pending.return_to,
                 server_url=url_before,
@@ -1358,7 +1361,7 @@ class McpConnectionService:
         logger.info("MCP sign-in finished server_id=%s user_id=%s", pending.server_id, pending.user_id)
         return CompletedConnection(
             server_id=server.id,
-            workspace_id=server.workspace_id,
+            workspace_id=workspace_id,
             server_name=server.name,
             return_to=pending.return_to,
             server_url=url_before,

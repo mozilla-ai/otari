@@ -128,7 +128,10 @@ def _store_server(
     enabled: bool = True,
     allowed_tools: list[str] | None = None,
 ) -> WorkspaceMcpServer:
+    workspace = test_db.get(Workspace, workspace_id)
+    assert workspace is not None
     row = WorkspaceMcpServer(
+        organization_id=workspace.organization_id,
         workspace_id=workspace_id,
         name="github",
         url=url,

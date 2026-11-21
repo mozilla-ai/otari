@@ -119,7 +119,10 @@ def _store(
     labeled: bool = True,
 ) -> WorkspaceMcpServer:
     """Store a server. ``labeled=False`` leaves its read labels unset, so they follow the server's own."""
+    workspace = test_db.get(Workspace, workspace_id)
+    assert workspace is not None
     row = WorkspaceMcpServer(
+        organization_id=workspace.organization_id,
         workspace_id=workspace_id,
         name=name,
         url=PUBLIC_URL,
@@ -147,7 +150,8 @@ def _new_key(client: TestClient, master: dict[str, str], **body: Any) -> dict[st
     return created
 
 
-def _servers(workspace: uuid.UUID) -> str:
+def _servers(workspace: uuid.UUID | None) -> str:
+    assert workspace is not None, "a workspace server"
     return f"{API_ROOT}/workspaces/{workspace}/mcp-servers"
 
 
@@ -1131,7 +1135,10 @@ async def test_a_request_reads_only_its_own_workspace_s_grants(
     mine = _store(test_db, here, "github", everyone=[])
     theirs = _store(test_db, elsewhere.id, "jira", everyone=[])
     test_db.add_all(
-        [WorkspaceMcpServerGrant(server_id=server.id, user_id="shared", tools=["*"]) for server in (mine, theirs)]
+        [
+            WorkspaceMcpServerGrant(server_id=server.id, workspace_id=workspace, user_id="shared", tools=["*"])
+            for server, workspace in ((mine, here), (theirs, elsewhere.id))
+        ]
     )
     test_db.commit()
 

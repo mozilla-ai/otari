@@ -490,7 +490,11 @@ async def test_a_stored_url_with_whitespace_around_it_still_counts_as_stored(
     async_db: AsyncSession, stored: str
 ) -> None:
     team = await _team(async_db)
-    async_db.add(WorkspaceMcpServer(workspace_id=team.workspace.id, name="sentry", url=stored))
+    async_db.add(
+        WorkspaceMcpServer(
+            organization_id=team.workspace.organization_id, workspace_id=team.workspace.id, name="sentry", url=stored
+        )
+    )
     await async_db.commit()
 
     async with UnitOfWork(async_db) as uow:

@@ -54,6 +54,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpCheckSignInRequiredError,
@@ -85,6 +86,7 @@ from gateway.models.tools import (
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
+    OrganizationRepository,
     UserRepository,
     WorkspaceMemberRepository,
     WorkspaceRepository,
@@ -456,6 +458,9 @@ class WorkspaceMcpServerPublic(BaseModel):
         those components masked. A manager sees the URL as stored, because the
         edit form restates it and would otherwise save the mask back.
         """
+        if server.workspace_id is None:
+            # This shape describes a workspace's own server; nothing lists an organization server yet.
+            raise ValueError(f"MCP server {server.id} belongs to no workspace")
         client = McpConnectionService.stored_oauth_client(server)
         own_client = client if client is not None and not client.dynamic else None
         return cls(
@@ -1644,9 +1649,22 @@ class WorkspaceMcpServerService:
         await _validate_url(request.url, has_token=per_user or bool(request.authorization_token))
 
         # The workspace lock stops a concurrent create from invalidating the count below before this insert.
+        # The organization's is taken first, in the order a workspace's deletion takes the two: the insert
+        # checks the server's organization key, which waits on a deletion holding the organization.
         workspaces = WorkspaceRepository(self.db)
-        await workspaces.lock(resolved_workspace_id)
         organization_id = await workspaces.get_organization_id(resolved_workspace_id)
+        if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        await OrganizationRepository(self.db).lock_settings(organization_id)
+        await workspaces.lock(resolved_workspace_id)
+        workspace = await workspaces.get(resolved_workspace_id)
+        if workspace is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        # Asked again under the locks: a removal from the organization that held them has committed by now.
+        if not await authorization.has_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        ):
+            raise NotAuthorizedError
 
         count = (
             await self.db.execute(
@@ -1659,6 +1677,7 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerLimitReachedError(workspace_id, MAX_MCP_SERVERS_PER_WORKSPACE)
 
         server = WorkspaceMcpServer(
+            organization_id=organization_id,
             workspace_id=resolved_workspace_id,
             name=request.name,
             url=request.url,
@@ -1698,7 +1717,7 @@ class WorkspaceMcpServerService:
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
-        if growth is not None and background_tasks is not None and organization_id is not None:
+        if growth is not None and background_tasks is not None:
             await growth.record_action(
                 background_tasks=background_tasks,
                 action=GrowthAction.MCP_SERVER_CREATED,
@@ -1931,8 +1950,15 @@ class WorkspaceMcpServerService:
             unknown = [key_id for key_id in request.api_key_ids if key_id not in found]
             if unknown:
                 raise WorkspaceMcpServerGrantSubjectError(f"Key '{unknown[0]}' is not a key of this workspace")
+        # The key reads end in commits, so the workspace is locked after them and before anything is written:
+        # a member minting their own attribution row takes the same lock first. The server is locked after it,
+        # in the order a workspace's deletion takes them, since a grant's insert checks its workspace key.
+        owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids) if request.user_ids else set()
+        workspaces = WorkspaceRepository(self.db)
+        await workspaces.lock(resolved_workspace_id)
+        if await workspaces.get_organization_id(resolved_workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
         if request.user_ids:
-            owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids)
             members = await self._members_by_attribution(
                 resolved_workspace_id, [user_id for user_id in request.user_ids if user_id not in owners]
             )
@@ -1942,8 +1968,7 @@ class WorkspaceMcpServerService:
                     f"'{strangers[0]}' is not a member of this workspace and owns no key in it"
                 )
         repository = WorkspaceMcpServerGrantRepository(self.db)
-        # The key reads above end in commits; the server is read again here, locked, so two
-        # concurrent adds cannot both pass the cap.
+        # Read again, locked, so two concurrent adds cannot both pass the cap.
         server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
         if server is None:
             raise WorkspaceMcpServerNotFoundError(server_id)
@@ -1961,7 +1986,13 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerGrantSubjectError(
                 f"A server holds at most {MAX_GRANTS_PER_SERVER} grants; grant a user instead of each of their keys"
             )
-        await repository.put(server.id, api_key_ids=request.api_key_ids, user_ids=request.user_ids, tools=request.tools)
+        await repository.put(
+            server,
+            workspace_id=resolved_workspace_id,
+            api_key_ids=request.api_key_ids,
+            user_ids=request.user_ids,
+            tools=request.tools,
+        )
         await self.db.commit()
         logger.info(
             "MCP server grants added server_id=%s keys=%d users=%d",

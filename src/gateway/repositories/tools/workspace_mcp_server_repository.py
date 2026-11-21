@@ -96,13 +96,17 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         return list((await self.db.execute(query)).scalars().all())
 
     async def attached_workspace_ids(self) -> frozenset[uuid.UUID]:
-        """Every workspace that has an enabled server attached by default."""
+        """Every workspace that has an enabled server of its own attached by default."""
         found = await self.db.execute(
             select(WorkspaceMcpServer.workspace_id)
-            .where(WorkspaceMcpServer.attach_by_default.is_(True), WorkspaceMcpServer.enabled.is_(True))
+            .where(
+                WorkspaceMcpServer.attach_by_default.is_(True),
+                WorkspaceMcpServer.enabled.is_(True),
+                WorkspaceMcpServer.workspace_id.is_not(None),
+            )
             .distinct()
         )
-        return frozenset(found.scalars())
+        return frozenset(workspace_id for workspace_id in found.scalars() if workspace_id is not None)
 
     async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
         """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.
@@ -140,12 +144,17 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing the bearer token of every server in these workspaces."""
-        if not workspace_ids:
+        """Stage clearing the bearer token of every server in these workspaces or of these organizations."""
+        if not workspace_ids and not organization_ids:
             return
         await self.db.execute(
             update(WorkspaceMcpServer)
-            .where(WorkspaceMcpServer.workspace_id.in_(list(workspace_ids)))
+            .where(
+                or_(
+                    WorkspaceMcpServer.workspace_id.in_(list(workspace_ids)),
+                    WorkspaceMcpServer.organization_id.in_(list(organization_ids)),
+                )
+            )
             .values(encrypted_token=None)
             .execution_options(synchronize_session=False)
         )
