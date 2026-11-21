@@ -543,12 +543,13 @@ Registers the hook in the current Git repository; refuses outside one. When the 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
-| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+| `--repo-only` / `--no-repo-only` | keep the existing registration's choice, else off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. `--no-repo-only` removes the flag. |
 
 Re-running `setup`:
 
 - rewrites the registered command in place, matching an existing entry by the executable's name and `hook` alone (an entry naming otari on `PATH` and one naming an install path are the same registration);
-- drops a flag added to the settings file by hand: pass `--repo-only` to `setup` instead;
+- keeps `--repo-only` when the existing registration has it and neither flag is passed, and says so; pass `--no-repo-only` to remove it;
+- drops any other flag added to the settings file by hand;
 - moves otari's command to an entry of its own where an entry holds it beside another hook's, leaving that entry's matcher alone;
 - rewrites every entry in the event that runs otari hook, not only the first.
 
