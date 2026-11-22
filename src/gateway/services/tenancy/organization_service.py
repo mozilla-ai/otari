@@ -95,6 +95,7 @@ from gateway.models.tenancy import (
     OrganizationPublic,
     PendingOrganizationInvitationPublic,
     PendingOrganizationInvitationsPublic,
+    SignInMeans,
     User,
     Workspace,
     WorkspaceAssignmentRequest,
@@ -233,16 +234,6 @@ def _hash_invitation_token(token: str) -> str:
     as a password, so it is hashed at rest and compared by hash.
     """
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-def _has_never_signed_in(user: User) -> bool:
-    """Whether an identity has no way in yet: no password, and no verified address.
-
-    The verified address is what a provider sign-in leaves behind on an identity
-    that never set a password, so checking the password alone would treat an
-    account someone signs in to with Google as unclaimed.
-    """
-    return user.is_active and user.hashed_password is None and user.email_verified_at is None
 
 
 def _refuse_unproven_address(target: User, membership: OrganizationMember | None, email: str) -> None:
@@ -2094,7 +2085,7 @@ class OrganizationService:
         or removed one counts for nothing, and counting it would strand an
         invitee on a deployment with no mail and no provider.
         """
-        if invitee is None or not _has_never_signed_in(invitee):
+        if invitee is None or not invitee.is_active or invitee.sign_in_means is not SignInMeans.NONE:
             return False
         elsewhere = [m for m in await self.members.get_by_user(invitee.id) if m.organization_id != organization_id]
         if any(membership.status == "active" for membership in elsewhere):
@@ -2115,7 +2106,7 @@ class OrganizationService:
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
         needs_password = await self._invitee_is_claimable(invitee, organization.id)
-        can_sign_in = not _has_never_signed_in(invitee)
+        can_sign_in = invitee.sign_in_means is not SignInMeans.NONE
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
@@ -2213,8 +2204,8 @@ class OrganizationService:
         result = await self._resolve_invitation_to_active_membership(
             invitation, membership, organization, blocked_addresses
         )
-        verification_pending = invitee.hashed_password is not None and invitee.email_verified_at is None
-        can_sign_in = password is not None or not _has_never_signed_in(invitee)
+        verification_pending = invitee.sign_in_means is SignInMeans.UNVERIFIED_PASSWORD
+        can_sign_in = password is not None or invitee.sign_in_means is not SignInMeans.NONE
         claimed_identity = None
         if password is not None:
             # The claim was a conditional UPDATE the session did not see, so the name it wrote is read back.

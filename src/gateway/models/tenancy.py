@@ -53,6 +53,7 @@ exactly as the platform's own tenancy models do.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import field_validator
@@ -139,6 +140,23 @@ MAX_FULL_NAME_LENGTH = 255
 # `web/src/features/account/avatar/faces.ts`, whose test pins the same number).
 # A face is its index, so this is the bound on a stored pick.
 AVATAR_FACE_COUNT = 203_896
+
+
+class SignInMeans(StrEnum):
+    """The sign-in credentials an identity carries.
+
+    The members are exclusive and cover every identity. Only ``PASSWORD`` and
+    ``WITHOUT_PASSWORD`` can complete a sign-in, because an address nobody has verified is
+    refused once the password it carries has been proven.
+
+    NOTE: ``WITHOUT_PASSWORD`` is a provider or a passkey. Nothing enforces that, so a flow that
+    verifies an address must leave a password, a provider or a passkey behind.
+    """
+
+    NONE = "none"
+    PASSWORD = "password"
+    UNVERIFIED_PASSWORD = "unverified_password"
+    WITHOUT_PASSWORD = "without_password"
 
 
 class UserBase(SQLModel):
@@ -268,6 +286,21 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # until they pick one, and the dashboard then draws the face their id hashes
     # to, so nobody needs a row written to have an avatar.
     avatar_face: int | None = Field(default=None)
+
+    @property
+    def sign_in_means(self) -> SignInMeans:
+        """The sign-in credentials this identity carries.
+
+        NOTE: This says nothing about whether the identity is active. A caller that
+        cares reads ``is_active`` as well.
+        """
+        if self.hashed_password is not None:
+            if self.email_verified_at is None:
+                return SignInMeans.UNVERIFIED_PASSWORD
+            return SignInMeans.PASSWORD
+        if self.email_verified_at is None:
+            return SignInMeans.NONE
+        return SignInMeans.WITHOUT_PASSWORD
 
 
 class DeploymentUserOrganizationPublic(SQLModel):
@@ -1855,6 +1888,7 @@ __all__ = [
     "OrganizationsPublic",
     "PendingOrganizationInvitationPublic",
     "PendingOrganizationInvitationsPublic",
+    "SignInMeans",
     "SwitchActiveOrganizationRequest",
     "User",
     "UserCreate",

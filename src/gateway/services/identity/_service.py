@@ -37,7 +37,7 @@ from gateway.models.identity import (
     ProviderIdentity,
     is_organization_connection_provider,
 )
-from gateway.models.tenancy import Organization, OrganizationDomainRole, User
+from gateway.models.tenancy import Organization, OrganizationDomainRole, SignInMeans, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
@@ -519,7 +519,7 @@ class IdentityService:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
         if await self.blocked_among([account.email]):
             raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
-        if account.hashed_password is None and account.email_verified_at is not None:
+        if account.sign_in_means is SignInMeans.WITHOUT_PASSWORD:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "
                 "Once signed in, its owner can add a password from Account settings."
