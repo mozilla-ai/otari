@@ -44,6 +44,7 @@ def _rank(router: AutomaticRouter, **changes: Any) -> CompiledPlan:
         "settings": AutomaticRouting.model_validate({"offerings": {"us": {"region": "us"}, "eu": {"region": "eu"}}}),
         "costs": {"us:model": Decimal("0.01"), "eu:model": Decimal("0.01")},
         "scope": "workspace:user:key:chat",
+        "tenant": "organization",
         "anchor": "private conversation",
         "region": None,
         "mode": "chat:completion",
@@ -498,3 +499,22 @@ def test_close_releases_outstanding_calls_without_binding(router: AutomaticRoute
     assert all(health.active == 0 for health in router.health.values())
     assert all(health.cooldown == 0 for health in router.health.values())
     assert not router.affinities
+
+
+def test_one_organization_cannot_evict_another_organizations_sessions(
+    router: AutomaticRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past its own share, an organization's new session evicts its own oldest, never another's."""
+    monkeypatch.setattr("gateway.services.routing._automatic._TENANT_AFFINITY_LIMIT", 2)
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 3)
+    victim = _rank(router, tenant="victim", scope="victim:user:key:chat")
+    assert victim.automatic is not None
+    victim.automatic.start(victim.attempts[1]).finish(success=True)
+    for anchor in ("a", "b", "c", "d"):
+        plan = _rank(router, tenant="attacker", anchor=anchor)
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[1]).finish(success=True)
+    assert len(router.affinities) == 3
+    assert _rank(router, tenant="victim", scope="victim:user:key:chat").head.instance == "eu"
+    assert _rank(router, tenant="attacker", anchor="a").head.instance == "us"
+    assert _rank(router, tenant="attacker", anchor="d").head.instance == "eu"

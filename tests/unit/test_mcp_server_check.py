@@ -208,11 +208,25 @@ async def test_a_check_with_no_free_slot_raises_rather_than_reporting_the_server
 ) -> None:
     """A busy gateway says nothing about the server, so it must not be recorded as the server's health."""
     gate = ConcurrencyGate(limit=1, admission_timeout_s=0.05)
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_GATE", gate)
+    monkeypatch.setattr(mcp_stateless, "CHECK_GATE", gate)
 
     async with gate.slot():
         with pytest.raises(McpCapacityUnavailable):
             await check_stored_server(_server(f"http://{refusing}/401"))
+
+
+@pytest.mark.asyncio
+async def test_checks_that_hold_every_check_slot_leave_discovery_free() -> None:
+    """A check dials any URL a tenant's admin saves, so it must not take other tenants' discovery slots."""
+    gate = mcp_stateless.CHECK_GATE
+    assert gate is not mcp_stateless.DISCOVERY_GATE
+    held = [await gate._semaphore.acquire() for _ in range(gate.limit)]  # noqa: SLF001
+    try:
+        async with mcp_stateless.DISCOVERY_GATE.slot():
+            pass
+    finally:
+        for _ in held:
+            gate._semaphore.release()  # noqa: SLF001
 
 
 @pytest.mark.asyncio

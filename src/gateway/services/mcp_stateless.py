@@ -104,6 +104,7 @@ EXECUTION_TOTAL_TIMEOUT_S = 45.0
 # Admission.
 DISCOVERY_CONCURRENCY = 4
 DISCOVERY_ADMISSION_TIMEOUT_S = 5.0
+CHECK_CONCURRENCY = 4
 EXECUTION_CONCURRENCY = 8
 EXECUTION_ADMISSION_TIMEOUT_S = 5.0
 
@@ -469,10 +470,12 @@ def discovery_response_exceeds_bound(response: Any) -> bool:
 class ConcurrencyGate:
     """A per-process slot ceiling with a bounded wait for admission.
 
-    Discovery and execution hold separate gates. Discovery talks to a
-    server that has not been authorized for anything yet and can be slow or
-    hostile; execution is running a call a person or a policy already approved.
-    One ceiling shared between them would let the first starve the second.
+    Discovery, execution and server checks hold separate gates. Discovery
+    talks to a server that has not been authorized for anything yet and can be
+    slow or hostile; execution is running a call a person or a policy already
+    approved. A check dials whatever URL an admin is saving, so one tenant
+    could hold every slot it shares. One ceiling shared between any two would
+    let the first starve the second.
     """
 
     def __init__(self, *, limit: int, admission_timeout_s: float) -> None:
@@ -500,6 +503,7 @@ class ConcurrencyGate:
 
 DISCOVERY_GATE = ConcurrencyGate(limit=DISCOVERY_CONCURRENCY, admission_timeout_s=DISCOVERY_ADMISSION_TIMEOUT_S)
 EXECUTION_GATE = ConcurrencyGate(limit=EXECUTION_CONCURRENCY, admission_timeout_s=EXECUTION_ADMISSION_TIMEOUT_S)
+CHECK_GATE = ConcurrencyGate(limit=CHECK_CONCURRENCY, admission_timeout_s=DISCOVERY_ADMISSION_TIMEOUT_S)
 
 
 async def _run_in_owner_task(operation: Coroutine[Any, Any, T]) -> T:
@@ -945,11 +949,11 @@ async def check_stored_server(server: ResolvedMcpServer) -> ServerCheck:
     caller's to settle first, as they are for discovery.
 
     Raises:
-        McpCapacityUnavailable: no discovery slot freed up in time, so nothing was checked.
+        McpCapacityUnavailable: no check slot freed up in time, so nothing was checked.
     """
     deadline = asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S)
     try:
-        async with deadline, DISCOVERY_GATE.slot():
+        async with deadline, CHECK_GATE.slot():
             return await _run_in_owner_task(_check_once(server))
     except McpCapacityUnavailable:
         raise

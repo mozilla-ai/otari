@@ -750,7 +750,9 @@ if none fits, the request is refused without an upstream call.
 State and scope:
 
 - Feedback is local to each gateway worker, bounded to 10,000 health entries and
-  10,000 conversation digests, and reset on restart. It measures traffic through
+  10,000 conversation digests (at most 1,000 per organization, so one
+  organization's new conversations replace its own oldest rather than another's),
+  and reset on restart. It measures traffic through
   that worker, not a provider's global utilization. Existing rate-limit
   admission still enforces capacity, including shared Redis limits.
 - Session affinity is scoped to the authenticated workspace, user, key and API;

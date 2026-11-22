@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 _EU = frozenset("AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split())
 _TTL = 300.0
 _LIMIT = 10000
+# Session bindings one organization may hold, so it cannot evict another's.
+_TENANT_AFFINITY_LIMIT = 1000
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
 _ACCOUNT_FIELDS = frozenset(
     {
@@ -101,6 +103,7 @@ class AutomaticSelection:
     router: AutomaticRouter
     affinity: str | None
     mode: str
+    tenant: str
     observations: list[AutomaticObservation] = field(default_factory=list)
 
     def forget(self, attempt: Attempt) -> None:
@@ -111,7 +114,7 @@ class AutomaticSelection:
         """Remove the session binding only if it still points to this credential fingerprint."""
         previous = self.router.affinities.get(self.affinity) if self.affinity else None
         if self.affinity and previous and previous[0] == key:
-            del self.router.affinities[self.affinity]
+            self.router.unbind(self.affinity)
 
     def close(self) -> None:
         """Release every outstanding observation without recording success or failure."""
@@ -168,10 +171,7 @@ class AutomaticObservation:
         if unhealthy:
             self.selection.forget_key(self.key)
         if success and self.selection.affinity:
-            router.affinities[self.selection.affinity] = (self.key, now)
-            router.affinities.move_to_end(self.selection.affinity)
-            while len(router.affinities) > _LIMIT:
-                router.affinities.popitem(last=False)
+            router.bind(self.selection.affinity, self.selection.tenant, self.key, now)
 
 
 class AutomaticRouter:
@@ -186,7 +186,8 @@ class AutomaticRouter:
         self.clock = clock
         self._salt = secrets.token_bytes(32)
         self.health: OrderedDict[str, _Health] = OrderedDict()
-        self.affinities: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self.affinities: OrderedDict[str, tuple[str, float, str]] = OrderedDict()
+        self._tenant_affinities: dict[str, OrderedDict[str, None]] = {}
 
     def _digest(self, value: object) -> str:
         """Create a private process-local fingerprint without retaining its input."""
@@ -194,6 +195,28 @@ class AutomaticRouter:
         # Keyed, process-local fingerprints are never persisted as password verifiers.
         # codeql[py/weak-sensitive-data-hashing]
         return hmac.new(self._salt, payload, hashlib.sha256).hexdigest()
+
+    def bind(self, affinity: str, tenant: str, key: str, now: float) -> None:
+        """Bind a session to a credential, evicting the tenant's own oldest binding before anyone else's."""
+        self.unbind(affinity)
+        own = self._tenant_affinities.setdefault(tenant, OrderedDict())
+        while len(own) >= _TENANT_AFFINITY_LIMIT:
+            self.unbind(next(iter(own)))
+        self.affinities[affinity] = (key, now, tenant)
+        own[affinity] = None
+        while len(self.affinities) > _LIMIT:
+            self.unbind(next(iter(self.affinities)))
+
+    def unbind(self, affinity: str) -> None:
+        """Drop a session binding, if any."""
+        previous = self.affinities.pop(affinity, None)
+        if previous is None:
+            return
+        own = self._tenant_affinities.get(previous[2])
+        if own is not None:
+            own.pop(affinity, None)
+            if not own:
+                del self._tenant_affinities[previous[2]]
 
     def candidate_key(self, attempt: Attempt) -> str:
         """Identify the actual credential, including one resolved at dispatch."""
@@ -231,6 +254,7 @@ class AutomaticRouter:
         settings: AutomaticRouting,
         costs: Mapping[str, Decimal | None],
         scope: str,
+        tenant: str,
         anchor: str,
         region: Region | None,
         mode: str,
@@ -242,6 +266,7 @@ class AutomaticRouter:
         ``own`` holds the selectors the caller's organization serves on its own provider keys. A priced,
         healthy own key leads every other offering, so the organization's key is used before one the
         deployment pays for; the other signals order the offerings within each tier.
+        ``tenant`` is the caller's organization, which owns the session binding for its share of the table.
         """
         from gateway.services.routing.compiler import DroppedCandidate
 
@@ -305,7 +330,7 @@ class AutomaticRouter:
             else:
                 bound = None
         if affinity and previous and bound is None:
-            self.affinities.pop(affinity, None)
+            self.unbind(affinity)
         ordered = ranked[:limit]
         attempts = [
             replace(a, position=i, selection_reason="catalog" if i == 1 else "on_failure")
@@ -314,7 +339,7 @@ class AutomaticRouter:
         return replace(
             plan,
             attempts=attempts,
-            automatic=AutomaticSelection(self, affinity, mode),
+            automatic=AutomaticSelection(self, affinity, mode, self._digest(tenant)),
             dropped=[
                 *plan.dropped,
                 *(
