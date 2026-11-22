@@ -9025,6 +9025,14 @@
         "title": "EndUsersDeleted",
         "type": "object"
       },
+      "EndpointAuthMethod": {
+        "description": "How the credential for one endpoint is produced.\n\nEvery member produces request headers, so what a dispatch or discovery\ncaller receives is a header mapping whichever member a key names.",
+        "enum": [
+          "static_header"
+        ],
+        "title": "EndpointAuthMethod",
+        "type": "string"
+      },
       "EndpointAuthPublic": {
         "description": "What an endpoint credential reports. Never carries the value, only its last four characters.",
         "properties": {
@@ -9043,9 +9051,8 @@
             "type": "string"
           },
           "method": {
-            "description": "How the credential is produced. Reported as plain text rather than a closed set, so a reader built before a later method still renders a key that uses one.",
-            "title": "Method",
-            "type": "string"
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced."
           },
           "state": {
             "$ref": "#/components/schemas/EndpointAuthState",
@@ -9078,10 +9085,8 @@
             "type": "string"
           },
           "method": {
-            "const": "static_header",
-            "description": "How the credential is produced. `static_header` sends one stored value as one header.",
-            "title": "Method",
-            "type": "string"
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced. `static_header` sends one stored value as one header."
           },
           "secret": {
             "anyOf": [

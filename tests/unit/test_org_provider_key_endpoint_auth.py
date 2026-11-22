@@ -97,7 +97,7 @@ def test_a_credential_set_for_the_first_time_without_a_value_is_refused() -> Non
 
 def test_a_credential_sent_with_no_rotation_date_is_refused_at_the_boundary() -> None:
     with pytest.raises(ValidationError):
-        EndpointAuthRequest(method="static_header", header_name="Fastly-Key")  # type: ignore[call-arg]
+        EndpointAuthRequest(method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key")  # type: ignore[call-arg]
 
 
 def _gate(**overrides: object) -> None:
@@ -142,7 +142,7 @@ def test_a_stored_row_reports_the_credential_it_carries() -> None:
     )
 
     assert row.endpoint_auth == EndpointAuth(
-        method="static_header",
+        method=EndpointAuthMethod.STATIC_HEADER,
         header_name="Fastly-Key",
         encrypted_secret="gAAAA-x",
         last4="9f2a",

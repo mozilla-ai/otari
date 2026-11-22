@@ -13555,6 +13555,15 @@ export interface components {
             deleted: number;
         };
         /**
+         * EndpointAuthMethod
+         * @description How the credential for one endpoint is produced.
+         *
+         *     Every member produces request headers, so what a dispatch or discovery
+         *     caller receives is a header mapping whichever member a key names.
+         * @enum {string}
+         */
+        EndpointAuthMethod: "static_header";
+        /**
          * EndpointAuthPublic
          * @description What an endpoint credential reports. Never carries the value, only its last four characters.
          */
@@ -13571,11 +13580,8 @@ export interface components {
              * @description The last four characters of the stored value.
              */
             last4: string;
-            /**
-             * Method
-             * @description How the credential is produced. Reported as plain text rather than a closed set, so a reader built before a later method still renders a key that uses one.
-             */
-            method: string;
+            /** @description How the credential is produced. */
+            method: components["schemas"]["EndpointAuthMethod"];
             /** @description How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request. */
             state: components["schemas"]["EndpointAuthState"];
         };
@@ -13599,12 +13605,8 @@ export interface components {
              * @description The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.
              */
             header_name: string;
-            /**
-             * Method
-             * @description How the credential is produced. `static_header` sends one stored value as one header.
-             * @constant
-             */
-            method: "static_header";
+            /** @description How the credential is produced. `static_header` sends one stored value as one header. */
+            method: components["schemas"]["EndpointAuthMethod"];
             /**
              * Secret
              * @description The value to send. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL.

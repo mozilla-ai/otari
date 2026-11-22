@@ -60,8 +60,9 @@ def test_an_endpoint_credential_is_refused_on_the_providers_own_endpoint() -> No
     assert _refusal(has_api_base=False) is not None
 
 
-def test_an_unknown_method_is_refused() -> None:
-    assert _refusal(method="mtls") is not None
+def test_a_method_this_build_does_not_know_carries_no_credential() -> None:
+    """A later build may store one, and a header this build cannot produce is not sent half-made."""
+    assert EndpointAuth.from_columns(**_columns(method="mtls")) is None  # type: ignore[arg-type]
 
 
 def test_a_static_header_with_an_empty_header_name_is_refused() -> None:
@@ -136,10 +137,6 @@ def test_a_header_in_otaris_own_namespace_is_refused(name: str) -> None:
 
 def test_a_static_header_becomes_the_one_header_it_names() -> None:
     assert _auth().headers(secret="s3cret") == {"Fastly-Key": "s3cret"}
-
-
-def test_a_method_this_build_does_not_know_adds_no_header() -> None:
-    assert _auth(method="mtls").headers(secret="s3cret") == {}
 
 
 @pytest.mark.parametrize(

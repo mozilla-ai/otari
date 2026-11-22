@@ -101,7 +101,7 @@ class EndpointAuth:
     one.
     """
 
-    method: str
+    method: EndpointAuthMethod
     header_name: str
     encrypted_secret: str
     last4: str
@@ -120,14 +120,22 @@ class EndpointAuth:
         """The credential these columns hold, or None where they hold none.
 
         A write names every column, so a row holding only some of them holds
-        nothing that can be sent. It reads as no credential, which leaves the
-        endpoint to refuse the request rather than half a credential to be
-        offered to it.
+        nothing that can be sent. A row naming a method this build does not
+        know holds nothing it can produce. Either reads as no credential, which
+        leaves the endpoint to refuse the request rather than half a credential
+        to be offered to it.
         """
-        if method is None or header_name is None or encrypted_secret is None or last4 is None or expires_at is None:
+        if (
+            method is None
+            or method not in EndpointAuthMethod
+            or header_name is None
+            or encrypted_secret is None
+            or last4 is None
+            or expires_at is None
+        ):
             return None
         return cls(
-            method=method,
+            method=EndpointAuthMethod(method),
             header_name=header_name,
             encrypted_secret=encrypted_secret,
             last4=last4,
@@ -143,8 +151,6 @@ class EndpointAuth:
         """
         if not has_api_base:
             return "an endpoint credential on a key that dials the provider's own endpoint"
-        if self.method != EndpointAuthMethod.STATIC_HEADER:
-            return f"an unknown endpoint authentication method '{self.method}'"
         return refused_header_name_reason(self.header_name)
 
     def refused_expiry_reason(self, *, now: datetime) -> str | None:
@@ -170,14 +176,10 @@ class EndpointAuth:
         return EndpointAuthState.VALID
 
     def headers(self, *, secret: str) -> dict[str, str]:
-        """The headers this credential adds to every request to its endpoint.
-
-        Empty where the method is not one this build knows, so a caller adds
-        the result unconditionally.
-        """
-        if self.method != EndpointAuthMethod.STATIC_HEADER:
-            return {}
-        return {self.header_name: secret}
+        """The headers this credential adds to every request to its endpoint."""
+        match self.method:
+            case EndpointAuthMethod.STATIC_HEADER:
+                return {self.header_name: secret}
 
 
 def endpoint_auth_columns(auth: EndpointAuth | None) -> dict[str, object | None]:

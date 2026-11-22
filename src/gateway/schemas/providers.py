@@ -32,7 +32,7 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.types.endpoint_auth import EndpointAuthState
+from gateway.types.endpoint_auth import EndpointAuthMethod, EndpointAuthState
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
@@ -45,7 +45,7 @@ class EndpointAuthRequest(SQLModel):
     made, so it would be a field of its own rather than a method here.
     """
 
-    method: Literal["static_header"] = Field(
+    method: EndpointAuthMethod = Field(
         description="How the credential is produced. `static_header` sends one stored value as one header."
     )
     header_name: str = Field(
@@ -75,12 +75,7 @@ class EndpointAuthRequest(SQLModel):
 class EndpointAuthPublic(SQLModel):
     """What an endpoint credential reports. Never carries the value, only its last four characters."""
 
-    method: str = Field(
-        description=(
-            "How the credential is produced. Reported as plain text rather than a closed set, so a reader "
-            "built before a later method still renders a key that uses one."
-        )
-    )
+    method: EndpointAuthMethod = Field(description="How the credential is produced.")
     header_name: str
     last4: str = Field(description="The last four characters of the stored value.")
     expires_at: datetime
