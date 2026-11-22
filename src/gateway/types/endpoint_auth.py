@@ -169,3 +169,18 @@ class EndpointAuth:
         if self.method != EndpointAuthMethod.STATIC_HEADER or not self.header_name or secret is None:
             return {}
         return {self.header_name: secret}
+
+
+def endpoint_auth_columns(auth: EndpointAuth | None) -> dict[str, object | None]:
+    """Every column one endpoint credential occupies, cleared where there is none.
+
+    A write names all of them whichever it is doing, so a row cannot keep a
+    declaration with no value behind it.
+    """
+    return {
+        "encrypted_endpoint_auth_secret": auth.encrypted_secret if auth is not None else None,
+        "endpoint_auth_expires_at": auth.expires_at if auth is not None else None,
+        "endpoint_auth_header_name": auth.header_name if auth is not None else None,
+        "endpoint_auth_last4": auth.last4 if auth is not None else None,
+        "endpoint_auth_method": auth.method if auth is not None else None,
+    }

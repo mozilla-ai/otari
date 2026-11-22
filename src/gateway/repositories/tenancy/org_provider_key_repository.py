@@ -28,7 +28,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyCreateRequest,
     OrgProviderKeyUpdateRequest,
 )
-from gateway.types.endpoint_auth import EndpointAuth
+from gateway.types.endpoint_auth import EndpointAuth, endpoint_auth_columns
 
 # One (key, override) pair per candidate; the override is None when the
 # workspace has never departed from inheriting this key.
@@ -245,7 +245,6 @@ class OrgProviderKeyRepository(
         slug: str | None = None,
         endpoint_auth: EndpointAuth | None = None,
     ) -> OrgProviderKey:
-        auth = endpoint_auth or EndpointAuth()
         key = OrgProviderKey(
             organization_id=organization_id,
             provider=provider,
@@ -256,12 +255,8 @@ class OrgProviderKeyRepository(
             api_base=api_base,
             encrypted_client_args=encrypted_client_args,
             zero_data_retention=zero_data_retention,
-            endpoint_auth_method=auth.method,
-            endpoint_auth_header_name=auth.header_name,
-            encrypted_endpoint_auth_secret=auth.encrypted_secret,
-            endpoint_auth_last4=auth.last4,
-            endpoint_auth_expires_at=auth.expires_at,
         )
+        key.sqlmodel_update(endpoint_auth_columns(endpoint_auth))
         self.db.add(key)
         await self.db.flush()
         await self.db.refresh(key)
@@ -311,12 +306,7 @@ class OrgProviderKeyRepository(
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing every stored credential of every key these organizations hold.
-
-        An endpoint credential is cleared whole. Its fields only mean anything
-        together, so a declaration left behind with no value makes the key
-        unservable rather than merely credential-free.
-        """
+        """Stage clearing every stored credential of every key these organizations hold."""
         if not organization_ids:
             return
         await self.db.execute(
@@ -326,11 +316,7 @@ class OrgProviderKeyRepository(
                 encrypted_api_key=None,
                 last4=None,
                 encrypted_client_args=None,
-                encrypted_endpoint_auth_secret=None,
-                endpoint_auth_last4=None,
-                endpoint_auth_method=None,
-                endpoint_auth_header_name=None,
-                endpoint_auth_expires_at=None,
+                **endpoint_auth_columns(None),
             )
             .execution_options(synchronize_session=False)
         )

@@ -28,7 +28,12 @@ from gateway.services.model_discovery_service import (
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
-from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthMethod, EndpointAuthState
+from gateway.types.endpoint_auth import (
+    EndpointAuth,
+    EndpointAuthMethod,
+    EndpointAuthState,
+    endpoint_auth_columns,
+)
 
 LATER = datetime.now(UTC) + timedelta(days=90)
 
@@ -494,3 +499,36 @@ def test_every_credential_that_follows_is_named_in_the_order_a_request_sends_the
         "any hidden client_args credential",
         "the endpoint credential",
     ]
+
+
+def _whole() -> EndpointAuth:
+    return EndpointAuth(
+        method=EndpointAuthMethod.STATIC_HEADER,
+        header_name="Fastly-Key",
+        encrypted_secret="gAAAA-x",
+        last4="9f2a",
+        expires_at=LATER,
+    )
+
+
+def test_the_one_writer_names_every_endpoint_column_a_key_holds() -> None:
+    """A write names them all, so a row cannot keep a declaration with no value behind it."""
+    held = {name for name in OrgProviderKey.model_fields if "endpoint_auth" in name}
+
+    assert held
+    assert set(endpoint_auth_columns(None)) == held
+    assert set(endpoint_auth_columns(_whole())) == held
+
+
+def test_a_key_that_carries_no_credential_clears_every_column() -> None:
+    assert set(endpoint_auth_columns(None).values()) == {None}
+
+
+def test_each_column_is_written_from_the_field_it_holds() -> None:
+    assert endpoint_auth_columns(_whole()) == {
+        "encrypted_endpoint_auth_secret": "gAAAA-x",
+        "endpoint_auth_expires_at": LATER,
+        "endpoint_auth_header_name": "Fastly-Key",
+        "endpoint_auth_last4": "9f2a",
+        "endpoint_auth_method": "static_header",
+    }

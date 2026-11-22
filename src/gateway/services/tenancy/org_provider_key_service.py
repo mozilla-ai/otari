@@ -109,7 +109,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
-from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY, EndpointAuth
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY, EndpointAuth, endpoint_auth_columns
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -837,11 +837,7 @@ class OrgProviderKeyService:
             )
             _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
             update_data.pop("endpoint_auth", None)
-            update_data["endpoint_auth_method"] = auth.method
-            update_data["endpoint_auth_header_name"] = auth.header_name
-            update_data["encrypted_endpoint_auth_secret"] = auth.encrypted_secret
-            update_data["endpoint_auth_last4"] = auth.last4
-            update_data["endpoint_auth_expires_at"] = auth.expires_at
+            update_data.update(endpoint_auth_columns(auth))
         if "api_key" in update_data:
             encrypted_api_key, last4 = _encrypt_secret_for_storage(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key
