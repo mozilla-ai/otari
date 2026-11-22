@@ -518,3 +518,28 @@ def test_one_organization_cannot_evict_another_organizations_sessions(
     assert _rank(router, tenant="victim", scope="victim:user:key:chat").head.instance == "eu"
     assert _rank(router, tenant="attacker", anchor="a").head.instance == "us"
     assert _rank(router, tenant="attacker", anchor="d").head.instance == "eu"
+
+
+def test_a_full_table_never_evicts_another_organizations_live_session(
+    router: AutomaticRouter, now: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A newcomer to a full table reclaims an expired binding, or else goes unbound; a live one stays."""
+    monkeypatch.setattr("gateway.services.routing._automatic._TENANT_AFFINITY_LIMIT", 2)
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 2)
+    for tenant in ("first", "second"):
+        plan = _rank(router, tenant=tenant, scope=f"{tenant}:user:key:chat")
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[1]).finish(success=True)
+    newcomer = _rank(router, tenant="newcomer", scope="newcomer:user:key:chat")
+    assert newcomer.automatic is not None
+    newcomer.automatic.start(newcomer.attempts[1]).finish(success=True)
+    assert _rank(router, tenant="first", scope="first:user:key:chat").head.instance == "eu"
+    assert _rank(router, tenant="second", scope="second:user:key:chat").head.instance == "eu"
+    assert _rank(router, tenant="newcomer", scope="newcomer:user:key:chat").head.instance == "us"
+
+    now[0] += 3601
+    newcomer = _rank(router, tenant="newcomer", scope="newcomer:user:key:chat")
+    assert newcomer.automatic is not None
+    newcomer.automatic.start(newcomer.attempts[1]).finish(success=True)
+    assert _rank(router, tenant="newcomer", scope="newcomer:user:key:chat").head.instance == "eu"
+    assert len(router.affinities) == 2

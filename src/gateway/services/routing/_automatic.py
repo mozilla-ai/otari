@@ -104,6 +104,7 @@ class AutomaticSelection:
     affinity: str | None
     mode: str
     tenant: str
+    ttl: float
     observations: list[AutomaticObservation] = field(default_factory=list)
 
     def forget(self, attempt: Attempt) -> None:
@@ -171,7 +172,7 @@ class AutomaticObservation:
         if unhealthy:
             self.selection.forget_key(self.key)
         if success and self.selection.affinity:
-            router.bind(self.selection.affinity, self.selection.tenant, self.key, now)
+            router.bind(self.selection.affinity, self.selection.tenant, self.key, now, self.selection.ttl)
 
 
 class AutomaticRouter:
@@ -196,16 +197,27 @@ class AutomaticRouter:
         # codeql[py/weak-sensitive-data-hashing]
         return hmac.new(self._salt, payload, hashlib.sha256).hexdigest()
 
-    def bind(self, affinity: str, tenant: str, key: str, now: float) -> None:
-        """Bind a session to a credential, evicting the tenant's own oldest binding before anyone else's."""
+    def bind(self, affinity: str, tenant: str, key: str, now: float, ttl: float) -> None:
+        """Bind a session to a credential, never evicting another tenant's live binding.
+
+        A full table gives up an expired binding first, then the tenant's own oldest; with
+        neither, the session goes unbound.
+        """
         self.unbind(affinity)
         own = self._tenant_affinities.setdefault(tenant, OrderedDict())
-        while len(own) >= _TENANT_AFFINITY_LIMIT:
+        if len(own) >= _TENANT_AFFINITY_LIMIT:
             self.unbind(next(iter(own)))
+        elif len(self.affinities) >= _LIMIT:
+            oldest = next(iter(self.affinities))
+            if now - self.affinities[oldest][1] >= ttl:
+                self.unbind(oldest)
+            elif own:
+                self.unbind(next(iter(own)))
+            else:
+                del self._tenant_affinities[tenant]
+                return
         self.affinities[affinity] = (key, now, tenant)
-        own[affinity] = None
-        while len(self.affinities) > _LIMIT:
-            self.unbind(next(iter(self.affinities)))
+        self._tenant_affinities.setdefault(tenant, OrderedDict())[affinity] = None
 
     def unbind(self, affinity: str) -> None:
         """Drop a session binding, if any."""
@@ -339,7 +351,7 @@ class AutomaticRouter:
         return replace(
             plan,
             attempts=attempts,
-            automatic=AutomaticSelection(self, affinity, mode, self._digest(tenant)),
+            automatic=AutomaticSelection(self, affinity, mode, self._digest(tenant), settings.session_ttl_seconds),
             dropped=[
                 *plan.dropped,
                 *(
