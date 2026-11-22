@@ -13570,7 +13570,7 @@ export interface components {
              * Last4
              * @description The last four characters of the stored value.
              */
-            last4?: string | null;
+            last4: string;
             /**
              * Method
              * @description How the credential is produced. Reported as plain text rather than a closed set, so a reader built before a later method still renders a key that uses one.

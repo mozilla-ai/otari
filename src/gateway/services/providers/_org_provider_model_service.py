@@ -104,7 +104,6 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.types.endpoint_auth import EndpointAuth
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
@@ -904,19 +903,10 @@ class OrgProviderModelService:
             return None
 
     @staticmethod
-    def _endpoint_auth(key: OrgProviderKey) -> EndpointAuth:
-        """The endpoint credential this key carries, whether or not it declares one."""
-        return EndpointAuth(
-            method=key.endpoint_auth_method,
-            header_name=key.endpoint_auth_header_name,
-            encrypted_secret=key.encrypted_endpoint_auth_secret,
-        )
-
-    @classmethod
-    def _endpoint_headers(cls, key: OrgProviderKey) -> dict[str, str]:
+    def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
         """The headers this key's endpoint credential adds, or none where it has one that will not decrypt."""
-        auth = cls._endpoint_auth(key)
-        if auth.encrypted_secret is None:
+        auth = key.endpoint_auth
+        if auth is None:
             return {}
         try:
             return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
@@ -931,7 +921,7 @@ class OrgProviderModelService:
         request, and a refusal of either arrives the same way. Passing the
         address's own wording on would read as a verdict on the API key alone.
         """
-        if discovery.credentials_rejected and cls._endpoint_auth(key).declared:
+        if discovery.credentials_rejected and key.endpoint_auth is not None:
             return replace(discovery, error=_ENDPOINT_CREDENTIAL_REJECTED)
         return discovery
 

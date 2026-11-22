@@ -16,14 +16,19 @@ NOW = datetime(2026, 11, 20, tzinfo=UTC)
 LATER = NOW + timedelta(days=30)
 
 
-def _auth(**overrides: object) -> EndpointAuth:
+def _columns(**overrides: object) -> dict[str, object]:
     fields: dict[str, object] = {
         "method": EndpointAuthMethod.STATIC_HEADER,
         "header_name": "Fastly-Key",
         "encrypted_secret": "gAAAA-ciphertext",
+        "last4": "text",
         "expires_at": LATER,
     }
-    return EndpointAuth(**{**fields, **overrides})  # type: ignore[arg-type]
+    return {**fields, **overrides}
+
+
+def _auth(**overrides: object) -> EndpointAuth:
+    return EndpointAuth(**_columns(**overrides))  # type: ignore[arg-type]
 
 
 def _refusal(*, has_api_base: bool = True, **overrides: object) -> str | None:
@@ -38,13 +43,17 @@ def test_a_static_header_on_a_tenant_endpoint_is_served() -> None:
     assert _refusal() is None
 
 
-def test_a_key_declaring_no_method_is_served() -> None:
-    assert _refusal(method=None, header_name=None, expires_at=None, has_api_base=False) is None
+def test_a_row_holding_every_column_carries_the_credential_they_name() -> None:
+    assert EndpointAuth.from_columns(**_columns()) == _auth()  # type: ignore[arg-type]
 
 
-def test_a_key_declaring_no_method_carries_no_credential() -> None:
-    assert EndpointAuth().declared is False
-    assert _auth().declared is True
+@pytest.mark.parametrize("missing", ["method", "header_name", "encrypted_secret", "last4", "expires_at"])
+def test_a_row_holding_only_some_of_the_columns_carries_no_credential(missing: str) -> None:
+    assert EndpointAuth.from_columns(**_columns(**{missing: None})) is None  # type: ignore[arg-type]
+
+
+def test_a_row_holding_none_of_the_columns_carries_no_credential() -> None:
+    assert EndpointAuth.from_columns(**dict.fromkeys(_columns())) is None
 
 
 def test_an_endpoint_credential_is_refused_on_the_providers_own_endpoint() -> None:
@@ -55,25 +64,12 @@ def test_an_unknown_method_is_refused() -> None:
     assert _refusal(method="mtls") is not None
 
 
-@pytest.mark.parametrize("header_name", [None, ""])
-def test_a_static_header_with_no_header_name_is_refused(header_name: str | None) -> None:
-    assert _refusal(header_name=header_name) is not None
-
-
-def test_a_static_header_with_no_stored_value_is_refused() -> None:
-    assert _refusal(encrypted_secret=None) is not None
+def test_a_static_header_with_an_empty_header_name_is_refused() -> None:
+    assert _refusal(header_name="") is not None
 
 
 def test_a_future_expiry_is_stored() -> None:
     assert _expiry_refusal() is None
-
-
-def test_a_key_declaring_no_method_needs_no_expiry() -> None:
-    assert _expiry_refusal(method=None, expires_at=None) is None
-
-
-def test_a_static_header_with_no_expiry_is_refused_at_write() -> None:
-    assert _expiry_refusal(expires_at=None) is not None
 
 
 @pytest.mark.parametrize("expires_at", [NOW, NOW - timedelta(seconds=1)])
@@ -142,16 +138,8 @@ def test_a_static_header_becomes_the_one_header_it_names() -> None:
     assert _auth().headers(secret="s3cret") == {"Fastly-Key": "s3cret"}
 
 
-@pytest.mark.parametrize(
-    ("overrides", "secret"),
-    [({"method": None}, "s"), ({"header_name": None}, "s"), ({}, None)],
-)
-def test_a_credential_that_is_not_whole_adds_no_header(overrides: dict[str, object], secret: str | None) -> None:
-    assert _auth(**overrides).headers(secret=secret) == {}
-
-
-def test_a_credential_declaring_no_expiry_has_no_state() -> None:
-    assert EndpointAuth().state(now=NOW) is None
+def test_a_method_this_build_does_not_know_adds_no_header() -> None:
+    assert _auth(method="mtls").headers(secret="s3cret") == {}
 
 
 @pytest.mark.parametrize(

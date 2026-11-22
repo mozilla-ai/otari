@@ -1,6 +1,7 @@
 """An organization's endpoint credential is encrypted on the way in and survives a form that never saw it."""
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -48,10 +49,20 @@ def _sent(**overrides: object) -> EndpointAuthRequest:
     return EndpointAuthRequest(**{**fields, **overrides})  # type: ignore[arg-type]
 
 
-def test_a_sent_value_is_encrypted_and_only_its_last_four_are_kept_readable() -> None:
-    auth = store._endpoint_auth_for_storage(_sent(secret="abcd-wxyz"), stored=EndpointAuth())
+def _whole() -> EndpointAuth:
+    return EndpointAuth(
+        method=EndpointAuthMethod.STATIC_HEADER,
+        header_name="Fastly-Key",
+        encrypted_secret="gAAAA-x",
+        last4="9f2a",
+        expires_at=LATER,
+    )
 
-    assert auth.encrypted_secret is not None
+
+def test_a_sent_value_is_encrypted_and_only_its_last_four_are_kept_readable() -> None:
+    auth = store._endpoint_auth_for_storage(_sent(secret="abcd-wxyz"), stored=None)
+
+    assert auth is not None
     assert auth.encrypted_secret != "abcd-wxyz"
     assert decrypt_secret(auth.encrypted_secret) == "abcd-wxyz"
     assert auth.last4 == "wxyz"
@@ -68,28 +79,32 @@ def test_a_form_resubmitted_without_the_value_keeps_the_stored_one() -> None:
 
     auth = store._endpoint_auth_for_storage(_sent(expires_at=LATER + timedelta(days=1)), stored=stored)
 
+    assert auth is not None
     assert auth.encrypted_secret == "gAAAA-stored"
     assert auth.last4 == "9f2a"
     assert auth.expires_at == LATER + timedelta(days=1)
 
 
 def test_sending_nothing_clears_the_credential() -> None:
-    stored = EndpointAuth(method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key", encrypted_secret="x")
+    assert store._endpoint_auth_for_storage(None, stored=_whole()) is None
 
-    assert store._endpoint_auth_for_storage(None, stored=stored) == EndpointAuth()
+
+def test_a_credential_set_for_the_first_time_without_a_value_is_refused() -> None:
+    """There is nothing stored to keep, so a blank field cannot mean keep it."""
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        store._endpoint_auth_for_storage(_sent(), stored=None)
+
+
+def test_a_credential_sent_with_no_rotation_date_is_refused_at_the_boundary() -> None:
+    with pytest.raises(ValidationError):
+        EndpointAuthRequest(method="static_header", header_name="Fastly-Key")  # type: ignore[call-arg]
 
 
 def _gate(**overrides: object) -> None:
-    fields: dict[str, object] = {
-        "method": EndpointAuthMethod.STATIC_HEADER,
-        "header_name": "Fastly-Key",
-        "encrypted_secret": "gAAAA-x",
-        "expires_at": LATER,
-    }
     store._gate_endpoint_auth(
-        EndpointAuth(**{**fields, **overrides}),  # type: ignore[arg-type]
+        replace(_whole(), **overrides),  # type: ignore[arg-type]
         api_base="https://proxy.example/v1",
-        stored=EndpointAuth(),
+        stored=None,
     )
 
 
@@ -109,15 +124,8 @@ def test_an_expiry_in_the_past_is_refused_at_write() -> None:
 
 
 def test_an_endpoint_credential_is_refused_on_a_key_with_no_base_url() -> None:
-    auth = EndpointAuth(
-        method=EndpointAuthMethod.STATIC_HEADER,
-        header_name="Fastly-Key",
-        encrypted_secret="gAAAA-x",
-        expires_at=LATER,
-    )
-
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
-        store._gate_endpoint_auth(auth, api_base=None, stored=EndpointAuth())
+        store._gate_endpoint_auth(_whole(), api_base=None, stored=None)
 
 
 def test_a_stored_row_reports_the_credential_it_carries() -> None:
@@ -133,7 +141,7 @@ def test_a_stored_row_reports_the_credential_it_carries() -> None:
         endpoint_auth_expires_at=LATER,
     )
 
-    assert store._endpoint_auth_of(row) == EndpointAuth(
+    assert row.endpoint_auth == EndpointAuth(
         method="static_header",
         header_name="Fastly-Key",
         encrypted_secret="gAAAA-x",
@@ -145,7 +153,7 @@ def test_a_stored_row_reports_the_credential_it_carries() -> None:
 def test_a_row_carrying_no_credential_reports_none() -> None:
     row = OrgProviderKey(organization_id=uuid.uuid4(), provider="openai", name="k", created_at=datetime.now(UTC))
 
-    assert store._endpoint_auth_of(row).declared is False
+    assert row.endpoint_auth is None
 
 
 @pytest.mark.asyncio
@@ -185,6 +193,8 @@ def test_discovery_sends_the_endpoint_credential() -> None:
         endpoint_auth_method="static_header",
         endpoint_auth_header_name="Fastly-Key",
         encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret"),
+        endpoint_auth_last4="cret",
+        endpoint_auth_expires_at=LATER,
     )
 
     assert OrgProviderModelService._endpoint_headers(row) == {"Fastly-Key": "edge-s3cret"}
@@ -200,6 +210,8 @@ def test_discovery_sends_no_credential_it_cannot_decrypt(monkeypatch: pytest.Mon
         endpoint_auth_method="static_header",
         endpoint_auth_header_name="Fastly-Key",
         encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret"),
+        endpoint_auth_last4="cret",
+        endpoint_auth_expires_at=LATER,
     )
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
@@ -233,6 +245,8 @@ def _key(*, endpoint_auth: bool) -> OrgProviderKey:
         endpoint_auth_method="static_header" if endpoint_auth else None,
         endpoint_auth_header_name="Fastly-Key" if endpoint_auth else None,
         encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret") if endpoint_auth else None,
+        endpoint_auth_last4="cret" if endpoint_auth else None,
+        endpoint_auth_expires_at=LATER if endpoint_auth else None,
     )
 
 
@@ -314,19 +328,19 @@ def test_an_expiry_with_no_offset_is_refused_at_the_boundary() -> None:
 
 
 def test_a_stored_endpoint_secret_follows_a_key_the_request_leaves_alone() -> None:
-    assert store._endpoint_secret_survives("gAAAA-x", None, sent=False) is True
+    assert store._endpoint_secret_survives(_whole(), None, sent=False) is True
 
 
 def test_a_stored_endpoint_secret_does_not_follow_a_key_whose_credential_is_removed() -> None:
-    assert store._endpoint_secret_survives("gAAAA-x", None, sent=True) is False
+    assert store._endpoint_secret_survives(_whole(), None, sent=True) is False
 
 
 def test_a_stored_endpoint_secret_does_not_follow_a_key_given_a_new_value() -> None:
-    assert store._endpoint_secret_survives("gAAAA-x", _sent(secret="edge-s3cret"), sent=True) is False
+    assert store._endpoint_secret_survives(_whole(), _sent(secret="edge-s3cret"), sent=True) is False
 
 
 def test_a_stored_endpoint_secret_follows_a_form_resubmitted_without_the_value() -> None:
-    assert store._endpoint_secret_survives("gAAAA-x", _sent(), sent=True) is True
+    assert store._endpoint_secret_survives(_whole(), _sent(), sent=True) is True
 
 
 def test_a_key_holding_no_endpoint_secret_carries_nothing_to_another_address() -> None:
@@ -334,12 +348,7 @@ def test_a_key_holding_no_endpoint_secret_carries_nothing_to_another_address() -
 
 
 def _expired() -> EndpointAuth:
-    return EndpointAuth(
-        method=EndpointAuthMethod.STATIC_HEADER,
-        header_name="Fastly-Key",
-        encrypted_secret="gAAAA-x",
-        expires_at=datetime.now(UTC) - timedelta(days=1),
-    )
+    return replace(_whole(), expires_at=datetime.now(UTC) - timedelta(days=1))
 
 
 def test_a_rotation_date_that_passed_does_not_refuse_an_edit_that_leaves_it_alone() -> None:
@@ -395,28 +404,18 @@ def test_renaming_the_header_on_a_date_that_passed_is_refused() -> None:
 
 def test_a_rotation_date_moved_further_into_the_past_is_still_refused() -> None:
     stored = _expired()
-    moved = EndpointAuth(
-        method=stored.method,
-        header_name=stored.header_name,
-        encrypted_secret=stored.encrypted_secret,
-        expires_at=datetime.now(UTC) - timedelta(days=30),
-    )
+    moved = replace(stored, expires_at=datetime.now(UTC) - timedelta(days=30))
 
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
         store._gate_endpoint_auth(moved, api_base="https://proxy.example/v1", stored=stored)
 
 
 def test_removing_a_credential_whose_rotation_date_passed_is_allowed() -> None:
-    store._gate_endpoint_auth(EndpointAuth(), api_base="https://proxy.example/v1", stored=_expired())
+    store._gate_endpoint_auth(None, api_base="https://proxy.example/v1", stored=_expired())
 
 
 def test_a_credential_a_key_may_not_carry_is_refused_even_where_the_request_sent_none() -> None:
-    stored = EndpointAuth(
-        method=EndpointAuthMethod.STATIC_HEADER,
-        header_name="Fastly-Key",
-        encrypted_secret="gAAAA-x",
-        expires_at=LATER,
-    )
+    stored = _whole()
 
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
         store._gate_endpoint_auth(stored, api_base=None, stored=stored)
@@ -499,16 +498,6 @@ def test_every_credential_that_follows_is_named_in_the_order_a_request_sends_the
         "any hidden client_args credential",
         "the endpoint credential",
     ]
-
-
-def _whole() -> EndpointAuth:
-    return EndpointAuth(
-        method=EndpointAuthMethod.STATIC_HEADER,
-        header_name="Fastly-Key",
-        encrypted_secret="gAAAA-x",
-        last4="9f2a",
-        expires_at=LATER,
-    )
 
 
 def test_the_one_writer_names_every_endpoint_column_a_key_holds() -> None:

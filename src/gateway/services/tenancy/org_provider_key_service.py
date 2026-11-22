@@ -178,10 +178,9 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
         entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
-    auth = _endpoint_auth_of(key)
-    if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
-        raise UnservableEndpointError(reason)
-    if auth.encrypted_secret is not None:
+    if (auth := key.endpoint_auth) is not None:
+        if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
+            raise UnservableEndpointError(reason)
         entry[ENDPOINT_AUTH_HEADERS_KEY] = auth.headers(secret=decrypt_secret(auth.encrypted_secret))
     return entry
 
@@ -438,28 +437,22 @@ def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
         return encrypt_mapping(client_args or None)
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError from None
-def _endpoint_auth_of(key: OrgProviderKey) -> EndpointAuth:
-    """The endpoint credential a stored row carries."""
-    return EndpointAuth(
-        method=key.endpoint_auth_method,
-        header_name=key.endpoint_auth_header_name,
-        encrypted_secret=key.encrypted_endpoint_auth_secret,
-        last4=key.endpoint_auth_last4,
-        expires_at=key.endpoint_auth_expires_at,
-    )
 
 
-def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: EndpointAuth) -> EndpointAuth:
-    """The endpoint credential to store, keeping the stored value where the caller sent none.
+def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: EndpointAuth | None) -> EndpointAuth | None:
+    """The endpoint credential to store, or None where the request carries none.
 
     An editor is only ever shown the last four characters, so a form resubmitted
-    without the value keeps the one already held, as ``client_args`` does.
+    without the value keeps the one already held, as ``client_args`` does. A
+    credential being set for the first time has nothing to keep, so one sent
+    without a value is refused.
     """
     if sent is None:
-        return EndpointAuth()
-    encrypted, last4 = (
-        _encrypt_secret_for_storage(sent.secret) if sent.secret else (stored.encrypted_secret, stored.last4)
-    )
+        return None
+    held = (stored.encrypted_secret, stored.last4) if stored is not None else (None, None)
+    encrypted, last4 = _encrypt_secret_for_storage(sent.secret) if sent.secret else held
+    if encrypted is None or last4 is None:
+        raise OrgProviderKeyEndpointAuthRefusedError("an endpoint credential with no value")
     return EndpointAuth(
         method=sent.method,
         header_name=sent.header_name,
@@ -469,7 +462,9 @@ def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: Endp
     )
 
 
-def _endpoint_secret_survives(stored: str | None, submitted: EndpointAuthRequest | None, *, sent: bool) -> bool:
+def _endpoint_secret_survives(
+    stored: EndpointAuth | None, submitted: EndpointAuthRequest | None, *, sent: bool
+) -> bool:
     """Whether a key's stored endpoint credential would follow it to another base URL.
 
     A request that removes the credential, or supplies a new value for it,
@@ -496,7 +491,7 @@ def _credentials_that_follow(*, api_key: bool, client_args: bool, endpoint: bool
     ]
 
 
-def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, stored: EndpointAuth) -> None:
+def _gate_endpoint_auth(auth: EndpointAuth | None, *, api_base: str | None, stored: EndpointAuth | None) -> None:
     """Refuse an endpoint credential a key may not carry, or a rotation date it may not take.
 
     The rotation date is held to the future only where the request changes the
@@ -504,6 +499,8 @@ def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, stored: End
     that leaves the credential alone is refused nothing on its account, while
     one that rotates the value has to say when the new value expires.
     """
+    if auth is None:
+        return
     expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth != stored else None
     for reason in (auth.refused_reason(has_api_base=bool(api_base)), expiry):
         if reason is not None:
@@ -685,8 +682,8 @@ class OrgProviderKeyService:
         name = _validated_name(request.name)
         await _gate_api_base(provider, request.api_base)
         _check_client_args(provider, request.client_args)
-        endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=EndpointAuth())
-        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, stored=EndpointAuth())
+        endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=None)
+        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, stored=None)
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -805,9 +802,7 @@ class OrgProviderKeyService:
                     sent="client_args" in update_data,
                 )
                 endpoint_secret_follows = _endpoint_secret_survives(
-                    key.encrypted_endpoint_auth_secret,
-                    request.endpoint_auth,
-                    sent="endpoint_auth" in update_data,
+                    key.endpoint_auth, request.endpoint_auth, sent="endpoint_auth" in update_data
                 )
                 following = _credentials_that_follow(
                     api_key=key.encrypted_api_key is not None and "api_key" not in update_data,
@@ -829,7 +824,7 @@ class OrgProviderKeyService:
             _check_client_args(key.provider, client_args)
             update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
         if "endpoint_auth" in update_data or "api_base" in update_data:
-            stored = _endpoint_auth_of(key)
+            stored = key.endpoint_auth
             auth = (
                 _endpoint_auth_for_storage(request.endpoint_auth, stored=stored)
                 if "endpoint_auth" in update_data

@@ -32,7 +32,7 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthState
+from gateway.types.endpoint_auth import EndpointAuthState
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
@@ -82,7 +82,7 @@ class EndpointAuthPublic(SQLModel):
         )
     )
     header_name: str
-    last4: str | None = Field(default=None, description="The last four characters of the stored value.")
+    last4: str = Field(description="The last four characters of the stored value.")
     expires_at: datetime
     state: EndpointAuthState = Field(
         description=(
@@ -94,21 +94,15 @@ class EndpointAuthPublic(SQLModel):
     @classmethod
     def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
         """Read one row's endpoint credential for the API, or None where it carries none."""
-        auth = EndpointAuth(
-            method=key.endpoint_auth_method,
-            header_name=key.endpoint_auth_header_name,
-            last4=key.endpoint_auth_last4,
-            expires_at=key.endpoint_auth_expires_at,
-        )
-        state = auth.state(now=now)
-        if auth.method is None or auth.header_name is None or auth.expires_at is None or state is None:
+        auth = key.endpoint_auth
+        if auth is None:
             return None
         return cls(
             method=auth.method,
             header_name=auth.header_name,
             last4=auth.last4,
             expires_at=auth.expires_at,
-            state=state,
+            state=auth.state(now=now),
         )
 
 

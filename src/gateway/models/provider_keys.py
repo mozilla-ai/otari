@@ -60,6 +60,7 @@ from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint, false, tex
 from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
+from gateway.types.endpoint_auth import EndpointAuth
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
@@ -141,6 +142,17 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # The organization's declaration that this key's upstream account keeps no
     # prompt or completion data. Shown in the catalog; nothing is enforced on it.
     zero_data_retention: bool = Field(default=False, nullable=False, sa_column_kwargs={"server_default": false()})
+
+    @property
+    def endpoint_auth(self) -> EndpointAuth | None:
+        """The endpoint credential this key carries, or None where it carries none."""
+        return EndpointAuth.from_columns(
+            method=self.endpoint_auth_method,
+            header_name=self.endpoint_auth_header_name,
+            encrypted_secret=self.encrypted_endpoint_auth_secret,
+            last4=self.endpoint_auth_last4,
+            expires_at=self.endpoint_auth_expires_at,
+        )
 
     @property
     def selector_prefix(self) -> str:
