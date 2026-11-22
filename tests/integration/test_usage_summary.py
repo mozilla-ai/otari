@@ -1390,3 +1390,47 @@ async def test_summary_aggregates_match_the_separate_passes(db_session: Session,
     # The fast path is the point: one ``GROUPING SETS`` statement covers every
     # dimension, where the fallback would issue one per dimension plus the totals.
     assert sum("GROUPING SETS" in statement for statement in statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_aggregates_honor_independent_caps(db_session: Session, async_db: AsyncSession) -> None:
+    """Each dimension keeps its own top groups, and the cap truncates.
+
+    The uniform-cap case above cannot tell a missing cap from a cap read off the
+    wrong dimension. Here the caps differ and are below the seeded group counts,
+    so the rows kept have to be that dimension's top groups.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    for index in range(12):
+        _make_log(
+            db_session,
+            user_id=f"cap{index % 3}",
+            timestamp=now,
+            model=f"m{index % 2}",
+            provider="openai",
+            cost=0.01 * (index + 1),
+            total_tokens=index,
+        )
+    db_session.commit()
+
+    workspace_id = seed_workspace_id(db_session)
+    filters = UsageFilters(
+        start_date=now - timedelta(days=1),
+        end_date=now + timedelta(days=1),
+        workspace_id=workspace_id,
+    )
+    scope = UsageScope(workspaces=[workspace_id])
+    dimensions = {"user": 2, "model": 1}
+    uow = UnitOfWork(async_db)
+    repository = UsageLogRepository(uow)
+
+    async with uow:
+        combined = await repository.summary_aggregates(filters, scope, dimensions=dimensions)
+        separate = {
+            name: await repository.groups(filters, scope, dimension=name, limit=limit)
+            for name, limit in dimensions.items()
+        }
+
+    assert combined.groups == separate
+    assert len(combined.groups["user"]) == 2
+    assert len(combined.groups["model"]) == 1
