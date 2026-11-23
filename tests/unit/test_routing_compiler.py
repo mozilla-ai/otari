@@ -27,6 +27,7 @@ from gateway.services.catalog import OfferingRow, build_selector_index, reset_se
 from gateway.services.routing import (
     BudgetState,
     NoEligibleCandidatesError,
+    PolicyOrder,
     RouterOrdering,
     compile_catalog_plan,
     compile_policy,
@@ -434,3 +435,15 @@ def test_a_catalog_offering_with_no_stored_credential_stays_in_the_plan(
         ("openai", "m1-a"),
         ("anthropic", "m1-b"),
     ]
+
+
+def test_a_policy_order_is_its_selected_target_then_its_failure_chain() -> None:
+    spec = PolicySpec.model_validate(
+        {
+            "select": [{"when": {"user_id": "vip"}, "target": "openai:gpt-5"}, {"default": "openai:gpt-5-mini"}],
+            "on_failure": ["local:qwen3", "anthropic:claude-haiku-4-5"],
+        }
+    )
+    failure_chain = (("local:qwen3", "on_failure"), ("anthropic:claude-haiku-4-5", "on_failure"))
+    assert PolicyOrder.of(spec).selectors == (("openai:gpt-5-mini", "default"), *failure_chain)
+    assert PolicyOrder.of(spec, user_id="vip").selectors == (("openai:gpt-5", "condition:user_id"), *failure_chain)

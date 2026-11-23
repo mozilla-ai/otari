@@ -19,16 +19,43 @@ Three fields that look redundant and are not (the distinction
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from any_llm import LLMProvider
 
-__all__ = ["Attempt", "SelectionReason"]
+__all__ = ["Attempt", "Candidate", "SelectionReason"]
 
 # Why this attempt is in the plan, recorded on the usage row so a fallover or a
 # tier-down is legible after the fact. ``condition:<key>`` and ``router:<name>``
 # carry their source, so the set is open by construction.
 SelectionReason = str
+
+
+class Candidate(Protocol):
+    """What the attempt walker reads of a candidate: where it sits in the plan, what it names, and its call.
+
+    :class:`Attempt` is the any-llm candidate. A plan of calls that are not
+    any-llm completions, such as a decisions policy's, walks a type of its own.
+    """
+
+    @property
+    def position(self) -> int:
+        """1-based index in the plan."""
+        ...
+
+    @property
+    def instance(self) -> str:
+        """The instance the candidate is priced, budgeted and recorded under."""
+        ...
+
+    @property
+    def model(self) -> str:
+        """Bare model name, with no instance or provider prefix."""
+        ...
+
+    def call_kwargs(self, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        """What the candidate is called with, given the fields every candidate shares."""
+        ...
 
 
 @dataclass(frozen=True)

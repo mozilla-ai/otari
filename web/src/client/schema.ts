@@ -1542,7 +1542,8 @@ export interface paths {
          * @description Answer typed questions (noul, choice, score) about a state.
          *
          *     ``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``
-         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.
+         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``, or
+         *     a routing policy, whose targets are tried in order until one answers.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -12915,7 +12916,7 @@ export interface components {
             images?: string[] | null;
             /**
              * Model
-             * @description Decision provider and model, e.g. 'typesafe:jev-latest'
+             * @description Decision provider and model, e.g. 'typesafe:jev-latest', or a routing policy naming such targets
              */
             model: string;
             /**

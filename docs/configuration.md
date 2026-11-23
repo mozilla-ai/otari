@@ -1702,7 +1702,9 @@ Gemini reports no cost, so price its model in `pricing` (as
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
-model like any other, as `<provider>:<model>` in `pricing`.
+model like any other, as `<provider>:<model>` in `pricing`. A routing policy may
+name them as targets, to fall over from one decision model to the next; see
+[Route decisions](routing.md#route-decisions).
 
 ### Agent model recommendations
 

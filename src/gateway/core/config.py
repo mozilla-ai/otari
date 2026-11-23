@@ -1907,6 +1907,15 @@ class GatewayConfig(
         for name, target in self.aliases.items():
             self.validate_alias(name, target)
 
+    def names_decision_provider(self, selector: str) -> bool:
+        """Whether ``selector`` is ``<name>:<model>`` with ``name`` a ``decision_providers`` entry.
+
+        Such a selector is a target only a decisions request can be served by.
+        """
+        colon, slash = selector.find(":"), selector.find("/")
+        cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
+        return 0 < cut < len(selector) - 1 and selector[:cut] in self.decision_providers
+
     def policy_names(self) -> set[str]:
         """Every configured routing-policy name. Empty when routing is disabled."""
         if not self.routing.enabled:
@@ -1956,9 +1965,12 @@ class GatewayConfig(
             # the prefix must resolve to a configured instance or a known
             # implementation, and it must not point at another indirection.
             # `validate_alias` phrases its errors as `aliases.<name>`, so the
-            # message is re-raised under the policy's own path.
+            # message is re-raised under the policy's own path. A decision
+            # provider's selector is a target too, for a decisions request.
             chainable = alias_names | policy_names
             for selector in spec.static_selectors():
+                if self.names_decision_provider(selector):
+                    continue
                 try:
                     self.validate_alias(name, selector, alias_names=chainable)
                 except ValueError as exc:

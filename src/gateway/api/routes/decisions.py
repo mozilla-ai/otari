@@ -2,7 +2,8 @@
 
 ``POST /api/v1/decisions`` takes the body TypeSafe's ``/v1/systemone`` defined, which
 OpenRouter's alpha Decisions API and llama-server's ``/v1/systemone`` adopted, and
-forwards it to the provider the ``model`` prefix names under ``decision_providers``.
+forwards it to the provider the ``model`` prefix names under ``decision_providers``,
+or to each target of the routing policy ``model`` names in turn.
 ``POST /api/v1/systemone`` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works with only its base URL changed.
 """
@@ -32,7 +33,8 @@ async def create_decision(
     """Answer typed questions (noul, choice, score) about a state.
 
     ``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``
-    entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.
+    entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``, or
+    a routing policy, whose targets are tried in order until one answers.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.

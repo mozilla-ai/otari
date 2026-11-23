@@ -255,6 +255,35 @@ dashboard session, naming one of their workspaces in `workspace_id`. There, a
 model the organization cannot reach is listed as left out, whether it comes from
 a draft or a saved policy.
 
+## Route decisions
+
+A policy may also be the `model` of a [decision](api-reference.md#decisions)
+(`POST /api/v1/decisions` or `/api/v1/systemone`), and its targets may then name
+[decision providers](configuration.md#decision-providers):
+
+```yaml
+routing:
+  policies:
+    tagger:
+      select:
+        - default: typesafe:jev-latest
+      on_failure:
+        - openrouter:typesafe/jev-1.13
+        - local-qwen:qwen3-vl-8b-instruct
+```
+
+Callers send `model: tagger`. Each target is tried in order and the next one is
+asked when a target fails, on the same failures a completion policy falls over
+on. Each target is priced at its own rate and reserved on its own provider's
+budgets as it is reached, and the usage row names the target that answered, as
+on a completion. The answer's `model` is the policy's name; the `Otari-Provider`,
+`Otari-Model`, `Otari-Attempt-Count` and `Otari-Fallback` headers name the target
+that answered and how it was reached. A `when` entry selects as it does for a
+completion; a `router` entry is not consulted, so the policy's `default` serves.
+
+A decision provider's selector serves only decisions: a completion that names
+the policy does not reach it.
+
 ## Agent model recommendations
 
 A policy decides the model of a request that reaches Otari. A coding agent that
@@ -346,15 +375,16 @@ request schemas.
   `on_failure`.
 - Targets must be concrete provider or instance selectors, or name one of the
   workspace's [provider keys by its request prefix](model-providers.md#add-a-key-for-your-own-endpoint),
-  so a policy can fall over between two keys on the same endpoint. Policies and
-  aliases cannot chain.
+  so a policy can fall over between two keys on the same endpoint, or a
+  [decision provider](#route-decisions). Policies and aliases cannot chain.
 - Policy names cannot contain `:` or `/` or collide with an alias or provider
   instance.
 - `routing.enabled: false` disables policy resolution but still validates the
   configured policies.
 - Caller model allow-lists apply to every candidate.
-- Dynamic policies apply to Chat Completions, Messages, and Responses. A static
-  one-target policy can resolve on other model-taking endpoints.
+- Dynamic policies apply to Chat Completions, Messages, Responses and
+  [Decisions](#route-decisions). A static one-target policy can resolve on other
+  model-taking endpoints.
 
 ## What is billed and what the caller sees
 

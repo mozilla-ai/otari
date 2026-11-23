@@ -65,10 +65,14 @@ class UnknownDecisionProviderError(ValueError):
 class DecisionProviderError(RuntimeError):
     """The upstream refused the request, could not be reached, or answered unreadably."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, status_code: int | None = None, original_exception: BaseException | None = None
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         """The upstream's HTTP status, or ``None`` when no response arrived."""
+        self.original_exception = original_exception
+        """The transport failure when no response arrived, which the upstream-error classifiers read."""
 
 
 def get_decision_client() -> httpx.AsyncClient:
@@ -288,7 +292,7 @@ async def request_decision(
         )
     except httpx.HTTPError as exc:
         msg = f"{provider.provider} decisions could not be reached: {type(exc).__name__}"
-        raise DecisionProviderError(msg) from exc
+        raise DecisionProviderError(msg, original_exception=exc) from exc
 
     if response.status_code >= httpx.codes.MULTIPLE_CHOICES:
         msg = f"{provider.provider} decisions returned HTTP {response.status_code}"

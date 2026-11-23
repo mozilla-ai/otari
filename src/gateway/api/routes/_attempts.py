@@ -53,9 +53,11 @@ from gateway.services.provider_kwargs import (
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
-from gateway.types.attempt import Attempt
+from gateway.types.attempt import Attempt, Candidate
 
 T = TypeVar("T")
+# The candidate a walk tries: an any-llm ``Attempt``, or another plan's own type.
+CandidateT = TypeVar("CandidateT", bound=Candidate)
 
 ALL_ATTEMPTS_FAILED_DETAIL = "All upstream providers failed"
 ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
@@ -266,10 +268,12 @@ def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
     return True, "unknown"
 
 
-def _soonest_refusal(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple[Attempt, HTTPException]:
+def _soonest_refusal(
+    refusals: Sequence[tuple[CandidateT, HTTPException]],
+) -> tuple[CandidateT, HTTPException]:
     """The candidate and refusal a caller can retry soonest, so ``Retry-After`` is not the last candidate's wait."""
 
-    def _retry_after(entry: tuple[Attempt, HTTPException]) -> float:
+    def _retry_after(entry: tuple[CandidateT, HTTPException]) -> float:
         value = (entry[1].headers or {}).get("Retry-After")
         try:
             return float(value) if value is not None else math.inf
@@ -279,7 +283,9 @@ def _soonest_refusal(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple
     return min(reversed(refusals), key=_retry_after)
 
 
-def _refusal_to_answer(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple[Attempt, HTTPException]:
+def _refusal_to_answer(
+    refusals: Sequence[tuple[CandidateT, HTTPException]],
+) -> tuple[CandidateT, HTTPException]:
     """The candidate and refusal a walk that served nothing answers with.
 
     Insufficient funds refuses the organization rather than a candidate, so
@@ -292,20 +298,20 @@ def _refusal_to_answer(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tup
 
 async def walk_attempts(
     *,
-    attempts: Sequence[Attempt],
+    attempts: Sequence[CandidateT],
     base_request_fields: dict[str, Any],
-    run_attempt: Callable[[Attempt, dict[str, Any], Callable[[], None]], Awaitable[T]],
+    run_attempt: Callable[[CandidateT, dict[str, Any], Callable[[], None]], Awaitable[T]],
     max_tool_iterations: int,
     policy_name: str | None = None,
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
-    build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
-    credential_attempt: Callable[[Attempt], Awaitable[Attempt]] | None = None,
+    build_kwargs: Callable[[CandidateT, dict[str, Any]], dict[str, Any]] | None = None,
+    credential_attempt: Callable[[CandidateT], Awaitable[CandidateT]] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
-    admit_attempt: AdmitAttempt | None = None,
-    on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
-    on_skipped: Callable[[Attempt, HTTPException], Awaitable[None]] | None = None,
-    on_terminal: Callable[[Attempt], None] | None = None,
-) -> tuple[Attempt, T]:
+    admit_attempt: Callable[[CandidateT], Awaitable[DropAdmission | None]] | None = None,
+    on_absorbed: Callable[[CandidateT, BaseException, int], Awaitable[None]] | None = None,
+    on_skipped: Callable[[CandidateT, HTTPException], Awaitable[None]] | None = None,
+    on_terminal: Callable[[CandidateT], None] | None = None,
+) -> tuple[CandidateT, T]:
     """Try each attempt in order; return ``(chosen, result)`` for the first success.
 
     ``run_attempt`` receives the attempt, its merged call kwargs, and a
@@ -381,11 +387,11 @@ async def walk_attempts(
     failures: list[AttemptFailure] = []
     last_exc: BaseException | None = None
     cannot_serve: CandidateCannotServe | None = None
-    refusals: list[tuple[Attempt, HTTPException]] = []
+    refusals: list[tuple[CandidateT, HTTPException]] = []
     # A failure is absorbed, and a skip recorded, only once another candidate is sent the request.
-    unabsorbed: tuple[Attempt, BaseException] | None = None
-    unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
-    last_failed: Attempt | None = None
+    unabsorbed: tuple[CandidateT, BaseException] | None = None
+    unrecorded_skips: list[tuple[CandidateT, HTTPException]] = []
+    last_failed: CandidateT | None = None
 
     for index, planned in enumerate(attempts):
         # Rebound to the candidate as it is sent once ``credential_attempt`` has run.
@@ -394,7 +400,7 @@ async def walk_attempts(
         drop_admission: DropAdmission | None = None
         sent = False
 
-        def _mark_locked_in(_attempt: Attempt = attempt) -> None:
+        def _mark_locked_in(_attempt: CandidateT = attempt) -> None:
             nonlocal locked_in
             locked_in = True
             logger.info(

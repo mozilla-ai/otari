@@ -30,7 +30,7 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -53,7 +53,7 @@ from gateway.api.deps import (
 )
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
-from gateway.api.routes._attempts import classify_local_attempt_error
+from gateway.api.routes._attempts import DropAdmission, classify_local_attempt_error, walk_attempts
 from gateway.api.routes._helpers import (
     country_gate_for,
     country_not_supported,
@@ -68,7 +68,14 @@ from gateway.api.routes._pipeline import (
     request_started,
     throttle_early_rejection,
 )
-from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import (
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
+    MODEL_HEADER,
+    PROVIDER_HEADER,
+    REQUEST_ID_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
     INSUFFICIENT_FUNDS,
@@ -106,6 +113,7 @@ from gateway.services.budgets import (
     ReservationHandle,
     estimate_cost,
     estimate_tokens,
+    get_budget_state,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
@@ -138,6 +146,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_selector_detail,
 )
+from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing import NO_FACTS, PriceFacts, UsageCharge, apply_rules, can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
@@ -165,6 +174,13 @@ from gateway.services.providers import (
     hosted_implementation,
     serve_on_hosted_provider,
     unpriced_model_refusal,
+)
+from gateway.services.routing import (
+    BudgetState,
+    DroppedCandidate,
+    NoEligibleCandidatesError,
+    PolicyOrder,
+    needs_budget_state,
 )
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL, stored_error_message
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
@@ -1228,12 +1244,20 @@ class DecisionUnavailableError(Exception):
 
 
 class DecisionCallError(Exception):
-    """The call failed. ``logged_status`` goes on the usage row and ``response`` to the caller."""
+    """The call failed. ``logged_status`` goes on the usage row and ``response`` to the caller.
 
-    def __init__(self, message: str, *, logged_status: int, response: HTTPException) -> None:
+    ``upstream`` is the provider's failure behind it, where there is one. It is
+    kept as ``original_exception``, the link the upstream-error classifiers
+    follow, so a policy's walk reads it as it reads a completion candidate's.
+    """
+
+    def __init__(
+        self, message: str, *, logged_status: int, response: HTTPException, upstream: BaseException | None = None
+    ) -> None:
         super().__init__(message)
         self.logged_status = logged_status
         self.response = response
+        self.original_exception = upstream
 
 
 class DecisionCall(Protocol[ResultT]):
@@ -1264,11 +1288,57 @@ class DecisionCall(Protocol[ResultT]):
 
 
 @dataclass(frozen=True)
+class DecisionPlan(Generic[ResultT]):
+    """The calls a decisions request may be answered by, in the order they are tried.
+
+    Each target is the selector that named the call, the call, and why it is in
+    the plan. ``policy`` is the routing policy the request named, whose targets
+    are walked as a completion policy's candidates are; ``None`` asks its one
+    call as it is.
+    """
+
+    targets: Sequence[tuple[str, DecisionCall[ResultT], str]]
+    policy: str | None = None
+
+
+@dataclass(frozen=True)
+class _DecisionTarget(Generic[ResultT]):
+    """One call of a plan, resolved, as the attempt walker tries it."""
+
+    position: int
+    selector: str
+    call: DecisionCall[ResultT]
+    quote: DecisionQuote
+    selection_reason: str
+
+    @property
+    def instance(self) -> str:
+        return self.quote.provider
+
+    @property
+    def model(self) -> str:
+        return self.quote.model
+
+    def call_kwargs(self, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        """A decision call carries its own request, so it takes nothing from the walk."""
+        return base_request_fields
+
+
+@dataclass(frozen=True)
 class _Funding:
     """A deployment-paid call's hold on the billing port, and whose funds it is on."""
 
     organization_id: uuid.UUID
     hold: Decimal
+
+
+@dataclass(frozen=True)
+class _Admission:
+    """What a target holds once admitted: its rate, its reservation, and a deployment-paid call's hold."""
+
+    pricing: ModelPricing | None
+    reservation: ReservationHandle
+    funding: _Funding | None
 
 
 def decision_status_error(status_code: int | None) -> HTTPException:
@@ -1305,9 +1375,10 @@ def decision_input_chars(request: DecisionRequest) -> int:
 class SelectorDecision:
     """The call behind a decisions request: the selector names a ``decision_providers`` entry, asked as is."""
 
-    def __init__(self, config: GatewayConfig, request: DecisionRequest) -> None:
+    def __init__(self, config: GatewayConfig, request: DecisionRequest, selector: str | None = None) -> None:
         self._config = config
         self._request = request
+        self._selector = request.model if selector is None else selector
         self.prompt_chars = decision_input_chars(request)
         self.default_output_tokens = ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(request.questions)
         self._provider: DecisionProvider | None = None
@@ -1315,7 +1386,7 @@ class SelectorDecision:
 
     def resolve(self) -> DecisionQuote:
         try:
-            self._provider, self._model = resolve_decision_provider(self._config, self._request.model)
+            self._provider, self._model = resolve_decision_provider(self._config, self._selector)
         except UnknownDecisionProviderError as exc:
             raise DecisionUnavailableError(str(exc)) from exc
         return DecisionQuote(provider=self._provider.name, model=self._model)
@@ -1332,6 +1403,7 @@ class SelectorDecision:
                 str(exc),
                 logged_status=UpstreamFailure(exc).logged_status,
                 response=decision_status_error(exc.status_code),
+                upstream=exc,
             ) from exc
         except ValidationError as exc:
             # The error's own text quotes the upstream body, so only its size is kept.
@@ -1362,16 +1434,23 @@ async def run_decision(
     user: str | None,
     prompt_chars: int,
     default_output_tokens: int,
-    call: DecisionCall[ResultT],
+    plan: Callable[[str, uuid.UUID | None], Awaitable[DecisionPlan[ResultT]]],
 ) -> ResultT:
-    """Run the decisions scaffold around ``call``: resolve, gate, reserve, call, log, settle.
+    """Run the decisions scaffold around a plan: resolve, gate, reserve, call, log, settle.
 
     The same steps as :func:`run_passthrough`, which cannot run them: it resolves the model
-    against the any-llm provider instances, and a decision is answered by whatever ``call``
-    resolves to. Billing is per token, priced from the ``<provider>:<model>`` rate when one
-    is configured, otherwise from the charge the call reports, which only OpenRouter does.
-    A call whose quote names a price of its own is deployment-paid instead: that price is
-    held and charged through ``billing`` as well as the budgets, and no rate is looked up.
+    against the any-llm provider instances, and a decision is answered by whatever each call
+    resolves to. ``plan`` is asked for the calls once the billed user and workspace are
+    known, since a routing policy can be scoped to either. Billing is per token, priced
+    from the ``<provider>:<model>`` rate when one is configured, otherwise from the charge
+    the call reports, which only OpenRouter does. A call whose quote names a price of its
+    own is deployment-paid instead: that price is held and charged through ``billing`` as
+    well as the budgets, and no rate is looked up.
+
+    A routing policy's plan is walked as a completion policy's is: a target is
+    dropped where the key's allow-list or the request's country refuses it, the
+    rest are tried in order, and each is gated, reserved and recorded under the
+    target that answered.
     """
     started_at = time.monotonic()
     request_id = str(uuid.uuid4())
@@ -1423,103 +1502,156 @@ async def run_decision(
             request_id=request_id,
         )
 
-    try:
-        quote = call.resolve()
-    except DecisionUnavailableError as exc:
-        await log_rejection(str(exc), row_model=selector, row_provider=None, status_code=400)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    provider_name, model = quote.provider, quote.model
+    decided = await plan(user_id, workspace_id)
+    routed = decided.policy is not None
+    resolved: list[_DecisionTarget[ResultT]] = []
+    dropped: list[DroppedCandidate] = []
+    for named, call, reason in decided.targets:
+        try:
+            quote = call.resolve()
+        except DecisionUnavailableError as exc:
+            if not routed:
+                await log_rejection(str(exc), row_model=selector, row_provider=None, status_code=400)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            dropped.append(DroppedCandidate(named, "unresolvable", f"could not be resolved to a provider ({exc})"))
+            continue
+        resolved.append(_DecisionTarget(0, named, call, quote, reason))
+
     # A refusal after the quote names what was quoted: the allow-list and the
     # pricing rows are checked against that label, which a bound recommender
-    # may answer with in place of the selector.
-    quoted = f"{provider_name}:{model}"
-
+    # may answer with in place of the selector. A policy drops a target it
+    # refuses, as the routing compiler drops a candidate, and is refused only
+    # when none is left.
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(key_allowlist, quoted):
-        not_allowed_detail = model_not_allowed_detail(quoted)
-        await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
-    try:
-        gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
-        ensure_provider_country(config, gate, quote.served_by or provider_name)
-    except CountryNotServedError as exc:
-        refused = country_not_supported(exc.gate, quoted)
-        await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
-        raise refused from exc
-
-    pricing: ModelPricing | None = None
-    if quote.charge is None:
-        # A decisions model is not in the community pricing dataset, which could
-        # only produce a false match on the bare model name.
-        pricing = await find_model_pricing(
-            db, provider_name, model, use_defaults=False, organization_id=organization_id
-        )
-    elif organization_id is None:
-        # Deployment-paid, and nobody to bill: refused before anything is held.
-        no_organization_detail = _DECISION_NO_ORGANIZATION_DETAIL
-        await log_rejection(no_organization_detail, row_model=model, row_provider=provider_name, status_code=402)
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=no_organization_detail)
-    try:
-        reservation = await reserve_budget(
-            db,
-            user_id,
-            quote.charge
-            if quote.charge is not None
-            else estimate_cost(
-                pricing,
-                prompt_chars=prompt_chars,
-                max_output_tokens=None,
-                default_output_tokens=default_output_tokens,
-            ),
-            estimated_tokens=estimate_tokens(
-                prompt_chars=prompt_chars,
-                max_output_tokens=None,
-                default_output_tokens=default_output_tokens,
-            ),
-            # Not the selector: ``model`` only drives reserve_budget's free-model
-            # shortcut, which splits it through any-llm (see search.py).
-            model=None,
-            strategy=config.budget_strategy,
-            counts_toward_budget=not budget_exempt,
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider_name),
-            organization_id=organization_id,
-        )
-    except HTTPException as exc:
-        # As in run_passthrough's _reserve: an unknown user's 404 cannot satisfy usage_logs.user_id's foreign key.
-        if exc.status_code != status.HTTP_404_NOT_FOUND:
+    gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
+    targets: list[_DecisionTarget[ResultT]] = []
+    for target in resolved:
+        quoted = f"{target.instance}:{target.model}"
+        if key_allowlist is not None and not is_model_allowed(key_allowlist, quoted):
+            if routed:
+                dropped.append(
+                    DroppedCandidate(target.selector, "not_allowed", "is not in allowed_models for this caller")
+                )
+                continue
+            not_allowed_detail = model_not_allowed_detail(quoted)
             await log_rejection(
-                str(exc.detail), row_model=model, row_provider=provider_name, status_code=exc.status_code
+                not_allowed_detail, row_model=target.model, row_provider=target.instance, status_code=403
             )
-        raise
-    if (
-        quote.charge is None
-        and not budget_exempt
-        and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
-    ):
-        await refund_reservation(db, reservation)
-        no_pricing_detail = no_pricing_error_detail(quoted)
-        logger.warning(
-            "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on", quoted
-        )
-        await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=no_pricing_detail,
-            headers=error_headers(PRICING_REQUIRED),
-        )
-
-    funding: _Funding | None = None
-    if quote.charge is not None and organization_id is not None:
-        funding = _Funding(organization_id=organization_id, hold=quote.charge)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
         try:
-            await billing.hold(organization_id=funding.organization_id, amount=funding.hold)
-        except InsufficientFundsError as exc:
-            await refund_reservation(db, reservation)
-            await log_rejection(exc.public_message, row_model=model, row_provider=provider_name, status_code=402)
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=exc.public_message) from exc
+            ensure_provider_country(config, gate, target.quote.served_by or target.instance)
+        except CountryNotServedError as exc:
+            if routed:
+                fragment = f"is on a provider provider_supported_countries closes to {exc.closed}"
+                dropped.append(DroppedCandidate(target.selector, "country_not_supported", fragment))
+                continue
+            refused = country_not_supported(exc.gate, quoted)
+            await log_rejection(
+                str(refused.detail), row_model=target.model, row_provider=target.instance, status_code=403
+            )
+            raise refused from exc
+        targets.append(replace(target, position=len(targets) + 1))
 
-    async def undo() -> None:
-        """Give back what the request holds: the billing hold, then the budget reservation.
+    if decided.policy is not None:
+        if not targets:
+            no_candidates = NoEligibleCandidatesError(decided.policy, dropped)
+            logger.warning("%s", no_candidates.operator_detail)
+            await log_rejection(
+                no_candidates.operator_detail,
+                row_model=decided.policy,
+                row_provider=None,
+                status_code=no_candidates.status_code,
+            )
+            raise HTTPException(status_code=no_candidates.status_code, detail=no_candidates.caller_detail)
+        if dropped:
+            logger.warning(
+                "Routing policy '%s' compiled to %d of %d decision targets; dropped %s",
+                decided.policy,
+                len(targets),
+                len(decided.targets),
+                "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
+            )
+
+    async def admit(target: _DecisionTarget[ResultT]) -> _Admission:
+        """Price ``target``, reserve its estimate, and take a deployment-paid call's hold."""
+        quote = target.quote
+        provider_name, model = quote.provider, quote.model
+        pricing: ModelPricing | None = None
+        if quote.charge is None:
+            # A decisions model is not in the community pricing dataset, which could
+            # only produce a false match on the bare model name.
+            pricing = await find_model_pricing(
+                db, provider_name, model, use_defaults=False, organization_id=organization_id
+            )
+        elif organization_id is None:
+            # Deployment-paid, and nobody to bill: refused before anything is held.
+            no_organization_detail = _DECISION_NO_ORGANIZATION_DETAIL
+            await log_rejection(no_organization_detail, row_model=model, row_provider=provider_name, status_code=402)
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=no_organization_detail)
+        try:
+            reservation = await reserve_budget(
+                db,
+                user_id,
+                quote.charge
+                if quote.charge is not None
+                else estimate_cost(
+                    pricing,
+                    prompt_chars=prompt_chars,
+                    max_output_tokens=None,
+                    default_output_tokens=default_output_tokens,
+                ),
+                estimated_tokens=estimate_tokens(
+                    prompt_chars=prompt_chars,
+                    max_output_tokens=None,
+                    default_output_tokens=default_output_tokens,
+                ),
+                # Not the selector: ``model`` only drives reserve_budget's free-model
+                # shortcut, which splits it through any-llm (see search.py).
+                model=None,
+                strategy=config.budget_strategy,
+                counts_toward_budget=not budget_exempt,
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider_name),
+                organization_id=organization_id,
+            )
+        except HTTPException as exc:
+            # As in run_passthrough's _reserve: an unknown user's 404 cannot satisfy usage_logs.user_id's foreign key.
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                await log_rejection(
+                    str(exc.detail), row_model=model, row_provider=provider_name, status_code=exc.status_code
+                )
+            raise
+        if (
+            quote.charge is None
+            and not budget_exempt
+            and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
+        ):
+            await refund_reservation(db, reservation)
+            quoted = f"{provider_name}:{model}"
+            no_pricing_detail = no_pricing_error_detail(quoted)
+            logger.warning(
+                "Rejected a request for model '%s' with 402: no pricing is configured and require_pricing is on",
+                quoted,
+            )
+            await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=no_pricing_detail,
+                headers=error_headers(PRICING_REQUIRED),
+            )
+
+        funding: _Funding | None = None
+        if quote.charge is not None and organization_id is not None:
+            funding = _Funding(organization_id=organization_id, hold=quote.charge)
+            try:
+                await billing.hold(organization_id=funding.organization_id, amount=funding.hold)
+            except InsufficientFundsError as exc:
+                await refund_reservation(db, reservation)
+                await log_rejection(exc.public_message, row_model=model, row_provider=provider_name, status_code=402)
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=exc.public_message) from exc
+        return _Admission(pricing=pricing, reservation=reservation, funding=funding)
+
+    async def undo(admission: _Admission) -> None:
+        """Give back what an admission holds: the billing hold, then the budget reservation.
 
         The session is rolled back first. The port commits nothing, so whatever
         it wrote before the failure (a release that raised midway, a charge the
@@ -1528,6 +1660,7 @@ async def run_decision(
         commit. The refund runs even when the release fails, and a hold still
         claimed after that is logged for releasing by hand.
         """
+        funding = admission.funding
         await db.rollback()
         try:
             if funding is not None:
@@ -1542,38 +1675,37 @@ async def run_decision(
                     await db.rollback()
                     raise
         finally:
-            await refund_reservation(db, reservation)
+            await refund_reservation(db, admission.reservation)
 
-    def usage_row(**outcome: Any) -> UsageLog:
-        return UsageLog(
+    def usage_row(target: _DecisionTarget[ResultT], **outcome: Any) -> UsageLog:
+        row = UsageLog(
             id=str(uuid.uuid4()),
             workspace_id=workspace_id,
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),
-            model=model,
-            provider=provider_name,
+            model=target.model,
+            provider=target.instance,
             endpoint=DECISIONS_ENDPOINT,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=not budget_exempt,
             request_group_id=request_id,
             **outcome,
         )
+        if decided.policy is not None:
+            # Where the row sits in the policy's plan, as a completion's routed rows record it.
+            row.policy_name, row.selection_reason = decided.policy, target.selection_reason
+            row.attempt_position, row.attempt_count = target.position, len(targets)
+        return row
 
-    # As in run_passthrough: nothing else runs on the session before settlement.
-    await release_session(db)
-    track_request(
-        raw_request,
-        endpoint=DECISIONS_ENDPOINT,
-        model=model,
-        provider=provider_name,
-        user_id=user_id,
-        api_key_id=api_key_id,
-    )
-
-    try:
-        outcome = await call.dispatch()
+    async def settle(
+        target: _DecisionTarget[ResultT], admission: _Admission, outcome: DecisionOutcome[ResultT]
+    ) -> None:
+        """Record what ``target`` answered and settle its admission at what it cost."""
+        provider_name, model = target.instance, target.model
+        pricing, funding, quote = admission.pricing, admission.funding, target.quote
         row = usage_row(
+            target,
             status="success",
             prompt_tokens=outcome.input_tokens,
             completion_tokens=outcome.output_tokens,
@@ -1627,26 +1759,175 @@ async def run_decision(
         await log_writer.put(row)
         await reconcile_reservation(
             db,
-            reservation,
+            admission.reservation,
             cost if cost is not None else 0.0,
             actual_tokens=outcome.input_tokens + outcome.output_tokens,
         )
-    except DecisionCallError as exc:
-        await log_writer.put(
-            usage_row(status="error", error_message=stored_error_message(str(exc)), status_code=exc.logged_status)
+
+    if decided.policy is None:
+        (target,) = targets
+        admission = await admit(target)
+        # As in run_passthrough: nothing else runs on the session before settlement.
+        await release_session(db)
+        track_request(
+            raw_request,
+            endpoint=DECISIONS_ENDPOINT,
+            model=target.model,
+            provider=target.instance,
+            user_id=user_id,
+            api_key_id=api_key_id,
         )
-        await undo()
-        logger.error("Decision failed for %s:%s: %s", provider_name, model, exc)
-        raise exc.response from exc
-    except BaseException:
-        # Cancellation, a failed release, charge or settlement, or an unexpected error.
-        await undo()
-        raise
+        try:
+            outcome = await target.call.dispatch()
+            await settle(target, admission, outcome)
+        except DecisionCallError as exc:
+            await log_writer.put(
+                usage_row(
+                    target, status="error", error_message=stored_error_message(str(exc)), status_code=exc.logged_status
+                )
+            )
+            await undo(admission)
+            logger.error("Decision failed for %s:%s: %s", target.instance, target.model, exc)
+            raise exc.response from exc
+        except BaseException:
+            # Cancellation, a failed release, charge or settlement, or an unexpected error.
+            await undo(admission)
+            raise
+    else:
+        served, outcome, sent = await _walk_decision_targets(
+            policy=decided.policy,
+            targets=targets,
+            admit=admit,
+            undo=undo,
+            usage_row=usage_row,
+            log_writer=log_writer,
+            release=lambda: release_session(db),
+            track=lambda head: track_request(
+                raw_request,
+                endpoint=DECISIONS_ENDPOINT,
+                model=head.model,
+                provider=head.instance,
+                user_id=user_id,
+                api_key_id=api_key_id,
+            ),
+            settle=settle,
+        )
+        response.headers.update(
+            {
+                PROVIDER_HEADER: served.instance,
+                ATTEMPT_COUNT_HEADER: str(sent),
+                FALLBACK_HEADER: "true" if served.position != 1 else "false",
+            }
+        )
+        # A header cannot carry every model name a provider accepts.
+        if served.model.isascii() and served.model.isprintable():
+            response.headers[MODEL_HEADER] = served.model
 
     if rate_limit_info:
         for header, value in rate_limit_headers(rate_limit_info).items():
             response.headers[header] = value
     return outcome.result
+
+
+async def _walk_decision_targets(
+    *,
+    policy: str,
+    targets: Sequence[_DecisionTarget[ResultT]],
+    admit: Callable[[_DecisionTarget[ResultT]], Awaitable[_Admission]],
+    undo: Callable[[_Admission], Awaitable[None]],
+    usage_row: Callable[..., UsageLog],
+    log_writer: LogWriter,
+    release: Callable[[], Awaitable[object]],
+    track: Callable[[_DecisionTarget[ResultT]], None],
+    settle: Callable[[_DecisionTarget[ResultT], _Admission, DecisionOutcome[ResultT]], Awaitable[None]],
+) -> tuple[_DecisionTarget[ResultT], DecisionOutcome[ResultT], int]:
+    """Try a policy's targets in order on the completion routes' walker; return the one that answered.
+
+    Each target is admitted as it is reached: priced at its own rate, and
+    reserved on its own provider's budgets. A target that fails gives its
+    admission back and the walk moves on, as a completion policy's does, and
+    the failure is recorded as an absorbed row. A refused admission (a budget
+    with no room, an unpriced model under ``require_pricing``) ends the walk.
+    When only one target was called, its failure is answered as naming it
+    directly would be; otherwise the walker's answer for an exhausted plan stands.
+
+    Returns the target that answered, its outcome, settled, and how many targets were sent the request.
+    """
+    admissions: dict[int, _Admission] = {}
+    called: list[tuple[_DecisionTarget[ResultT], DecisionCallError]] = []
+    sent = 0
+
+    async def admit_target(target: _DecisionTarget[ResultT]) -> DropAdmission:
+        admissions[target.position] = await admit(target)
+        # As in run_passthrough: nothing else runs on the session before settlement.
+        await release()
+
+        async def drop(_sent: bool) -> None:
+            await undo(admissions.pop(target.position))
+
+        return drop
+
+    async def run_target(
+        target: _DecisionTarget[ResultT], _kwargs: dict[str, Any], _mark_locked_in: Callable[[], None]
+    ) -> DecisionOutcome[ResultT]:
+        nonlocal sent
+        sent += 1
+        try:
+            return await target.call.dispatch()
+        except DecisionCallError as exc:
+            called.append((target, exc))
+            raise
+
+    async def absorbed(target: _DecisionTarget[ResultT], exc: BaseException, _total: int) -> None:
+        logged_status = exc.logged_status if isinstance(exc, DecisionCallError) else UpstreamFailure(exc).logged_status
+        row = usage_row(
+            target, status="absorbed", error_message=stored_error_message(str(exc)), status_code=logged_status
+        )
+        # A failure the policy recovered from is on record without counting as spend or an error.
+        row.counts_toward_budget = False
+        await log_writer.put(row)
+
+    stopped_on: list[_DecisionTarget[ResultT]] = []
+    track(targets[0])
+    try:
+        served, outcome = await walk_attempts(
+            attempts=targets,
+            base_request_fields={},
+            run_attempt=run_target,
+            max_tool_iterations=0,
+            policy_name=policy,
+            admit_attempt=admit_target,
+            on_absorbed=absorbed,
+            on_terminal=stopped_on.append,
+        )
+    except HTTPException:
+        last = called[-1] if called else None
+        if last is not None and stopped_on and last[0] is stopped_on[0]:
+            target, failure = last
+            await log_writer.put(
+                usage_row(
+                    target,
+                    status="error",
+                    error_message=stored_error_message(str(failure)),
+                    status_code=failure.logged_status,
+                )
+            )
+            logger.error("Decision policy %s failed on %s:%s: %s", policy, target.instance, target.model, failure)
+            if len(called) == 1:
+                raise failure.response from failure
+        raise
+    except BaseException:
+        # Cancellation mid-call: the target in flight still holds its admission.
+        for admission in list(admissions.values()):
+            await undo(admission)
+        raise
+    admission = admissions.pop(served.position)
+    try:
+        await settle(served, admission, outcome)
+    except BaseException:
+        await undo(admission)
+        raise
+    return served, outcome, sent
 
 
 @dataclass(frozen=True)
@@ -1666,18 +1947,55 @@ class DecisionScaffold:
         request: DecisionRequest,
         auth_result: tuple[APIKey | None, bool],
     ) -> DecisionResponse:
-        """Run the scaffold for one decisions request, against the provider its selector names."""
-        call = SelectorDecision(self.config, request)
-        return await self.run_call(
+        """Run the scaffold for one decisions request.
+
+        ``model`` names a provider and a model, or a routing policy whose
+        targets do. A policy's answer names the policy, as a completion's does.
+        """
+        api_key = auth_result[0]
+        asked = SelectorDecision(self.config, request)
+        routed = False
+
+        async def plan(user_id: str, workspace_id: uuid.UUID | None) -> DecisionPlan[DecisionResponse]:
+            nonlocal routed
+            spec = resolve_effective_policy(self.config, request.model, user_id, workspace_id=workspace_id)
+            if spec is None:
+                return DecisionPlan(targets=[(request.model, asked, "static")])
+            budget = BudgetState()
+            if needs_budget_state(spec):
+                budget = await get_budget_state(
+                    self.db,
+                    user_id,
+                    BudgetScopeRequest(api_key=api_key, workspace_id=workspace_id),
+                    strategy=self.config.budget_strategy,
+                )
+            order = PolicyOrder.of(spec, user_id=user_id, key_id=api_key.id if api_key else None, budget=budget)
+            routed = True
+            return DecisionPlan(
+                targets=[
+                    (selector, SelectorDecision(self.config, request, selector), reason)
+                    for selector, reason in order.selectors
+                ],
+                policy=request.model,
+            )
+
+        answer = await run_decision(
             raw_request=raw_request,
             response=response,
             auth_result=auth_result,
+            db=self.db,
+            config=self.config,
+            log_writer=self.log_writer,
+            billing=self.billing,
             selector=request.model,
             user=request.user,
-            prompt_chars=call.prompt_chars,
-            default_output_tokens=call.default_output_tokens,
-            call=call,
+            prompt_chars=asked.prompt_chars,
+            default_output_tokens=asked.default_output_tokens,
+            plan=plan,
         )
+        if routed:
+            answer.model = request.model
+        return answer
 
     async def run_call(
         self,
@@ -1692,6 +2010,10 @@ class DecisionScaffold:
         call: DecisionCall[ResultT],
     ) -> ResultT:
         """Run the scaffold around ``call``, with ``selector`` as the name a refusal reports."""
+
+        async def plan(_user_id: str, _workspace_id: uuid.UUID | None) -> DecisionPlan[ResultT]:
+            return DecisionPlan(targets=[(selector, call, "static")])
+
         return await run_decision(
             raw_request=raw_request,
             response=response,
@@ -1704,7 +2026,7 @@ class DecisionScaffold:
             user=user,
             prompt_chars=prompt_chars,
             default_output_tokens=default_output_tokens,
-            call=call,
+            plan=plan,
         )
 
 

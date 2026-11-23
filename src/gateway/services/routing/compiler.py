@@ -47,6 +47,7 @@ __all__ = [
     "CompiledPlan",
     "DroppedCandidate",
     "NoEligibleCandidatesError",
+    "PolicyOrder",
     "RouterOrdering",
     "compile_catalog_plan",
     "compile_policy",
@@ -277,6 +278,39 @@ def _select_head(
     return [(spec.default_target, "default")]
 
 
+@dataclass(frozen=True)
+class PolicyOrder:
+    """The selectors a policy names for one request, in the order they are tried, each with why it is there.
+
+    The selected candidate (or the router's whole ranking), then ``on_failure`` in
+    declared order, neither resolved nor filtered. :func:`compile_policy` resolves
+    them into attempts; a plan whose targets are not all any-llm models, such as
+    a decisions policy's, resolves them itself.
+    """
+
+    selectors: tuple[tuple[str, str], ...]
+
+    @classmethod
+    def of(
+        cls,
+        spec: PolicySpec,
+        *,
+        user_id: str | None = None,
+        key_id: str | None = None,
+        budget: BudgetState | None = None,
+        router_ordering: RouterOrdering | None = None,
+    ) -> PolicyOrder:
+        """The order ``spec`` tries its selectors in for a request with these facts."""
+        selected = _select_head(
+            spec,
+            user_id=user_id,
+            key_id=key_id,
+            budget=budget or BudgetState(),
+            router_ordering=router_ordering,
+        )
+        return cls((*selected, *((selector, "on_failure") for selector in spec.on_failure)))
+
+
 def compile_policy(
     config: GatewayConfig,
     policy_name: str,
@@ -315,18 +349,10 @@ def compile_policy(
     derives its own status from why the candidates went: 403 when access rules
     filtered them, 502 when none of them resolve to a configured provider.
     """
-    budget = budget or BudgetState()
-    selected = _select_head(
-        spec,
-        user_id=user_id,
-        key_id=key_id,
-        budget=budget,
-        router_ordering=router_ordering,
+    ordered = list(
+        PolicyOrder.of(spec, user_id=user_id, key_id=key_id, budget=budget, router_ordering=router_ordering).selectors
     )
-    routed = selected[0][1].startswith("router:")
-
-    ordered: list[tuple[str, str]] = list(selected)
-    ordered.extend((selector, "on_failure") for selector in spec.on_failure)
+    routed = ordered[0][1].startswith("router:")
     attempts, dropped = _resolve_candidates(
         config,
         ordered,

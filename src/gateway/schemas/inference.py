@@ -77,7 +77,9 @@ class DecisionRequest(BaseModel):
         },
     )
 
-    model: str = Field(description="Decision provider and model, e.g. 'typesafe:jev-latest'")
+    model: str = Field(
+        description="Decision provider and model, e.g. 'typesafe:jev-latest', or a routing policy naming such targets"
+    )
     state: DecisionContent = Field(description="The content the questions are about")
     questions: dict[str, DecisionQuestion] = Field(min_length=1, description="Questions, keyed by answer name")
     images: list[str] | None = Field(

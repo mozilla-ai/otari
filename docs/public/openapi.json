@@ -7701,7 +7701,7 @@
             "title": "Images"
           },
           "model": {
-            "description": "Decision provider and model, e.g. 'typesafe:jev-latest'",
+            "description": "Decision provider and model, e.g. 'typesafe:jev-latest', or a routing policy naming such targets",
             "title": "Model",
             "type": "string"
           },
@@ -38469,7 +38469,7 @@
     },
     "/api/v1/decisions": {
       "post": {
-        "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
+        "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``, or\na routing policy, whose targets are tried in order until one answers.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
         "operationId": "decisions-create_decision",
         "requestBody": {
           "content": {

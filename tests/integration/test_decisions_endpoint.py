@@ -6,13 +6,24 @@ settlement, the usage row, and how an upstream failure reaches the caller.
 """
 
 import time
+from collections.abc import Sequence
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
+    MODEL_HEADER,
+    PROVIDER_HEADER,
+    REQUEST_ID_HEADER,
+    GatewayConfig,
+)
+from gateway.models.routing import RoutingConfig
 from gateway.services.inference import DecisionProviderError
 
 DECISIONS_USAGE_LABEL = "/v1/decisions"
@@ -59,10 +70,22 @@ def test_config(postgres_url: str) -> GatewayConfig:
             "typesafe": {"api_key": "ts-secret"},
             "openrouter": {"api_key": "or-secret"},
         },
+        routing=RoutingConfig.model_validate(
+            {
+                "policies": {
+                    "tagger": {
+                        "select": [{"default": "typesafe:jev-latest"}],
+                        "on_failure": ["openrouter:typesafe/jev-1.13"],
+                    }
+                }
+            }
+        ),
     )
 
 
-def _mock_decision(answer: dict[str, Any] | None = None, *, side_effect: Exception | None = None) -> Any:
+def _mock_decision(
+    answer: dict[str, Any] | None = None, *, side_effect: Exception | Sequence[object] | None = None
+) -> Any:
     mock = AsyncMock(return_value=answer if answer is not None else ANSWER, side_effect=side_effect)
     return patch("gateway.api.routes._passthrough.request_decision", mock)
 
@@ -353,3 +376,109 @@ def test_a_refused_decision_carries_its_request_id(client: TestClient, api_key_h
         resp = client.post(f"{API_ROOT}/decisions", json={**PAYLOAD, "model": "nope:jev"}, headers=api_key_header)
     assert resp.status_code == 400
     assert resp.headers[REQUEST_ID_HEADER]
+
+
+POLICY_PAYLOAD: dict[str, Any] = {**PAYLOAD, "model": "tagger"}
+
+
+def _key_for(client: TestClient, master_key_header: dict[str, str], user_id: str, allowed: list[str]) -> dict[str, str]:
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": f"{user_id}-key", "user_id": user_id, "allowed_models": allowed},
+        headers=master_key_header,
+    ).json()
+    return {API_KEY_HEADER: f"Bearer {key['key']}"}
+
+
+def test_a_policy_fails_over_to_its_next_target_and_records_the_one_that_answered(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openrouter:typesafe/jev-1.13",
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 10.0,
+        },
+        headers=master_key_header,
+    )
+    rate_limited = DecisionProviderError("typesafe decisions returned HTTP 429", status_code=429)
+    with _mock_decision(side_effect=[rate_limited, ANSWER]) as mock:
+        resp = client.post(f"{API_ROOT}/decisions", json=POLICY_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    assert [call.args[0].name for call in mock.await_args_list] == ["typesafe", "openrouter"]
+    assert mock.await_args_list[1].args[1]["model"] == "typesafe/jev-1.13"
+    # The answer names the policy, and the headers name the target that gave it.
+    assert resp.json()["model"] == "tagger"
+    assert resp.json()["answers"]["team"]["choice"] == "technical"
+    served_by = (resp.headers[PROVIDER_HEADER], resp.headers[MODEL_HEADER])
+    assert served_by == ("openrouter", "typesafe/jev-1.13")
+    assert (resp.headers[ATTEMPT_COUNT_HEADER], resp.headers[FALLBACK_HEADER]) == ("2", "true")
+
+    user_id = api_key_obj["user_id"]
+    rows = _decision_rows(client, master_key_header, user_id)
+    (served,) = [row for row in rows if row["status"] == "success"]
+    (absorbed,) = [row for row in rows if row["status"] == "absorbed"]
+    assert (served["provider"], served["model"]) == ("openrouter", "typesafe/jev-1.13")
+    assert (served["policy_name"], served["selection_reason"]) == ("tagger", "on_failure")
+    assert (served["attempt_position"], served["attempt_count"]) == (2, 2)
+    # Priced at the rate of the target that answered: 1000 input at $3/M plus 10 output at $10/M.
+    assert float(served["cost"]) == pytest.approx(0.0031)
+    assert (absorbed["provider"], absorbed["status_code"]) == ("typesafe", 429)
+    assert absorbed["counts_toward_budget"] is False
+    assert absorbed["request_group_id"] == served["request_group_id"] == resp.headers[REQUEST_ID_HEADER]
+    user = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0)
+
+
+def test_a_policy_whose_every_target_fails_is_a_502_and_refunds(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    outage = [DecisionProviderError("down", status_code=503), DecisionProviderError("down", status_code=500)]
+    with _mock_decision(side_effect=outage) as mock:
+        resp = client.post(f"{API_ROOT}/decisions", json=POLICY_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 502, resp.text
+    assert mock.await_count == 2
+    user_id = api_key_obj["user_id"]
+    rows = _decision_rows(client, master_key_header, user_id)
+    assert sorted((row["status"], row["provider"]) for row in rows) == [
+        ("absorbed", "typesafe"),
+        ("error", "openrouter"),
+    ]
+    user = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0)
+
+
+def test_a_policy_drops_a_target_the_key_may_not_use(client: TestClient, master_key_header: dict[str, str]) -> None:
+    headers = _key_for(client, master_key_header, "typesafe-only", ["typesafe:jev-latest"])
+    refused = DecisionProviderError("typesafe decisions returned HTTP 422", status_code=422)
+    with _mock_decision(side_effect=refused) as mock:
+        resp = client.post(f"{API_ROOT}/decisions", json=POLICY_PAYLOAD, headers=headers)
+
+    # The one target left was the only one called, so it answers as naming it directly would.
+    assert resp.status_code == 400, resp.text
+    assert mock.await_count == 1
+
+
+def test_a_policy_with_no_permitted_target_is_refused_without_naming_its_targets(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _key_for(client, master_key_header, "chat-only", ["openai:gpt-4o"])
+    with _mock_decision() as mock:
+        resp = client.post(f"{API_ROOT}/decisions", json=POLICY_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 403, resp.text
+    detail = resp.json()["detail"]
+    assert "tagger" in detail
+    assert "typesafe" not in detail
+    assert "openrouter" not in detail
+    mock.assert_not_awaited()

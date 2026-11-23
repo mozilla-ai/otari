@@ -276,6 +276,8 @@ def _validate_write(
     # came from, and resolution is single-pass.
     indirections = all_policy_names(config) | all_alias_names(config) | {name}
     for selector in spec.static_selectors():
+        if config.names_decision_provider(selector):
+            continue
         try:
             config.validate_alias(
                 name,

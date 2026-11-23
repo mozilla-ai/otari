@@ -1070,7 +1070,9 @@ Decisions API:
 ```
 
 `model` is `<provider>:<model>`, where the provider is an entry under
-[`decision_providers`](configuration.md#decision-providers). The answer comes back
+[`decision_providers`](configuration.md#decision-providers), or a
+[routing policy](routing.md#route-decisions) whose targets are tried in order
+until one answers. The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
 `confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
 as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a

@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig, validate_decision_provider_entry
+from gateway.models.routing import RoutingConfig
 from gateway.schemas.inference import MAX_DECISION_IMAGES, DecisionRequest, DecisionResponse
 from gateway.services.inference import (
     DecisionProvider,
@@ -381,3 +382,23 @@ def test_images_must_be_inline_and_few() -> None:
         DecisionRequest.model_validate({**base, "images": ["https://example.com/a.png"]})
     with pytest.raises(ValidationError):
         DecisionRequest.model_validate({**base, "images": ["data:image/png;base64,AA"] * (MAX_DECISION_IMAGES + 1)})
+
+
+def _policy_config(*targets: str) -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        model_discovery=False,
+        decision_providers={"local-qwen": {"provider": "llamacpp", "api_base": "http://qwen:8080"}},
+        routing=RoutingConfig.model_validate(
+            {"policies": {"tagger": {"select": [{"default": targets[0]}], "on_failure": list(targets[1:])}}}
+        ),
+    )
+
+
+def test_a_policy_may_name_a_decision_providers_selector() -> None:
+    _policy_config("openai:gpt-5-mini", "local-qwen:qwen3-vl-8b-instruct").validate_routing_policies()
+
+
+def test_a_policy_still_refuses_a_prefix_nothing_declares() -> None:
+    with pytest.raises(ValueError, match="routing.policies.tagger"):
+        _policy_config("openai:gpt-5-mini", "nowhere:qwen3").validate_routing_policies()
