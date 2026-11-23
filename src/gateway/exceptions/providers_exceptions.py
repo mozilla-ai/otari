@@ -98,6 +98,9 @@ class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     The next call would send the stored credential to the new host, and whoever
     can edit a key only ever reads its ``last4``, so the move has to come from
     someone who holds the credential.
+
+    NOTE: Callers must name at least one credential. An empty sequence has
+    nothing to report and raises rather than refusing the move.
     """
 
     def __init__(self, credentials: Sequence[str]) -> None:

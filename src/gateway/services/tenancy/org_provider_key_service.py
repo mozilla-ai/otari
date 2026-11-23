@@ -171,8 +171,9 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
     it is a rotation date, and the endpoint answers for the credential itself.
 
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the
-    key cannot be decrypted, and ``UnservableEndpointError``; the caller
-    decides whether to skip it.
+    key cannot be decrypted, ``UnservableEndpointError`` for a credential the
+    key may not carry, and ``UnreadableEndpointAuthError`` for one this build
+    cannot assemble; the caller decides whether to skip it.
     """
     entry: dict[str, Any] = {}
     if key.api_base:
@@ -193,11 +194,13 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
 def key_is_usable(key: OrgProviderKey) -> bool:
     """Whether this key can actually supply a credential on this deployment.
 
-    A row whose secret will not decrypt (no ``OTARI_SECRET_KEY``, or the wrong
-    one) is skipped by the dispatch-path cache below, so anything that reports
-    what a tenant may *reach* has to skip it too, or the catalog advertises
-    models every request through that provider then fails on. Single-sourced
-    here so the two answers cannot drift.
+    False where the row cannot be served as stored: its secret will not decrypt
+    (no ``OTARI_SECRET_KEY``, or the wrong one), its provider cannot take a
+    custom address, or its endpoint credential may not be carried or cannot be
+    read. The dispatch-path cache skips every one of those, so anything that
+    reports what a tenant may *reach* has to skip them too, or the catalog
+    advertises models every request through that provider then fails on.
+    Single-sourced here so the two answers cannot drift.
     """
     try:
         _row_to_entry(key)

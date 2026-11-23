@@ -145,7 +145,13 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
 
     @property
     def endpoint_auth(self) -> EndpointAuth | None:
-        """The endpoint credential this key carries, or None where it carries none."""
+        """The endpoint credential this key carries, or None where it carries none.
+
+        Raises:
+            UnreadableEndpointAuthError: The columns hold a credential this
+                build cannot assemble, which is a different state from holding
+                none.
+        """
         return EndpointAuth.from_columns(
             method=self.endpoint_auth_method,
             header_name=self.endpoint_auth_header_name,

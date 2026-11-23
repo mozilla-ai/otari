@@ -198,9 +198,10 @@ class OrgProviderKeyPublic(SQLModel):
     zero_data_retention: bool = False
     usable: bool = Field(
         description=(
-            "False when the stored credential cannot be decrypted on this deployment, so the key "
-            "supplies nothing at dispatch and the catalog withholds its provider. A row this deployment "
-            "cannot read is still listed, because deleting or replacing it is what fixes it."
+            "False when the key cannot be served as stored, so it supplies nothing at dispatch and the "
+            "catalog withholds its provider: a credential this deployment cannot decrypt or read, a "
+            "provider that cannot take a custom base URL, or an endpoint credential the key may not "
+            "carry. Such a row is still listed, because deleting or replacing it is what fixes it."
         )
     )
     offered_count: int = Field(
