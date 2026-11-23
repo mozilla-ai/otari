@@ -37,6 +37,14 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`, and an entry carrying one must be the only entry for its profile. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
 | `on` | What the guardrail reads: any of `input`, `tool_results`, `tool_calls` and `output`. Defaults to `["input"]`. See [What a guardrail reads](#what-a-guardrail-reads). |
 
+An entry runs a profile on a guardrails service: the entry's own `url`, or else
+the deployment's `guardrails_url`. A guardrail your organization defined from
+the [catalog](#the-guardrail-catalog) runs only through an organization
+[mandate](#mandate-fields), on otari.ai as on any deployment, so an entry can
+tighten a mandated profile but cannot start a catalog guardrail by naming it.
+An entry with no service to run on is
+[not configured](#when-the-guardrails-service-is-unreachable).
+
 ## What a guardrail reads
 
 `on` lists what a guardrail reads, on all three endpoints:
@@ -73,6 +81,38 @@ at once.
 The client still holds the original of a tool result Otari withheld; Otari
 replaces it again each time it is sent.
 
+A `403` lists each guardrail that refused:
+
+```json
+{"detail": {"message": "Request blocked by guardrail policy.", "code": "guardrail_violation",
+            "guardrails": [{"profile": "lakera", "explanation": null, "score": 1.0, "categories": ["prompt_attack"]}]}}
+```
+
+`explanation` and `score` are the guardrail's own. `categories` names what the
+guardrail says fired, such as `prompt_attack` or `pii/phone_number`, and is an
+empty list when it names nothing. The Messages endpoint puts the same fields in
+its `error` object. The `Otari-Guardrails` header carries the same names. The
+request's trace carries them too, as long as they fit: it stores them as one
+comma-separated value of at most 128 characters, so it keeps the leading names
+that fit and leaves off the rest. Two 64-character names, for example, leave
+the trace only the first.
+
+Where the names come from:
+
+- A guardrail an organization [defined](#definition-fields): the categories the
+  any-guardrail library reports as triggered. Lakera Guard names the detectors
+  that fired, from the per-detector breakdown it returns while the definition
+  leaves `breakdown` on, which is the default; with `breakdown` off it names
+  nothing. A guardrail whose library reports no categories, such as Bedrock
+  Guardrails, names nothing.
+- A guardrails service: the optional `categories` in its
+  [`/validate` result](#what-a-guardrails-service-answers).
+
+A name comes from a vendor, or from a service the caller chose, so only short
+identifiers are kept: at most 8, each at most 64 characters of letters, digits
+and `_ . : / @ + -`, and none shaped like an email address or a credential.
+Anything else is dropped rather than shown, and so is the vendor's own message.
+
 ## Reading the `Otari-Guardrails` header
 
 When input guardrail results are available, both non-streamed and streamed
@@ -93,6 +133,13 @@ absent at zero:
 [{"profile": "prompt-injection", "mode": "block", "valid": false, "score": 1.0, "status": "evaluated", "withheld": 1}]
 ```
 
+`categories` lists what the guardrail says fired, as a [refusal](#modes) does,
+and is absent when it names nothing:
+
+```json
+[{"profile": "lakera", "mode": "monitor", "valid": false, "score": 1.0, "status": "evaluated", "categories": ["pii/phone_number"]}]
+```
+
 A streamed response's header is sent before the answer, so it does not count what
 the tool loop or the answer's guardrails did; the request's trace records each
 check.
@@ -104,11 +151,12 @@ gave no verdict, so `status` says which:
 | --- | --- |
 | `evaluated` | The check ran. `valid` is `true` or `false`. |
 | `inconclusive` | The check ran and the guardrail returned no verdict. |
-| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` that carries this header. `reason` says why. |
+| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` or a `424` that carries this header. `reason` says why. |
 
 `reason` appears only on an `unavailable` entry:
 
-- `not_configured`: the deployment has no guardrails service for the profile.
+- `not_configured`: no guardrails service is configured for the profile: the
+  entry names no `url` and the deployment has no `guardrails_url`.
 - `http_<status>`: the service answered the `/validate` call with that error
   status, for example `http_404`. A `404` means the service has no `/validate`
   at the address Otari called, or does not serve the profile.
@@ -122,7 +170,14 @@ The guardrail's own explanation is never put in the header.
 
 A `block` guardrail that cannot be evaluated at all (service down, no URL
 configured, malformed response) **fails closed**: input it cannot read is
-refused with a `502` rather than forwarded unchecked, and an answer with a `403`.
+refused with a `502` and the code `guardrail_unavailable` rather than forwarded
+unchecked, and an answer with a `403`.
+When the reason is that no guardrails service is configured for the profile,
+the refusal is a `424` with the code `guardrail_not_configured` instead, since
+no retry can fix it. Its message says what to change: a profile you named in
+the request needs a `url` on its entry, or the entry removed, and a mandated
+one needs an administrator of your organization or of the deployment to
+configure it.
 A tool result it cannot read is withheld instead, as a flagged one is, with a
 message saying it could not be checked, and a tool call Otari would run is
 skipped. A `monitor` guardrail fails open, since it was never enforcing.
@@ -141,7 +196,7 @@ was wrong with it.
 
 | `on_unavailable` | A `block` entry that cannot be evaluated |
 | --- | --- |
-| `block` (default) | Refuses the request with `502`. |
+| `block` (default) | Refuses the request with `502`, or `424` when no service is configured for it. |
 | `monitor` | Serves the request and records the check as `unavailable`, or `inconclusive` when the service gave no verdict, trading enforcement for availability. |
 
 A mandate that names a [definition](#definition-fields) is checked inside the
@@ -396,6 +451,17 @@ A `url` that already ends in `/validate` is called at
 there, most often `http_404`.
 
 `valid: false` means the input was flagged, and `valid: null` is an inconclusive
-verdict. `GET /profiles` is optional: it lists
+verdict. `categories` is optional and names what fired:
+
+```
+→ {"profile": "...", "result": {"valid": false, "explanation": null, "score": 0.997, "categories": ["prompt_attack"]}}
+```
+
+Each item is a name, or an object with `name` and `triggered` as any-guardrail
+serializes a category, of which only those with `triggered: true` count. A
+result without `categories` names nothing. Otari keeps only the names a
+[refusal](#modes) may show.
+
+`GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
