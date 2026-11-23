@@ -56,7 +56,7 @@ workspace that owns them is gone.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
 from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
@@ -75,6 +75,19 @@ from gateway.types.endpoint_auth import EndpointAuth
 # ==============================================================================
 # Org provider keys
 # ==============================================================================
+
+_ENDPOINT_AUTH_ALL_OR_NONE = (
+    "(endpoint_auth_method IS NULL"
+    " AND endpoint_auth_header_name IS NULL"
+    " AND encrypted_endpoint_auth_secret IS NULL"
+    " AND endpoint_auth_last4 IS NULL"
+    " AND endpoint_auth_expires_at IS NULL)"
+    " OR (endpoint_auth_method IS NOT NULL"
+    " AND endpoint_auth_header_name IS NOT NULL"
+    " AND encrypted_endpoint_auth_secret IS NOT NULL"
+    " AND endpoint_auth_last4 IS NOT NULL"
+    " AND endpoint_auth_expires_at IS NOT NULL)"
+)
 
 
 class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -110,6 +123,10 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         # composite FK to it, pinning each link row to *its own* organization
         # rather than trusting every write path to keep that invariant.
         UniqueConstraint("organization_id", "id", name="uq_org_provider_keys_org_id"),
+        # The endpoint credential occupies five columns and means nothing unless
+        # every one of them holds a value. Enforced here so a write that sets
+        # some of them is refused rather than stored.
+        CheckConstraint(_ENDPOINT_AUTH_ALL_OR_NONE, name="ck_org_provider_keys_endpoint_auth_all_or_none"),
     )
 
     organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
