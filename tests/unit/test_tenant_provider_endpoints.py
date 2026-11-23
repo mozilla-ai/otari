@@ -28,12 +28,21 @@ from gateway.types.provider_file import ProviderFile
 WORKSPACE_ID = uuid.uuid4()
 
 
-def _sdk_clients(llm: AnyLLM) -> list[object]:
+def _sdk_clients(llm: AnyLLM) -> list[httpx.AsyncClient | httpx2.AsyncClient]:
     """The HTTP clients behind every SDK client a provider instance holds."""
     return [
         inner
         for value in vars(llm).values()
         if isinstance(inner := getattr(value, "_client", None), (httpx.AsyncClient, httpx2.AsyncClient))
+    ]
+
+
+def _sdk_default_headers(llm: AnyLLM) -> list[dict[str, str]]:
+    """What every SDK client a provider instance holds adds to each request it makes."""
+    return [
+        dict(headers)
+        for value in vars(llm).values()
+        if (headers := getattr(value, "default_headers", None)) is not None
     ]
 
 
@@ -256,7 +265,13 @@ async def test_an_endpoint_credential_is_sent_as_a_default_header_and_never_to_t
 # SDK refuses the name would make the endpoint credential undeliverable there.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", sorted(TENANT_ENDPOINT_PROVIDERS))
-async def test_every_pinnable_provider_accepts_a_gateway_built_default_header(provider: str) -> None:
+async def test_every_pinnable_provider_sends_a_gateway_built_default_header(provider: str) -> None:
+    """The header reaches the request, and never the client every organization on this provider shares.
+
+    An SDK that dropped the keyword would send the request to the tenant's
+    proxy with no credential, and one that set it on the injected client would
+    put one organization's credential on a pool keyed by address alone.
+    """
     llm = AnyLLM.create(
         provider,
         api_key="k",
@@ -265,4 +280,11 @@ async def test_every_pinnable_provider_accepts_a_gateway_built_default_header(pr
         default_headers={"Fastly-Key": "edge-s3cret"},
     )
 
-    assert _sdk_clients(llm), f"{provider} holds no SDK client this test can see"
+    clients = _sdk_clients(llm)
+    assert clients, f"{provider} holds no SDK client this test can see"
+    assert any("Fastly-Key" in headers for headers in _sdk_default_headers(llm)), (
+        f"{provider} drops a gateway-built default header"
+    )
+    assert all("Fastly-Key" not in client.headers for client in clients), (
+        f"{provider} puts a tenant's header on the client every organization shares"
+    )
