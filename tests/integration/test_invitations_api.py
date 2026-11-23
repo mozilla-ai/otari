@@ -376,6 +376,7 @@ def test_the_preview_does_not_tell_an_unverified_signup_it_can_sign_in(
         False,
         ["password_reset"],
     )
+    assert preview["verification_pending"] is True
 
 
 def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_sign_in(
@@ -1453,6 +1454,8 @@ def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
     assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, False, [])
+    # Nobody has signed up on this address, so there is no verification to wait on.
+    assert preview["verification_pending"] is False
 
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")

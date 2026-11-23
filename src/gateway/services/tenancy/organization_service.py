@@ -2099,10 +2099,11 @@ class OrganizationService:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
 
         ``needs_password`` tells the token's holder whether accepting may set
-        the address's first password, and ``can_sign_in`` and ``ways_in`` how
-        the address gets in when it may not. That is only ever said to someone
-        holding this invitation, which already names the address, so it widens
-        nothing signup's enumeration-safety protects.
+        the address's first password, and ``verification_pending``,
+        ``can_sign_in`` and ``ways_in`` how the address gets in when it may
+        not. That is only ever said to someone holding this invitation, which
+        already names the address, so it widens nothing signup's
+        enumeration-safety protects.
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
         needs_password = await self._invitee_is_claimable(invitee, organization.id)
@@ -2113,6 +2114,7 @@ class OrganizationService:
             role=membership.role,
             expires_at=invitation.expires_at,
             needs_password=needs_password,
+            verification_pending=invitee.sign_in_means is SignInMeans.UNVERIFIED_PASSWORD,
             can_sign_in=can_sign_in,
             ways_in=[] if needs_password or can_sign_in else _ways_in(claims),
         )

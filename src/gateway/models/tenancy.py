@@ -1241,9 +1241,16 @@ class InvitationPreviewPublic(SQLModel):
     needs_password: bool = Field(
         description=(
             "Whether accepting should also set the invited address's first password. False when the address "
-            "already has a way in, and also when another organization has it as a member or invitee, since this "
-            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
-            "password whenever this is false."
+            "already has a way in, when a password it chose at signup is waiting on verification, and when "
+            "another organization has it as a member or invitee, since this link may not choose a password for "
+            "it then. can_sign_in and verification_pending tell the three apart. Accept refuses a password "
+            "whenever this is false."
+        )
+    )
+    verification_pending: bool = Field(
+        description=(
+            "Whether the invited address chose a password through signup and has not verified it yet, "
+            "so it has to open its verification link before it can sign in."
         )
     )
     can_sign_in: bool = Field(

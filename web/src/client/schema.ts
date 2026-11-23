@@ -15595,13 +15595,18 @@ export interface components {
             expires_at: string;
             /**
              * Needs Password
-             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.
+             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, when a password it chose at signup is waiting on verification, and when another organization has it as a member or invitee, since this link may not choose a password for it then. can_sign_in and verification_pending tell the three apart. Accept refuses a password whenever this is false.
              */
             needs_password: boolean;
             /** Organization Name */
             organization_name: string;
             /** Role */
             role: string;
+            /**
+             * Verification Pending
+             * @description Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.
+             */
+            verification_pending: boolean;
             /**
              * Ways In
              * @description When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.
