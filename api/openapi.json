@@ -24680,6 +24680,26 @@
         "title": "ResponsesRequest",
         "type": "object"
       },
+      "RotateMasterKeyRequest": {
+        "description": "The proof a session-authenticated master-key rotation has to supply.\n\nOnly read when the caller authenticated with the dashboard session cookie. A request\ncarrying the master key is the deployment credential already, so it needs no further proof.",
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's current password. Required for a session-authenticated rotation.",
+            "title": "Current Password"
+          }
+        },
+        "title": "RotateMasterKeyRequest",
+        "type": "object"
+      },
       "RotateMasterKeyResponse": {
         "description": "A newly generated dashboard master key, returned once.",
         "properties": {
@@ -58236,6 +58256,23 @@
       "post": {
         "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",
         "operationId": "settings-rotate_master_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RotateMasterKeyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -58246,6 +58283,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
