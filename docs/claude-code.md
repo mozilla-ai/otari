@@ -117,7 +117,9 @@ catalog writes its version `5-5` or `5.5`, so no alias is needed. An alias of th
 
 Otari can also serve Claude Code from non-Anthropic models. Keep that setup in a
 settings file of its own, such as `~/.claude/otari.json`, so a plain `claude`
-keeps yours:
+keeps yours, in a shell without the variables exported
+[above](#route-claude-code-through-otari) (`unset` them first). Use your
+region's or your gateway's base URL; see [Base URL](api-reference.md#base-url).
 
 ```json
 {
@@ -138,11 +140,11 @@ keeps yours:
 }
 ```
 
-Then start Claude Code with it, the key still in the shell:
+Then start Claude Code with it, the key set for that command only, so a later
+plain `claude` does not send it to Anthropic:
 
 ```bash
-export ANTHROPIC_AUTH_TOKEN="<your-otari-key>"
-claude --settings ~/.claude/otari.json
+ANTHROPIC_AUTH_TOKEN="<your-otari-key>" claude --settings ~/.claude/otari.json
 ```
 
 - The Opus, Sonnet and Haiku variables name the models that background calls
