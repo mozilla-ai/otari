@@ -104,7 +104,7 @@ The bootstrap operator is the account the master key acts as (see
 someone else:
 
 1. Make sure their account is active, has a password and an email address it
-   verified by email (not one only vouched for by a passed-on link), and is not
+   verified by email (not one an organization supplied through a passed-on link), and is not
    blocked.
 2. On **Accounts**, choose **Make operator** from the menu on their row if they
    are not an operator yet.
@@ -260,4 +260,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/v0.54.0/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/v0.55.0/web/README.md).

@@ -115,8 +115,51 @@ Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
 name as the model's [catalog id](https://docs.otari.ai/reference/gateway/models#catalog-spellings), whether the
 catalog writes its version `5-5` or `5.5`, so no alias is needed. An alias of the same name wins, which is how to send it elsewhere.
 
-Otari can also serve Claude Code's requests from non-Anthropic models: set
-Claude Code's default Opus, Sonnet and Haiku model variables to them.
+Otari can also serve Claude Code from non-Anthropic models. Keep that setup in a
+settings file of its own, such as `~/.claude/otari.json`, so a plain `claude`
+keeps yours, in a shell without the variables exported
+[above](#route-claude-code-through-otari) (`unset` them first). Use your
+region's or your gateway's base URL; see [Base URL](https://docs.otari.ai/reference#base-url).
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.otari.ai/api",
+    "ANTHROPIC_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "z-ai/glm-5.3"
+  },
+  "modelPicker": {
+    "replaceBuiltInOptions": true,
+    "options": [
+      { "model": "z-ai/glm-5.3", "label": "GLM 5.3" },
+      { "model": "moonshotai/kimi-k3.1-pro", "label": "Kimi K3.1 Pro" }
+    ]
+  }
+}
+```
+
+Then start Claude Code with it, the key set for that command only, so a later
+plain `claude` does not send it to Anthropic:
+
+```bash
+ANTHROPIC_AUTH_TOKEN="<your-otari-key>" claude --settings ~/.claude/otari.json
+```
+
+- The Opus, Sonnet and Haiku variables name the models that background calls
+  and subagents get when they ask for those tiers.
+- `modelPicker` lists models in `/model` by the labels you give them.
+  `replaceBuiltInOptions` hides Opus, Sonnet and Haiku, which would otherwise
+  name whichever model they point at. It needs Claude Code 2.1.242 or later,
+  which reads it from user or managed settings or `--settings`, never from a
+  project.
+- Claude Code cannot list Otari's models itself: its gateway model discovery
+  keeps only ids that contain `claude` or `anthropic`. Add a model to
+  `modelPicker`, or start a session on it with `--model <id>`.
+- Picking a model with Enter in `/model`, or with `/model <id>`, saves it as
+  your Claude Code default, which a plain `claude` then sends to Anthropic.
+  Press `s` in the picker to keep the pick to the session.
 
 A non-Claude model may lose Anthropic-specific behavior such as extended
 thinking, prompt caching or tool semantics, and Anthropic's server-side context
@@ -157,7 +200,7 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/v0.54.0/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/v0.55.0/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would

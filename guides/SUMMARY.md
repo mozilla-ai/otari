@@ -36,6 +36,7 @@
 * [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 * [Create a multi-provider routing](create-a-multi-provider-routing.md)
 * [Configure guardrails](configure-guardrails.md)
+* [Host your own guardrail](host-your-own-guardrail.md)
 * [Track spend per end user](end-users.md)
 
 ## Organize
