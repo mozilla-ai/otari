@@ -120,25 +120,29 @@ class OrgProviderKeyPublic(SQLModel):
 
     @classmethod
     def from_row(
-        cls, key: OrgProviderKey, *, usable: bool, offered_count: int = 0, serving_count: int = 0
+        cls,
+        key: OrgProviderKey,
+        *,
+        client_args: dict[str, Any] | None,
+        usable: bool,
+        offered_count: int = 0,
+        serving_count: int = 0,
     ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
 
-        ``usable`` is passed in rather than derived here: answering it means
-        decrypting, which belongs to the service layer that owns the secret box.
-        Required rather than defaulted so a caller cannot report a key as working
+        ``client_args`` and ``usable`` are both passed in rather than derived
+        here: answering either means decrypting, which belongs to the service
+        layer that owns the secret box. Both are required rather than defaulted
+        so a caller cannot report a key as working, or as carrying no settings,
         without having asked. The two counts come from the offered-models table,
         and default to a key that offers nothing, which is the one a row has
         before its first refresh.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
-        ``region_name``, other client kwargs), and a credential-shaped field
-        placed there is never echoed back either: ``redact_secret_like_values``
-        masks it the same way ``encrypted_api_key`` itself already stays off
-        the wire (only ``last4`` comes back). That masking is the whole
-        protection the field gets, and it is enough because it holds for every
-        reader: this surface has one audience, the organization owners and
-        admins each of its routes is gated on.
+        ``region_name``, other client kwargs), and a credential-shaped entry in
+        it is never echoed back: ``redact_secret_like_values`` masks it the same
+        way ``encrypted_api_key`` itself stays off the wire, with only ``last4``
+        coming back.
         """
         return cls(
             id=key.id,
@@ -147,7 +151,7 @@ class OrgProviderKeyPublic(SQLModel):
             name=key.name,
             slug=key.slug,
             api_base=key.api_base,
-            client_args=redact_secret_like_values(key.client_args),
+            client_args=redact_secret_like_values(client_args),
             last4=key.last4,
             is_org_default=key.is_org_default,
             zero_data_retention=key.zero_data_retention,
@@ -372,8 +376,13 @@ class ProviderEndpointPublic(SQLModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: ProviderEndpoint) -> ProviderEndpointPublic:
-        """Read one row for the API, masking credential-shaped ``default_params`` entries."""
+    def from_row(cls, row: ProviderEndpoint, *, default_params: dict[str, Any] | None) -> ProviderEndpointPublic:
+        """Read one row for the API, masking credential-shaped ``default_params`` entries.
+
+        ``default_params`` is passed in rather than read off the row: it is held
+        encrypted, and decrypting belongs to the service layer that owns the
+        secret box.
+        """
         return cls(
             id=row.id,
             workspace_id=row.workspace_id,
@@ -382,7 +391,7 @@ class ProviderEndpointPublic(SQLModel):
             provider=row.provider,
             api_base=row.api_base,
             last4=row.last4,
-            default_params=redact_secret_like_values(row.default_params),
+            default_params=redact_secret_like_values(default_params),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

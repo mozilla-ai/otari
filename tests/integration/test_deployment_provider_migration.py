@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.providers import HostedProvider, ProviderCredential
 from gateway.services.model_discovery_service import ProviderDiscovery
-from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
+from gateway.services.secret_box import decrypt_secret, encrypt_mapping, encrypt_secret, generate_secret_key
 
 from .conftest import shared_test_config
 
@@ -65,7 +65,7 @@ def stored(db_session_factory: Callable[[], Session]) -> Callable[..., None]:
                     instance=instance,
                     encrypted_api_key=encrypt_secret(api_key) if api_key is not None else None,
                     last4=api_key[-4:] if api_key is not None else None,
-                    client_args=fields.pop("client_args", None) or {},
+                    encrypted_client_args=encrypt_mapping(fields.pop("client_args", None) or None),
                     updated_at=datetime.now(UTC),
                     **fields,
                 )

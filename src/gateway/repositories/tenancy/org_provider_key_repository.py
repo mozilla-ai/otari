@@ -239,7 +239,7 @@ class OrgProviderKeyRepository(
         encrypted_api_key: str | None,
         last4: str | None,
         api_base: str | None,
-        client_args: dict[str, object] | None,
+        encrypted_client_args: str | None,
         zero_data_retention: bool = False,
         slug: str | None = None,
     ) -> OrgProviderKey:
@@ -251,7 +251,7 @@ class OrgProviderKeyRepository(
             encrypted_api_key=encrypted_api_key,
             last4=last4,
             api_base=api_base,
-            client_args=client_args,
+            encrypted_client_args=encrypted_client_args,
             zero_data_retention=zero_data_retention,
         )
         self.db.add(key)
@@ -309,7 +309,7 @@ class OrgProviderKeyRepository(
         await self.db.execute(
             update(OrgProviderKey)
             .where(col(OrgProviderKey.organization_id).in_(list(organization_ids)))
-            .values(encrypted_api_key=None, last4=None, client_args=None)
+            .values(encrypted_api_key=None, last4=None, encrypted_client_args=None)
             .execution_options(synchronize_session=False)
         )
 

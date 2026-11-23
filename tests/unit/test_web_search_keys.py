@@ -29,7 +29,7 @@ from gateway.models.tools import (
     WorkspaceWebSearchKeyOverride,
 )
 from gateway.services import search_backend
-from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.services.secret_box import encrypt_mapping, encrypt_secret, generate_secret_key
 from gateway.services.tools import (
     SearchQuery,
     _web_search_keys,
@@ -157,7 +157,7 @@ def test_a_fetch_key_is_a_fetch_credential_with_its_endpoint_and_options(monkeyp
     key = _key("pages", provider="tabstack", kind="fetch")
     key.encrypted_api_key = encrypt_secret("tbs-own")
     key.api_base = "https://tabstack.example/v1"
-    key.options = {"effort": "standard"}
+    key.encrypted_options = encrypt_mapping({"effort": "standard"})
 
     assert _web_search_keys.key_credential(key) == WebFetchCredential(
         provider="tabstack",

@@ -208,7 +208,7 @@ async def _own_key(db: AsyncSession, organization: Organization, provider: str) 
         encrypted_api_key=None,
         last4=None,
         api_base=None,
-        client_args=None,
+        encrypted_client_args=None,
     )
     await db.commit()
 

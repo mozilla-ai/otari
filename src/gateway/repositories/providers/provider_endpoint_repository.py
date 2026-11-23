@@ -93,13 +93,13 @@ class ProviderEndpointRepository(
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing the API key of every endpoint in these workspaces."""
+        """Stage clearing the API key and default request fields of every endpoint in these workspaces."""
         if not workspace_ids:
             return
         await self.db.execute(
             update(ProviderEndpoint)
             .where(ProviderEndpoint.workspace_id.in_(list(workspace_ids)))
-            .values(encrypted_api_key=None, last4=None)
+            .values(encrypted_api_key=None, last4=None, encrypted_default_params=None)
             .execution_options(synchronize_session=False)
         )
 

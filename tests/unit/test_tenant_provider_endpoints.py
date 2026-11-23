@@ -16,6 +16,7 @@ from gateway.models.provider_keys import OrgProviderKey
 from gateway.services import provider_kwargs
 from gateway.services.providers import owned_endpoint_sdk_client
 from gateway.services.providers._owned_endpoint_network import OwnedEndpointTransport
+from gateway.services.secret_box import encrypt_mapping, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.web_retrieval_network import PinnedTransportError, SystemAddressResolver
 
@@ -95,13 +96,20 @@ async def test_the_pinned_client_refuses_an_address_a_name_moved_to(monkeypatch:
         await OwnedEndpointTransport().handle_async_request(httpx.Request("POST", "https://proxy.example/v1/chat"))
 
 
-def _row(provider: str, **fields: Any) -> OrgProviderKey:
+def _row(provider: str, *, client_args: dict[str, Any] | None = None, **fields: Any) -> OrgProviderKey:
+    """A stored key, with its client extras sealed as the database holds them."""
     return OrgProviderKey(
-        organization_id=uuid.uuid4(), provider=provider, name="k", created_at=datetime.now(UTC), **fields
+        organization_id=uuid.uuid4(),
+        provider=provider,
+        name="k",
+        created_at=datetime.now(UTC),
+        encrypted_client_args=encrypt_mapping(client_args),
+        **fields,
     )
 
 
-def test_a_stored_key_loses_the_client_args_its_provider_may_not_set() -> None:
+def test_a_stored_key_loses_the_client_args_its_provider_may_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     row = _row(
         "openai",
         client_args={"base_url": "http://10.0.0.1", "default_headers": {"X": "1"}, "organization": "org-1"},
@@ -118,7 +126,8 @@ def test_a_stored_key_on_a_provider_that_cannot_be_pinned_is_not_served_with_its
     assert store.key_is_usable(row) is False
 
 
-def test_a_stored_bedrock_key_keeps_its_credential_fields() -> None:
+def test_a_stored_bedrock_key_keeps_its_credential_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     args = {"region_name": "us-east-1", "aws_access_key_id": "AKIA", "aws_secret_access_key": "s"}
 
     assert store._row_to_entry(_row("bedrock", client_args={**args, "endpoint_url": "http://10.0.0.1"})) == {

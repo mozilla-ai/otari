@@ -68,6 +68,21 @@ class OrgProviderKeyClientArgsRefusedError(TenancyValidationError):
         )
 
 
+class OrgProviderKeyClientArgsUnreadableError(TenancyValidationError):
+    """A masked client argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the admin enters the value in full, which is what a
+    rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked client argument keeps the stored value, and there is none that can be read back. "
+            "Enter the client arguments in full."
+        )
+
+
 class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     """A new ``api_base`` on a key that holds a credential, sent without the credential.
 
@@ -498,6 +513,7 @@ __all__ = [
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",
     "OrgProviderKeyClientArgsRefusedError",
+    "OrgProviderKeyClientArgsUnreadableError",
     "OrgProviderKeyDisabledForWorkspaceError",
     "OrgProviderKeyNameRequiredError",
     "OrgProviderKeyNotArchivedError",

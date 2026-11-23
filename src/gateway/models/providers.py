@@ -20,7 +20,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
-from gateway.models.secret_fields import redact_secret_like_values
 
 
 class ModelAlias(Base):
@@ -109,32 +108,16 @@ class ProviderCredential(Base):
     api_base: Mapped[str | None] = mapped_column()
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column()
-    client_args: Mapped[dict[str, Any]] = mapped_column("client_args", JSON, default=dict)
+    # A Bedrock instance keeps its ``aws_secret_access_key`` here, so the SDK
+    # client extras are as much a credential as ``encrypted_api_key`` is and are
+    # held the same way.
+    encrypted_client_args: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-
-    def to_public_dict(self) -> dict[str, Any]:
-        """Serialize for the API. Never includes the secret, only ``last4``.
-
-        ``client_args`` is masked by key name the same way
-        ``OrgProviderKey.to_public`` masks its own: a Bedrock instance
-        keeps its ``aws_secret_access_key`` there, so the field this table holds
-        in clear is as much a credential as ``encrypted_api_key`` is, and it must
-        not round-trip over the API either.
-        """
-        return {
-            "instance": self.instance,
-            "provider_type": self.provider_type,
-            "api_base": self.api_base,
-            "last4": self.last4,
-            "client_args": redact_secret_like_values(self.client_args) or {},
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
 
 
 class ProviderEndpoint(Base):
@@ -184,8 +167,10 @@ class ProviderEndpoint(Base):
     api_base: Mapped[str] = mapped_column(String(1024))
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column(String(8))
-    # Fields sent in every request body beneath the caller's own.
-    default_params: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # Fields sent in every request body beneath the caller's own. A model server
+    # behind an edge can want a credential among them, so they are held encrypted
+    # the way the key above is.
+    encrypted_default_params: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

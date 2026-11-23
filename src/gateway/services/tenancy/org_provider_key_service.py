@@ -55,6 +55,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
     OrgProviderKeyClientArgsRefusedError,
+    OrgProviderKeyClientArgsUnreadableError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
     OrgProviderKeyInvalidSlugError,
@@ -73,7 +74,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
+from gateway.models.secret_fields import carries_redaction, restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -97,7 +98,9 @@ from gateway.schemas.providers import (
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
 )
 from gateway.services.tenancy import authorization
@@ -140,6 +143,28 @@ class UnservableEndpointError(ValueError):
     """A stored key's ``api_base`` is one its provider's client cannot be pinned to."""
 
 
+def client_args_of(key: OrgProviderKey) -> dict[str, Any] | None:
+    """The key's stored SDK client extras, or None when it holds none.
+
+    Raises the errors :func:`decrypt_mapping` does, so a caller that reports on
+    a key rather than serving one decides what an unreadable row means.
+    """
+    return decrypt_mapping(key.encrypted_client_args)
+
+
+def _readable_client_args(key: OrgProviderKey) -> dict[str, Any] | None:
+    """The key's stored client extras, or None when no configured key reads them.
+
+    Reporting on a key is not serving one: a listing names a row whose secret
+    has moved rather than failing, so a decryption that cannot be done reads as
+    no extras at all.
+    """
+    try:
+        return client_args_of(key)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return None
+
+
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
     """Build a config.providers-shaped overlay entry from a stored key.
 
@@ -156,7 +181,7 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
         if key.provider not in TENANT_ENDPOINT_PROVIDERS:
             raise UnservableEndpointError(key.provider)
         entry["api_base"] = key.api_base
-    if client_args := tenant_client_args(key.provider, key.client_args):
+    if client_args := tenant_client_args(key.provider, client_args_of(key)):
         entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
@@ -407,6 +432,14 @@ def _encrypt_api_key(api_key: str | None) -> tuple[str | None, str | None]:
         raise SecretBoxUnavailableTenancyError from None
 
 
+def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
+    """Encrypt a key's client extras for storage. Nothing to store stays None."""
+    try:
+        return encrypt_mapping(client_args or None)
+    except SecretBoxUnavailableError:
+        raise SecretBoxUnavailableTenancyError from None
+
+
 def _validated_provider(provider: str) -> str:
     """Normalize and validate a provider name against any-llm's known implementations.
 
@@ -553,6 +586,7 @@ class OrgProviderKeyService:
         return [
             OrgProviderKeyPublic.from_row(
                 row,
+                client_args=_readable_client_args(row),
                 usable=key_is_usable(row),
                 offered_count=counts.get(row.id, (0, 0))[0],
                 serving_count=counts.get(row.id, (0, 0))[1],
@@ -597,7 +631,7 @@ class OrgProviderKeyService:
                 encrypted_api_key=encrypted_api_key,
                 last4=last4,
                 api_base=request.api_base,
-                client_args=request.client_args,
+                encrypted_client_args=_encrypt_client_args(request.client_args),
                 zero_data_retention=request.zero_data_retention,
             )
             await self.db.commit()
@@ -689,7 +723,7 @@ class OrgProviderKeyService:
             await _gate_api_base(key.provider, update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
                 stored_args_follow = stored_secrets_survive(
-                    key.client_args, update_data.get("client_args"), sent="client_args" in update_data
+                    _readable_client_args(key), update_data.get("client_args"), sent="client_args" in update_data
                 )
                 if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
                     raise OrgProviderKeyCredentialRequiredError
@@ -697,8 +731,16 @@ class OrgProviderKeyService:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was
             # never shown; those keep their stored value.
-            update_data["client_args"] = restore_redacted_values(update_data["client_args"], key.client_args)
-            _check_client_args(key.provider, update_data["client_args"])
+            stored_client_args = _readable_client_args(key)
+            if stored_client_args is None and (
+                key.encrypted_client_args is not None or carries_redaction(update_data["client_args"])
+            ):
+                # Either the mask would be stored as the value, or a write would
+                # drop ciphertext that the right key could still open.
+                raise OrgProviderKeyClientArgsUnreadableError
+            client_args = restore_redacted_values(update_data.pop("client_args"), stored_client_args)
+            _check_client_args(key.provider, client_args)
+            update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
         if "api_key" in update_data:
             encrypted_api_key, last4 = _encrypt_api_key(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key

@@ -6,7 +6,9 @@ from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyErro
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
     generate_secret_key,
     get_secret_box,
@@ -20,6 +22,28 @@ def test_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     token = encrypt_secret("sk-super-secret")
     assert token != "sk-super-secret"
     assert decrypt_secret(token) == "sk-super-secret"
+
+
+def test_a_mapping_round_trips(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    values = {"region_name": "us-east-2", "aws_secret_access_key": "sk-secret", "nested": {"token": "t"}}
+    token = encrypt_mapping(values)
+    assert token is not None
+    assert "sk-secret" not in token
+    assert decrypt_mapping(token) == values
+
+
+def test_no_mapping_stays_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert encrypt_mapping(None) is None
+    assert decrypt_mapping(None) is None
+
+
+def test_an_empty_mapping_is_not_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    token = encrypt_mapping({})
+    assert token is not None
+    assert decrypt_mapping(token) == {}
 
 
 def test_the_box_is_built_once_per_key(monkeypatch: pytest.MonkeyPatch) -> None:

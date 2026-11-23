@@ -458,6 +458,21 @@ class WebSearchKeyIncompleteError(TenancyValidationError):
         super().__init__(f"A key on {provider} needs {missing}")
 
 
+class WebSearchKeyOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the admin enters the options in full, which is what a
+    rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
+
+
 class WebSearchKeySettingRefusedError(TenancyValidationError):
     """A key's ``api_base`` or ``options`` its provider, or this deployment, does not take."""
 
@@ -518,6 +533,21 @@ class WebSearchKeyDefaultConflictError(TenancyConflictError):
 class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
+
+
+class SearchToolOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    backend. Refused so the operator enters the options in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
 
 
 class SearchToolRefusedError(TenancyValidationError):
@@ -731,6 +761,7 @@ __all__ = [
     "SearchToolKeyUnstorableError",
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
+    "SearchToolOptionsUnreadableError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
     "StoredSearchToolNotFoundError",
