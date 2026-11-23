@@ -132,7 +132,7 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     endpoint_auth_header_name: str | None = Field(default=None, max_length=64)
     encrypted_endpoint_auth_secret: str | None = Field(default=None)
     endpoint_auth_last4: str | None = Field(default=None, max_length=8)
-    endpoint_auth_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={"index": True})
+    endpoint_auth_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # _timestamp_field, not a bare Field(default=None): PostgreSQL renders a
     # plain ``datetime`` column as TIMESTAMP WITHOUT TIME ZONE, which asyncpg
     # then refuses a timezone-aware value against (the same trap

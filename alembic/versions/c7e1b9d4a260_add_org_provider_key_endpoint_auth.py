@@ -20,7 +20,6 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _TABLE = "org_provider_keys"
-_EXPIRY_INDEX = "ix_org_provider_keys_endpoint_auth_expires_at"
 
 
 def upgrade() -> None:
@@ -30,12 +29,10 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("encrypted_endpoint_auth_secret", sa.String(), nullable=True))
         batch_op.add_column(sa.Column("endpoint_auth_last4", sa.String(length=8), nullable=True))
         batch_op.add_column(sa.Column("endpoint_auth_expires_at", sa.DateTime(timezone=True), nullable=True))
-        batch_op.create_index(_EXPIRY_INDEX, ["endpoint_auth_expires_at"])
 
 
 def downgrade() -> None:
     with op.batch_alter_table(_TABLE) as batch_op:
-        batch_op.drop_index(_EXPIRY_INDEX)
         batch_op.drop_column("endpoint_auth_expires_at")
         batch_op.drop_column("endpoint_auth_last4")
         batch_op.drop_column("encrypted_endpoint_auth_secret")
