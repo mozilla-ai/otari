@@ -10,8 +10,10 @@ import httpx2
 import pytest
 from any_llm import AnyLLM, LLMProvider
 
+from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles, _AnyLlmFileSession
 from gateway.core.config import GatewayConfig
 from gateway.core.provider_params import TENANT_ENDPOINT_HTTPX2_PROVIDERS, TENANT_ENDPOINT_PROVIDERS
+from gateway.exceptions.files_exceptions import ProviderFileUnavailableError
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.services import provider_kwargs
 from gateway.services.providers import owned_endpoint_sdk_client
@@ -19,6 +21,8 @@ from gateway.services.providers._owned_endpoint_network import OwnedEndpointTran
 from gateway.services.secret_box import encrypt_mapping, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.web_retrieval_network import PinnedTransportError, SystemAddressResolver
+from gateway.types.provider_account import ResolvedCredential
+from gateway.types.provider_file import ProviderFile
 
 WORKSPACE_ID = uuid.uuid4()
 
@@ -38,12 +42,45 @@ async def test_every_sdk_client_of_a_pinnable_provider_uses_the_pinned_client(pr
     pinned = owned_endpoint_sdk_client(LLMProvider(provider))
     expected = httpx2.AsyncClient if provider in TENANT_ENDPOINT_HTTPX2_PROVIDERS else httpx.AsyncClient
     assert isinstance(pinned, expected)
+    # Refusing the redirect is the point of pinning: a download that answers with
+    # one would otherwise reach an address no check was run against.
+    assert pinned.follow_redirects is False
 
     llm = AnyLLM.create(provider, api_key="k", api_base="https://203.0.114.1/v1", http_client=pinned)
 
     clients = _sdk_clients(llm)
     assert clients, f"{provider} holds no SDK client this test can see"
     assert all(client is pinned for client in clients)
+
+
+@pytest.mark.asyncio
+async def test_a_download_an_endpoint_redirects_is_refused_rather_than_followed() -> None:
+    """The redirect is what reaches an address no check was run against, so the read fails instead."""
+    followed: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        followed.append(str(request.url))
+        return httpx.Response(302, headers={"location": "http://169.254.170.2/v2/metadata"})
+
+    # follow_redirects=False is what the pinned client sets; the mock transport
+    # stands in for the endpoint so no address is dialed.
+    pinned = httpx.AsyncClient(transport=httpx.MockTransport(answer), follow_redirects=False)
+    session = AnyLlmProviderFiles().open_session(
+        provider=LLMProvider.OPENAI,
+        instance="openai",
+        credential=ResolvedCredential(
+            api_key="sk-1", api_base="https://proxy.example/v1", client_args={"http_client": pinned}
+        ),
+    )
+    file = ProviderFile(file_id="cfile_1", filename="out.txt", container_id="cntr_1")
+
+    with pytest.raises(ProviderFileUnavailableError):
+        async for _ in session.read(file, budget_bytes=1024):
+            pass  # pragma: no cover - the first read raises
+    await session.aclose()
+
+    assert followed == ["https://proxy.example/v1/containers/cntr_1/files/cfile_1/content"]
+    assert not pinned.is_closed
 
 
 def _entry(**entry: Any) -> None:
@@ -65,6 +102,25 @@ async def test_an_organization_key_with_an_api_base_dials_through_the_pinned_cli
 
     assert kwargs["client_args"]["http_client"] is owned_endpoint_sdk_client(LLMProvider.OPENAI)
     assert kwargs["client_args"]["timeout"] == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.ANTHROPIC])
+async def test_a_file_session_on_an_organization_key_dials_through_the_pinned_client(provider: LLMProvider) -> None:
+    store._org_cache[(WORKSPACE_ID, provider.value)] = {"api_base": "https://proxy.example/v1", "api_key": "sk-1"}
+    kwargs = provider_kwargs.get_provider_kwargs(GatewayConfig(), provider, workspace_id=WORKSPACE_ID)
+    pinned = owned_endpoint_sdk_client(provider)
+
+    session = AnyLlmProviderFiles().open_session(
+        provider=provider, instance=provider.value, credential=provider_kwargs.effective_credential(provider, kwargs)
+    )
+    assert isinstance(session, _AnyLlmFileSession)
+    clients = _sdk_clients(session._llm)
+    await session.aclose()
+
+    assert clients
+    assert all(client is pinned for client in clients)
+    assert not pinned.is_closed
 
 
 @pytest.mark.asyncio
