@@ -115,6 +115,50 @@ def test_an_alias_target_a_request_tries_first_is_the_one_described(config: Gate
     assert listed[0].pricing.input_price_per_million == 0.1
 
 
+def _limited(selector: str, input_price: float | None, context: int | None, output: int | None = None) -> ModelObject:
+    return _offering(selector, input_price).model_copy(update={"context_window": context, "max_output_tokens": output})
+
+
+def test_a_limit_the_first_offering_does_not_know_comes_from_the_others(config: GatewayConfig, no_index: None) -> None:
+    """A self-hosted engine reports its context length while a priced offering tried before it knows none."""
+    listed = models_by_identity(
+        config,
+        None,
+        [_limited(_FIREWORKS, 0.7, None), _limited(_NEBIUS, None, 262144), _limited("openai:gpt-4o", 2.5, None)],
+    )
+
+    row = next(row for row in listed if row.id == "z-ai/glm-5.3")
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.7
+    assert row.context_window == 262144
+    assert row.max_output_tokens is None
+    assert next(row for row in listed if row.id == "openai/gpt-4o").context_window is None
+
+
+def test_a_limit_the_first_offering_knows_is_kept(config: GatewayConfig, no_index: None) -> None:
+    listed = models_by_identity(
+        config, None, [_limited(_FIREWORKS, 0.7, 131072, 16384), _limited(_NEBIUS, None, 262144, 32768)]
+    )
+
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (131072, 16384)
+
+
+def test_a_filled_limit_is_the_smallest_the_others_report_and_never_exceeds_the_window(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """Whichever offering a fallback reaches can hold it, and no output limit is larger than the context."""
+    third = "together:zai-org/GLM-5.3"
+    config.providers["together"] = {"api_key": "x"}
+    listed = models_by_identity(
+        config,
+        None,
+        [_limited(_FIREWORKS, 0.7, 65536), _limited(_NEBIUS, None, 262144, 131072), _limited(third, None, 200000)],
+    )
+
+    assert [row.id for row in listed] == ["z-ai/glm-5.3"]
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (65536, 65536)
+
+
 def test_a_model_offered_only_by_alias_targets_is_left_to_the_alias(config: GatewayConfig, no_index: None) -> None:
     alias = ModelObject(id="fast", created=0, owned_by=ALIAS_OWNED_BY)
 

@@ -116,6 +116,49 @@ def test_a_server_built_on_vllm_reports_its_context_and_reasoning_under_its_own_
         assert model["supported_parameters"] == ["reasoning"]
 
 
+def test_the_context_a_vllm_server_reports_is_listed_when_another_offering_is_tried_first(postgres_url: str) -> None:
+    """A priced offering that knows no context ranks first; the listing still carries the engine's."""
+    config = _config(postgres_url)
+    config.providers = {
+        name: {"provider_type": "vllm", "api_base": f"http://{name}.example.com/v1", "models": ["Qwen/Qwen3-32B"]}
+        for name in ("gpu", "edge")
+    }
+    listing = {"id": "Qwen/Qwen3-32B", "object": "model", "created": 0}
+    by_server = {
+        "gpu": Model.model_validate({**listing, "owned_by": "vllm", "max_model_len": 262144}),
+        "edge": Model.model_validate({**listing, "owned_by": "edge"}),
+    }
+
+    async def _alist(*, api_base: str, **_: object) -> list[Model]:
+        return [by_server[api_base.removeprefix("http://").partition(".")[0]]]
+
+    get_model_cache().clear()
+    client_gen = build_test_client(config)
+    client = next(client_gen)
+    try:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", AsyncMock(side_effect=_alist)),
+        ):
+            priced = client.post(
+                f"{API_ROOT}/pricing",
+                json={
+                    "model_key": "edge:Qwen/Qwen3-32B",
+                    "input_price_per_million": 0.1,
+                    "output_price_per_million": 0.2,
+                },
+                headers=_MASTER,
+            )
+            assert priced.status_code == 200
+            (model,) = client.get(f"{API_ROOT}/models", headers=_MASTER).json()["data"]
+            single = client.get(f"{API_ROOT}/models/{model['id']}", headers=_MASTER).json()
+    finally:
+        client_gen.close()
+
+    assert model["pricing"]["input_price_per_million"] == 0.1
+    assert model["context_window"] == single["context_window"] == 262144
+
+
 # --------------------------------------------------------------------------- #
 # An organization's own key
 # --------------------------------------------------------------------------- #
