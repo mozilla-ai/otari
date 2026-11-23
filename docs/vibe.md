@@ -7,7 +7,9 @@ as a provider, including Otari.
 ## Quick start
 
 1. Create a key on the dashboard's **API keys** page.
-2. Add Otari as a provider, and a model on it, in `~/.vibe/config.toml`:
+2. Add Otari as a provider, and a model on it, in `~/.vibe/config.toml`.
+   `active_model` belongs above the file's first `[[...]]` table, and replaces
+   any `active_model` already there:
 
    ```toml
    active_model = "glm-5.3"
@@ -36,8 +38,9 @@ as a provider, including Otari.
 use `https://eu.api.otari.ai/api/v1`, and a gateway you run uses its URL plus
 `/api/v1`. See [Base URL](api-reference.md#base-url).
 
-A `.vibe/config.toml` in a project takes the place of `~/.vibe/config.toml`
-there, and `VIBE_HOME` moves the home one. Name the provider something other
+A `.vibe/config.toml` in a project you trust overrides the settings it sets,
+and the rest still come from `~/.vibe/config.toml`; `VIBE_HOME` moves the home
+one. Name the provider something other
 than `mistral`: a provider with a built-in one's name replaces it.
 
 ## Choosing a model

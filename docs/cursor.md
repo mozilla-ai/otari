@@ -7,8 +7,9 @@ OpenAI-compatible API, including Otari, through its OpenAI base URL override.
 
 1. Create a key on the dashboard's **API keys** page.
 2. In Cursor, open **Cursor Settings** > **Models**.
-3. Under **API Keys**, enter your Otari key as the **OpenAI API Key**, turn on
-   **Override OpenAI Base URL**, and set it to `https://api.otari.ai/api/v1`.
+3. Under **API Keys**, enter your Otari key as the **OpenAI API Key** and turn
+   on **Use OpenAI API Key**. Turn on **Override OpenAI Base URL**, set it to
+   `https://api.otari.ai/api/v1`, and choose **Save**.
 4. Under **Models**, choose **Add model**, enter `z-ai/glm-5.3`, and turn it
    on.
 5. Pick `z-ai/glm-5.3` in Chat or Agent.
