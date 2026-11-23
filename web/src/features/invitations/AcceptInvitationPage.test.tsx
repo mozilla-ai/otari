@@ -183,7 +183,11 @@ describe("AcceptInvitationPage", () => {
 
   it("says to verify first when the address signed up and has not verified yet", async () => {
     // Accepting never verifies: whoever signed up may not hold the mailbox.
-    mockApi({ verificationPending: true })
+    mockApi({
+      verificationPending: true,
+      canSignIn: false,
+      waysIn: ["password_reset"],
+    })
     const user = userEvent.setup()
     renderPage("/accept-invitation?token=abc123")
 
@@ -201,6 +205,9 @@ describe("AcceptInvitationPage", () => {
         name: "Didn't sign up? Set a password instead",
       }),
     ).toHaveAttribute("href", "/recover-password")
+    // One route to the reset page, not two. The sentence above already says
+    // that verifying comes first.
+    expect(screen.queryByRole("link", { name: "Choose a password" })).toBeNull()
   })
 
   it("sets a password for an address that has never signed in, in the same step", async () => {

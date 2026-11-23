@@ -196,6 +196,7 @@ export function AcceptInvitationPage() {
                 Go to sign in
               </Button>
               {accept.data.can_sign_in === false &&
+              !accept.data.verification_pending &&
               accept.data.ways_in?.includes("password_reset") ? (
                 <PublicAuthLink to="/recover-password">
                   Choose a password
