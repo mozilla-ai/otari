@@ -469,16 +469,15 @@ def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: Endp
     )
 
 
-def _endpoint_secret_survives(
-    stored: EndpointAuth | None, submitted: EndpointAuthRequest | None, *, sent: bool
-) -> bool:
+def _endpoint_secret_survives(held: bool, submitted: EndpointAuthRequest | None, *, sent: bool) -> bool:
     """Whether a key's stored endpoint credential would follow it to another base URL.
 
     A request that removes the credential, or supplies a new value for it,
     carries nothing across. One that leaves the field out, or sends it without a
-    value, keeps what is stored.
+    value, keeps what is stored. ``held`` is whether a value is stored at all,
+    which a row holds whether or not this build can read it.
     """
-    if stored is None:
+    if not held:
         return False
     if not sent:
         return True
@@ -823,7 +822,9 @@ class OrgProviderKeyService:
                     sent="client_args" in update_data,
                 )
                 endpoint_secret_follows = _endpoint_secret_survives(
-                    _stored_endpoint_auth(key), request.endpoint_auth, sent="endpoint_auth" in update_data
+                    key.encrypted_endpoint_auth_secret is not None,
+                    request.endpoint_auth,
+                    sent="endpoint_auth" in update_data,
                 )
                 following = _credentials_that_follow(
                     api_key=key.encrypted_api_key is not None and "api_key" not in update_data,
@@ -845,10 +846,15 @@ class OrgProviderKeyService:
             _check_client_args(key.provider, client_args)
             update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
         if "endpoint_auth" in update_data:
-            stored = _stored_endpoint_auth(key)
-            auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=stored)
-            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
             update_data.pop("endpoint_auth")
+            sent = request.endpoint_auth
+            # Read only what the write needs. A credential sent whole replaces
+            # what is held, and one being removed discards it, so neither is
+            # refused because this build cannot read what the row held.
+            keeps_stored_value = sent is not None and not sent.secret
+            stored = _stored_endpoint_auth(key) if keeps_stored_value else None
+            auth = _endpoint_auth_for_storage(sent, stored=stored)
+            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
             update_data.update(endpoint_auth_columns(auth))
         elif "api_base" in update_data:
             # Moving the address re-gates the credential already stored. A

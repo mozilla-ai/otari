@@ -29,7 +29,6 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
-    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
@@ -175,13 +174,10 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
         await update(api_base=None)
 
 
-async def test_moving_the_address_leaves_an_unreadable_endpoint_credential_alone(
-    async_db: AsyncSession,
-) -> None:
-    """An edit writes what it names, so a credential this build cannot read is refused and not cleared."""
-    organization = await _organization(async_db)
-    owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrgProviderKeyService(async_db)
+async def _key_with_unreadable_endpoint_auth(
+    async_db: AsyncSession, service: OrgProviderKeyService, owner: User
+) -> OrgProviderKeyPublic:
+    """A key whose stored method this build cannot read, as a later build then a rollback leaves it."""
     created = await service.create_key_for_user(
         user=owner,
         request=OrgProviderKeyCreateRequest(
@@ -198,12 +194,22 @@ async def test_moving_the_address_leaves_an_unreadable_endpoint_credential_alone
         ),
     )
     assert created.endpoint_auth is not None
-
     await async_db.execute(
         update(OrgProviderKey).where(col(OrgProviderKey.id) == created.id).values(endpoint_auth_method="mtls")
     )
+    return created
 
-    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+
+async def test_moving_the_address_asks_for_an_unreadable_endpoint_credential_again(
+    async_db: AsyncSession,
+) -> None:
+    """A value is stored whether or not this build can read it, so the refusal names resending it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    with pytest.raises(OrgProviderKeyCredentialRequiredError):
         await service.update_key_for_user(
             user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base="https://proxy/v2")
         )
@@ -212,6 +218,48 @@ async def test_moving_the_address_leaves_an_unreadable_endpoint_credential_alone
     assert row is not None
     assert row.encrypted_endpoint_auth_secret is not None
     assert row.endpoint_auth_header_name == "Fastly-Key"
+
+
+async def test_an_unreadable_endpoint_credential_can_be_removed(async_db: AsyncSession) -> None:
+    """Removing it reads nothing, so a row this build cannot read is not stuck carrying one."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    updated = await service.update_key_for_user(
+        user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(name="renamed", endpoint_auth=None)
+    )
+
+    assert (updated.name, updated.endpoint_auth) == ("renamed", None)
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.encrypted_endpoint_auth_secret is None
+    assert row.endpoint_auth_method is None
+
+
+async def test_an_unreadable_endpoint_credential_can_be_replaced_whole(async_db: AsyncSession) -> None:
+    """A credential sent with its own value keeps nothing, so replacing it reads nothing either."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    updated = await service.update_key_for_user(
+        user=owner,
+        key_id=created.id,
+        request=OrgProviderKeyUpdateRequest(
+            endpoint_auth=EndpointAuthRequest(
+                method=EndpointAuthMethod.STATIC_HEADER,
+                header_name="CF-Access-Client-Id",
+                secret="replaced-9f2a",
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+            )
+        ),
+    )
+
+    assert updated.endpoint_auth is not None
+    assert (updated.endpoint_auth.header_name, updated.endpoint_auth.last4) == ("CF-Access-Client-Id", "9f2a")
 
 
 async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(

@@ -346,23 +346,23 @@ def test_an_expiry_with_no_offset_is_refused_at_the_boundary() -> None:
 
 
 def test_a_stored_endpoint_secret_follows_a_key_the_request_leaves_alone() -> None:
-    assert store._endpoint_secret_survives(_whole(), None, sent=False) is True
+    assert store._endpoint_secret_survives(True, None, sent=False) is True
 
 
 def test_a_stored_endpoint_secret_does_not_follow_a_key_whose_credential_is_removed() -> None:
-    assert store._endpoint_secret_survives(_whole(), None, sent=True) is False
+    assert store._endpoint_secret_survives(True, None, sent=True) is False
 
 
 def test_a_stored_endpoint_secret_does_not_follow_a_key_given_a_new_value() -> None:
-    assert store._endpoint_secret_survives(_whole(), _sent(secret="edge-s3cret"), sent=True) is False
+    assert store._endpoint_secret_survives(True, _sent(secret="edge-s3cret"), sent=True) is False
 
 
 def test_a_stored_endpoint_secret_follows_a_form_resubmitted_without_the_value() -> None:
-    assert store._endpoint_secret_survives(_whole(), _sent(), sent=True) is True
+    assert store._endpoint_secret_survives(True, _sent(), sent=True) is True
 
 
 def test_a_key_holding_no_endpoint_secret_carries_nothing_to_another_address() -> None:
-    assert store._endpoint_secret_survives(None, None, sent=False) is False
+    assert store._endpoint_secret_survives(False, None, sent=False) is False
 
 
 def _expired() -> EndpointAuth:
