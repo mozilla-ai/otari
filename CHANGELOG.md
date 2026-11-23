@@ -4,6 +4,51 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.55.0](https://github.com/mozilla-ai/otari/releases/tag/v0.55.0) - 2026-11-23
+
+
+
+### Bug Fixes
+
+- **mail:** Decide a link's kind by whether the email reaches its recipient in [#3451](https://github.com/mozilla-ai/otari/pull/3451) by [@peteski22](https://github.com/peteski22) ([`908d7e0`](https://github.com/mozilla-ai/otari/commit/908d7e048f4cf7c2dcecee8a7023ac0d7dd81a97))
+- **dashboard:** Drop the byte ceiling from the password hint in [#3455](https://github.com/mozilla-ai/otari/pull/3455) by [@jigjigjig](https://github.com/jigjigjig) ([`a7e2e32`](https://github.com/mozilla-ai/otari/commit/a7e2e32ba4288afc6adb220ed0cde458b6f4eff2))
+- **routing:** Say why backups were not tried after a tool loop locks in by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e976d7d`](https://github.com/mozilla-ai/otari/commit/e976d7da07160bdf1ddacf9c38aed910003112bc))
+- **tools:** Report internal_error for a search or fetch that raised in [#3448](https://github.com/mozilla-ai/otari/pull/3448) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`ed451b4`](https://github.com/mozilla-ai/otari/commit/ed451b4ece18918994e68de2317a783f314e1027))
+- **routing:** Accept a catalog id as a stored policy target in [#3461](https://github.com/mozilla-ai/otari/pull/3461) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`7b2871d`](https://github.com/mozilla-ai/otari/commit/7b2871d82c7f904f857728ac3d6bfa9192528611))
+- **routing:** Give the reason when every candidate rejects alike by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f5b3c08`](https://github.com/mozilla-ai/otari/commit/f5b3c08d228a29d51af6cb181863fcc99085f6ef))
+- **architecture:** Read an import cycle from what each statement waits for in [#3475](https://github.com/mozilla-ai/otari/pull/3475) by [@peteski22](https://github.com/peteski22) ([`94f243e`](https://github.com/mozilla-ai/otari/commit/94f243e19b2d59b83abe9ba52389dc54042e863f))
+- **guardrails:** Report the service's http status as the unavailable reason by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`b37af1b`](https://github.com/mozilla-ai/otari/commit/b37af1bae31d933797e5e7d3306fc14d0ae617ea))
+- **guardrails:** Refuse a guardrail with no service as a 424 by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a7d581d`](https://github.com/mozilla-ai/otari/commit/a7d581d952ad9cd343fe7aeed138b1d20a8de5aa))
+- **responses:** Serve a model the vendor refuses natively as chat by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`ab8c1a8`](https://github.com/mozilla-ai/otari/commit/ab8c1a818d1a373613870ea1022668d7cba1a5bd))
+- **routing:** Say which candidates failed when the last one timed out in [#3471](https://github.com/mozilla-ai/otari/pull/3471) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`604c7c3`](https://github.com/mozilla-ai/otari/commit/604c7c36963482b1fc1f36bf095dc36853b8305f))
+
+
+### Features
+
+- **catalog:** List temperature in supported_parameters in [#3466](https://github.com/mozilla-ai/otari/pull/3466) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0e9f505`](https://github.com/mozilla-ai/otari/commit/0e9f5056d312b183b966a321d8a0077a2be6e532))
+- **guardrails:** Give the guardrail 502 a stable error code by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`9e727cc`](https://github.com/mozilla-ai/otari/commit/9e727cc2d0ede4b6f3a6933259c4e8d57a3d65fc))
+- **guardrails:** Keep the categories a guardrail says fired by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`ba9ee54`](https://github.com/mozilla-ai/otari/commit/ba9ee54c003687a91efec743ba99db3d7a5fb71f))
+- **traces:** Record what a guardrail says fired by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`b6abe6b`](https://github.com/mozilla-ai/otari/commit/b6abe6baa894a5f47447457503f49431df792ace))
+- **guardrails:** Say which categories fired when a guardrail blocks by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`603a88c`](https://github.com/mozilla-ai/otari/commit/603a88c2d931c93df07632779904a7ba1d107cab))
+
+
+### Maintenance
+
+- **BREAKING:** **identity:** Record that an address was proved, not that it was not in [#3482](https://github.com/mozilla-ai/otari/pull/3482) by [@peteski22](https://github.com/peteski22) ([`449813d`](https://github.com/mozilla-ai/otari/commit/449813dd54439fd0e4387e9b9d3f186c35cd876a))
+
+
+### Other
+
+- Update zdr.md by [@ssaantunes](https://github.com/ssaantunes) ([`a8d2960`](https://github.com/mozilla-ai/otari/commit/a8d2960dff14b31272c34007f761b8d698e2062d))
+- Update SUMMARY.md by [@ssaantunes](https://github.com/ssaantunes) ([`8970745`](https://github.com/mozilla-ai/otari/commit/897074587c812cb8c9f2414432e70747f458269f))
+
+
+### Performance
+
+- **hook:** Parse transcript lines with one reused json decoder in [#3472](https://github.com/mozilla-ai/otari/pull/3472) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3d441cc`](https://github.com/mozilla-ai/otari/commit/3d441cc5172ec0f52a086c7c0e91dbe7e32edee7))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.54.0...v0.55.0
 ## [0.54.0](https://github.com/mozilla-ai/otari/releases/tag/v0.54.0) - 2026-11-19
 
 
