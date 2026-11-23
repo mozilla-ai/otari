@@ -92,6 +92,10 @@ def refused_header_name_reason(name: str) -> str | None:
     return None
 
 
+class UnreadableEndpointAuthError(ValueError):
+    """A row holds endpoint credential columns that do not assemble into a credential."""
+
+
 @dataclass(frozen=True)
 class EndpointAuth:
     """One endpoint's second credential as it is stored.
@@ -119,12 +123,15 @@ class EndpointAuth:
     ) -> "EndpointAuth | None":
         """The credential these columns hold, or None where they hold none.
 
-        A write names every column, so a row holding only some of them holds
-        nothing that can be sent. A row naming a method this build does not
-        know holds nothing it can produce. Either reads as no credential, which
-        leaves the endpoint to refuse the request rather than half a credential
-        to be offered to it.
+        Raises:
+            UnreadableEndpointAuthError: The columns name a credential this
+                build cannot assemble. Holding one that cannot be read is a
+                different state from holding none, so it is reported rather
+                than answered as an absent credential.
         """
+        columns = (method, header_name, encrypted_secret, last4, expires_at)
+        if all(column is None for column in columns):
+            return None
         if (
             method is None
             or method not in EndpointAuthMethod
@@ -133,7 +140,7 @@ class EndpointAuth:
             or last4 is None
             or expires_at is None
         ):
-            return None
+            raise UnreadableEndpointAuthError("an endpoint credential this build cannot read")
         return cls(
             method=EndpointAuthMethod(method),
             header_name=header_name,

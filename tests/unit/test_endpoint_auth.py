@@ -9,6 +9,7 @@ from gateway.types.endpoint_auth import (
     EndpointAuth,
     EndpointAuthMethod,
     EndpointAuthState,
+    UnreadableEndpointAuthError,
     refused_header_name_reason,
 )
 
@@ -48,8 +49,10 @@ def test_a_row_holding_every_column_carries_the_credential_they_name() -> None:
 
 
 @pytest.mark.parametrize("missing", ["method", "header_name", "encrypted_secret", "last4", "expires_at"])
-def test_a_row_holding_only_some_of_the_columns_carries_no_credential(missing: str) -> None:
-    assert EndpointAuth.from_columns(**_columns(**{missing: None})) is None  # type: ignore[arg-type]
+def test_a_row_holding_only_some_of_the_columns_cannot_be_read(missing: str) -> None:
+    """Holding part of a credential is not holding none, so it is reported rather than read as absent."""
+    with pytest.raises(UnreadableEndpointAuthError):
+        EndpointAuth.from_columns(**_columns(**{missing: None}))  # type: ignore[arg-type]
 
 
 def test_a_row_holding_none_of_the_columns_carries_no_credential() -> None:
@@ -60,9 +63,10 @@ def test_an_endpoint_credential_is_refused_on_the_providers_own_endpoint() -> No
     assert _refusal(has_api_base=False) is not None
 
 
-def test_a_method_this_build_does_not_know_carries_no_credential() -> None:
-    """A later build may store one, and a header this build cannot produce is not sent half-made."""
-    assert EndpointAuth.from_columns(**_columns(method="mtls")) is None  # type: ignore[arg-type]
+def test_a_method_this_build_does_not_know_cannot_be_read() -> None:
+    """A later build may store one, and this build can neither produce it nor report the key as carrying none."""
+    with pytest.raises(UnreadableEndpointAuthError):
+        EndpointAuth.from_columns(**_columns(method="mtls"))  # type: ignore[arg-type]
 
 
 def test_a_static_header_with_an_empty_header_name_is_refused() -> None:

@@ -12,11 +12,14 @@ identities at whatever role a case needs).
 
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
@@ -26,6 +29,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
@@ -46,6 +50,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.providers import (
+    EndpointAuthRequest,
     OrgProviderKeyCreateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeyUpdateRequest,
@@ -59,6 +64,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     refresh_org_provider_cache,
     reset_org_provider_cache,
 )
+from gateway.types.endpoint_auth import EndpointAuthMethod
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("public_dns")]
 
@@ -167,6 +173,45 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
     with pytest.raises(OrgProviderKeyInvalidSlugError):
         # A key named by its own prefix keeps an endpoint for that prefix to name.
         await update(api_base=None)
+
+
+async def test_moving_the_address_leaves_an_unreadable_endpoint_credential_alone(
+    async_db: AsyncSession,
+) -> None:
+    """An edit writes what it names, so a credential this build cannot read is refused and not cleared."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai",
+            name="primary",
+            api_key="sk-live-1234",
+            api_base="https://proxy/v1",
+            endpoint_auth=EndpointAuthRequest(
+                method=EndpointAuthMethod.STATIC_HEADER,
+                header_name="Fastly-Key",
+                secret="edge-secret",
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+            ),
+        ),
+    )
+    assert created.endpoint_auth is not None
+
+    await async_db.execute(
+        update(OrgProviderKey).where(col(OrgProviderKey.id) == created.id).values(endpoint_auth_method="mtls")
+    )
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        await service.update_key_for_user(
+            user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base="https://proxy/v2")
+        )
+
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.encrypted_endpoint_auth_secret is not None
+    assert row.endpoint_auth_header_name == "Fastly-Key"
 
 
 async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(

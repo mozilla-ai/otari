@@ -109,7 +109,12 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
-from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY, EndpointAuth, endpoint_auth_columns
+from gateway.types.endpoint_auth import (
+    ENDPOINT_AUTH_HEADERS_KEY,
+    EndpointAuth,
+    UnreadableEndpointAuthError,
+    endpoint_auth_columns,
+)
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -196,7 +201,7 @@ def key_is_usable(key: OrgProviderKey) -> bool:
     """
     try:
         _row_to_entry(key)
-    except (SecretBoxUnavailableError, SecretDecryptionError, UnservableEndpointError):
+    except (SecretBoxUnavailableError, SecretDecryptionError, UnservableEndpointError, UnreadableEndpointAuthError):
         return False
     return True
 
@@ -330,7 +335,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                 continue
             try:
                 new_cache[(workspace_id, provider)] = _row_to_entry(active)
-            except UnservableEndpointError as exc:
+            except (UnservableEndpointError, UnreadableEndpointAuthError) as exc:
                 logger.warning(
                     "Skipping organization provider key '%s' (%s) for workspace %s: %s.",
                     active.name,
@@ -489,6 +494,18 @@ def _credentials_that_follow(*, api_key: bool, client_args: bool, endpoint: bool
         )
         if follows
     ]
+
+
+def _stored_endpoint_auth(key: OrgProviderKey) -> EndpointAuth | None:
+    """The credential this key holds, refusing where it holds one that cannot be read.
+
+    An edit decides what the row will hold next, so a credential this build
+    cannot read is refused rather than cleared or written over.
+    """
+    try:
+        return key.endpoint_auth
+    except UnreadableEndpointAuthError as exc:
+        raise OrgProviderKeyEndpointAuthRefusedError(str(exc)) from exc
 
 
 def _gate_endpoint_auth(auth: EndpointAuth | None, *, api_base: str | None, stored: EndpointAuth | None) -> None:
@@ -802,7 +819,7 @@ class OrgProviderKeyService:
                     sent="client_args" in update_data,
                 )
                 endpoint_secret_follows = _endpoint_secret_survives(
-                    key.endpoint_auth, request.endpoint_auth, sent="endpoint_auth" in update_data
+                    _stored_endpoint_auth(key), request.endpoint_auth, sent="endpoint_auth" in update_data
                 )
                 following = _credentials_that_follow(
                     api_key=key.encrypted_api_key is not None and "api_key" not in update_data,
@@ -823,16 +840,17 @@ class OrgProviderKeyService:
             client_args = restore_redacted_values(update_data.pop("client_args"), stored_client_args)
             _check_client_args(key.provider, client_args)
             update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
-        if "endpoint_auth" in update_data or "api_base" in update_data:
-            stored = key.endpoint_auth
-            auth = (
-                _endpoint_auth_for_storage(request.endpoint_auth, stored=stored)
-                if "endpoint_auth" in update_data
-                else stored
-            )
+        if "endpoint_auth" in update_data:
+            stored = _stored_endpoint_auth(key)
+            auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=stored)
             _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
-            update_data.pop("endpoint_auth", None)
+            update_data.pop("endpoint_auth")
             update_data.update(endpoint_auth_columns(auth))
+        elif "api_base" in update_data:
+            # Moving the address re-gates the credential already stored. A
+            # field the request does not name is not written.
+            held = _stored_endpoint_auth(key)
+            _gate_endpoint_auth(held, api_base=update_data["api_base"], stored=held)
         if "api_key" in update_data:
             encrypted_api_key, last4 = _encrypt_secret_for_storage(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key

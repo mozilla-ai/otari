@@ -104,6 +104,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.endpoint_auth import UnreadableEndpointAuthError
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
@@ -904,14 +905,30 @@ class OrgProviderModelService:
 
     @staticmethod
     def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
-        """The headers this key's endpoint credential adds, or none where it has one that will not decrypt."""
-        auth = key.endpoint_auth
-        if auth is None:
-            return {}
+        """The headers this key's endpoint credential adds, or none where it cannot be served as stored.
+
+        Held to the refusals dispatch applies, so the two paths cannot report
+        one key differently.
+        """
         try:
+            auth = key.endpoint_auth
+            if auth is None or auth.refused_reason(has_api_base=bool(key.api_base)) is not None:
+                return {}
             return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
-        except (SecretBoxUnavailableError, SecretDecryptionError):
+        except (SecretBoxUnavailableError, SecretDecryptionError, UnreadableEndpointAuthError):
             return {}
+
+    @staticmethod
+    def _carries_endpoint_auth(key: OrgProviderKey) -> bool:
+        """Whether this key sends a second credential on every request, readable or not.
+
+        A credential this build cannot read sends no header, so an address that
+        refuses the request is still refusing the endpoint credential.
+        """
+        try:
+            return key.endpoint_auth is not None
+        except UnreadableEndpointAuthError:
+            return True
 
     @classmethod
     def _named_refusal(cls, discovery: ProviderDiscovery, key: OrgProviderKey) -> ProviderDiscovery:
@@ -921,7 +938,7 @@ class OrgProviderModelService:
         request, and a refusal of either arrives the same way. Passing the
         address's own wording on would read as a verdict on the API key alone.
         """
-        if discovery.credentials_rejected and key.endpoint_auth is not None:
+        if discovery.credentials_rejected and cls._carries_endpoint_auth(key):
             return replace(discovery, error=_ENDPOINT_CREDENTIAL_REJECTED)
         return discovery
 

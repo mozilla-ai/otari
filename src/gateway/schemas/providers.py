@@ -32,7 +32,7 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.types.endpoint_auth import EndpointAuthMethod, EndpointAuthState
+from gateway.types.endpoint_auth import EndpointAuthMethod, EndpointAuthState, UnreadableEndpointAuthError
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
@@ -88,8 +88,15 @@ class EndpointAuthPublic(SQLModel):
 
     @classmethod
     def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
-        """Read one row's endpoint credential for the API, or None where it carries none."""
-        auth = key.endpoint_auth
+        """Read one row's endpoint credential for the API, or None where it carries none.
+
+        A credential this build cannot read is reported as none, because a list
+        of keys must render whatever a row holds.
+        """
+        try:
+            auth = key.endpoint_auth
+        except UnreadableEndpointAuthError:
+            return None
         if auth is None:
             return None
         return cls(
