@@ -3,6 +3,9 @@
 [Cursor](https://cursor.com) can send its Chat and Agent requests to any
 OpenAI-compatible API, including Otari, through its OpenAI base URL override.
 
+It needs a paid Cursor plan: on the Free plan, Chat and Agent answer
+**Cursor Subscription Required** even with your own key set.
+
 ## Quick start
 
 1. Create a key on the dashboard's **API keys** page.
