@@ -1,0 +1,104 @@
+{
+  "status": 200,
+  "body": {
+    "search_metadata": {
+      "id": "search_jOZRYa4201H0P1lr0klD6mVx",
+      "status": "Success",
+      "created_at": "2026-11-23T09:26:00Z",
+      "request_time_taken": 1.51,
+      "parsing_time_taken": 0.05,
+      "total_time_taken": 1.57,
+      "request_url": "https://www.google.com/search?q=latest+stable+python+release&oq=latest+stable+python+release&gl=us&hl=en&num=3",
+      "html_url": "https://www.searchapi.io/api/v1/searches/search_jOZRYa4201H0P1lr0klD6mVx.html",
+      "json_url": "https://www.searchapi.io/api/v1/searches/search_jOZRYa4201H0P1lr0klD6mVx"
+    },
+    "search_parameters": {
+      "engine": "google",
+      "q": "latest stable python release",
+      "device": "desktop",
+      "hl": "en",
+      "gl": "us",
+      "num": 3
+    },
+    "search_information": {
+      "query_displayed": "latest stable python release",
+      "total_results": 39,
+      "time_taken_displayed": 0.29,
+      "detected_location": "Unknown",
+      "has_no_results_for": false
+    },
+    "organic_results": [
+      {
+        "position": 1,
+        "title": "What are the currently supported Python versions?",
+        "link": "https://stackoverflow.com/questions/60126561/what-are-the-currently-supported-python-versions",
+        "source": "Stack Overflow",
+        "domain": "stackoverflow.com",
+        "displayed_link": "1 answer  ·  6 years ago",
+        "snippet": "Python 2.7 reached end of life with the end of 2019 (PEP 373). But which are the currently supported Python versions? I realize that \"supported\" might mean ...",
+        "rich_snippet": {
+          "detected_extensions": {
+            "answer_link": "https://www.google.com/goto?url=CAESYQHEIkXXlH8uFHDbd9xJPhZVAePTbLr4rkOYo6nG4kNO-b2pikU0dAIQeZSgGaDJP1G7OJIfpF9oM12muafYYkZcUhUFDqvpOvT82vMYxzhtioPJAYn2UpWScVb1FDT67CQ&gsessionid=5jckND3PLY-YtOAzQmczjZqjRmSCx-gYCHWayYTECsCOIPgoL7hRbA",
+            "answer_link_token": "zAhq_ULwbzUw_ZvCVDThHgSom2DS7_EfZY-uSPGyvavupGxtikGxE-bWyxnfmD_9TgwKfXFcthe818QzelyNf3r9og8HaHTV7wSSpDpd9QApUpZqCEAdy4awztrWXJL-P5a6mWB1LG_JQ0Uec-v19wdciXR4ZlZK4TuX00WoeBHZYSM4zzeDP2udpuQMv9ZGjAq1--FNdmNzzjltHn_AOd--9ea5hsOU2cv6eL_4LQbGRw",
+            "answer_count": 1,
+            "top_answer": "Status of current python branches Python 3.6 Lifespan 3.6 will receive bugfix updates approximately every 3 months for about 24 months. Sometime after ..."
+          }
+        },
+        "favicon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAMAAABF0y+mAAAAclBMVEX/XgD/XwDHTA3/YABQKBoAER/QTwz/YQCZPhMAFB4fHB14NBcAFx4eHB3ZUgruWQZoLxg2IRtEJRvhVAkAGB2wRREYGh2BNhZfLBkLGR4aGx3nVggzIBymQhISGh32WwS8SQ9AJBuTPBSLORVWKhkADh+4PaZeAAAAuUlEQVR4AbzQRQLDMAwAQaturCqRw8z4/yeWMXTsXsco8Zdgjw5yG4+Gwg2TJzJJyY1D0WJN9pqCIwFd1rym6PkBohtqDhYqI4opEZhmeVjMFVTJOgujm3IAMwSsuNbsB25WOr8I1/uwsSjPOa2b+UYjs9oGg45NY/5cUKRrJv9kR6GFYo4pc5bnGWsKQMwVQfUdcZ13y+niPTgk9SAXlo73UjeLlmjW8SNuYYEhPZuWO0XzSVw2eAEARO8NFMONSEkAAAAASUVORK5CYII="
+      },
+      {
+        "position": 2,
+        "title": "Python Versions and End-of-Life Dates",
+        "link": "https://aurateria.com/versions/python",
+        "source": "Aurateria",
+        "domain": "aurateria.com",
+        "displayed_link": "https://aurateria.com › Version Radar",
+        "snippet": "The version to be on today is Python 3.15 (3.15.2). Latest release Python 3.15 Latest Oct 2026 9 Oct 2028 31 Oct 2031 3.15.2 Python 3.14 ...",
+        "snippet_highlighted_words": [
+          "Python 3.15"
+        ],
+        "date": "7 days ago",
+        "favicon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAMAAABF0y+mAAAAflBMVEVHcEzlWFzlV1zPOaPWQ4nUQZHSPZnPOaHNN6nKM7PGLr7FLMPEK8fmWFzZR4HbSXzdTXTfTmvrYEniVGfkVV3smbDroMPcXZfmWFXiaovaPm3jfq3zv9D2z9zxsr/54OrpXE3odn3qX0niSFPrYEXsYULtYzzxaDLyp6rzayqy+Os7AAAAKnRSTlMAF3HN////////+mQXV/3//v/N/////////////////////////////+9JuWmOAAABIklEQVR4AXXRVQLCMAwA0MzdV4pUcLn/BcmaBSe/r40ChucHYRhFcRwnSZqmWZblQVGCi6pu6vBdc4zCWds2X5qRem37T0vwu+6fFtAPfzWAYXDasE7IXcE4krZiMYdkzWBJ2q3EuhYLsRFKRayIpIiN2my02ViZxKSwJXVoGqmFtJK7QnQ6YWvkipAUkbTbTdjST54I9qjIB8ROabVQ1kqeF46z7sShM0oJo7XkbcCJ9IA4mAFrruyKdwXnSZHfkBSRdMKRcV2TwsUp4vUwqt1Omx1iQwqXWREP1+tVCKUlXwHR6XaPYoy5muuq4wvC7cJ/9/OunveF/sLq5kUdWAPwL286vqgP3u2f1h5A5eyHVgCoP/+SAXh+j8468dD7HsIdVVE509Lzg3IAAAAASUVORK5CYII="
+      }
+    ],
+    "perspectives": [
+      {
+        "position": 1,
+        "title": "Python 3.15.2, 3.14.10, 3.13.18, 3.12.16 and 3.11.18 are out",
+        "link": "https://www.google.com/goto?url=CAESngEBxCJF17IhbLOzTjPHbN3URMLQM_HULrCtHQTX3IB57JRbqyNOFjfTH86eKuL7Xg4HqE-y9sUf5qEeSoneoI82vZZ9nDtRZt3mHdlvR99fJzOWpb5p9MhFCiHVPuCa8bjdmK_opOUQSXCzrx9pFVkqPntL01B43r5qbUuwzXTmV71HymYbQ7iD2a3wgXd1buHr91HfEzJffgxRuODXbQ&gsessionid=5jckND3PLY-YtOAzQmczjZqjRmSCx-gYCHWayYTECsCOIPgoL7hRbA",
+        "link_token": "P183bWBnD_elhiuJCMIh-T1UUQm5v6vl5oHColPGUW_uRcL0E8Uc7uHK4BQcm63JFV3ZfDyaOaooVDjbfkzbPu8TrnPQuA_P8uum6u5h7IgX15Ksn5fu2oc2Ui5AMiJRn6yz7gQF9z2EPNs6Zn3vQZ2ce-DyZN_qctXZoXfrIoROFc9-NtHft5NroilB5SmP9zz1ohFGdCg-f0VvxU42uX13kYt3Knr5dswG_zs17AqENiiPpZElBI2zipwvgcR8i_GaT9QZaNiMPcuG5YjYyCg9-Ta4bZHQy9qbfjhIDn8ic-he9w0--iEhIH_QtVTvC8yRI--juRe8eyT1D2UBjNik9nO4g",
+        "author": "r/Python",
+        "source": "Reddit",
+        "date": "4 weeks ago",
+        "iso_date": "2026-10-27T07:00:00Z",
+        "reactions": "30+ comments"
+      },
+      {
+        "position": 2,
+        "title": "Python Release Python 3.15.0",
+        "link": "https://www.google.com/goto?url=CAESjgEBxCJF1_tWIcUL-hfEYSPkftD2CWB4wcAjHNf-YX49IjKga5Vaz8tdmBiMS8IuWcHE63GBTqYn-oKcrHQfQEzOU43wLVDWZl5sw7gZkP_HF1ql61-nsM02dPjpHsnn3uroKAyobYvMm3mnRjoQjnkvKed_ZZHxl4Afwr8CxghVIQl6-yolB6UcTUpACPj2&gsessionid=5jckND3PLY-YtOAzQmczjZqjRmSCx-gYCHWayYTECsCOIPgoL7hRbA",
+        "link_token": "CcmB9_afgjjAniu_aPLGv9PKcmZ7XYt9DPkMiKbhaR06hIEFm8hxBmn0GBTi3ArWUF6uVbTvJHTD2U1pDLOeroK35DjaEJbGMedcsD7FlOlEImy2wsZYe0C_bwOld5_R19jDNB2yzjkO6clD1cqsbGev-9RXu7YVvYzgrD0bnnllvO-iWQIGTq05ZvTHwnc0bOWp-UNf7BuW-cZZnx8068c7BxuXZSyS7DHtzNLqq0KYhgGoeHFAbO0sl6rnIbzl_cBGOUQ0k-hU4LilI39ZKQ--Uc4PHb5YRvuS8oqs--luHlHh49umIMqDoQWX6KHA",
+        "author": "r/programming",
+        "source": "Reddit",
+        "date": "1 month ago",
+        "iso_date": "2026-10-10T07:00:00Z",
+        "reactions": "30+ comments"
+      },
+      {
+        "position": 3,
+        "title": "Python 3.15.0 released",
+        "link": "https://www.google.com/goto?url=CAESggEBxCJF1-yI7f01higJkg5BaDW0Y-LvzlbuBkuN79RUiWeTNSOmC_No96boNWVLsZvtGssKXA3IIzab4Gvx-kSvBqS1UK1J_TR6scUzkWziVRIPmRoqykS9Baf6vJ3ebRfo9oW75C-tcm9E9yvLu6Dl8ec26-hXjldeSbEVmLa0Tm72&gsessionid=5jckND3PLY-YtOAzQmczjZqjRmSCx-gYCHWayYTECsCOIPgoL7hRbA",
+        "link_token": "R8u15aEF0gehKCUuqs7V_RC6hqExkVCR5AaDyhs1jXhAUah_o8oDF4u9HrVgcRhGtXeO0z_AZBAQgknBR_WCmZP8qc7K8HvtWIo1NaVf_0A0AIikX8M7ebUkL1YTnt7_t1499MQgM_2HR3M5Rk4j2-s0Lv-MWwaK1wtxDXGNvI8h-GxY2oBJ3HvvccByOPcLwD--7bLBu_W5zpKTnzDpIBxhSwI7_MaDnJ0YbeyhY_FF4Qjp2xlnFdgOoozGReqp--8Hl8N25MXdm4o3_y--01BxUHZQf--iKddSVo5ORw",
+        "author": "r/linux",
+        "source": "Reddit",
+        "date": "1 month ago",
+        "iso_date": "2026-10-10T07:00:00Z",
+        "reactions": "50+ comments"
+      }
+    ],
+    "pagination": {
+      "current": 1,
+      "next": "https://www.google.com/search?q=latest+stable+python+release&oq=latest+stable+python+release&gl=us&hl=en&start=3&num=3"
+    }
+  }
+}

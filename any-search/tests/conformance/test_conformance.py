@@ -94,6 +94,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("perplexity", "empty")),
         "error": Scenario(handler=_replay("perplexity", "error")),
     },
+    "searchapi": {
+        "normal": Scenario(handler=_replay("searchapi", "normal")),
+        "empty": Scenario(handler=_replay("searchapi", "empty")),
+        "error": Scenario(handler=_replay("searchapi", "error")),
+    },
     "searxng": {
         "normal": Scenario(handler=_replay("searxng", "normal")),
         "empty": Scenario(handler=_replay("searxng", "empty")),

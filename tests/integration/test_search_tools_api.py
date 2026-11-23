@@ -463,6 +463,7 @@ def test_search_catalog_serves_the_library_metadata(
         "keenable",
         "mojeek",
         "perplexity",
+        "searchapi",
         "searxng",
         "serply",
         "synthetic",
