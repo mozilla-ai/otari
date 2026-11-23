@@ -19,6 +19,7 @@ from gateway.exceptions.identity_exceptions import (
     DeploymentUserNotFoundError,
     DeploymentUserSelfChangeError,
     InvalidBlockedEmailEntryError,
+    MasterKeyRotationRefusedError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
@@ -434,6 +435,36 @@ class IdentityService:
             user_id,
             "master_key" if by_master_key else "session",
         )
+
+    async def confirm_master_key_rotation(self, *, actor: User, current_password: str | None) -> None:
+        """Refuse a session-authenticated master-key rotation that did not re-prove the password.
+
+        Rotation hands the caller the deployment credential itself, which is what
+        ``hand_over_bootstrap_operator`` and ``_refuse_bootstrap_password_link`` assume a session
+        cannot hold. From a session it is therefore held to the same proof as the handover: only
+        the identity the master key acts as may do it, and only after re-proving its password, so
+        a stolen cookie cannot mint the master key and reach those two operations. A request
+        carrying the master key is that credential already and needs no further proof.
+
+        Raises:
+            MasterKeyRotationRefusedError: If the caller is not the bootstrap operator, or its
+                account has no password to prove.
+            CurrentPasswordIncorrectError: If the current password given does not match.
+        """
+        async with self._uow:
+            bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id != actor.id:
+            raise MasterKeyRotationRefusedError(
+                "Only the bootstrap operator, or a request carrying the master key, can rotate the master key"
+            )
+        if actor.hashed_password is None:
+            raise MasterKeyRotationRefusedError(
+                "Set a password for your account first, or rotate the key with the master key"
+            )
+        if not current_password:
+            raise MasterKeyRotationRefusedError("Enter your current password to rotate the master key")
+        if not await verify_password_async(current_password, actor.hashed_password):
+            raise CurrentPasswordIncorrectError
 
     async def _require_handover_target(self, target: User) -> None:
         if not target.is_active:

@@ -21042,6 +21042,20 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * RotateMasterKeyRequest
+         * @description The proof a session-authenticated master-key rotation has to supply.
+         *
+         *     Only read when the caller authenticated with the dashboard session cookie. A request
+         *     carrying the master key is the deployment credential already, so it needs no further proof.
+         */
+        RotateMasterKeyRequest: {
+            /**
+             * Current Password
+             * @description The caller's current password. Required for a session-authenticated rotation.
+             */
+            current_password?: string | null;
+        };
+        /**
          * RotateMasterKeyResponse
          * @description A newly generated dashboard master key, returned once.
          */
@@ -37140,7 +37154,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RotateMasterKeyRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -37149,6 +37167,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotateMasterKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
