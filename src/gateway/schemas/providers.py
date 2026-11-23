@@ -32,7 +32,12 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.types.endpoint_auth import EndpointAuthMethod, EndpointAuthState, UnreadableEndpointAuthError
+from gateway.types.endpoint_auth import (
+    EndpointAuthMethod,
+    EndpointAuthState,
+    UnreadableEndpointAuthError,
+    refused_header_value_reason,
+)
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
 
@@ -73,6 +78,14 @@ class EndpointAuthRequest(SQLModel):
             "passed, since the proxy answers that itself on every request."
         )
     )
+
+    @field_validator("secret")
+    @classmethod
+    def _value_a_header_can_carry(cls, secret: str | None) -> str | None:
+        """Refuse a value the transport cannot put in a header field."""
+        if secret is not None and (reason := refused_header_value_reason(secret)) is not None:
+            raise ValueError(reason)
+        return secret
 
 
 class EndpointAuthPublic(SQLModel):

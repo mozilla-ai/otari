@@ -11,6 +11,7 @@ from gateway.types.endpoint_auth import (
     EndpointAuthState,
     UnreadableEndpointAuthError,
     refused_header_name_reason,
+    refused_header_value_reason,
 )
 
 NOW = datetime(2026, 11, 20, tzinfo=UTC)
@@ -90,6 +91,19 @@ def test_an_expiry_that_has_passed_does_not_refuse_a_stored_credential() -> None
 
     assert expired.refused_reason(has_api_base=True) is None
     assert expired.headers(secret="s3cret") == {"Fastly-Key": "s3cret"}
+
+
+@pytest.mark.parametrize("value", ["edge-s3cret", "a", "Bearer abc.123", "one two\tthree", "~" * 512])
+def test_a_value_of_printable_ascii_is_served(value: str) -> None:
+    assert refused_header_value_reason(value) is None
+
+
+@pytest.mark.parametrize(
+    "value", ["", " lead", "trail ", "two\nlines", "two\rlines", "nul\x00byte", "h\u00e9ader", "\tlead"]
+)
+def test_a_value_a_header_field_cannot_carry_is_refused(value: str) -> None:
+    """A control character ends the field, so the transport refuses the whole request rather than the value."""
+    assert refused_header_value_reason(value) is not None
 
 
 @pytest.mark.parametrize("name", ["Fastly-Key", "CF-Access-Client-Id", "a", "A" * 64])

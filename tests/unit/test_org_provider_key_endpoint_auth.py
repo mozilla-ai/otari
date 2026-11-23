@@ -100,8 +100,8 @@ def test_a_credential_sent_with_no_rotation_date_is_refused_at_the_boundary() ->
         EndpointAuthRequest(method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key")  # type: ignore[call-arg]
 
 
-@pytest.mark.parametrize("secret", ["", "x" * 1025])
-def test_a_value_outside_the_stored_length_is_refused_at_the_boundary(secret: str) -> None:
+@pytest.mark.parametrize("secret", ["", "x" * 1025, "two\nlines", " lead", "trail "])
+def test_a_value_a_stored_credential_cannot_hold_is_refused_at_the_boundary(secret: str) -> None:
     """The value is sent as a header on every request, and an empty one is not a way to keep the stored value."""
     with pytest.raises(ValidationError):
         EndpointAuthRequest(

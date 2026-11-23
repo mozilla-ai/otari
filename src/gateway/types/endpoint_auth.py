@@ -19,6 +19,11 @@ _OTARI_PREFIX = "otari-"
 # No colon, so a pseudo-header such as ``:authority`` cannot be spelled.
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
+# A header field value, held to printable ASCII with no leading or trailing
+# space. RFC 9110 section 5.5 allows a space or a tab between visible
+# characters and no control character anywhere.
+_HEADER_VALUE = re.compile(r"^[\x21-\x7e](?:[\x20-\x7e\t]*[\x21-\x7e])?$")
+
 # Reserved for the connection itself rather than for a credential. RFC 9110
 # section 7.6.1 and RFC 9112 section 6 name them.
 _FRAMING_HEADERS = frozenset(
@@ -65,6 +70,18 @@ class EndpointAuthMethod(StrEnum):
     """How the credential for one endpoint is produced."""
 
     STATIC_HEADER = "static_header"
+
+
+def refused_header_value_reason(value: str) -> str | None:
+    """Why a tenant may not send ``value`` as a header value, or None.
+
+    A control character ends the field, and the transport refuses the whole
+    request rather than the value, so an unchecked value reads back as a key
+    that stores and reports fine while every call to its endpoint fails.
+    """
+    if not _HEADER_VALUE.match(value):
+        return "a value outside the allowed characters, which are printable ASCII with no leading or trailing space"
+    return None
 
 
 def refused_header_name_reason(name: str) -> str | None:
