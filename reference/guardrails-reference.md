@@ -21,6 +21,7 @@ Contents:
 - [Which profiles exist, and what they take](#which-profiles-exist-and-what-they-take)
 - [The guardrail catalog](#the-guardrail-catalog)
 - [What a guardrails service answers](#what-a-guardrails-service-answers)
+- [How long a service has to answer](#how-long-a-service-has-to-answer)
 
 ## The `guardrails` request field
 
@@ -465,3 +466,30 @@ result without `categories` names nothing. Otari keeps only the names a
 `GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
+[Host your own guardrail](https://docs.otari.ai/guides/control/host-your-own-guardrail) walks through writing one.
+
+## How long a service has to answer
+
+Otari waits up to 30 seconds for a service behind `guardrails_url`, a mandate's
+`url` or a request's `url`. The limit applies to each phase of the call
+(connecting, sending the request, waiting for the answer and getting a
+connection from the pool) rather than to the whole of it. Nothing retries, with
+one exception: a mandate's or a request's `url` whose host resolves to more than
+one address is tried at the next address when a connection cannot be opened.
+Each attempt has its own 30 seconds to connect, so connecting can take longer
+for such a host.
+
+A call that runs out of time is a check that could not run, the same as a
+service that is down: it takes the paths in
+[When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable).
+A `block` entry with `on_unavailable: block` refuses input with a `502` and an
+answer with a `403`, withholds a tool result and skips a tool call. A `block`
+entry with `on_unavailable: monitor`, and any `monitor` entry, lets the text
+through, and the `Otari-Guardrails` entry reads `"valid": null`, `"status":
+"unavailable"` and `"reason": "evaluation_failed"`. That differs from
+`inconclusive`, which is a service that answered in time with `valid: null`.
+The guardrail runs before the provider is called, so the wait is added to the
+request. A check that timed out is asked again on the next request.
+
+A [definition](#definition-fields) Otari runs itself has 10 seconds per check,
+and its timeout takes the same paths.
