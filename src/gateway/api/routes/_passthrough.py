@@ -38,6 +38,7 @@ from typing import Annotated, Any, Generic, Protocol, TypeVar
 
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError, MissingApiKeyError, UnsupportedProviderError
+from any_llm.types.completion import ChatCompletion
 from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,6 +122,7 @@ from gateway.services.budgets import (
 )
 from gateway.services.catalog import hide_alias_target
 from gateway.services.inference import (
+    DecisionPrompt,
     DecisionProvider,
     DecisionProviderError,
     DeploymentCharge,
@@ -170,6 +172,7 @@ from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
     UnknownHostedUpstreamError,
+    acompletion,
     ensure_provider_country,
     hosted_implementation,
     serve_on_hosted_provider,
@@ -1219,13 +1222,17 @@ class DecisionQuote:
     deployment's pricing row, which is the open-source case, where the caller
     pays whatever the upstream charged. ``served_by`` is the provider the
     country gate checks where the label names none; ``None`` checks
-    ``provider``.
+    ``provider``. ``catalog_priced`` lets the rate come from the models.dev
+    catalog, as a chat model's does; a decision model is not in it. ``refusal``
+    is what the target's organization key refuses it with, where it does.
     """
 
     provider: str
     model: str
     charge: Decimal | None = None
     served_by: str | None = None
+    catalog_priced: bool = False
+    refusal: ModelRefusal | None = None
 
 
 @dataclass(frozen=True)
@@ -1375,12 +1382,10 @@ def decision_input_chars(request: DecisionRequest) -> int:
 class SelectorDecision:
     """The call behind a decisions request: the selector names a ``decision_providers`` entry, asked as is."""
 
-    def __init__(self, config: GatewayConfig, request: DecisionRequest, selector: str | None = None) -> None:
+    def __init__(self, config: GatewayConfig, request: DecisionRequest, selector: str) -> None:
         self._config = config
         self._request = request
-        self._selector = request.model if selector is None else selector
-        self.prompt_chars = decision_input_chars(request)
-        self.default_output_tokens = ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(request.questions)
+        self._selector = selector
         self._provider: DecisionProvider | None = None
         self._model = ""
 
@@ -1419,6 +1424,120 @@ class SelectorDecision:
             output_tokens=usage.output_tokens if usage else 0,
             charge=reported_charge(result),
         )
+
+
+class ChatModelDecision:
+    """The call behind a decisions request whose selector names a chat model, which states its probabilities.
+
+    The selector resolves as a completion's does, against ``providers``, the
+    aliases and the caller's organization keys, and the call is one chat
+    completion through any-llm, with a JSON schema for the answer.
+    """
+
+    def __init__(
+        self,
+        config: GatewayConfig,
+        request: DecisionRequest,
+        selector: str,
+        *,
+        user_id: str,
+        workspace_id: uuid.UUID | None,
+    ) -> None:
+        self._config = config
+        self._selector = selector
+        self._user_id = user_id
+        self._workspace_id = workspace_id
+        self._prompt = DecisionPrompt(request)
+        self._resolved: ResolvedProvider | None = None
+
+    def resolve(self) -> DecisionQuote:
+        try:
+            resolved = resolve_provider_selector(
+                self._config, self._selector, self._user_id, workspace_id=self._workspace_id
+            )
+        except (ValueError, AnyLLMError) as exc:
+            configured = ", ".join(sorted(self._config.decision_providers)) or "none"
+            msg = (
+                f"Model '{self._selector}' names neither a configured decision provider nor a chat model. "
+                f"Use '<provider>:<model>' with a decision provider (one of: {configured}) or a chat model."
+            )
+            raise DecisionUnavailableError(msg) from exc
+        self._resolved = resolved
+        refusal = organization_key_refusal(
+            self._config,
+            self._workspace_id,
+            resolved.instance,
+            resolved.provider.value,
+            resolved.model,
+            selector=self._selector,
+            through_alias=resolved.alias is not None,
+        )
+        return DecisionQuote(provider=resolved.instance, model=resolved.model, catalog_priced=True, refusal=refusal)
+
+    async def dispatch(self) -> DecisionOutcome[DecisionResponse]:
+        resolved = self._resolved
+        if resolved is None:
+            msg = "dispatch() before resolve()"
+            raise RuntimeError(msg)
+        try:
+            require_declared_credential(self._config, resolved.instance, resolved.provider, resolved.kwargs)
+            completion = await acompletion(
+                **{
+                    **resolved.kwargs,
+                    "model": resolved.dispatch_model,
+                    "messages": self._prompt.messages(),
+                    "response_format": self._prompt.response_format(),
+                }
+            )
+        except Exception as exc:
+            missing = missing_credential(exc)
+            raise DecisionCallError(
+                str(exc),
+                logged_status=UpstreamFailure(exc).logged_status,
+                response=missing_credential_error(missing.behind_alias(resolved.alias))
+                if missing is not None
+                else provider_call_failure(exc),
+                upstream=exc,
+            ) from exc
+        if not isinstance(completion, ChatCompletion):
+            msg = "acompletion returned a stream for a call that asked for none"
+            raise TypeError(msg)
+        choice = completion.choices[0] if completion.choices else None
+        try:
+            if choice is None or choice.finish_reason == "length":
+                msg = "the answer was cut off" if choice is not None else "the completion has no choices"
+                raise ValueError(msg)
+            answers = self._prompt.answers(choice.message.content)
+        except ValueError as exc:
+            # The message never quotes the reply, which is the model's reading of the caller's state.
+            detail = f"{resolved.instance}:{resolved.model} gave no answer the questions can be read from ({exc})"
+            unreadable = HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL
+            )
+            raise DecisionCallError(detail, logged_status=status.HTTP_502_BAD_GATEWAY, response=unreadable) from exc
+        result = DecisionResponse.model_validate(
+            {"model": resolved.alias or completion.model or resolved.model, "answers": answers}
+        )
+        usage = completion.usage
+        return DecisionOutcome(
+            result=result,
+            input_tokens=usage.prompt_tokens if usage else 0,
+            output_tokens=usage.completion_tokens if usage else 0,
+        )
+
+
+def decision_call_for(
+    config: GatewayConfig,
+    request: DecisionRequest,
+    selector: str,
+    *,
+    user_id: str,
+    workspace_id: uuid.UUID | None,
+) -> DecisionCall[DecisionResponse]:
+    """The call ``selector`` names: a ``decision_providers`` entry's, which wins a shared prefix, or a chat model's."""
+    if config.names_decision_provider(selector):
+        return SelectorDecision(config, request, selector)
+    return ChatModelDecision(config, request, selector, user_id=user_id, workspace_id=workspace_id)
 
 
 async def run_decision(
@@ -1527,6 +1646,17 @@ async def run_decision(
     targets: list[_DecisionTarget[ResultT]] = []
     for target in resolved:
         quoted = f"{target.instance}:{target.model}"
+        refusal = target.quote.refusal
+        if refusal is not None:
+            if routed:
+                dropped.append(DroppedCandidate(target.selector, "not_allowed", "is refused by the organization's key"))
+                continue
+            await log_rejection(
+                refusal.detail, row_model=target.model, row_provider=target.instance, status_code=refusal.status_code
+            )
+            raise HTTPException(
+                status_code=refusal.status_code, detail=refusal.detail, headers=error_headers(refusal.code)
+            )
         if key_allowlist is not None and not is_model_allowed(key_allowlist, quoted):
             if routed:
                 dropped.append(
@@ -1579,9 +1709,9 @@ async def run_decision(
         pricing: ModelPricing | None = None
         if quote.charge is None:
             # A decisions model is not in the community pricing dataset, which could
-            # only produce a false match on the bare model name.
+            # only produce a false match on the bare model name. A chat model is.
             pricing = await find_model_pricing(
-                db, provider_name, model, use_defaults=False, organization_id=organization_id
+                db, provider_name, model, use_defaults=quote.catalog_priced, organization_id=organization_id
             )
         elif organization_id is None:
             # Deployment-paid, and nobody to bill: refused before anything is held.
@@ -1953,14 +2083,17 @@ class DecisionScaffold:
         targets do. A policy's answer names the policy, as a completion's does.
         """
         api_key = auth_result[0]
-        asked = SelectorDecision(self.config, request)
         routed = False
 
         async def plan(user_id: str, workspace_id: uuid.UUID | None) -> DecisionPlan[DecisionResponse]:
             nonlocal routed
+
+            def call_for(selector: str) -> DecisionCall[DecisionResponse]:
+                return decision_call_for(self.config, request, selector, user_id=user_id, workspace_id=workspace_id)
+
             spec = resolve_effective_policy(self.config, request.model, user_id, workspace_id=workspace_id)
             if spec is None:
-                return DecisionPlan(targets=[(request.model, asked, "static")])
+                return DecisionPlan(targets=[(request.model, call_for(request.model), "static")])
             budget = BudgetState()
             if needs_budget_state(spec):
                 budget = await get_budget_state(
@@ -1972,10 +2105,7 @@ class DecisionScaffold:
             order = PolicyOrder.of(spec, user_id=user_id, key_id=api_key.id if api_key else None, budget=budget)
             routed = True
             return DecisionPlan(
-                targets=[
-                    (selector, SelectorDecision(self.config, request, selector), reason)
-                    for selector, reason in order.selectors
-                ],
+                targets=[(selector, call_for(selector), reason) for selector, reason in order.selectors],
                 policy=request.model,
             )
 
@@ -1989,8 +2119,8 @@ class DecisionScaffold:
             billing=self.billing,
             selector=request.model,
             user=request.user,
-            prompt_chars=asked.prompt_chars,
-            default_output_tokens=asked.default_output_tokens,
+            prompt_chars=decision_input_chars(request),
+            default_output_tokens=ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(request.questions),
             plan=plan,
         )
         if routed:

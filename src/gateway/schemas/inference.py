@@ -78,7 +78,10 @@ class DecisionRequest(BaseModel):
     )
 
     model: str = Field(
-        description="Decision provider and model, e.g. 'typesafe:jev-latest', or a routing policy naming such targets"
+        description=(
+            "Decision provider and model, e.g. 'typesafe:jev-latest'; a chat model, which states the "
+            "probabilities itself; or a routing policy naming such targets"
+        )
     )
     state: DecisionContent = Field(description="The content the questions are about")
     questions: dict[str, DecisionQuestion] = Field(min_length=1, description="Questions, keyed by answer name")
@@ -87,8 +90,8 @@ class DecisionRequest(BaseModel):
         max_length=MAX_DECISION_IMAGES,
         description=(
             "Images for a vision decision model, as data URLs (data:image/...;base64,...). "
-            "Sent as llama-server's 'images' field, to OpenRouter as image_url parts of the state, and to "
-            "Gemini as image blocks; a provider that reads no images refuses the request."
+            "Sent as llama-server's 'images' field, to OpenRouter and to a chat model as image_url parts, "
+            "and to Gemini as image blocks; a provider that reads no images refuses the request."
         ),
     )
     user: str | None = Field(default=None, description="User ID for usage attribution; not sent upstream")

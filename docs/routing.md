@@ -258,19 +258,26 @@ a draft or a saved policy.
 ## Route decisions
 
 A policy may also be the `model` of a [decision](api-reference.md#decisions)
-(`POST /api/v1/decisions` or `/api/v1/systemone`), and its targets may then name
-[decision providers](configuration.md#decision-providers):
+(`POST /api/v1/decisions` or `/api/v1/systemone`). Its targets may then name
+[decision providers](configuration.md#decision-providers) as well as chat
+models, which [state their probabilities](api-reference.md#decisions) when asked:
 
 ```yaml
 routing:
   policies:
     tagger:
       select:
-        - default: typesafe:jev-latest
+        - default: claude-api:claude-haiku-5-5
       on_failure:
-        - openrouter:typesafe/jev-1.13
+        - chatgpt:gpt-5.6-luna
+        - openrouter:perplexity/pplx-decider-v1.3:free
+        - openrouter:typesafe/jev-1.14
         - local-qwen:qwen3-vl-8b-instruct
 ```
+
+Here `claude-api` and `chatgpt` are `providers` instances, and `openrouter` and
+`local-qwen` are `decision_providers` entries. A prefix that names both is the
+decision provider's.
 
 Callers send `model: tagger`. Each target is tried in order and the next one is
 asked when a target fails, on the same failures a completion policy falls over

@@ -538,10 +538,12 @@ models.dev does not say which image models can edit, so every offering with
 the `images` protocol lists both image routes. An edit to a model that only
 generates, such as `dall-e-3`, is refused by the provider.
 
-`/decisions` and `/systemone` take only a selector whose provider is a
-`decision_providers` entry. An offering from another provider instance lists
-them when its models.dev entry names those protocols, but a request to either
-route with that offering's selector is refused.
+`/decisions` and `/systemone` send a selector whose provider is a
+`decision_providers` entry to that decision provider, and any other selector to
+a chat model, which is [asked for the probabilities](api-reference.md#decisions).
+An offering from another provider instance lists them when its models.dev entry
+names those protocols, but a request to either route with that offering's
+selector is answered by its chat completions, not by its own decisions protocol.
 
 Other protocols name no route. A vendor's native protocol, such as `converse`
 or `generate-content`, is what any-llm calls behind the routes above, so a

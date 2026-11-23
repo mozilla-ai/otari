@@ -3,6 +3,7 @@
 from gateway.services.inference._audio_length import audio_seconds
 from gateway.services.inference._batch_line_errors import BatchLineError
 from gateway.services.inference._batch_results import BatchResultsService
+from gateway.services.inference._chat_decisions import DecisionPrompt
 from gateway.services.inference._client_country import (
     CountryDatabaseError,
     client_country,
@@ -165,6 +166,7 @@ __all__ = [
     "BlockedCaller",
     "Claimed",
     "CountryDatabaseError",
+    "DecisionPrompt",
     "DecisionProvider",
     "DecisionProviderError",
     "DeploymentCharge",

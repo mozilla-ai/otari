@@ -28,8 +28,9 @@ ModelEndpoint = Literal[
 
 # models.dev's v2 ``api`` protocols. ``decisions`` and ``systemone`` are one handler
 # under two paths, and each is named, so a client gets the path its SDK expects.
-# Both take only a ``decision_providers`` selector, so they name the route a
-# protocol maps to, not one every selector of the model is served on. ``images``
+# Only a ``decision_providers`` selector reaches a decisions protocol (any other
+# is answered by a chat model), so they name the route a protocol maps to, not
+# one every selector of the model is served on through it. ``images``
 # names both image routes: models.dev does not say which image models can edit.
 _MODELS_DEV_PROTOCOLS: dict[str, tuple[ModelEndpoint, ...]] = {
     "chat-completions": ("/chat/completions",),

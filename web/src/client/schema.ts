@@ -1542,8 +1542,9 @@ export interface paths {
          * @description Answer typed questions (noul, choice, score) about a state.
          *
          *     ``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``
-         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``, or
-         *     a routing policy, whose targets are tried in order until one answers.
+         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``; a
+         *     chat model, which is asked for the probabilities in one completion; or a routing
+         *     policy, whose targets are tried in order until one answers.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -11546,7 +11547,7 @@ export interface components {
             discovered: boolean;
             /**
              * Endpoints
-             * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` take only a `decision_providers` selector, not this one. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
+             * @description The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. `/decisions` and `/systemone` serve this selector as a chat model asked for probabilities, not through its own decisions protocol, which only a `decision_providers` selector reaches. Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves.
              */
             endpoints?: ("/chat/completions" | "/responses" | "/messages" | "/images/generations" | "/images/edits" | "/embeddings" | "/audio/speech" | "/audio/transcriptions" | "/systemone" | "/rerank" | "/decisions" | "/moderations" | "/videos")[];
             /** Max Output Tokens */
@@ -12911,12 +12912,12 @@ export interface components {
         DecisionRequest: {
             /**
              * Images
-             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). Sent as llama-server's 'images' field, to OpenRouter as image_url parts of the state, and to Gemini as image blocks; a provider that reads no images refuses the request.
+             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). Sent as llama-server's 'images' field, to OpenRouter and to a chat model as image_url parts, and to Gemini as image blocks; a provider that reads no images refuses the request.
              */
             images?: string[] | null;
             /**
              * Model
-             * @description Decision provider and model, e.g. 'typesafe:jev-latest', or a routing policy naming such targets
+             * @description Decision provider and model, e.g. 'typesafe:jev-latest'; a chat model, which states the probabilities itself; or a routing policy naming such targets
              */
             model: string;
             /**

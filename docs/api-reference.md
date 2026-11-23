@@ -1070,14 +1070,27 @@ Decisions API:
 ```
 
 `model` is `<provider>:<model>`, where the provider is an entry under
-[`decision_providers`](configuration.md#decision-providers), or a
-[routing policy](routing.md#route-decisions) whose targets are tried in order
-until one answers. The answer comes back
+[`decision_providers`](configuration.md#decision-providers); a chat model, named
+as on a completion; or a [routing policy](routing.md#route-decisions) whose
+targets are tried in order until one answers. The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
 `confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
 as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a
 vision decision model served by llama-server, OpenRouter or Gemini; Otari sends them
 to OpenRouter as `image_url` parts of the state and to Gemini as image blocks.
+
+A chat model is asked for the probabilities themselves: one chat completion
+carries the state, its images as `image_url` parts and the questions, and a
+JSON schema holds the answer to the probability of yes for a `noul` question,
+of each option for a `choice` and of each level for a `score`. Otari returns it
+in the shape a decision model's answer has: `noul` is the probability of yes,
+`choice` the most probable option and `score` the probability-weighted average
+level (`0` is the lowest), each with `probabilities` (a `score`'s keyed by level,
+with its criteria under `legend`) and `confidence`, the probability of the most
+probable outcome. Figures that do not add up to 1 are scaled to. They are the
+model's own estimate rather than a calibrated distribution, and the call is
+billed like a completion of that model, from the tokens it reports. An answer
+the questions cannot be read from returns 502.
 
 `POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works against Otari with its

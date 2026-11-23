@@ -284,7 +284,8 @@ class CatalogOffering(BaseModel):
         default_factory=list,
         description=(
             "The Otari routes its models.dev protocols map to, below the API base, in models.dev's order. "
-            "`/decisions` and `/systemone` take only a `decision_providers` selector, not this one. "
+            "`/decisions` and `/systemone` serve this selector as a chat model asked for probabilities, "
+            "not through its own decisions protocol, which only a `decision_providers` selector reaches. "
             "Empty when not known: models.dev has no entry for the offering, or names no protocol Otari serves."
         ),
     )

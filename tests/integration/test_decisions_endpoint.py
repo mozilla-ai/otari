@@ -5,12 +5,16 @@ own job: auth, provider selection, the key allow-list, budget reservation and
 settlement, the usage row, and how an upstream failure reaches the caller.
 """
 
+import json
 import time
 from collections.abc import Sequence
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import anthropic
+import httpx2
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 
 from gateway.core.config import (
@@ -66,6 +70,8 @@ def test_config(postgres_url: str) -> GatewayConfig:
         port=8000,
         auto_migrate=False,
         require_pricing=False,
+        model_discovery=False,
+        providers={"claude-api": {"provider_type": "anthropic", "api_key": "sk-ant"}},
         decision_providers={
             "typesafe": {"api_key": "ts-secret"},
             "openrouter": {"api_key": "or-secret"},
@@ -76,7 +82,11 @@ def test_config(postgres_url: str) -> GatewayConfig:
                     "tagger": {
                         "select": [{"default": "typesafe:jev-latest"}],
                         "on_failure": ["openrouter:typesafe/jev-1.13"],
-                    }
+                    },
+                    "chat-first": {
+                        "select": [{"default": "claude-api:claude-haiku-5-5"}],
+                        "on_failure": ["typesafe:jev-latest"],
+                    },
                 }
             }
         ),
@@ -482,3 +492,112 @@ def test_a_policy_with_no_permitted_target_is_refused_without_naming_its_targets
     assert "typesafe" not in detail
     assert "openrouter" not in detail
     mock.assert_not_awaited()
+
+
+CHAT_REPLY: dict[str, Any] = {"urgency": 0.9, "team": {"billing": 0.2, "technical": 0.8}}
+
+
+def _chat_completion(content: str, *, finish_reason: str = "stop") -> ChatCompletion:
+    return ChatCompletion(
+        id="cmpl-1",
+        choices=[
+            Choice(
+                finish_reason=finish_reason,
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content=content),
+            )
+        ],
+        created=0,
+        model="claude-haiku-5-5-20261001",
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=400, completion_tokens=20, total_tokens=420),
+    )
+
+
+def _mock_chat(*, side_effect: Any = None) -> Any:
+    mock = AsyncMock(return_value=_chat_completion(json.dumps(CHAT_REPLY)), side_effect=side_effect)
+    return patch("gateway.api.routes._passthrough.acompletion", mock)
+
+
+def _credit_balance_too_low() -> anthropic.BadRequestError:
+    message = "Your credit balance is too low to access the Anthropic API."
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.BadRequestError(
+        f"Error code: 400 - {body}", response=httpx2.Response(400, request=request, json=body), body=body
+    )
+
+
+def test_a_chat_model_answers_a_decision_with_the_probabilities_it_states(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "claude-api:claude-haiku-5-5",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 5.0,
+        },
+        headers=master_key_header,
+    )
+    images = ["data:image/png;base64,iVBORw0KGgo="]
+    payload = {**PAYLOAD, "model": "claude-api:claude-haiku-5-5", "images": images}
+    with _mock_chat() as chat, _mock_decision() as decision:
+        resp = client.post(f"{API_ROOT}/decisions", json=payload, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    decision.assert_not_awaited()
+    sent = chat.await_args.kwargs
+    assert sent["model"] == "anthropic:claude-haiku-5-5"
+    assert sent["api_key"] == "sk-ant"
+    assert sent["response_format"]["json_schema"]["schema"]["required"] == ["urgency", "team"]
+    user_content = sent["messages"][1]["content"]
+    assert user_content[1:] == [{"type": "image_url", "image_url": {"url": images[0]}}]
+
+    answers = resp.json()["answers"]
+    assert (answers["urgency"]["noul"], answers["urgency"]["confidence"]) == (0.9, 0.9)
+    assert answers["team"]["choice"] == "technical"
+    assert answers["team"]["probabilities"] == pytest.approx({"billing": 0.2, "technical": 0.8})
+
+    (row,) = _decision_rows(client, master_key_header, api_key_obj["user_id"])
+    assert (row["status"], row["provider"], row["model"]) == ("success", "claude-api", "claude-haiku-5-5")
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (400, 20)
+    # 400 input tokens at $1/M plus 20 output tokens at $5/M.
+    assert float(row["cost"]) == pytest.approx(0.0005)
+
+
+def test_a_chat_model_answer_the_questions_cannot_be_read_from_is_502(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    payload = {**PAYLOAD, "model": "claude-api:claude-haiku-5-5"}
+    with _mock_chat(side_effect=[_chat_completion('{"urgency": 0.9}')]):
+        resp = client.post(f"{API_ROOT}/decisions", json=payload, headers=api_key_header)
+    assert resp.status_code == 502
+    with _mock_chat(side_effect=[_chat_completion(json.dumps(CHAT_REPLY), finish_reason="length")]):
+        resp = client.post(f"{API_ROOT}/decisions", json=payload, headers=api_key_header)
+    assert resp.status_code == 502
+
+
+def test_a_policy_falls_over_from_a_chat_model_out_of_credit_to_a_decision_model(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    with _mock_chat(side_effect=_credit_balance_too_low()) as chat, _mock_decision() as decision:
+        resp = client.post(f"{API_ROOT}/decisions", json={**PAYLOAD, "model": "chat-first"}, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    assert chat.await_count == 1
+    assert decision.await_count == 1
+    assert resp.json()["model"] == "chat-first"
+    assert (resp.headers[PROVIDER_HEADER], resp.headers[FALLBACK_HEADER]) == ("typesafe", "true")
+
+    rows = _decision_rows(client, master_key_header, api_key_obj["user_id"])
+    assert sorted((row["status"], row["provider"], row["status_code"]) for row in rows) == [
+        ("absorbed", "claude-api", 400),
+        ("success", "typesafe", None),
+    ]
