@@ -9384,7 +9384,7 @@ export interface components {
         AcceptInvitationResultPublic: {
             /**
              * Can Sign In
-             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.
+             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it carries neither, and false while a password chosen at signup waits on verification.
              * @default true
              */
             can_sign_in: boolean;
@@ -15583,7 +15583,7 @@ export interface components {
         InvitationPreviewPublic: {
             /**
              * Can Sign In
-             * @description Whether the invited address can already sign in, with a password or through a provider.
+             * @description Whether the invited address can already sign in, with a password or through a provider. A password chosen at signup is not one of them until the address is verified.
              */
             can_sign_in: boolean;
             /** Email */

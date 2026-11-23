@@ -2106,7 +2106,7 @@ class OrganizationService:
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
         needs_password = await self._invitee_is_claimable(invitee, organization.id)
-        can_sign_in = invitee.sign_in_means is not SignInMeans.NONE
+        can_sign_in = invitee.sign_in_means.completes_sign_in
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
@@ -2205,7 +2205,7 @@ class OrganizationService:
             invitation, membership, organization, blocked_addresses
         )
         verification_pending = invitee.sign_in_means is SignInMeans.UNVERIFIED_PASSWORD
-        can_sign_in = password is not None or invitee.sign_in_means is not SignInMeans.NONE
+        can_sign_in = password is not None or invitee.sign_in_means.completes_sign_in
         claimed_identity = None
         if password is not None:
             # The claim was a conditional UPDATE the session did not see, so the name it wrote is read back.

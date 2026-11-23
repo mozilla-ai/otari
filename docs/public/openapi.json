@@ -51,7 +51,7 @@
         "properties": {
           "can_sign_in": {
             "default": true,
-            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.",
+            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it carries neither, and false while a password chosen at signup waits on verification.",
             "title": "Can Sign In",
             "type": "boolean"
           },
@@ -13318,7 +13318,7 @@
         "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
         "properties": {
           "can_sign_in": {
-            "description": "Whether the invited address can already sign in, with a password or through a provider.",
+            "description": "Whether the invited address can already sign in, with a password or through a provider. A password chosen at signup is not one of them until the address is verified.",
             "title": "Can Sign In",
             "type": "boolean"
           },
