@@ -118,11 +118,22 @@ def _declared_size(download: AsyncFileDownload) -> int:
     return 0
 
 
+def _refusal_detail(exc: Exception) -> str:
+    """The HTTP status a provider refused with, as a trailing clause, or nothing when it carried none.
+
+    NOTE: an endpoint that answers a download with a redirect is refused rather
+    than followed, and reads as an ordinary status here.
+    """
+    status = getattr(exc, "status_code", None)
+    return f" (HTTP {status})" if isinstance(status, int) else ""
+
+
 class _AnyLlmFileSession(ProviderFileSession):
     """Reads and writes one provider account's files through any-llm, with the credential that reaches it.
 
-    Owns the connection its calls run on, unless its credential carries one, so a
-    caller closes it with :meth:`aclose` once it has read everything it wants.
+    Owns the connection its calls run on unless the credential carries one, and
+    a caller closes it with :meth:`aclose` either way once it has read
+    everything it wants.
     """
 
     def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ResolvedCredential) -> None:
@@ -180,7 +191,7 @@ class _AnyLlmFileSession(ProviderFileSession):
         )
 
     async def aclose(self) -> None:
-        """Release the connection this client reads over.
+        """Release the connection this client reads over, and do nothing for one it was handed.
 
         A release that fails is logged rather than raised, because the caller has
         already read whatever it came for and can do nothing about it.
@@ -274,7 +285,9 @@ class _AnyLlmFileSession(ProviderFileSession):
                         raise FileOverBudgetError
                     yield chunk
         except _FILE_CALL_ERRORS as exc:
-            raise ProviderFileUnavailableError(f"{self.provider} could not serve file {file.file_id}") from exc
+            raise ProviderFileUnavailableError(
+                f"{self.provider} could not serve file {file.file_id}{_refusal_detail(exc)}"
+            ) from exc
 
     def _open(self, file: ProviderFile) -> AbstractAsyncContextManager[AsyncFileDownload]:
         if self._provider is LLMProvider.ANTHROPIC:
