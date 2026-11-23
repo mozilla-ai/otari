@@ -668,8 +668,7 @@ async def resend_verification_email(
     )
     if (
         identity is None
-        or identity.hashed_password is None
-        or identity.email_verified_at is not None
+        or identity.sign_in_means is not SignInMeans.UNVERIFIED_PASSWORD
         or not identity.is_active
         or not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup)
     ):
