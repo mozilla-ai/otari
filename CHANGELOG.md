@@ -4,6 +4,16 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.55.1](https://github.com/mozilla-ai/otari/releases/tag/v0.55.1) - 2026-11-23
+
+
+
+### Bug Fixes
+
+- **files:** Keep the pinned client in an org key's file sessions in [#3485](https://github.com/mozilla-ai/otari/pull/3485) by [@hitakshiA](https://github.com/hitakshiA) ([`12a65ec`](https://github.com/mozilla-ai/otari/commit/12a65eced273bdb3f044eda4f024501f3202ae1d))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.55.0...v0.55.1
 ## [0.55.0](https://github.com/mozilla-ai/otari/releases/tag/v0.55.0) - 2026-11-23
 
 
