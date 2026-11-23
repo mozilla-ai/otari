@@ -90,8 +90,8 @@ class EndpointAuthPublic(SQLModel):
     def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
         """Read one row's endpoint credential for the API, or None where it carries none.
 
-        A credential this build cannot read is reported as none, because a list
-        of keys must render whatever a row holds.
+        A credential this build cannot read is reported as none, because this
+        shape has to render whatever a row holds.
         """
         try:
             auth = key.endpoint_auth

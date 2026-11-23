@@ -447,10 +447,12 @@ def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
 def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: EndpointAuth | None) -> EndpointAuth | None:
     """The endpoint credential to store, or None where the request carries none.
 
-    An editor is only ever shown the last four characters, so a form resubmitted
-    without the value keeps the one already held, as ``client_args`` does. A
-    credential being set for the first time has nothing to keep, so one sent
-    without a value is refused.
+    An editor is only ever shown the last four characters, so a credential
+    resubmitted without its value keeps the value already held.
+
+    Raises:
+        OrgProviderKeyEndpointAuthRefusedError: A credential set for the first
+            time was sent with no value, so there is none held to keep.
     """
     if sent is None:
         return None
@@ -497,10 +499,12 @@ def _credentials_that_follow(*, api_key: bool, client_args: bool, endpoint: bool
 
 
 def _stored_endpoint_auth(key: OrgProviderKey) -> EndpointAuth | None:
-    """The credential this key holds, refusing where it holds one that cannot be read.
+    """The credential this key holds, or None where it holds none.
 
-    An edit decides what the row will hold next, so a credential this build
-    cannot read is refused rather than cleared or written over.
+    Raises:
+        OrgProviderKeyEndpointAuthRefusedError: The key holds a credential this
+            build cannot read. An edit decides what the row holds next, so one
+            that cannot be read is refused rather than cleared or written over.
     """
     try:
         return key.endpoint_auth

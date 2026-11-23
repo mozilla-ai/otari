@@ -62,11 +62,7 @@ class EndpointAuthState(StrEnum):
 
 
 class EndpointAuthMethod(StrEnum):
-    """How the credential for one endpoint is produced.
-
-    Every member produces request headers, so what a dispatch or discovery
-    caller receives is a header mapping whichever member a key names.
-    """
+    """How the credential for one endpoint is produced."""
 
     STATIC_HEADER = "static_header"
 
@@ -192,8 +188,8 @@ class EndpointAuth:
 def endpoint_auth_columns(auth: EndpointAuth | None) -> dict[str, object | None]:
     """Every column one endpoint credential occupies, cleared where there is none.
 
-    A write names all of them whichever it is doing, so a row cannot keep a
-    declaration with no value behind it.
+    Naming all of them is what keeps a row from holding a declaration with no
+    value behind it.
     """
     return {
         "encrypted_endpoint_auth_secret": auth.encrypted_secret if auth is not None else None,

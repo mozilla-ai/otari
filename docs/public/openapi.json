@@ -9026,7 +9026,7 @@
         "type": "object"
       },
       "EndpointAuthMethod": {
-        "description": "How the credential for one endpoint is produced.\n\nEvery member produces request headers, so what a dispatch or discovery\ncaller receives is a header mapping whichever member a key names.",
+        "description": "How the credential for one endpoint is produced.",
         "enum": [
           "static_header"
         ],

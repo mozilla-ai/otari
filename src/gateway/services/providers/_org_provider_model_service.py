@@ -905,11 +905,7 @@ class OrgProviderModelService:
 
     @staticmethod
     def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
-        """The headers this key's endpoint credential adds, or none where it cannot be served as stored.
-
-        Held to the refusals dispatch applies, so the two paths cannot report
-        one key differently.
-        """
+        """The headers this key's endpoint credential adds, or none where it cannot be served as stored."""
         try:
             auth = key.endpoint_auth
             if auth is None or auth.refused_reason(has_api_base=bool(key.api_base)) is not None:
