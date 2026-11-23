@@ -19,7 +19,7 @@ provider, including Otari.
            "apiKey": "{env:OTARI_API_KEY}"
          },
          "models": {
-           "openai:gpt-4o": {}
+           "z-ai/glm-5.3": {}
          }
        }
      }
@@ -30,7 +30,7 @@ provider, including Otari.
 
    ```bash
    export OTARI_API_KEY=<your-otari-key>
-   opencode --model otari/openai:gpt-4o
+   opencode --model otari/z-ai/glm-5.3
    ```
 
 `models` lists the models opencode offers from this provider, keyed by the name
