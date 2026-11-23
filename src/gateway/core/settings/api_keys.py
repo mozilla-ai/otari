@@ -201,6 +201,18 @@ class FederationIssuer(BaseModel):
 class ApiKeySettings(BaseModel):
     """API keys a deployment declares rather than mints."""
 
+    max_api_key_lifetime_days: Annotated[int | None, Shown(SettingsGroup.GENERAL)] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Longest lifetime a minted API key may be given, in days from the key's creation. A create or "
+            "update that asks for a later expiry is clamped to it, and a mint left without an expiry gets one "
+            "at the cap, so no API key outlives it. Null, the default, is no cap. Keys a deployment mints at "
+            "startup or through other flows (the bootstrap key, keys declared in config.yml, OAuth app keys) "
+            "are unaffected."
+        ),
+    )
+
     api_keys: Annotated[dict[str, ApiKeyConfig], SECRET] = Field(
         default_factory=dict,
         description=(

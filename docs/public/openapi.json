@@ -7070,7 +7070,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional expiration timestamp",
+            "description": "Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a key minted without one gets an expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header.",
             "title": "Expires At"
           },
           "is_service_key": {
@@ -7448,7 +7448,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional expiration timestamp",
+            "description": "Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a key minted without one gets an expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header.",
             "title": "Expires At"
           },
           "is_service_key": {
@@ -29494,6 +29494,7 @@
                 "type": "null"
               }
             ],
+            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.",
             "title": "Expires At"
           },
           "is_active": {
@@ -29678,6 +29679,7 @@
                 "type": "null"
               }
             ],
+            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.",
             "title": "Expires At"
           },
           "is_active": {
@@ -44078,7 +44080,7 @@
         ]
       },
       "post": {
-        "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
+        "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\nWhere the deployment sets ``max_api_key_lifetime_days``, the expiry is clamped to that cap\n(a mint naming none gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
         "operationId": "keys-create_key",
         "requestBody": {
           "content": {
@@ -44219,7 +44221,7 @@
         ]
       },
       "patch": {
-        "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
+        "description": "Update an API key in the caller's organization.\n\nRequires master key authentication. A new ``expires_at`` is capped by the deployment's\n``max_api_key_lifetime_days``, measured from the key's creation, and a capped change\nanswers with ``Otari-Key-Lifetime-Capped``.",
         "operationId": "keys-update_key",
         "parameters": [
           {
@@ -48552,7 +48554,7 @@
         ]
       },
       "post": {
-        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). A viewer of the workspace is refused\nwith 403. The secret is returned once. Where the deployment sets\n``max_api_key_lifetime_days``, the expiry is clamped to that cap (a mint naming\nnone gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.\n\nA service key is the organization's rather than the caller's: only an\norganization owner or admin may create one, its end-user budgets must be\nthis organization's, and it is owned by a user minted for it alone.",
         "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
@@ -48644,7 +48646,7 @@
         ]
       },
       "patch": {
-        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.",
+        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.\n\nA new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,\nmeasured from the key's creation, and a capped change answers with\n``Otari-Key-Lifetime-Capped``.",
         "operationId": "organization-keys-update_own_key",
         "parameters": [
           {

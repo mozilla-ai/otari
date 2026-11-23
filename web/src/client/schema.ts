@@ -2807,6 +2807,9 @@ export interface paths {
          *     on first use. Keys without an explicit owner therefore share one identity, and so share budget,
          *     usage, and files.
          *
+         *     Where the deployment sets ``max_api_key_lifetime_days``, the expiry is clamped to that cap
+         *     (a mint naming none gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.
+         *
          *     ``workspace_id`` names a workspace in the caller's organization, and omitting
          *     it mints into that organization's default workspace. A key resolves that
          *     organization's provider credentials and bills there, so minting into another
@@ -2848,7 +2851,9 @@ export interface paths {
          * Update Key
          * @description Update an API key in the caller's organization.
          *
-         *     Requires master key authentication.
+         *     Requires master key authentication. A new ``expires_at`` is capped by the deployment's
+         *     ``max_api_key_lifetime_days``, measured from the key's creation, and a capped change
+         *     answers with ``Otari-Key-Lifetime-Capped``.
          */
         patch: operations["keys-update_key"];
         trace?: never;
@@ -4164,7 +4169,9 @@ export interface paths {
          *     caller's own attribution user, the key is always budget-enforced, and the
          *     workspace must be visible to the caller (a member of it, or an organization
          *     owner/admin, who see every workspace). A viewer of the workspace is refused
-         *     with 403. The secret is returned once.
+         *     with 403. The secret is returned once. Where the deployment sets
+         *     ``max_api_key_lifetime_days``, the expiry is clamped to that cap (a mint naming
+         *     none gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.
          *
          *     A service key is the organization's rather than the caller's: only an
          *     organization owner or admin may create one, its end-user budgets must be
@@ -4197,6 +4204,10 @@ export interface paths {
         /**
          * Update Own Key
          * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
+         *
+         *     A new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,
+         *     measured from the key's creation, and a capped change answers with
+         *     ``Otari-Key-Lifetime-Capped``.
          */
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
@@ -12789,7 +12800,7 @@ export interface components {
             exclude_from_budget: boolean;
             /**
              * Expires At
-             * @description Optional expiration timestamp
+             * @description Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a key minted without one gets an expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header.
              */
             expires_at?: string | null;
             /**
@@ -12926,7 +12937,7 @@ export interface components {
             end_user_budget_ids?: string[] | null;
             /**
              * Expires At
-             * @description Optional expiration timestamp
+             * @description Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a key minted without one gets an expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header.
              */
             expires_at?: string | null;
             /**
@@ -23657,7 +23668,10 @@ export interface components {
             end_user_budget_ids?: string[] | null;
             /** Exclude From Budget */
             exclude_from_budget?: boolean | null;
-            /** Expires At */
+            /**
+             * Expires At
+             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.
+             */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
@@ -23712,7 +23726,10 @@ export interface components {
             end_user_budget_id?: string | null;
             /** End User Budget Ids */
             end_user_budget_ids?: string[] | null;
-            /** Expires At */
+            /**
+             * Expires At
+             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.
+             */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;

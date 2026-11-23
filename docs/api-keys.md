@@ -24,6 +24,12 @@ use an access token instead: see [Read Otari from your agent](read-otari-from-yo
 
 The key is made in the workspace selected in the top-left corner.
 
+A self-hosted deployment can cap how long a minted key may live: where the
+operator sets `max_api_key_lifetime_days` (see [Configuration](configuration.md)),
+an expiry past it is clamped to the key's creation plus that many days, and a
+key minted without an expiry gets one at the cap. The API answers a clamped
+write with the `Otari-Key-Lifetime-Capped` header carrying the expiry applied.
+
 **Access**, under **More options**, sets what the key may call: one checkbox
 per scope, grouped by area. Models, Tools and MCP are shown; Files, Batches,
 Coding agents, Usage, and End users on a service key are under **Advanced

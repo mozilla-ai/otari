@@ -107,6 +107,7 @@ _SETTING_NAMES = frozenset(
         "mail_from_name",
         "mail_transport",
         "master_key",
+        "max_api_key_lifetime_days",
         "mcp_catalog_enabled",
         "mcp_private_hosts",
         "mcp_catalog_sync",
