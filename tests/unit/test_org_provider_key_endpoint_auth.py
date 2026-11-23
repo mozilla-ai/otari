@@ -100,6 +100,24 @@ def test_a_credential_sent_with_no_rotation_date_is_refused_at_the_boundary() ->
         EndpointAuthRequest(method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key")  # type: ignore[call-arg]
 
 
+@pytest.mark.parametrize("secret", ["", "x" * 1025])
+def test_a_value_outside_the_stored_length_is_refused_at_the_boundary(secret: str) -> None:
+    """The value is sent as a header on every request, and an empty one is not a way to keep the stored value."""
+    with pytest.raises(ValidationError):
+        EndpointAuthRequest(
+            method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key", secret=secret, expires_at=LATER
+        )
+
+
+def test_a_value_at_the_longest_stored_length_is_accepted() -> None:
+    sent = EndpointAuthRequest(
+        method=EndpointAuthMethod.STATIC_HEADER, header_name="Fastly-Key", secret="x" * 1024, expires_at=LATER
+    )
+
+    assert sent.secret is not None
+    assert len(sent.secret) == 1024
+
+
 def _gate(**overrides: object) -> None:
     store._gate_endpoint_auth(
         replace(_whole(), **overrides),  # type: ignore[arg-type]
@@ -467,7 +485,9 @@ def test_the_public_shape_reports_a_credential_against_the_clock_it_is_given() -
     row = _key(endpoint_auth=True)
     row.endpoint_auth_expires_at = datetime.now(UTC) + timedelta(days=1)
 
-    public = OrgProviderKeyPublic.from_row(row, usable=True, now=datetime.now(UTC) + timedelta(days=365))
+    public = OrgProviderKeyPublic.from_row(
+        row, client_args=None, usable=True, now=datetime.now(UTC) + timedelta(days=365)
+    )
 
     assert public.endpoint_auth is not None
     assert public.endpoint_auth.state is EndpointAuthState.EXPIRED

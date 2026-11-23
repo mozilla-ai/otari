@@ -58,9 +58,12 @@ class EndpointAuthRequest(SQLModel):
     )
     secret: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=1024,
         description=(
             "The value to send. Write-only: responses report only its last four characters. Required when "
-            "the credential is first set, and on any change of base URL."
+            "the credential is first set, and on any change of base URL. Omit it to keep the value already "
+            "stored; an empty string is refused rather than read as keeping it."
         ),
     )
     expires_at: AwareDatetime = Field(
