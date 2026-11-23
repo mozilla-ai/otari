@@ -164,6 +164,14 @@ own list. No list allows any model, an empty list allows none, and entries may
 use provider wildcards such as `openai:*`. A key can narrow its user's access,
 never widen it.
 
+An entry may also be a model's catalog id, as `GET /api/v1/models` lists it
+(`mistralai/mistral-small-3`). Otari stores it as the `instance:model` selector
+of each provider offering the model when the list is saved, and the key's
+response shows those selectors. A provider that starts offering the model later
+is not on the list until you save it again. An entry that is also the legacy
+`provider/model` spelling of a model that provider serves (`openai/gpt-4o`)
+still means that one offering.
+
 **Search and fetch tools.** These have their own list, `allowed_tools`, which
 governs `POST /api/v1/search` and `POST /api/v1/fetch`:
 

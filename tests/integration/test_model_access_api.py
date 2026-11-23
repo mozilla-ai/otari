@@ -66,6 +66,35 @@ def test_create_key_rejects_non_canonical_entry(client: TestClient, master_key_h
     assert "instance:model" in resp.json()["detail"]
 
 
+def test_a_key_restricted_by_catalog_id_reaches_that_model_alone(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The dashboard's picker offers ``GET /models`` ids, named for the model's author (otari#3069)."""
+    _seed_pricing(client, master_key_header, ALLOWED)
+    _seed_pricing(client, master_key_header, DENIED)
+    refreshed = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
+    assert refreshed.status_code == 200, refreshed.text
+
+    resp = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "picked", "allowed_models": [CATALOG_ID[DENIED]]},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allowed_models"] == [DENIED]
+    scoped = {"Otari-Key": f"Bearer {resp.json()['key']}"}
+
+    ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=scoped).json()["data"]}
+    assert CATALOG_ID[DENIED] in ids
+    assert CATALOG_ID[ALLOWED] not in ids
+    refused = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": CATALOG_ID[ALLOWED], "messages": [{"role": "user", "content": "hi"}]},
+        headers=scoped,
+    )
+    assert refused.status_code == 403, refused.text
+
+
 def test_patch_tri_state(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id = client.post(
         f"{API_ROOT}/keys",

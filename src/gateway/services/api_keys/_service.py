@@ -277,6 +277,7 @@ class ApiKeyService:
                 AccessLists(changes.get("allowed_models", stored.models), changes.get("allowed_tools", stored.tools)),
                 stored=stored,
                 owner_id=owner_id,
+                workspace_id=key.workspace_id,
             )
             for column, value in changes.items():
                 setattr(key, column, value)
@@ -284,7 +285,14 @@ class ApiKeyService:
             key.allowed_tools = access.tools
 
     async def check_access_lists(
-        self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None
+        self,
+        config: GatewayConfig,
+        requested: AccessLists,
+        *,
+        stored: AccessLists,
+        owner_id: str | None,
+        workspace_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> AccessLists:
         """The ``allowed_models`` and ``allowed_tools`` to store on a key or a user, each checked only if it changes.
 
@@ -293,7 +301,8 @@ class ApiKeyService:
         unrelated edit. A key's changed list must fit its owner's (``owner_id``;
         ``None`` for a user, or a key with no owner). The owner is read in a block of
         its own, whose commit would also store what the caller had staged, so a route
-        calls this first.
+        calls this first. ``workspace_id`` or ``organization_id`` names whose catalog
+        a catalog ID in a changed list is read from.
 
         Raises:
             ValueError: a changed list names something unknown, or grants more than the owner's.
@@ -301,7 +310,11 @@ class ApiKeyService:
         models_changed = requested.models != stored.models
         tools_changed = requested.tools != stored.tools
         checked = AccessLists(
-            validate_allowed_models(config, requested.models) if models_changed else stored.models,
+            validate_allowed_models(
+                config, requested.models, workspace_id=workspace_id, organization_id=organization_id
+            )
+            if models_changed
+            else stored.models,
             validate_allowed_tools(config, requested.tools) if tools_changed else stored.tools,
         )
         if owner_id is None or not (models_changed or tools_changed):

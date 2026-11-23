@@ -351,7 +351,7 @@ async def create_own_key(
     )
 
     try:
-        allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_models = validate_allowed_models(config, request.allowed_models, organization_id=organization.id)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
         scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:

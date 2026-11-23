@@ -357,7 +357,7 @@ async def create_key(
     organization's workspace would spend its budget on its credentials.
     """
     try:
-        allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_models = validate_allowed_models(config, request.allowed_models, organization_id=organization_id)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
         scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
@@ -563,6 +563,7 @@ async def update_key(
             ),
             stored=stored,
             owner_id=key.user_id,
+            organization_id=organization_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
