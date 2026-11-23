@@ -216,6 +216,59 @@ async def test_gemini_receives_inline_images_as_image_blocks() -> None:
     ]
 
 
+async def _ask_openrouter(body: dict[str, Any]) -> dict[str, Any]:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"answers": {}})
+
+    provider = DecisionProvider(
+        name="openrouter",
+        provider="openrouter",
+        api_key="or",
+        url="https://openrouter.ai/api/alpha/decisions",
+        timeout_s=5,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await request_decision(provider, body, client=client)
+    (request,) = seen
+    sent: dict[str, Any] = json.loads(request.content)
+    return sent
+
+
+@pytest.mark.asyncio
+async def test_openrouter_receives_inline_images_as_image_url_parts_of_the_state() -> None:
+    images = ["data:image/png;base64,AA", "data:image/jpeg;base64,BB"]
+    body = {"model": "perplexity/pplx-decider-v1.3:free", "state": "photo", "questions": QUESTIONS, "images": images}
+    assert await _ask_openrouter(body) == {
+        "model": "perplexity/pplx-decider-v1.3:free",
+        "state": [
+            {"type": "text", "text": "photo"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,BB"}},
+        ],
+        "questions": QUESTIONS,
+    }
+
+
+@pytest.mark.asyncio
+async def test_openrouter_serializes_a_structured_state_into_the_text_part() -> None:
+    body = {
+        "model": "m",
+        "state": {"message": "charged twice"},
+        "questions": QUESTIONS,
+        "images": ["data:image/png;base64,AA"],
+    }
+    assert (await _ask_openrouter(body))["state"][0] == {"type": "text", "text": '{"message": "charged twice"}'}
+
+
+@pytest.mark.asyncio
+async def test_openrouter_is_sent_a_body_without_images_as_it_is() -> None:
+    body = {"model": "m", "state": {"message": "charged twice"}, "questions": QUESTIONS}
+    assert await _ask_openrouter(body) == body
+
+
 @pytest.mark.asyncio
 async def test_gemini_answer_names_the_model_and_counts_tokens_under_typesafe_keys() -> None:
     reply = {

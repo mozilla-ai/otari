@@ -12910,7 +12910,7 @@ export interface components {
         DecisionRequest: {
             /**
              * Images
-             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). An extension llama-server supports; a provider that does not refuses the request.
+             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). Sent as llama-server's 'images' field, to OpenRouter as image_url parts of the state, and to Gemini as image blocks; a provider that reads no images refuses the request.
              */
             images?: string[] | null;
             /**
