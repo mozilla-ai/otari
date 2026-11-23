@@ -5,7 +5,7 @@ proxy that requires a second credential. All five columns are nullable, so an
 existing key keeps dialing with its provider credential alone.
 
 Revision ID: c7e1b9d4a260
-Revises: b4d6f8a0c2e5
+Revises: f6b8d0a2c4e7
 Create Date: 2026-11-20
 """
 
