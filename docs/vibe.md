@@ -8,8 +8,8 @@ as a provider, including Otari.
 
 1. Create a key on the dashboard's **API keys** page.
 2. Add Otari as a provider, and a model on it, in `~/.vibe/config.toml`.
-   `active_model` belongs above the file's first `[[...]]` table, and replaces
-   any `active_model` already there:
+   `active_model` belongs above the file's first table header, `[...]` or
+   `[[...]]`, and replaces any `active_model` already there:
 
    ```toml
    active_model = "glm-5.3"
