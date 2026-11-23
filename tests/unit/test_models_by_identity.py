@@ -159,6 +159,14 @@ def test_a_filled_limit_is_the_smallest_the_others_report_and_never_exceeds_the_
     assert (listed[0].context_window, listed[0].max_output_tokens) == (65536, 65536)
 
 
+def test_an_output_limit_the_first_offering_knows_is_not_capped_by_a_filled_window(
+    config: GatewayConfig, no_index: None
+) -> None:
+    listed = models_by_identity(config, None, [_limited(_FIREWORKS, 0.7, None, 32768), _limited(_NEBIUS, None, 8192)])
+
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (8192, 32768)
+
+
 def test_a_model_offered_only_by_alias_targets_is_left_to_the_alias(config: GatewayConfig, no_index: None) -> None:
     alias = ModelObject(id="fast", created=0, owned_by=ALIAS_OWNED_BY)
 

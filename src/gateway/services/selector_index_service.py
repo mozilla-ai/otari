@@ -184,7 +184,9 @@ def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[s
 
     A self-hosted engine is often the one offering that knows its context
     length, and rarely the one tried first. The smallest is the one every
-    offering that reports a limit holds, whichever a fallback reaches.
+    offering that reports a limit holds, whichever a fallback reaches. A
+    filled output limit is capped at the row's context window; a limit
+    ``first`` knows is kept as it is.
     """
     filled: dict[str, int] = {}
     contexts = [obj.context_window for obj in others if obj.context_window is not None]
@@ -194,7 +196,7 @@ def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[s
     if first.max_output_tokens is None and outputs:
         filled["max_output_tokens"] = min(outputs)
     window = filled.get("context_window", first.context_window)
-    output = filled.get("max_output_tokens", first.max_output_tokens)
+    output = filled.get("max_output_tokens")
     if window is not None and output is not None and output > window:
         filled["max_output_tokens"] = window
     return filled
