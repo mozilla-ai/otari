@@ -214,6 +214,9 @@ function KeyForm({
   // nothing: neither whether the form saves nor what it sends.
   const endpointAuth =
     draft.apiBase.trim() === "" ? EMPTY_ENDPOINT_AUTH : draft.endpointAuth
+  // The credential as it would be sent, not the draft field: clearing the base
+  // URL takes the credential with it, and that is a change the save must carry.
+  const { isDirty: endpointAuthChanged } = useDirtySnapshot(endpointAuth)
 
   const canSubmit =
     parsedClientArgs.ok &&
@@ -261,13 +264,16 @@ function KeyForm({
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
         client_args: clientArgs,
-        endpoint_auth: endpointAuthBody,
         zero_data_retention: draft.zeroDataRetention,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
       // not a request to delete it.
       if (draft.apiKey !== "") body.api_key = draft.apiKey
+      // Sent only where the credential changed, for the same reason. The date
+      // field holds minutes, so resending an untouched credential would rewrite
+      // a stored rotation date that carried seconds.
+      if (endpointAuthChanged) body.endpoint_auth = endpointAuthBody
       update.mutate({ keyId: editing.id, body }, { onSuccess: onClose })
       return
     }

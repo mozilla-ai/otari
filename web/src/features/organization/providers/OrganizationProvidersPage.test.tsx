@@ -568,6 +568,39 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  // The date field holds minutes, so resending an untouched credential would
+  // rewrite a stored rotation date that carried seconds, and could be refused
+  // on the account of a date the person saving never touched.
+  it("leaves a stored endpoint credential out of a save that did not change it", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:37+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /^Name/ }))
+    await user.type(screen.getByRole("textbox", { name: /^Name/ }), "renamed")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ name: "renamed" })
+      expect(patch?.body).not.toHaveProperty("endpoint_auth")
+    })
+  })
+
   // The gateway refuses to carry a stored value to a host the person saving it
   // never proved they hold, so the dialog asks rather than offering the save.
   it("asks for the endpoint credential again when the key moves to another address", async () => {
