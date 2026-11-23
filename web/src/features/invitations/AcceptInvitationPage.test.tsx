@@ -56,6 +56,7 @@ function mockApi(opts: {
         role: "admin",
         expires_at: "2026-01-08T00:00:00+00:00",
         needs_password: opts.needsPassword ?? false,
+        verification_pending: opts.verificationPending ?? false,
         can_sign_in: canSignIn,
         ways_in: opts.needsPassword || canSignIn ? [] : waysIn,
       } as never
@@ -181,6 +182,47 @@ describe("AcceptInvitationPage", () => {
     expect(currentRoute()).toBe("/")
   })
 
+  it("tells an unverified signup to verify, and whoever did not sign up what else works", async () => {
+    // The invitee may not be whoever signed up on the address, so the one
+    // route the verification link opens is not the only one to name.
+    mockApi({
+      verificationPending: true,
+      canSignIn: false,
+      waysIn: ["provider"],
+    })
+    renderPage("/accept-invitation?token=abc123", {
+      oauthProviders: ["google"],
+    })
+
+    expect(
+      await screen.findByText(
+        /open the verification link emailed at signup\. If you did not sign up, sign in with Google\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("offers no reset link where this deployment cannot deliver one", async () => {
+    // Mail is configured, so the signup ran, but the transport reaches nobody.
+    mockApi({ verificationPending: true, canSignIn: false, waysIn: [] })
+    const user = userEvent.setup()
+    renderPage("/accept-invitation?token=abc123")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Accept invitation" }),
+    )
+
+    expect(
+      await screen.findByText(
+        /If you did not sign up, ask whoever administers/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", {
+        name: "Didn't sign up? Set a password instead",
+      }),
+    ).toBeNull()
+  })
+
   it("says to verify first when the address signed up and has not verified yet", async () => {
     // Accepting never verifies: whoever signed up may not hold the mailbox.
     mockApi({
@@ -196,7 +238,9 @@ describe("AcceptInvitationPage", () => {
     )
 
     expect(
-      await screen.findByText(/Verify ada@example.com first/),
+      await screen.findByText(
+        /Verify ada@example.com first: open the verification link emailed at signup, then sign in\. If you did not sign up, choose a password/,
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByText("Sign in to get started.")).toBeNull()
     // The invitee may not be who signed up, and takes the address back here.
