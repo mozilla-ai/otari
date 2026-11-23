@@ -1378,10 +1378,12 @@ request's price.
 A transcription model that reports tokens and no length, such as
 `gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
 length Otari reads from the uploaded file. Otari reads the length of a WAV,
-MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
-not its name. A file it cannot read, such as a WebM upload, gives no length,
-so that request keeps no cost at a `minute` or `second` rate. A length the
-provider reports always wins over the length read from the file.
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF, WMA or WebM file by its
+content, not its name. A WebM file from a browser recorder states no length,
+so Otari counts it from the timestamps of the audio blocks in the file. A file
+it cannot read gives no length, so that request keeps no cost at a `minute` or
+`second` rate. A length the provider reports always wins over the length read
+from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
