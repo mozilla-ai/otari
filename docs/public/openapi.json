@@ -9081,6 +9081,7 @@
           "header_name": {
             "description": "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.",
             "maxLength": 64,
+            "minLength": 1,
             "title": "Header Name",
             "type": "string"
           },

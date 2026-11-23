@@ -54,6 +54,7 @@ class EndpointAuthRequest(SQLModel):
         description="How the credential is produced. `static_header` sends one stored value as one header."
     )
     header_name: str = Field(
+        min_length=1,
         max_length=64,
         description=(
             "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends "
