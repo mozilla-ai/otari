@@ -13,9 +13,13 @@ provider, including Otari.
      "provider": {
        "otari": {
          "npm": "@ai-sdk/openai-compatible",
+         "name": "Otari",
          "options": {
            "baseURL": "https://api.otari.ai/api/v1",
            "apiKey": "{env:OTARI_API_KEY}"
+         },
+         "models": {
+           "z-ai/glm-5.3": {}
          }
        }
      }
@@ -26,17 +30,21 @@ provider, including Otari.
 
    ```bash
    export OTARI_API_KEY=<your-otari-key>
-   opencode --model otari/openai:gpt-4o
+   opencode --model otari/z-ai/glm-5.3
    ```
 
-`baseURL` ends in `/api/v1`; opencode adds `/chat/completions` itself. EU
+`models` lists the models opencode offers from this provider, keyed by the name
+after `otari/`. A provider with none is not loaded, and opencode answers
+`Provider not found: otari`. `baseURL` ends in `/api/v1`; opencode adds
+`/chat/completions` itself. EU
 accounts use `https://eu.api.otari.ai/api/v1`, and a gateway you run uses its
 URL plus `/api/v1`. See [Base URL](https://docs.otari.ai/reference#base-url).
 
 ## Choosing a model
 
 opencode names a model `<provider id>/<model>`, and everything after `otari/`
-goes to Otari unchanged, so write it as Otari spells it:
+goes to Otari unchanged, so write it as Otari spells it. opencode offers only the
+models listed under `models`, so add that part as a key there before you use it:
 
 - On otari.ai, a catalog id such as `otari/deepseek/deepseek-v4.1-flash` lets
   Otari choose the provider, and
