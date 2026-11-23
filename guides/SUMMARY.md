@@ -13,11 +13,13 @@
 
 * [Claude Code](claude-code.md)
 * [Codex](codex.md)
+* [Cursor](cursor.md)
 * [Junie](junie.md)
 * [opencode](opencode.md)
 * [pi](pi.md)
 * [oh-my-pi](oh-my-pi.md)
 * [Hermes Agent](hermes.md)
+* [Mistral Vibe](vibe.md)
 * [Pydantic AI](pydantic-ai.md)
 * [LangChain](langchain.md)
 * [LangGraph](langgraph.md)
