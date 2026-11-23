@@ -238,8 +238,8 @@ async def _load_own_writable_key(
     key_id: str,
     *,
     revoking: bool = False,
-) -> APIKey:
-    """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
+) -> tuple[Organization, APIKey]:
+    """The caller's organization and one of their own keys in it, or 404, refused with 403 to a viewer of its workspace.
 
     An owner or admin also reaches the organization's service keys. A viewer
     still lists their keys; changing, rotating or revoking one is a write, and an
@@ -252,7 +252,7 @@ async def _load_own_writable_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
     )
-    return key
+    return organization, key
 
 
 async def _load_member_key(
@@ -503,7 +503,7 @@ async def update_own_key(
     """Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin."""
     fields = request.model_fields_set
     switching_off = fields == {"is_active"} and request.is_active is False
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
+    organization, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
     refuse_service_key_flag_change(key, request.is_service_key)
 
     # Tri-state via model_fields_set: the nullable columns take null to clear
@@ -531,7 +531,7 @@ async def update_own_key(
     )
 
     try:
-        await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id))
+        await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id), organization_id=organization.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except DATABASE_ERRORS as exc:
@@ -554,7 +554,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    key = await _load_own_writable_key(db, organizations, identity, key_id)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -584,7 +584,7 @@ async def delete_own_key(
     organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
     await db.delete(key)
     try:

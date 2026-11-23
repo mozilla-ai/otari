@@ -255,7 +255,13 @@ class ApiKeyService:
             await self._federation_rules.delete(row)
 
     async def update_owned(
-        self, config: GatewayConfig, key: APIKey, changes: Mapping[str, Any], *, owner_id: str
+        self,
+        config: GatewayConfig,
+        key: APIKey,
+        changes: Mapping[str, Any],
+        *,
+        owner_id: str,
+        organization_id: uuid.UUID | None = None,
     ) -> None:
         """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
 
@@ -278,6 +284,7 @@ class ApiKeyService:
                 stored=stored,
                 owner_id=owner_id,
                 workspace_id=key.workspace_id,
+                organization_id=organization_id,
             )
             for column, value in changes.items():
                 setattr(key, column, value)

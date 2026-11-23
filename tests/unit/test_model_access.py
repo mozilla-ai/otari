@@ -2,12 +2,16 @@
 
 import uuid
 from collections.abc import Iterator
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import (
     OfferingRow,
     build_organization_selectors,
@@ -32,6 +36,7 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
+from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import org_provider_key_service as org_store
 from gateway.services.tenancy.org_provider_key_service import KeyOffer
 
@@ -237,6 +242,41 @@ def test_validate_refuses_a_catalog_id_served_only_on_a_key_reached_by_its_slug(
             validate_allowed_models(GatewayConfig(), ["alibaba/qwen3.8-flash"], organization_id=_ORG)
     finally:
         reset_selector_index()
+
+
+def test_validate_keeps_a_provider_spelling_whose_model_no_entry_can_name_as_before() -> None:
+    """``openai/gpt-4o`` served only on a renamed hosted provider was accepted before catalog IDs were read."""
+    rows = [OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", 2.0)]
+    set_selector_index(build_selector_index(rows, {"openai/gpt-4o": ("openai/gpt-4o", ("openai-eu:gpt-4o",))}))
+    try:
+        assert validate_allowed_models(GatewayConfig(), ["openai/gpt-4o"]) == ["openai:gpt-4o"]
+    finally:
+        reset_selector_index()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"organization_id": _ORG},
+        {"workspace_id": _ORG_WORKSPACE},
+        {"workspace_id": uuid.uuid4(), "organization_id": _ORG},
+    ],
+)
+async def test_a_changed_key_list_reads_a_catalog_id_from_the_keys_organization(scope: dict[str, uuid.UUID]) -> None:
+    """An edit reads the catalog the key was created against, also for a workspace the index has not mapped yet."""
+    service = ApiKeyService(cast(UnitOfWork, MagicMock()), cast(Any, MagicMock()), users=cast(Any, MagicMock()))
+
+    access = await service.check_access_lists(
+        GatewayConfig(),
+        AccessLists(["alibaba/qwen3.8-flash"], None),
+        stored=AccessLists(None, None),
+        owner_id=None,
+        **scope,
+    )
+
+    assert access.models == ["deepinfra:alibaba/qwen3.8-flash"]
 
 
 @pytest.mark.usefixtures("author_namespace_catalog")

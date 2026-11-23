@@ -541,12 +541,13 @@ def _validate_entry(
     if "*" in model and (model.count("*") > 1 or not model.endswith("*")):
         raise ValueError(f"'{entry}': only a single trailing '*' is allowed (openai:* or openai:gpt-4*)")
     if offerings := _catalog_offerings(entry, workspace_id=workspace_id, organization_id=organization_id):
-        # An offering on a key reached by its slug is not storable, so the
-        # model's other offerings stand for it.
-        storable = [offering for offering in offerings if _known_prefix(config, offering.partition(":")[0])]
-        if not storable:
+        # No entry can name a hosted provider called otherwise than its
+        # implementation, a hosted region, or a key reached by its slug, so the
+        # model's other offerings stand for those.
+        if storable := [offering for offering in offerings if _known_prefix(config, offering.partition(":")[0])]:
+            return storable
+        if not _known_prefix(config, prefix):
             raise ValueError(f"'{entry}' is served only through providers an allowed_models entry cannot name")
-        return storable
     canonical = f"{prefix}:{model}"
     if _known_prefix(config, prefix) or canonical in config.legacy_search_tool_keys():
         return [canonical]
@@ -576,14 +577,14 @@ def validate_allowed_models(
         return None
     if not isinstance(entries, list):
         raise ValueError("allowed_models must be a list of strings, [] to deny all, or null for unrestricted")
-    canonical: list[str] = []
+    canonical: dict[str, None] = {}
     for entry in entries:
         if not isinstance(entry, str):
             raise ValueError("allowed_models entries must be strings")
-        for normalized in _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id):
-            if normalized not in canonical:
-                canonical.append(normalized)
-    return canonical
+        canonical |= dict.fromkeys(
+            _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id)
+        )
+    return list(canonical)
 
 
 def model_not_allowed_detail(model: str) -> str:
