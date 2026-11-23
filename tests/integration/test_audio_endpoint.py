@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from openai.types.audio.transcription import UsageDuration, UsageTokens
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _webm_support import webm
 from gateway.core.config import (
     API_ROOT,
     COST_USD_HEADER,
@@ -800,6 +801,45 @@ def test_a_per_minute_price_bills_the_uploads_length_when_the_model_reports_toke
     assert latest["cost"] == pytest.approx(0.06)
     assert latest["billing_meters"] == {"minutes": pytest.approx(0.1)}
     assert (latest["prompt_tokens"], latest["completion_tokens"]) == (36, 14)
+
+
+def test_a_per_minute_price_bills_a_browser_recordings_length_when_the_model_reports_tokens(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A WebM recording states no duration, so its length is counted from its blocks."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini-transcribe",
+            "rates": {"audio": {"input": {"price": 0.6, "unit": "minute"}}},
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    result = Transcription(
+        text="Hello", usage=UsageTokens(input_tokens=36, output_tokens=14, total_tokens=50, type="tokens")
+    )
+    recording = webm(range(0, 6000, 20), unknown_sizes=True, last_block_duration_ms=20)
+    with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=result):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("recording.webm", recording, "audio/webm")},
+            data={"model": "openai:gpt-4o-mini-transcribe"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200, resp.text
+
+    usage_resp = client.get(
+        f"{API_ROOT}/usage",
+        params={"endpoint": "/v1/audio/transcriptions", "status": "success"},
+        headers=master_key_header,
+    )
+    latest = usage_resp.json()[0]
+    # A tenth of a minute at $0.60 a minute.
+    assert latest["cost"] == pytest.approx(0.06)
+    assert latest["billing_meters"] == {"minutes": pytest.approx(0.1)}
 
 
 def test_a_transcription_refused_before_dispatch_is_never_measured(
