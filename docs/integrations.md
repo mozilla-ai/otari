@@ -8,6 +8,7 @@ Otari integrates with popular AI development frameworks and coding tools. Explor
 
 ## Supported integrations
 
+- [Set up coding tools with one command](setup-coding-tools.md)
 - [Claude Code](claude-code.md)
 - [Codex](codex.md)
 - [Cursor](cursor.md)

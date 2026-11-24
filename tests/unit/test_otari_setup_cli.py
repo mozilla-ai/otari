@@ -1,7 +1,9 @@
 """`otari setup` and the commands that start a tool: what is written, what is run, and where the key is not."""
 
 import json
+import shutil
 import stat
+import sys
 import tomllib
 from pathlib import Path
 
@@ -95,7 +97,7 @@ def launched(home: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, lis
     written = [configure(URL, store, ["vendor/model"]) for configure in otari_setup._CONFIGURE.values()]  # noqa: SLF001
     otari_setup._write_manifest(URL, written, "vendor/model")  # noqa: SLF001
     calls: list[tuple[str, list[str], dict[str, str]]] = []
-    monkeypatch.setattr(otari_setup.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(otari_setup, "_exec", lambda binary, argv, env: calls.append((binary, argv, env)))
     return calls
 
@@ -127,11 +129,11 @@ def test_otari_opencode_hands_opencode_the_key_and_its_config(
 
 
 def test_the_start_hint_names_otari_only_when_it_outlives_this_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(otari_setup.shutil, "which", lambda _: "/opt/homebrew/bin/otari")
+    monkeypatch.setattr(shutil, "which", lambda _: "/opt/homebrew/bin/otari")
     assert otari_setup._invocation() == "otari"  # noqa: SLF001
-    monkeypatch.setattr(otari_setup.shutil, "which", lambda _: f"{otari_setup.sys.prefix}/bin/otari")
+    monkeypatch.setattr(shutil, "which", lambda _: f"{sys.prefix}/bin/otari")
     assert otari_setup._invocation() == "uvx --from otari-agent otari"  # noqa: SLF001
-    monkeypatch.setattr(otari_setup.shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     assert otari_setup._invocation() == "uvx --from otari-agent otari"  # noqa: SLF001
 
 
@@ -173,7 +175,7 @@ def test_logout_removes_what_setup_wrote(home: Path, monkeypatch: pytest.MonkeyP
         def post(self, url: str, data: dict[str, str]) -> None:
             revoked.append(data["token"])
 
-    monkeypatch.setattr(otari_setup.httpx, "Client", Client)
+    monkeypatch.setattr(httpx, "Client", Client)
     result = CliRunner().invoke(cli, ["logout"])
     assert result.exit_code == 0
     assert revoked == [KEY]
