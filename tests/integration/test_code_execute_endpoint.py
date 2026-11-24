@@ -51,8 +51,10 @@ class _FakeSession:
     def discard(self) -> None:
         self.holds_across_requests = False
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
-        self._port.executed.append({"code": code, "timeout_s": timeout_s, "session": self.session_id})
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
+        self._port.executed.append(
+            {"code": code, "language": language, "timeout_s": timeout_s, "session": self.session_id}
+        )
         if self._port.unreachable:
             raise SandboxNotReachableError("connect failed")
         self._port.workspace.update(self._port.writes)
@@ -71,6 +73,7 @@ class _FakeSession:
 
 class _FakePort:
     label = "fake-provider"
+    languages = ("python",)
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []

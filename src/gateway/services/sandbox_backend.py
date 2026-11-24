@@ -1,7 +1,7 @@
 """Dispatch `code_execution` tool calls to a sandbox.
 
 A backend the tool-use loop in :mod:`gateway.services.mcp_loop` dispatches
-to whenever the model emits a ``code_execution(code=…)`` call. Everything here
+to whenever the model emits a ``code_execution(language=…, code=…)`` call. Everything here
 is the half that does not depend on how the code is actually run: the tool the
 model is offered, the allow-list, the usage tally, seeding the request's
 uploads and collecting what a run produced. Reaching a sandbox at all belongs
@@ -27,7 +27,7 @@ refactor to :func:`gateway.services.mcp_loop.mcp_tool_loop`.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -129,7 +129,7 @@ _MAX_SESSION_TTL_S = 3600.0
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
-    "Python only, with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
+    "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
     "user attached are in the working directory under their own names. A file "
     "you write there comes back with a file_id; give the user that file_id so "
     "they can download it."
@@ -178,40 +178,69 @@ EMPTY_CODE_TEXT = (
 )
 
 
-def code_execution_tool_definition() -> dict[str, Any]:
+def _language_refusal(language: str, languages: Sequence[str]) -> str:
+    """What the model sees for a call naming no language, or one the sandbox does not run.
+
+    It carries the sentinel, so the call is counted as a failure and never billed,
+    and names the languages to call the tool again with.
+    """
+    runs = ", ".join(languages)
+    if not language:
+        return (
+            f"{TOOL_ERROR_SENTINEL} invalid_input: the call named no language, so nothing was run. "
+            f"Call the tool again with `language` set to one of: {runs}."
+        )
+    return (
+        f"{TOOL_ERROR_SENTINEL} invalid_input: {language} does not run here, so nothing was run. "
+        f"This sandbox runs: {runs}."
+    )
+
+
+def code_execution_tool_definition(languages: Sequence[str]) -> dict[str, Any]:
     """The OpenAI-shaped function definition the model is given for code execution.
 
-    Module-level, and returning a fresh dict per call, so the ``/v1/tools``
-    discovery endpoint can advertise the same schema the tool loop injects without
-    constructing a backend. Mirrors
+    ``languages`` are the ones the deployment's sandbox runs
+    (:attr:`gateway.ports.code_execution_port.CodeExecutionPort.languages`), and
+    the only values ``language`` takes. Module-level, and returning a fresh dict
+    per call, so the ``/v1/tools`` discovery endpoint can advertise the same
+    schema the tool loop injects without constructing a backend. Mirrors
     :func:`gateway.services.web_retrieval_backend.web_search_tool_definition`.
     """
+    description = (
+        "Execute code in a sandboxed REPL. Returns stdout, stderr, and any rich "
+        "result blocks. State persists across calls within the same request."
+    )
+    if languages:
+        # Asked to run code in a language the sandbox does not run, a model tends
+        # to rewrite it in one the sandbox does, run that, and report the output as
+        # the original program's. These sentences tell it to say so, and other
+        # languages are named because models follow the sentences when they are.
+        listed = " or ".join(language.capitalize() for language in languages)
+        description += (
+            f" The code must be {listed}: Rust, C, JavaScript or any other language's "
+            "code does not run as is. When asked to run code in another language, tell "
+            f"the user it cannot be run as is here. If you rewrite it in {listed} and "
+            "run that instead, say so, and never present the output as the original program's."
+        )
     return {
         "type": "function",
         "function": {
             "name": CODE_EXECUTION_TOOL_NAME,
-            # Asked to run code in another language, a model tends to rewrite it in
-            # Python, run that, and report the output as the original program's. The
-            # last two sentences tell it to say so, and the languages are named
-            # because models follow the sentences when they are.
-            "description": (
-                "Run Python code in a sandboxed REPL and return its stdout, "
-                "stderr and rich results. State persists across calls within "
-                "the same request. The code must be Python: Rust, C, JavaScript "
-                "or any other language's code does not run as is. When asked to "
-                "run code in another language, tell the user it cannot be run "
-                "as is here. If you rewrite it in Python and run that instead, "
-                "say so, and never present the output as the original program's."
-            ),
+            "description": description,
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "language": {
+                        "type": "string",
+                        "enum": list(languages),
+                        "description": "The language the code is written in.",
+                    },
                     "code": {
                         "type": "string",
-                        "description": "The Python code to execute.",
-                    }
+                        "description": "The code to execute, written in `language`.",
+                    },
                 },
-                "required": ["code"],
+                "required": ["language", "code"],
             },
         },
     }
@@ -537,7 +566,7 @@ class SandboxBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [code_execution_tool_definition()] if self._serves_code_execution else []
+        return [code_execution_tool_definition(self._port.languages)] if self._serves_code_execution else []
 
     def owns_tool(self, name: str) -> bool:
         return name == CODE_EXECUTION_TOOL_NAME and self._serves_code_execution
@@ -575,15 +604,22 @@ class SandboxBackend:
         if not self.owns_tool(name):
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         code = str(arguments.get("code") or "")
+        language = str(arguments.get("language") or "").strip().lower()
         started = datetime.now(UTC)
-        if not code.strip():
-            # Nothing to run: an exit status from an empty program would read as a
-            # run that worked. Refused before admission, so it spends no budget.
+        languages = self._port.languages
+        refusal = None
+        if language not in languages:
+            refusal = _language_refusal(language, languages)
+        elif not code.strip():
+            # An exit status from an empty program would read as a run that worked.
+            refusal = EMPTY_CODE_TEXT
+        if refusal is not None:
+            # Refused before admission, so it spends no budget.
             self._executions.append(CodeExecution(code=code, result=None, invalid_input=True))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
             self._spans.record(started, ok=False, arguments=arguments)
-            return EMPTY_CODE_TEXT
+            return refusal
         # The sandbox is the deployment's, whichever backend runs it.
         rate_keys = code_execution_rate_keys(self._image)
         if self._tally is not None and not await self._tally.admit(
@@ -593,7 +629,7 @@ class SandboxBackend:
             self._spans.record(started, ok=False, arguments=arguments)
             return TOOL_BUDGET_EXCEEDED_TEXT
         try:
-            result, block, file_ids = await self._exec_tool(code)
+            result, block, file_ids = await self._exec_tool(code, language)
         except Exception:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
@@ -606,7 +642,7 @@ class SandboxBackend:
         self._spans.record(started, ok=not is_tool_error(result), arguments=arguments, result=result)
         return result
 
-    async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:
+    async def _exec_tool(self, code: str, language: str) -> tuple[str, ResultBlock, dict[str, str]]:
         if self._session is None:
             raise RuntimeError("SandboxBackend not entered as an async context manager")
 
@@ -618,10 +654,11 @@ class SandboxBackend:
             span.set_attribute("tool.name", CODE_EXECUTION_TOOL_NAME)
             span.set_attribute("tool.type", "otari_code_execution")
             span.set_attribute("code_execution.code_size", len(code))
+            span.set_attribute("code_execution.language", language)
             span.set_attribute("code_execution.backend", self._port.label)
             span.set_attribute("code_execution.session_id", self._session.session_id)
             try:
-                block = await self._session.execute(code, timeout_s=self._timeout_s)
+                block = await self._session.execute(code, language=language, timeout_s=self._timeout_s)
             except SandboxNotReachableError as exc:
                 # The adapter wrapped whatever went wrong, so the span records
                 # the cause where there is one: a connect error is worth seeing

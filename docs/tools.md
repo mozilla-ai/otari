@@ -470,14 +470,19 @@ Request it with:
 }
 ```
 
-The bundled sandbox and E2B run the code as Python, in every
-[sandbox environment](#sandbox-environments): an environment changes the
-packages installed, not the language, and a package it lacks fails the run with
-an `ImportError` the model sees. The tool's description says the code must be
-Python, and asks the model to tell the user when code in another language
-cannot run as is, or when it rewrote that code in Python and ran the rewrite.
-Models differ in how well they follow this: some report a Python rewrite's
-output as the original program's anyway.
+The model calls the tool with a `language` and the `code`. `language` takes only
+the languages the deployment's sandbox runs, which the tool's definition lists,
+and so does `GET /api/v1/tools`. Both providers run `python`, in every
+[sandbox environment](#sandbox-environments): Otari takes a protocol backend's
+`code_execution` kind to run Python, as the bundled sandbox does, and on E2B it
+runs the sandbox's default Python context. A call naming another language, or
+none, is refused before anything runs, with an error that names the languages
+to call the tool again with. Like a call with no code, it counts as a failed
+call and is not billed. The tool's description also asks the model, when asked
+to run code in another language, to tell the user it cannot run as is, and to
+say so when it rewrote that code in Python and ran the rewrite. Models differ in
+how well they follow this: some report a rewrite's output as the original
+program's anyway.
 
 The sandbox speaks the [code-execution protocol](code-execution-protocol.md),
 which is what `sandbox_url` points at. A deployment that would rather not run
@@ -505,7 +510,7 @@ sandbox but no model, such as rerunning a script to check its output:
 {"code": "print(1 + 1)", "container": "auto"}
 ```
 
-The code reaches the sandbox exactly as sent. The run is admitted as an
+The code is Python, and reaches the sandbox exactly as sent. The run is admitted as an
 `otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
 can turn it off, and its `exec_timeout_s` and pinned image apply. `environment`
 names the [sandbox environment](#sandbox-environments) to run in. It is priced

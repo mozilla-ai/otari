@@ -396,7 +396,8 @@ async def execute_code(
     )
     try:
         async with backend:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": request.code})
+            # ``CodeExecuteRequest.code`` is Python source.
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": request.code})
             execution = backend.take_executions()[-1]
     except SandboxNotReachableError as exc:
         error = _sandbox_failure(exc, claimed)
