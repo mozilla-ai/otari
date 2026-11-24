@@ -1,7 +1,7 @@
 import { Outlet } from "@tanstack/react-router"
 import { screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { OrganizationMember } from "@/client"
+import type { MailReadiness, OrganizationMember } from "@/client"
 import { PeoplePage } from "@/features/people/PeoplePage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -45,7 +45,7 @@ const MEMBERS = [person("Wei", "ws-platform"), person("Hana", "ws-mobile")]
 async function renderPeople(
   role: Role,
   selected = "ws-platform",
-  { hasTraces = true } = {},
+  { hasTraces = true, mail = "delivers" as MailReadiness } = {},
 ) {
   window.localStorage.setItem("otari.dashboard.selectedWorkspace", selected)
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -85,9 +85,10 @@ async function renderPeople(
     shell: (
       <Provider>
         <DeploymentProvider
-          value={bootstrap(
-            hasTraces ? { surfaces: [...SURFACES, "traces"] } : {},
-          )}
+          value={bootstrap({
+            mail,
+            ...(hasTraces ? { surfaces: [...SURFACES, "traces"] } : {}),
+          })}
         >
           <SelectedWorkspaceProvider>
             <Outlet />

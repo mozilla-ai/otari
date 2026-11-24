@@ -27,9 +27,10 @@ import type { OAuthProvider } from "./oauthProviders"
  * `mail` means the flow starts by sending a message: `POST /v1/auth/signup`,
  * `/resend-verification` and `/password/reset` each call `require_ready()` and
  * refuse with a 503 when this gateway has no transport or no public URL of its
- * own to put in a link. The bootstrap publishes the same fact as `mail_ready`,
- * so the affordance is hidden rather than offered and then refused, the way
- * otari#648 already settled it for the invitation form.
+ * own to put in a link. The bootstrap's `mail` publishes the same fact, so the
+ * affordance is hidden rather than offered and then refused, the way otari#648
+ * already settled it for the invitation form. A transport that delivers to
+ * nobody still passes, because these endpoints accept the request either way.
  *
  * `oauth` means the flow needs the page's own provider configured on this
  * deployment: the bootstrap's `oauth_providers` lists one entry per provider
@@ -179,7 +180,7 @@ export function oauthCallbackProvider(path: PublicAuthPath): string | null {
 
 /** What the deployment offers, as the availability check below reads it. */
 export interface PublicAuthDeployment {
-  mailReady: boolean
+  mailCanSend: boolean
   /** The bootstrap's `oauth_providers`, verbatim. */
   oauthProviders: readonly string[]
 }
@@ -193,7 +194,7 @@ export function isPublicAuthPageAvailable(
     case "none":
       return true
     case "mail":
-      return deployment.mailReady
+      return deployment.mailCanSend
     case "oauth": {
       const provider = oauthCallbackProvider(path)
       return provider !== null && deployment.oauthProviders.includes(provider)

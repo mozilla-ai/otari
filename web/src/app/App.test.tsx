@@ -334,7 +334,7 @@ describe("App", () => {
   })
 
   it("answers a mail-gated public auth path with a panel, not a form", () => {
-    // The default fixture reports mail_ready: false, which is what hides the
+    // The default fixture reports no mail, which is what hides the
     // link on the sign-in screen; the URL is still reachable from a bookmark.
     window.history.replaceState(null, "", "/signup")
     renderApp(bootstrap())
@@ -376,7 +376,7 @@ describe("App", () => {
 
   it("titles closed signup after its heading", () => {
     window.history.replaceState(null, "", "/signup")
-    renderApp(bootstrap({ mail_ready: true, open_signup: false }))
+    renderApp(bootstrap({ mail: "delivers", open_signup: false }))
 
     expect(document.title).toBe("Claim account · Otari")
   })
@@ -498,7 +498,7 @@ describe("a bootstrap from an older gateway", () => {
 
   it("still renders a public auth page, which reads it on the no-mail path", () => {
     window.history.replaceState(null, "", "/recover-password")
-    const { container } = renderApp(older("oauth_providers", "mail_ready"))
+    const { container } = renderApp(older("oauth_providers", "mail"))
 
     expect(container).not.toBeEmptyDOMElement()
     expect(

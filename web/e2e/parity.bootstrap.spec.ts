@@ -74,13 +74,13 @@ test("the deployment bootstrap is served unauthenticated", async ({
     federation_member_rules: true,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
-    mail_ready: false,
+    mail: "none",
     // The catalog stays behind the sign-in screen unless an operator opens it
     // with public_catalog; see docs/configuration.md#a-public-catalog.
     public_catalog: false,
-    // Closed, which is the default and is what mail_ready above would force
-    // anyway: signup sends a verification link, so a deployment that cannot
-    // send one registers nobody.
+    // Closed, which is the default and is what the mail state above would
+    // force anyway: signup sends a verification link, so a deployment that
+    // cannot send one registers nobody.
     open_signup: false,
   })
 })

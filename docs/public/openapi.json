@@ -7932,10 +7932,9 @@
             "title": "Feedback Enabled",
             "type": "boolean"
           },
-          "mail_ready": {
-            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.",
-            "title": "Mail Ready",
-            "type": "boolean"
+          "mail": {
+            "$ref": "#/components/schemas/MailReadiness",
+            "description": "How far an email this deployment sends gets. Signup, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature."
           },
           "maintenance_mode": {
             "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.",
@@ -8049,7 +8048,7 @@
           "open_signup",
           "feedback_enabled",
           "federation_member_rules",
-          "mail_ready"
+          "mail"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"
@@ -14344,6 +14343,16 @@
         "title": "ListedSearchToolSchema",
         "type": "object"
       },
+      "MailReadiness": {
+        "description": "How far an email carrying a link back to this deployment gets.\n\nThe members are exclusive and cover every deployment.\n``none`` means no message is sent at all.\n``sends_only`` means a message is sent and no link the recipient can open reaches them.\n``delivers`` means the recipient's mailbox receives it.",
+        "enum": [
+          "none",
+          "sends_only",
+          "delivers"
+        ],
+        "title": "MailReadiness",
+        "type": "string"
+      },
       "MailSettings": {
         "description": "What this deployment can send, and what stands in the way if it cannot.",
         "properties": {
@@ -14390,7 +14399,7 @@
             "title": "Public Base Url"
           },
           "ready": {
-            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.",
+            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.",
             "title": "Ready",
             "type": "boolean"
           },

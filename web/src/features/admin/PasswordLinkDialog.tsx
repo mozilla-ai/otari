@@ -3,6 +3,7 @@ import { CopyableValue } from "@/design-system/actions/CopyField"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useIssuePasswordLink } from "@/shared/api/deployment"
+import { mailCanSend } from "@/shared/helpers/bootstrap"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -26,7 +27,8 @@ export function PasswordLinkDialog({
   account: DeploymentUser | undefined
   onClose: () => void
 }) {
-  const { mail_ready } = useDeployment()
+  const { mail } = useDeployment()
+  const delivers = mailCanSend(mail)
   const issue = useIssuePasswordLink()
   const result = issue.data
   const name = account ? accountLabel(account) : ""
@@ -89,7 +91,7 @@ export function PasswordLinkDialog({
         if (!open) close()
       }}
       title="Send a password link"
-      submitLabel={mail_ready ? "Email the link" : "Create the link"}
+      submitLabel={delivers ? "Email the link" : "Create the link"}
       onSubmit={() => {
         if (account) issue.mutate(account.id)
       }}
@@ -99,7 +101,7 @@ export function PasswordLinkDialog({
       <p className="text-body">
         Give <strong>{name}</strong> a single-use link that sets a new password,
         for when they cannot sign in.{" "}
-        {mail_ready
+        {delivers
           ? `It is emailed to ${account?.email ?? ""}.`
           : "This deployment sends no mail, so you get the link to share with them yourself."}{" "}
         Any earlier reset link for this account stops working.

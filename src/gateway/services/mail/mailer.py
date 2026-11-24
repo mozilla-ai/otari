@@ -9,6 +9,7 @@ Which shape a given surface takes, and why, is in ``src/gateway/AGENTS.md``.
 """
 
 import asyncio
+from enum import StrEnum
 from urllib.parse import urlsplit
 
 from gateway.core.config import GatewayConfig
@@ -26,6 +27,21 @@ from gateway.services.mail.transports import redact_email, select_transport
 # What a console-only deployment sends from when no address is configured. Never
 # reached by SMTP, which requires mail_from_email before its transport is built.
 _FALLBACK_SENDER = "otari@localhost"
+
+
+class MailReadiness(StrEnum):
+    """How far an email carrying a link back to this deployment gets.
+
+    The members are exclusive and cover every deployment.
+    ``none`` means no message is sent at all.
+    ``sends_only`` means a message is sent and no link the recipient can open reaches them.
+    ``delivers`` means the recipient's mailbox receives it.
+    """
+
+    # Ordered by how far a message gets, not A-Z, so the published enum reads as the ladder it is.
+    NONE = "none"
+    SENDS_ONLY = "sends_only"
+    DELIVERS = "delivers"
 
 
 class Mailer:
@@ -83,6 +99,17 @@ class Mailer:
         except ValueError:
             return False
         return link.scheme in ("http", "https") and bool(link.hostname)
+
+    @property
+    def readiness(self) -> MailReadiness:
+        """How far a message carrying a link back to this deployment gets.
+
+        Derived here rather than by pairing the two predicates above, so one
+        answer cannot drift from the other.
+        """
+        if not self.can_send_links:
+            return MailReadiness.NONE
+        return MailReadiness.DELIVERS if self.can_deliver_links else MailReadiness.SENDS_ONLY
 
     @property
     def missing_settings(self) -> tuple[str, ...]:

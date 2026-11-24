@@ -202,7 +202,7 @@ export function bootstrap(
     // the OAuth tests name the providers they need rather than every other test
     // clearing a list it does not care about.
     oauth_providers: [],
-    mail_ready: false,
+    mail: "none",
     feedback_enabled: true,
     // Off, so a page test sends no connect read: the connect tests turn it on.
     platform_connect: false,

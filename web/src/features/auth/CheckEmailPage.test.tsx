@@ -1,15 +1,16 @@
 import { render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { CheckEmailPage } from "@/features/auth/CheckEmailPage"
 import { rememberSignInAddress } from "@/features/auth/signInAddress"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
 
-function renderPage(route: string) {
+function renderPage(route: string, mail: MailReadiness = "delivers") {
   return render(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap({ mail })}>
       <ThemeProvider>
         <CheckEmailPage route={route} />
       </ThemeProvider>

@@ -3,7 +3,11 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { HealthCheckSettings, HealthCheckStatus } from "@/client"
+import type {
+  HealthCheckSettings,
+  HealthCheckStatus,
+  MailReadiness,
+} from "@/client"
 import { HealthChecksPage } from "@/features/health/HealthChecksPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -137,12 +141,12 @@ function mockApi(
   return requests
 }
 
-function renderPage({ mailReady = true } = {}) {
+function renderPage({ mail = "delivers" as MailReadiness } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
-    <DeploymentProvider value={bootstrap({ mail_ready: mailReady })}>
+    <DeploymentProvider value={bootstrap({ mail })}>
       <QueryClientProvider client={client}>
         <HealthChecksPage />
       </QueryClientProvider>
@@ -416,7 +420,7 @@ describe("HealthChecksPage", () => {
       mockApi(
         status({ settings: settings({ alert_emails: ["ops@example.com"] }) }),
       )
-      await renderPage({ mailReady: false })
+      await renderPage({ mail: "none" })
 
       expect(
         await screen.findByText(/This deployment can't send email yet/),
