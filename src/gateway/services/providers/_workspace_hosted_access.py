@@ -369,15 +369,27 @@ class WorkspaceHostedAccessService:
     async def set_policy(
         self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceProviderPolicyRequest
     ) -> WorkspaceProviderPolicyPublic:
-        """Store what the workspace requires of every provider serving it."""
+        """Store what the workspace requires of every provider serving it, logging who changed it."""
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
+            previous = await self.policies.get_for(workspace.id)
+            was_required = previous is not None and previous.require_zero_data_retention
             policy = await self.policies.put(
                 workspace.id,
                 require_zero_data_retention=request.require_zero_data_retention,
                 allowed_data_locations=request.allowed_data_locations,
                 set_locations="allowed_data_locations" in request.model_fields_set,
+            )
+        if policy.require_zero_data_retention != was_required:
+            logger.info(
+                "Workspace provider policy changed: workspace=%s organization=%s user=%s "
+                "require_zero_data_retention %s -> %s",
+                workspace.id,
+                workspace.organization_id,
+                user.id,
+                was_required,
+                policy.require_zero_data_retention,
             )
         await self.refresh_cache()
         return WorkspaceProviderPolicyPublic(
