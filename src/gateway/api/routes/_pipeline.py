@@ -6269,7 +6269,9 @@ def build_streaming_response(
     async def _on_error(exc: BaseException) -> None:
         report_refusal(exc)
         if automatic_observation is not None:
-            automatic_observation.finish(unhealthy=_automatic_unhealthy(exc), account=_automatic_account_failure(exc))
+            automatic_observation.finish(
+                unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+            )
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(
@@ -6507,13 +6509,6 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
         or code in (402, 429)
         or (code is not None and code >= 500)
     )
-
-
-def _automatic_account_failure(exc: BaseException) -> bool:
-    """Identify failures of the credential itself (exhausted quota or funds, a rejected key) rather than one model."""
-    if isinstance(exc, _GATEWAY_SIDE_FAILURES):
-        return False
-    return upstream_exception_shape(exc)[1] == 402 or is_provider_credential_rejection(exc)
 
 
 def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
@@ -6767,7 +6762,9 @@ async def run_single_attempt_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc), account=_automatic_account_failure(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
 
             absorbed_rows: list[asyncio.Task[None]] = []
@@ -7200,7 +7197,9 @@ async def run_non_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc), account=_automatic_account_failure(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
                 if observation is not None:
                     observation.finish(success=True)

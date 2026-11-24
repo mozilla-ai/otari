@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from google.oauth2.service_account import Credentials
 
 from gateway.core.settings.routing import AutomaticOffering, AutomaticRouting, Region
+from gateway.services.inference import is_provider_credential_rejection, upstream_exception_shape
 
 if TYPE_CHECKING:
     from gateway.services.routing.compiler import CompiledPlan
@@ -230,6 +231,11 @@ class AutomaticRouter:
         return self._digest(
             (attempt.instance, attempt.provider.value, attempt.model, _credential_fields(attempt.kwargs))
         )
+
+    @staticmethod
+    def is_account_failure(exc: BaseException) -> bool:
+        """Whether the credential itself failed, not one model: exhausted quota or funds (402), or a refused key."""
+        return upstream_exception_shape(exc)[1] == 402 or is_provider_credential_rejection(exc)
 
     def account_key(self, attempt: Attempt) -> str:
         """Identify the credential an attempt is sent on, whatever model it names."""

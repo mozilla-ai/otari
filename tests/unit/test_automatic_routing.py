@@ -599,9 +599,9 @@ def test_refusal_drops_the_session_binding(router: AutomaticRouter) -> None:
 )
 def test_upstream_failures_classify_for_cooldown(status: int, unhealthy: bool, account: bool) -> None:
     """Exhausted quota cools the offering and its credential; a rejected request cools neither."""
-    from gateway.api.routes._pipeline import _automatic_account_failure, _automatic_unhealthy
+    from gateway.api.routes._pipeline import _automatic_unhealthy
 
     response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.test/v1/chat/completions"))
     exc = openai.APIStatusError("upstream refused", response=response, body=None)
     assert _automatic_unhealthy(exc) is unhealthy
-    assert _automatic_account_failure(exc) is account
+    assert AutomaticRouter.is_account_failure(exc) is account
