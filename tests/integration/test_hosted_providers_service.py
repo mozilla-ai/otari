@@ -20,7 +20,7 @@ from sqlmodel import col
 
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.api.deps import build_model_metadata_override_service
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
     HostedCatalogEmptyError,
@@ -39,6 +39,7 @@ from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, Organi
 from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.models.tenancy import Organization
+from gateway.ports.model_provider_port import HostedCredential
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
@@ -52,6 +53,7 @@ from gateway.schemas.providers import (
     HostedModelCreateRequest,
     HostedModelUpdateRequest,
     HostedProviderCreateRequest,
+    HostedProviderRegionCreateRequest,
     HostedProviderUpdateRequest,
 )
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
@@ -59,6 +61,7 @@ from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.providers._hosted_catalog import KEEP_FETCH_TOOL, KEEP_OWNED_ENDPOINT
+from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.secret_box import generate_secret_key
 from gateway.types.models_dev import parse_catalog_v2
 
@@ -1229,36 +1232,62 @@ async def test_the_adapter_answers_an_alias_under_the_provider_it_folds_to(
         assert credential.response_provider == "openai", asked
 
 
+REGION_KEY = "sk-live-region-5678"
+
+
 async def _policy_candidates(service: HostedProviderService, monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Three hosted providers a policy falls back across: one switched off, then two that serve ``gpt-4o``."""
+    """The candidates a policy falls back across, one for each rule a resolve applies.
+
+    A provider switched off, one whose vendor is switched off, a region pinned
+    by name, the same provider's regions in order, an alias folding to its
+    provider, and that provider.
+    """
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     _discovery(monkeypatch, "gpt-4o")
     await service.create_provider(
         HostedProviderCreateRequest(provider="openai", name="openai-off", api_key=KEY, enabled=False)
     )
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", name="openai-vendorless", api_key=KEY))
+    async with service.uow:
+        await HostedProviderVendorRepository(service.uow).switch_off("openai-vendorless", vendor_of("openai", "gpt-4o"))
     await service.create_provider(HostedProviderCreateRequest(provider="openai", name="openai-eu", api_key=KEY))
+    await service.add_region(
+        "openai-eu",
+        HostedProviderRegionCreateRequest(
+            slug="sg", label="Singapore", api_key=REGION_KEY, primary_slug="de", primary_label="Germany"
+        ),
+    )
     await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
-    return ["openai-off", "openai-eu", "openai"]
+    return ["openai-off", "openai-vendorless", "openai-eu@sg", "openai-eu", "openai-compatible", "openai"]
 
 
-def _hosted_reads(statements: list[str]) -> list[str]:
-    return [statement for statement in statements if "FROM hosted_provider" in statement]
+# What each candidate is served on, as (the name it settles under, its key), every region in order.
+SERVED = [
+    [],
+    [],
+    [("openai-eu@sg", REGION_KEY)],
+    [("openai-eu@de", KEY), ("openai-eu@sg", REGION_KEY)],
+    [("openai", KEY)],
+    [("openai", KEY)],
+]
 
 
-async def test_the_adapter_reads_a_policys_hosted_providers_once(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A request's candidates share one read of the providers and their regions, however many there are.
+def _served(credential: HostedCredential | None) -> list[tuple[str, str | None]]:
+    return [] if credential is None else [(each.response_provider, each.api_key) for each in credential.candidates()]
 
-    Each candidate read the provider and its regions on its own before, and a
-    candidate that reached the model check its row and its vendors too: ten
-    reads for these three. Now the providers, the regions and the vendors are
-    read once, and each model row once.
-    """
-    service = _service(async_db)
-    candidates = await _policy_candidates(service, monkeypatch)
-    organization_id = uuid.uuid4()
-    adapter = HostedProviderModelProviderAdapter(service)
+
+async def _read_afresh(
+    service: HostedProviderService, name: str, organization_id: uuid.UUID
+) -> list[tuple[str, str | None]]:
+    """What the per-name read, which bypasses the snapshot, serves ``name`` on."""
+    regions = await service.runtime.resolve(name, "gpt-4o", organization_id=organization_id)
+    return [(region_instance(each.name or name, each.region), each.api_key) for each in regions]
+
+
+async def _resolve_all(
+    adapter: HostedProviderModelProviderAdapter, candidates: list[str], organization_id: uuid.UUID
+) -> tuple[list[list[tuple[str, str | None]]], list[str]]:
+    """Each candidate's answer from one adapter, and the statements the database was sent for them."""
     statements: list[str] = []
 
     def record(_conn: object, _cursor: object, statement: str, *_args: object) -> None:
@@ -1267,28 +1296,86 @@ async def test_the_adapter_reads_a_policys_hosted_providers_once(
     event.listen(Engine, "before_cursor_execute", record)
     try:
         served = [
-            await adapter.resolve_hosted_credential(
-                organization_id=organization_id, workspace_id=None, provider=name, model="gpt-4o"
+            _served(
+                await adapter.resolve_hosted_credential(
+                    organization_id=organization_id, workspace_id=None, provider=name, model="gpt-4o"
+                )
             )
             for name in candidates
         ]
     finally:
         event.remove(Engine, "before_cursor_execute", record)
+    return served, [statement for statement in statements if "FROM hosted_provider" in statement]
 
-    assert [None if credential is None else credential.response_provider for credential in served] == [
-        None,
-        "openai-eu",
-        "openai",
-    ]
-    reads = _hosted_reads(statements)
-    assert len(reads) == 5, reads
+
+async def test_the_adapter_reads_a_policys_hosted_providers_once(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request's candidates share one read of the providers, their regions and the vendors switched off.
+
+    Each candidate read its provider and its regions on its own before, and one
+    that reached the model check its model row and its vendors too. Now each
+    model row is the only read left per candidate, and one is read once
+    however many candidates name it.
+    """
+    service = _service(async_db)
+    candidates = await _policy_candidates(service, monkeypatch)
+    organization_id = uuid.uuid4()
+
+    served, reads = await _resolve_all(HostedProviderModelProviderAdapter(service), candidates, organization_id)
+
+    assert served == SERVED
+    # One read each of the providers, the regions and the vendors, and one model
+    # row per provider that reached the model check (vendorless, openai-eu, openai).
+    assert len(reads) == 6, reads
     assert sum("FROM hosted_providers " in read for read in reads) == 1, reads
     assert sum("FROM hosted_provider_regions " in read for read in reads) == 1, reads
     assert sum("FROM hosted_provider_disabled_vendors " in read for read in reads) == 1, reads
-    # Each answer is what a resolve read afresh gives.
-    for name, credential in zip(candidates, served, strict=True):
-        fresh = await service.resolve(name, "gpt-4o", organization_id=organization_id)
-        assert (fresh is None) == (credential is None), name
+    assert [await _read_afresh(service, name, organization_id) for name in candidates] == served
+
+
+async def test_past_the_listing_bound_each_name_is_read_on_its_own(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With more providers than one listing holds, the adapter reads each name and its vendors as before."""
+    service = _service(async_db)
+    candidates = await _policy_candidates(service, monkeypatch)
+    monkeypatch.setattr("gateway.repositories.providers.hosted_provider_repository._ALL_PROVIDERS", 2)
+    organization_id = uuid.uuid4()
+
+    served, reads = await _resolve_all(HostedProviderModelProviderAdapter(service), candidates, organization_id)
+
+    assert served == SERVED
+    assert sum("WHERE hosted_providers.name = " in read for read in reads) >= len(candidates), reads
+    assert not any("hosted_provider_regions.hosted_provider_id IN " in read for read in reads), reads
+    assert not any("hosted_provider_disabled_vendors.provider IN " in read for read in reads), reads
+    assert sum("FROM hosted_provider_disabled_vendors " in read for read in reads) == 3, reads
+    assert [await _read_afresh(service, name, organization_id) for name in candidates] == served
+
+
+async def test_the_adapter_serves_a_restricted_provider_to_its_organization_alone(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One adapter asked for two organizations answers each by the restriction, whichever it reads first."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    owner = await _organization(async_db, "owner")
+    other = await _organization(async_db, "other")
+    service = _service(async_db)
+    _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", api_key=KEY, restricted_to_organization_id=owner.id)
+    )
+
+    for first, second in ((owner, other), (other, owner)):
+        adapter = HostedProviderModelProviderAdapter(service)
+        answers = {
+            organization.slug: await adapter.resolve_hosted_credential(
+                organization_id=organization.id, workspace_id=None, provider="openai", model="gpt-4o"
+            )
+            for organization in (first, second)
+        }
+        assert answers["other"] is None, first.slug
+        assert answers["owner"] is not None and answers["owner"].api_key == KEY, first.slug
 
 
 async def test_the_adapter_still_serves_after_the_request_rolls_back(

@@ -72,18 +72,19 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         result = await self.db.execute(select(HostedProvider).order_by(HostedProvider.name).limit(_ALL_PROVIDERS))
         return result.scalars().all()
 
-    async def list_all_detached(self) -> tuple[list[HostedProvider], bool]:
-        """Every hosted provider by name as objects no session holds, and whether that is all of them.
+    async def list_all_detached(self) -> list[HostedProvider] | None:
+        """Every hosted provider by name as objects no session holds, or None when there are more than a listing holds.
 
         Detached so a caller may keep them past the transaction that read them:
         a rollback expires every object its session holds, and reading one
-        afterwards is sync IO on an async session. Not all of them when the
-        bound on a listing cut it short.
+        afterwards is sync IO on an async session.
         """
-        rows = await self.list_all()
+        result = await self.db.execute(select(HostedProvider).order_by(HostedProvider.name).limit(_ALL_PROVIDERS + 1))
+        rows = result.scalars().all()
+        if len(rows) > _ALL_PROVIDERS:
+            return None
         columns = [attribute.key for attribute in inspect(HostedProvider).column_attrs]
-        detached = [HostedProvider(**{column: getattr(row, column) for column in columns}) for row in rows]
-        return detached, len(rows) < _ALL_PROVIDERS
+        return [HostedProvider(**{column: getattr(row, column) for column in columns}) for row in rows]
 
     async def list_encrypted(self) -> Sequence[HostedProvider]:
         """Every hosted provider holding a ciphertext, for a key rotation."""

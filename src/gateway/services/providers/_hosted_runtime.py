@@ -208,9 +208,12 @@ class HostedProviderRuntime:
     ) -> list[ResolvedHostedProvider]:
         """The usable connections of the hosted provider ``name`` on behalf of ``organization_id``, in order.
 
-        Read afresh; see :meth:`HostedServing.resolve` for the rules.
+        Read afresh, and for ``name`` alone; see :meth:`HostedServing.resolve` for the rules.
         """
-        return await self.serving().resolve(name, model, organization_id=organization_id)
+        serving = HostedServing(
+            self.uow, sources=self.sources, models=self.models, vendors=self.vendors, read_all=False
+        )
+        return await serving.resolve(name, model, organization_id=organization_id)
 
 
 class HostedServing:
@@ -222,7 +225,7 @@ class HostedServing:
     time a model is checked, and a model's row once per provider and model.
     The rows are detached, because a rollback later in the request would
     otherwise expire them. Where there are more providers than one listing
-    holds, each name is read on its own, as before.
+    holds, or ``read_all`` is false, each name is read on its own instead.
     """
 
     def __init__(
@@ -232,11 +235,13 @@ class HostedServing:
         sources: HostedSources,
         models: HostedProviderModelRepository,
         vendors: HostedProviderVendorRepository,
+        read_all: bool = True,
     ) -> None:
         self.uow = uow
         self.sources = sources
         self.models = models
         self.vendors = vendors
+        self._read_all = read_all
         self._snapshot: HostedSnapshot | None = None
         self._snapshot_read = False
         # provider -> the vendors switched off on it
@@ -287,7 +292,7 @@ class HostedServing:
         return [each for each in credentials if each not in shadowed]
 
     async def _get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
-        if not self._snapshot_read:
+        if self._read_all and not self._snapshot_read:
             self._snapshot = await self.sources.snapshot()
             self._snapshot_read = True
         if self._snapshot is None:

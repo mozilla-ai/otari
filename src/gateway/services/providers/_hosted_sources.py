@@ -233,8 +233,8 @@ class HostedSources:
 
     async def snapshot(self) -> HostedSnapshot | None:
         """Every hosted provider by name on detached rows, or None when there are more than a listing holds."""
-        rows, complete = await self.providers.list_all_detached()
-        if not complete:
+        rows = await self.providers.list_all_detached()
+        if rows is None:
             return None
         entries = self.entries()
         regions = await self.regions.list_for_providers_detached([row.id for row in rows])
