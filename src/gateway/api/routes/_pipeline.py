@@ -2039,14 +2039,16 @@ async def _grow_reservation(
         pricing, require_pricing=ctx.config.require_pricing
     ):
         logger.warning(
-            "Candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
+            "Candidate %s:%s has no pricing and require_pricing is on; skipping to next candidate",
             instance,
             model,
         )
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=no_pricing_error_detail(f"{instance}:{model}", unit=pricing.unit if pricing is not None else None),
-            headers=error_headers(PRICING_REQUIRED),
+        raise CandidateCannotServe(
+            HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=no_pricing_error_detail(f"{instance}:{model}", unit=pricing.unit if pricing is not None else None),
+                headers=error_headers(PRICING_REQUIRED),
+            )
         )
     repriced = estimate_cost(
         pricing,
@@ -3044,7 +3046,12 @@ async def resolve_request_context(
     # we cannot price because we then cannot debit it. A budget-exempt key is
     # never debited, so the gate does not apply: the call proceeds and logs
     # cost=null when unpriced.
-    if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+    # For multi-candidate plans, skip the head-only pricing gate so an unpriced first
+    # candidate does not refuse the whole request before the walk can try priced fallbacks.
+    # The per-candidate check in _grow_reservation (or the single-candidate path) still
+    # enforces require_pricing.
+    single_candidate = plan is None or (len(plan.attempts) <= 1 and plan.automatic is None)
+    if not budget_exempt and single_candidate and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
         await refund_reservation(db, reservation)
         refusal = await unpriced_model_refusal(
             config,
