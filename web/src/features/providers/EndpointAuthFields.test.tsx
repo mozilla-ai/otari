@@ -51,9 +51,12 @@ describe("endpointAuthDraftFrom", () => {
   })
 
   it("seeds the rotation date in the shape the inputs read", () => {
-    expect(endpointAuthDraftFrom(stored()).expiresAt).toMatch(
-      /^2027-03-01T\d{2}:\d{2}$/,
-    )
+    const seeded = endpointAuthDraftFrom(stored()).expiresAt
+
+    expect(seeded).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    // The input reads local time, so the calendar day follows the host. Read
+    // back as local, it is still the instant the gateway reported.
+    expect(new Date(seeded).toISOString()).toBe("2027-03-01T09:15:00.000Z")
   })
 })
 
