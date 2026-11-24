@@ -1035,9 +1035,7 @@ describe("SpendAndBudgetsPage", () => {
   }
 
   it("gives an operator who manages the organization its budgets, not the deployment's", async () => {
-    // otari#2099: this route used to show any operator the deployment's
-    // budgets, so an operator who was also an owner or admin had no way to
-    // the organization's. The fixture is that caller.
+    // otari#2099: an operator who is also an owner or admin.
     const requests = renderRoute(() =>
       jsonResponse(organizationContext({ deployment_operator: true })),
     )
@@ -1048,8 +1046,7 @@ describe("SpendAndBudgetsPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Organization budgets" }),
     ).toBeInTheDocument()
-    // Withheld at the request, not only in the markup: none of the three
-    // deployment-wide reads this route used to fire as an operator page.
+    // Withheld at the request, not only in the markup: no deployment-wide read.
     const read = requests.mock.calls.map(([url]) => String(url))
     expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
     expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(

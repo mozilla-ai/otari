@@ -13,15 +13,11 @@ import { SpendCeilingsCard } from "./SpendCeilingsCard"
 
 // Spend & budgets, for an organization owner or admin.
 //
-// The organization's own budgets, whoever opens them. The deployment's are a
-// page of their own on the deployment rail (`DeploymentBudgetsPage`): this
-// route used to show those to an operator instead, so an operator who also
-// managed an organization could not reach its budgets at all (otari#2099).
-// The roles matrix (otari-ai#1943) puts this row at Edit for an admin and
-// Hidden for a member, and before that it was operator-only end to end:
-// `/budgets` gates every handler on `require_deployment_operator` and
-// `/scoped-budgets` gates its whole router, so an organization's own admins
-// could manage neither its own caps nor where they applied.
+// The organization's own budgets, whoever opens them, an operator included
+// (otari#2099); the deployment's are `DeploymentBudgetsPage`. The roles matrix
+// (otari-ai#1943) puts this row at Edit for an admin and Hidden for a member.
+// It reads only the `/organizations/me/` routes: `/budgets` and
+// `/scoped-budgets` are `require_deployment_operator` throughout.
 //
 // Two sections, because the schema has two objects and they answer different
 // questions: a budget is *what a cap is*, and a ceiling is *who is capped*. They

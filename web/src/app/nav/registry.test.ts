@@ -143,11 +143,9 @@ describe("nav registry", () => {
     // sections rather than the rail withholding the destination. Rates live on
     // Providers instead, beside the models they price.
     //
-    // Spend & budgets left it a fourth way, in the same issue: the route
-    // became the organization's own page for an owner or admin. It first
-    // resolved to the deployment's page for an operator as well, which kept an
-    // operator who manages an organization from its budgets (otari#2099), so
-    // the deployment's are Deployment budgets, a row of their own here.
+    // Spend & budgets is the organization's own page for whoever opens it; the
+    // deployment's budgets are Deployment budgets, a row of their own here
+    // (otari#2099).
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([

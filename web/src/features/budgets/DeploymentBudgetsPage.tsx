@@ -555,11 +555,8 @@ function isOrganizationOwned(budget: Budget): boolean {
  *
  * Deployment-wide end to end: `/api/v1/budgets`, the gateway's `users` table,
  * and every workspace's member default, all behind
- * `require_deployment_operator`.
- * A page of its own rather than what Spend & budgets showed an operator, which
- * took an operator who also manages an organization away from that
- * organization's budgets (otari#2099): the organization rail's row is now the
- * organization's page for everyone who opens it.
+ * `require_deployment_operator`. Separate from Spend & budgets, which is the
+ * organization's own page even for an operator (otari#2099).
  */
 export function DeploymentBudgetsPage() {
   const budgets = useBudgets()
