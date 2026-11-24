@@ -14,7 +14,7 @@ the three constraints from this declaration rather than from whatever
 reflection recovers.
 
 Revision ID: c7e1b9d4a260
-Revises: f6b8d0a2c4e7
+Revises: a8c0e2f4b6d9
 Create Date: 2026-11-20
 """
 
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c7e1b9d4a260"
-down_revision: str | Sequence[str] | None = "f6b8d0a2c4e7"
+down_revision: str | Sequence[str] | None = "a8c0e2f4b6d9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
