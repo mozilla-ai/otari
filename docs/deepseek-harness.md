@@ -11,7 +11,8 @@ releases.
 
 1. Create a key on the dashboard's **API keys** page, and turn on
    [web search](web-search.md) for its workspace.
-2. Save this as `~/.dsh/cordis.patch.yml`:
+2. Create `~/.dsh` with `mkdir -p ~/.dsh`, and save this in it as
+   `cordis.patch.yml`:
 
    ```yaml
    - id: llm-pi-ai
@@ -36,6 +37,9 @@ releases.
        searchBaseURL: https://api.otari.ai/api/v1
        searchApiKeyEnv: OTARI_API_KEY
    ```
+
+   Replace `deepseek/deepseek-v4.1-flash`, in both places, with a model your
+   workspace serves; see [Choosing a model](#choosing-a-model).
 
 3. Export the key and start dsh:
 
@@ -82,8 +86,10 @@ key.
 
 - The key needs the `web:search` [scope](api-keys.md#scopes), which new keys
   have.
-- The workspace's **Max results**, **Allowed domains** and **Blocked domains**
-  apply.
+- The workspace's **Max results** applies, but its **Allowed domains** and
+  **Blocked domains** do not: they cover search inside a model request, not a
+  direct search. See
+  [Per-workspace web-access policy](tools.md#per-workspace-web-access-policy).
 - `GET /api/v1/tools` shows whether the key can search: web search's
   `direct_available` is `true`.
 
