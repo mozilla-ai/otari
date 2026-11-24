@@ -55,6 +55,8 @@ interface ApiOptions {
   apiKey?: string
   /** Whether the mint reports the fingerprint it stored; a row without one has nothing to show concealed. */
   hasFingerprint?: boolean
+  /** Whether the gateway has registered the `otari` CLI as an app. */
+  hasCliApp?: boolean
 }
 
 /**
@@ -69,6 +71,7 @@ function mockApi({
   activation = workspaceActivation(),
   apiKey = KEY,
   hasFingerprint = true,
+  hasCliApp = false,
   models = ["openai:gpt-4o-mini"],
 }: ApiOptions = {}) {
   let current = activation
@@ -77,6 +80,18 @@ function mockApi({
     .mockImplementation(async (input, init) => {
       const url = String(input)
       const method = init?.method ?? "GET"
+      if (url.includes("/oauth/apps/clients")) {
+        return hasCliApp
+          ? Response.json({
+              name: "Otari CLI",
+              redirect_uri: "http://127.0.0.1/callback",
+              issuer: "http://localhost:3000",
+              scopes: ["inference:run"],
+              verified: true,
+              spend_limits: true,
+            })
+          : Response.json({ detail: "Not Found" }, { status: 404 })
+      }
       if (url.includes("/activation/key")) {
         // Distinct per workspace, so a key left over from another one is
         // recognizable rather than indistinguishable.
@@ -448,7 +463,7 @@ describe("SetupGuide", () => {
     // rather than carrying the key.
     expect(
       await screen.findByRole("region", { name: "agent code" }),
-    ).toHaveTextContent("otari setup --yes")
+    ).toHaveTextContent("OTARI_API_KEY")
 
     for (const [label, region] of [
       ["cURL", "curl"],
@@ -461,6 +476,20 @@ describe("SetupGuide", () => {
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     // The model comes from the catalog, so the example runs as pasted.
     expect(snippet("typescript")).toHaveTextContent("openai:gpt-4o-mini")
+  })
+
+  it("hands the agent the setup command where the gateway accepts the CLI", async () => {
+    mockApi({ hasCliApp: true })
+    const user = userEvent.setup()
+    await renderGuide()
+    await createKey(user)
+
+    const prompt = await screen.findByRole("region", { name: "agent code" })
+    await waitFor(() => expect(prompt).toHaveTextContent("otari setup --yes"))
+    expect(prompt).not.toHaveTextContent("OTARI_API_KEY")
+    expect(
+      screen.getByText(/You approve a key with a spending limit/),
+    ).toBeInTheDocument()
   })
 
   it("sends the example at the address that served the guide", async () => {

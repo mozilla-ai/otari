@@ -21,6 +21,22 @@ export function useOAuthApp(clientId: string, redirectUri: string) {
   })
 }
 
+/** The client ID and loopback callback the `otari` CLI asks for a key with. */
+export const OTARI_CLI_APP = {
+  clientId: "otari-cli",
+  redirectUri: "http://127.0.0.1/callback",
+} as const
+
+/**
+ * Whether this gateway has registered the `otari` CLI as an app, which is what
+ * lets `otari setup` ask for a key. False until the answer is in, and on a
+ * gateway that registers no apps at all, where the endpoint does not exist.
+ */
+export function useCliSetupAvailable(): boolean {
+  return useOAuthApp(OTARI_CLI_APP.clientId, OTARI_CLI_APP.redirectUri)
+    .isSuccess
+}
+
 /** Search only workspaces where the signed-in user can approve app access. */
 export function useOAuthAppWorkspaces(search: string, enabled: boolean) {
   return useQuery({

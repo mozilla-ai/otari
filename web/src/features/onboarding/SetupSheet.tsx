@@ -16,12 +16,14 @@ import { ListeningPanel } from "@/features/onboarding/ListeningPanel"
 import { setupSuccessFace } from "@/features/onboarding/SetupSuccess"
 import type { SetupFailure } from "@/features/onboarding/setupFailureCopy"
 import {
+  agentPromptNote,
   buildSetupSnippets,
   DEFAULT_SETUP_TAB,
   SETUP_TABS,
   type SetupSnippetId,
 } from "@/features/onboarding/setupSnippets"
 import { useLandingTransition } from "@/features/onboarding/setupTransition"
+import { useCliSetupAvailable } from "@/shared/api/oauthApps"
 import {
   SNIPPET_KEY_ENV_VAR,
   SNIPPET_MODEL_PLACEHOLDER,
@@ -127,24 +129,29 @@ export function SetupSheet({
     (issuedKey && isUsingIssuedKey ? `$${SNIPPET_KEY_ENV_VAR}` : undefined)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
+  // Where the gateway accepts `otari setup`, the agent prompt hands over that command.
+  const cliSetup = useCliSetupAvailable()
   // A minted key shows its stand-in until revealed, a kept key the variable,
   // and no key yet the stand-in, so the examples are there from the first frame.
-  const shown = buildSetupSnippets({
-    baseUrl,
-    apiKey:
-      apiKey === undefined
-        ? (keyInUse ?? concealedKey)
-        : isRevealed
-          ? apiKey
-          : concealedKey,
-    model,
-  })
+  const shown = buildSetupSnippets(
+    {
+      baseUrl,
+      apiKey:
+        apiKey === undefined
+          ? (keyInUse ?? concealedKey)
+          : isRevealed
+            ? apiKey
+            : concealedKey,
+      model,
+    },
+    { cliSetup },
+  )
   // A copy always runs: the minted key itself or the kept key's variable. With
   // neither, `CodeBlock` offers no copy control rather than a dead one.
   const copied =
     keyInUse === undefined
       ? undefined
-      : buildSetupSnippets({ baseUrl, apiKey: keyInUse, model })
+      : buildSetupSnippets({ baseUrl, apiKey: keyInUse, model }, { cliSetup })
 
   // The same `Dialog` in the same place, so the frame stays open across faces.
   if (showsSuccess && landed) {
@@ -289,7 +296,7 @@ export function SetupSheet({
         </CodeBlock>
         <p className="text-caption text-subtle">
           {tab === "agent"
-            ? "Works with Claude Code, Codex and OpenCode. You approve a key with a spending limit in your browser."
+            ? agentPromptNote(cliSetup)
             : tab === "curl"
               ? "Hidden keys use a stand-in; copies include your real key."
               : `Reads your key from ${SNIPPET_KEY_ENV_VAR}; export it as the cURL tab shows.`}

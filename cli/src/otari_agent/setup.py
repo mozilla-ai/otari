@@ -7,8 +7,8 @@ file, and each coding tool's settings refer to it by a command or an environment
 variable rather than holding it.
 
 Nothing the person already has is edited: every tool gets a settings file of
-its own that it is started with, so a plain `claude` or `codex` behaves as it
-did before.
+its own, and `otari claude`, `otari codex` and `otari opencode` start the tool
+with it, so a plain `claude` or `codex` behaves as it did before.
 """
 
 from __future__ import annotations
@@ -80,9 +80,9 @@ def _manifest_path() -> Path:
     return _state_dir() / "setup.json"
 
 
-def _write_private(path: Path, text: str, *, executable: bool = False) -> None:
+def _write_private(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    mode = stat.S_IRUSR | stat.S_IWUSR | (stat.S_IXUSR if executable else 0)
+    mode = stat.S_IRUSR | stat.S_IWUSR
     # Created owner-only rather than narrowed afterwards, so the file is never readable by others.
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -302,6 +302,19 @@ def _approve(
 # --------------------------------------------------------------------------- gateway reads
 
 
+def _require_cli_app(client: httpx.Client, url: str) -> None:
+    """Stop before the browser opens when this gateway has not registered the CLI as an app."""
+    response = client.get(
+        f"{url}{API_ROOT}/oauth/apps/clients",
+        params={"client_id": CLIENT_ID, "redirect_uri": "http://127.0.0.1/callback"},
+    )
+    if response.status_code != httpx.codes.OK:
+        raise SetupError(
+            f"{url} does not accept `otari setup` yet. Its operator registers the CLI as the "
+            f'`{CLIENT_ID}` app first: see "Connect an app with OAuth" in the Otari docs.'
+        )
+
+
 def _auth(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
@@ -384,13 +397,12 @@ def _test_request(client: httpx.Client, url: str, key: str, model: str) -> TestR
 
 @dataclass(frozen=True)
 class Configured:
-    """One coding tool's outcome: the files written for it and how to start it."""
+    """One coding tool's outcome: the files written for it and the command `otari <binary>` starts."""
 
     tool: str
     label: str
+    binary: str
     files: list[Path]
-    start: str
-    launcher: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -413,29 +425,21 @@ GUIDE_ONLY: tuple[Tool, ...] = (
 )
 
 
-def _launcher_dir() -> Path:
-    """Somewhere already on PATH when there is one, so a tool starts by a short name."""
-    local = _home() / ".local" / "bin"
-    on_path = {Path(entry).resolve() for entry in os.environ.get("PATH", "").split(os.pathsep) if entry}
-    if local.is_dir() and local.resolve() in on_path:
-        return local
-    return _state_dir() / "bin"
+def _claude_settings() -> Path:
+    return _home() / ".claude" / "otari.json"
 
 
-def _write_launcher(name: str, body: str) -> tuple[Path, str]:
-    path = _launcher_dir() / name
-    _write_private(
-        path,
-        "#!/bin/sh\n# Written by `otari setup`. Starts the tool on Otari; safe to delete.\n" + body,
-        executable=True,
-    )
-    on_path = shutil.which(name) is not None and Path(shutil.which(name) or "").resolve() == path.resolve()
-    return path, name if on_path else _tilde(path)
+def _codex_profile() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or _home() / ".codex") / "otari.config.toml"
+
+
+def _opencode_config() -> Path:
+    return _state_dir() / "opencode.json"
 
 
 def _configure_claude_code(url: str, store: KeyStore, models: list[str]) -> Configured:
     model = models[0]
-    settings = _home() / ".claude" / "otari.json"
+    settings = _claude_settings()
     document = {
         # Claude Code runs this to get the key, so the key is not in this file.
         "apiKeyHelper": store.helper(),
@@ -454,8 +458,7 @@ def _configure_claude_code(url: str, store: KeyStore, models: list[str]) -> Conf
         },
     }
     _write_private(settings, json.dumps(document, indent=2) + "\n")
-    launcher, start = _write_launcher("otari-claude", f'exec claude --settings {shlex.quote(str(settings))} "$@"\n')
-    return Configured("claude-code", "Claude Code", [settings], start, launcher)
+    return Configured("claude-code", "Claude Code", "claude", [settings])
 
 
 def _toml_string(value: str) -> str:
@@ -463,11 +466,10 @@ def _toml_string(value: str) -> str:
 
 
 def _configure_codex(url: str, store: KeyStore, models: list[str]) -> Configured:
-    home = Path(os.environ.get("CODEX_HOME") or _home() / ".codex")
-    profile = home / "otari.config.toml"
+    profile = _codex_profile()
     command, *arguments = store.helper_argv()
     lines = [
-        "# Written by `otari setup`. Used only by `codex --profile otari`.",
+        "# Written by `otari setup`. Used only by `otari codex` (`codex --profile otari`).",
         f"model = {_toml_string(models[0])}",
         'model_provider = "otari"',
         "",
@@ -483,12 +485,11 @@ def _configure_codex(url: str, store: KeyStore, models: list[str]) -> Configured
         "",
     ]
     _write_private(profile, "\n".join(lines))
-    launcher, start = _write_launcher("otari-codex", 'exec codex --profile otari "$@"\n')
-    return Configured("codex", "Codex", [profile], start, launcher)
+    return Configured("codex", "Codex", "codex", [profile])
 
 
 def _configure_opencode(url: str, store: KeyStore, models: list[str]) -> Configured:
-    config = _state_dir() / "opencode.json"
+    config = _opencode_config()
     document = {
         "$schema": "https://opencode.ai/config.json",
         "model": f"otari/{models[0]}",
@@ -503,11 +504,7 @@ def _configure_opencode(url: str, store: KeyStore, models: list[str]) -> Configu
         },
     }
     _write_private(config, json.dumps(document, indent=2) + "\n")
-    launcher, start = _write_launcher(
-        "otari-opencode",
-        f'OTARI_API_KEY="$({store.helper()})" OPENCODE_CONFIG={shlex.quote(str(config))} exec opencode "$@"\n',
-    )
-    return Configured("opencode", "OpenCode", [config], start, launcher)
+    return Configured("opencode", "OpenCode", "opencode", [config])
 
 
 _CONFIGURE = {
@@ -533,9 +530,7 @@ def _read_manifest() -> dict[str, Any]:
 
 
 def _write_manifest(url: str, configured: list[Configured], model: str | None) -> None:
-    files = sorted(
-        {str(path) for item in configured for path in [*item.files, *([item.launcher] if item.launcher else [])]}
-    )
+    files = sorted({str(path) for item in configured for path in item.files})
     _write_private(_manifest_path(), json.dumps({"url": url, "model": model, "files": files}, indent=2) + "\n")
 
 
@@ -614,6 +609,7 @@ def setup(
         if reused:
             say(f"Using the key already stored in {store.where}.")
         else:
+            _require_cli_app(client, base)
             key, _scopes, manage_url = _approve(
                 client, base, limit=limit, expiration=expiration, open_browser=not no_browser, say=say
             )
@@ -635,16 +631,19 @@ def setup(
             say("Your workspace serves no models yet, so no tool was configured.")
         else:
             say("Coding tools")
+            otari = _invocation()
             for tool in selected:
                 item = _CONFIGURE[tool.id](base, store, offered)
                 configured.append(item)
-                say(f"  {tool.label:<12} ready. Start it with: {item.start}")
+                say(f"  {tool.label:<12} ready. Start it with: {otari} {tool.binary}")
             for tool in _installed(GUIDE_ONLY):
                 say(f"  {tool.label:<12} found, not set up by this command yet: {tool.guide}")
             if not selected:
                 say("  No supported coding tool found on this machine.")
             elif configured:
                 say("  Your own settings for these tools were not changed.")
+                if otari != "otari":
+                    say("  To shorten those commands, install otari: uv tool install otari-agent")
         _write_manifest(base, configured, offered[0] if offered else None)
         say()
 
@@ -679,7 +678,11 @@ def setup(
                     "limit": limit_line,
                     "model": offered[0] if offered else None,
                     "configured": [
-                        {"tool": item.tool, "files": [str(path) for path in item.files], "start": item.start}
+                        {
+                            "tool": item.tool,
+                            "files": [str(path) for path in item.files],
+                            "start": f"{_invocation()} {item.binary}",
+                        }
                         for item in configured
                     ],
                     "test": None
@@ -699,14 +702,59 @@ def setup(
         raise click.exceptions.Exit(1)
 
 
-@click.command("key")
-@click.option("--url", help="The Otari API address. Default: the one the last setup used.")
-def key_command(url: str | None) -> None:
-    """Print the stored key and nothing else, for a tool that runs a command to get it."""
-    key = KeyStore(_resolve_url(url)).load()
-    if key is None:
-        raise SetupError("No key is stored. Run otari setup.")
-    click.echo(key)
+def _invocation() -> str:
+    """How this machine runs `otari`: by name when it is installed, through uvx when it is not."""
+    found = shutil.which("otari")
+    # Under uvx the command is on PATH only while this run lasts, from its own environment.
+    installed = found is not None and Path(found).parent != Path(sys.prefix) / "bin"
+    return "otari" if installed else "uvx --from otari-agent otari"
+
+
+# Replaced in tests: the launch commands hand the process over to the coding tool.
+_exec = os.execvpe
+
+
+def _launch(tool: Tool, config: Path, arguments: list[str], *, needs_key_in_env: bool = False) -> None:
+    """Start a coding tool on Otari with the settings `otari setup` wrote for it."""
+    url = _read_manifest().get("url")
+    key = KeyStore(str(url)).load() if url else None
+    if not url or key is None or not config.exists():
+        raise SetupError(f"{tool.label} is not set up for Otari on this machine. Run otari setup first.")
+    if shutil.which(tool.binary) is None:
+        raise SetupError(f"{tool.label} is not installed: no `{tool.binary}` command was found.")
+    env = dict(os.environ)
+    if needs_key_in_env:
+        # Only for a tool that can read its key no other way; the others run a command for it.
+        env["OTARI_API_KEY"] = key
+        env["OPENCODE_CONFIG"] = str(config)
+    _exec(tool.binary, [tool.binary, *arguments], env)
+
+
+# Everything after the command name belongs to the tool, its own --help included.
+_PASS_THROUGH = {"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []}
+_BY_ID = {tool.id: tool for tool in TOOLS}
+
+
+@click.command("claude", context_settings=_PASS_THROUGH)
+@click.argument("arguments", nargs=-1, type=click.UNPROCESSED)
+def claude(arguments: tuple[str, ...]) -> None:
+    """Start Claude Code on Otari. Arguments go to `claude` unchanged."""
+    settings = _claude_settings()
+    _launch(_BY_ID["claude-code"], settings, ["--settings", str(settings), *arguments])
+
+
+@click.command("codex", context_settings=_PASS_THROUGH)
+@click.argument("arguments", nargs=-1, type=click.UNPROCESSED)
+def codex(arguments: tuple[str, ...]) -> None:
+    """Start Codex on Otari. Arguments go to `codex` unchanged."""
+    _launch(_BY_ID["codex"], _codex_profile(), ["--profile", "otari", *arguments])
+
+
+@click.command("opencode", context_settings=_PASS_THROUGH)
+@click.argument("arguments", nargs=-1, type=click.UNPROCESSED)
+def opencode(arguments: tuple[str, ...]) -> None:
+    """Start OpenCode on Otari. Arguments go to `opencode` unchanged."""
+    _launch(_BY_ID["opencode"], _opencode_config(), list(arguments), needs_key_in_env=True)
 
 
 @click.command("logout")
@@ -726,7 +774,7 @@ def logout(url: str | None) -> None:
             Path(name).unlink()
     with contextlib.suppress(FileNotFoundError):
         _manifest_path().unlink()
-    for folder in (_state_dir() / "keys", _state_dir() / "bin", _state_dir()):
+    for folder in (_state_dir() / "keys", _state_dir()):
         # Only when empty: anything else in there is not this command's to remove.
         with contextlib.suppress(OSError):
             folder.rmdir()

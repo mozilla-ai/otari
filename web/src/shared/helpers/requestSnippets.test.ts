@@ -3,6 +3,7 @@ import { API_ROOT } from "@/shared/api/client"
 import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   buildAgentPrompt,
+  buildAgentSetupPrompt,
   buildCurlSnippet,
   buildPythonSnippet,
   buildTypescriptSnippet,
@@ -221,8 +222,16 @@ describe("buildTypescriptSnippet", () => {
 })
 
 describe("buildAgentPrompt", () => {
-  it("hands the agent one setup command aimed at this gateway, never the key", () => {
+  it("names the variable and the Bearer header, never the key", () => {
     const prompt = buildAgentPrompt(INPUT)
+    expect(prompt).toContain("Authorization: Bearer $OTARI_API_KEY")
+    expect(prompt).not.toContain("gw-abc123")
+  })
+})
+
+describe("buildAgentSetupPrompt", () => {
+  it("hands the agent one setup command aimed at this gateway, never the key", () => {
+    const prompt = buildAgentSetupPrompt(INPUT)
     expect(prompt).toContain(
       "otari setup --yes --url https://otari.example.com --model openai:gpt-4o-mini",
     )
@@ -231,7 +240,7 @@ describe("buildAgentPrompt", () => {
   })
 
   it("leaves the model to the command when none is known", () => {
-    const prompt = buildAgentPrompt({ baseUrl: INPUT.baseUrl })
+    const prompt = buildAgentSetupPrompt({ baseUrl: INPUT.baseUrl })
     expect(prompt).toContain(
       "otari setup --yes --url https://otari.example.com\n",
     )

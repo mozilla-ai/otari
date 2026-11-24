@@ -11,7 +11,7 @@ import click
 from otari_agent import LOADED_NS, __version__
 from otari_agent.hook import guardrails, hook, time_checks_from
 from otari_agent.operator import operator_group
-from otari_agent.setup import key_command, logout, setup
+from otari_agent.setup import claude, codex, logout, opencode, setup
 from otari_agent.usage_import import import_group
 
 # What gateway.cli.register attaches, named here so a light install can say why
@@ -80,7 +80,9 @@ cli.add_command(guardrails)
 cli.add_command(import_group)
 cli.add_command(operator_group)
 cli.add_command(setup)
-cli.add_command(key_command)
+cli.add_command(claude)
+cli.add_command(codex)
+cli.add_command(opencode)
 cli.add_command(logout)
 
 
