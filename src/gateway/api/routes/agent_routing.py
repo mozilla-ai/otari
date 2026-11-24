@@ -145,7 +145,7 @@ async def recommend_model_for_agent(
     # The hold is sized from the question the core would put, description and
     # candidates included, which is also the best guess at what a bound recommender reads.
     question = build_decision_request(spawn, decision_model=ROUTER_LABEL, candidates=candidates)
-    recommendation = await scaffold.run_call(
+    settled = await scaffold.run_call(
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,
@@ -155,6 +155,7 @@ async def recommend_model_for_agent(
         default_output_tokens=ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
         call=_RecommenderCall(recommender, spawn, candidates),
     )
+    recommendation = settled.result
     return AgentModelRecommendation(
         model=recommendation.model,
         reason=recommendation.reason,
