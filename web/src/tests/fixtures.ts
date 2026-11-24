@@ -111,6 +111,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     reasoning_tokens: 0,
     billed_input_tokens: 0,
     billed_output_tokens: 0,
+    deployment_paid_cost: 0,
     request_count: 0,
     error_count: 0,
     unpriced_requests: 0,
