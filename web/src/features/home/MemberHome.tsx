@@ -28,6 +28,7 @@ import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
 import { useCanCreateKey } from "@/features/organization/access"
 import { useCurrentOwner } from "@/features/organization/attribution"
+import { RouterSavingsTile } from "@/features/routerSavings/RouterSavingsTile"
 import { wholePct } from "@/features/spend/limits"
 import {
   comparedWith,
@@ -595,6 +596,12 @@ export function MemberHome({
           />
         )}
       </KpiStrip>
+      <RouterSavingsTile
+        window={window}
+        workspaceId={workspaceId}
+        userId={me}
+        isEnabled={me !== undefined}
+      />
       <section aria-label="Where it went" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <h2 className="text-title">Where it went</h2>
