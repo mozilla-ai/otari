@@ -140,6 +140,12 @@ export const PRICED_OPTIONS: { label: string; value: string }[] = [
   { label: "Unpriced", value: "false" },
 ]
 
+export const PAID_BY_OPTIONS: { label: string; value: string }[] = [
+  { label: "All", value: "" },
+  { label: "Hosted", value: "true" },
+  { label: "Own keys", value: "false" },
+]
+
 // Gateway-run tools an operator can filter on. "Any tool" also matches MCP tools,
 // whose names come from the caller's own server and so cannot be enumerated here.
 export const TOOL_OPTIONS: { label: string; value: string }[] = [

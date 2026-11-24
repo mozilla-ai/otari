@@ -61,6 +61,7 @@ import {
   getActivityRowClassName,
   getActivityRowKey,
   indexGroupOutcomes,
+  PAID_BY_OPTIONS,
   PRICED_OPTIONS,
   resolveExtentWindow,
   resolveWindow,
@@ -99,6 +100,7 @@ const URL_DEFAULTS = {
   user_id: "",
   api_key_id: "",
   priced: "",
+  paid_by: "",
   source: "",
   source_label: "",
   endpoint: "",
@@ -157,6 +159,7 @@ function ActivityPageContent({
   const { userIds: userFilters, scope: observeScope } = observe
   const apiKeyFilters = url.getAll("api_key_id")
   const pricedFilter = url.get("priced")
+  const paidByFilter = url.get("paid_by")
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
@@ -249,6 +252,12 @@ function ActivityPageContent({
       : pricedFilter === "false"
         ? false
         : undefined
+  const deploymentPaid =
+    paidByFilter === "true"
+      ? true
+      : paidByFilter === "false"
+        ? false
+        : undefined
 
   const { selected: workspace } = useSelectedWorkspace()
   const filters: UsageFilters = useMemo(
@@ -269,6 +278,7 @@ function ActivityPageContent({
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
       priced,
+      deployment_paid: deploymentPaid,
     }),
     [
       workspace,
@@ -284,6 +294,7 @@ function ActivityPageContent({
       endpointFilter,
       providerFilter,
       priced,
+      deploymentPaid,
     ],
   )
 
@@ -412,6 +423,7 @@ function ActivityPageContent({
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
       priced,
+      deployment_paid: deploymentPaid,
     }),
     [
       workspace?.workspace_id,
@@ -429,6 +441,7 @@ function ActivityPageContent({
       endpointFilter,
       providerFilter,
       priced,
+      deploymentPaid,
     ],
   )
   // The timeline reads `series`; the tool dimension is requested so the Tool filter
@@ -553,6 +566,16 @@ function ActivityPageContent({
             label: "Priced",
             value: labelFrom(PRICED_OPTIONS, pricedFilter),
             onClear: () => url.patch({ priced: "" }),
+          },
+        ]
+      : []),
+    ...(paidByFilter
+      ? [
+          {
+            key: "paid_by",
+            label: "Paid by",
+            value: labelFrom(PAID_BY_OPTIONS, paidByFilter),
+            onClear: () => url.patch({ paid_by: "" }),
           },
         ]
       : []),
@@ -900,6 +923,17 @@ function ActivityPageContent({
               onChange={(value) => url.patch({ priced: value })}
               options={PRICED_OPTIONS}
             />
+            {/* Only offered once a hosted provider served something in the
+              window, following the tool select below. */}
+            {paidByFilter ||
+            contextSummary.data?.totals?.deployment_paid_cost ? (
+              <FilterSelect
+                label="Paid by"
+                value={paidByFilter}
+                onChange={(value) => url.patch({ paid_by: value })}
+                options={PAID_BY_OPTIONS}
+              />
+            ) : null}
             {/* Only offered once the window actually contains tool usage, following the
               source select below: a filter whose every option returns nothing is
               noise on the majority of gateways, which run no tools at all. */}

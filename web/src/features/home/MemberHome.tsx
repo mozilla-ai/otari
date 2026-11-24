@@ -29,6 +29,7 @@ import { ShareCell } from "@/features/home/ShareCell"
 import { useCanCreateKey } from "@/features/organization/access"
 import { useCurrentOwner } from "@/features/organization/attribution"
 import { wholePct } from "@/features/spend/limits"
+import { paidSplitLine } from "@/features/spend/paidSplit"
 import {
   comparedWith,
   DEFAULT_PERIOD,
@@ -469,13 +470,14 @@ export function MemberHome({
             ) : undefined
           }
           subline={
-            delta !== null
+            paidSplitLine(spend.totals) ||
+            (delta !== null
               ? undefined
               : !spend.totals
                 ? unreadLine
                 : requestCount > 0
                   ? `${formatNumber(requestCount)} requests`
-                  : "No requests yet"
+                  : "No requests yet")
           }
           graphic={slot(
             spend.series.length > 1 ? (

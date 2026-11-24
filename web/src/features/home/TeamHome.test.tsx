@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { TeamHome } from "@/features/home/TeamHome"
 import { API_ROOT } from "@/shared/api/client"
+import { formatUsd } from "@/shared/helpers/format"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -601,7 +602,13 @@ describe("Home, the window", () => {
   })
 
   /** Every read answered with some spend; returns every URL the page asked. */
-  function mockApi({ errors = 0 }: { errors?: number } = {}) {
+  function mockApi({
+    errors = 0,
+    hosted = 0,
+  }: {
+    errors?: number
+    hosted?: number
+  } = {}) {
     const asked: URL[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = new URL(String(input), "http://test")
@@ -624,6 +631,7 @@ describe("Home, the window", () => {
             cost: 4,
             request_count: 6,
             error_count: errors,
+            deployment_paid_cost: hosted,
           }),
           series: [],
           by_user: [spent("u-ada", "Ada"), spent("u-wei", "Wei")],
@@ -674,6 +682,16 @@ describe("Home, the window", () => {
       (url) =>
         url.searchParams.has("start_date") || url.searchParams.has("start"),
     )
+
+  it("splits the spend by who paid once a hosted provider served some", async () => {
+    mockApi({ hosted: 1 })
+    await renderHome("/?period=today")
+    expect(
+      await screen.findByText(
+        `${formatUsd(1)} hosted · ${formatUsd(3)} own keys`,
+      ),
+    ).toBeVisible()
+  })
 
   it("counts one failed request in the singular", async () => {
     mockApi({ errors: 1 })
