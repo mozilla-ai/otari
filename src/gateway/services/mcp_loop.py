@@ -891,6 +891,7 @@ async def mcp_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for chunk in inner:
@@ -926,4 +927,5 @@ async def mcp_tool_loop(
         on_first_response=on_first_response,
         check_first_response=require_choices,
         round_gate=round_gate,
+        use_budget=use_budget,
     )

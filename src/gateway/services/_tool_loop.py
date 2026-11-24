@@ -26,9 +26,12 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext, suppress
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Generic, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast
 
 from gateway.log_config import logger
+
+if TYPE_CHECKING:
+    from gateway.services.tools import ToolUseBudget
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
@@ -309,6 +312,23 @@ def _tool_name(entry: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _pool_tool_names(pool: ToolBackend) -> frozenset[str]:
+    """The names of the tools ``pool`` runs for the gateway."""
+    return frozenset(name for tool in pool.openai_tools if (name := _tool_name(tool)) is not None)
+
+
+def _spent_tools(budget: ToolUseBudget | None, pool_names: frozenset[str]) -> tuple[frozenset[str], bool]:
+    """The pool's tools whose ``max_uses`` this request has used up, and whether that is all of them.
+
+    A round with every one of them used up has nothing left to call, so it is the last
+    one, with its note and its handling of a call the model makes anyway.
+    """
+    if budget is None:
+        return frozenset(), False
+    spent = frozenset(name for name in pool_names if budget.exhausted(name))
+    return spent, bool(spent) and spent == pool_names
+
+
 def _released_tool_choice(choice: Any) -> Any:
     """``choice`` once its round has run, with any force lifted; ``None`` drops it.
 
@@ -410,9 +430,10 @@ def _round_request(
     *,
     first: bool,
     final: bool,
+    spent: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """What one round sends: its tool arguments and its transcript."""
-    kwargs = _round_kwargs(base, merged_tools, user_tools, pool, first=first, final=final)
+    kwargs = _round_kwargs(base, merged_tools, user_tools, pool, first=first, final=final, spent=spent)
     kwargs[transcript_key] = _round_transcript(transcript, final=final)
     return kwargs
 
@@ -425,6 +446,7 @@ def _round_kwargs(
     *,
     first: bool,
     final: bool,
+    spent: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """The tool arguments for one round.
 
@@ -434,8 +456,15 @@ def _round_kwargs(
     result could never reach it. The caller's tools stay, since a call of one ends
     the loop anyway. Every provider the loop serves accepts a transcript holding
     calls of a tool the round no longer declares.
+
+    A gateway tool in ``spent`` has used up its ``max_uses``: the round leaves it out
+    and drops a ``tool_choice`` that names it, since a call of it could only be refused.
     """
-    tools = user_tools if final else merged_tools
+    if final:
+        tools = user_tools
+    else:
+        gateway_tools = merged_tools[len(user_tools) :]
+        tools = user_tools + [tool for tool in gateway_tools if _tool_name(tool) not in spent]
     kwargs = dict(base)
     if tools:
         kwargs["tools"] = tools
@@ -445,10 +474,10 @@ def _round_kwargs(
             kwargs.pop("tool_choice")
         else:
             kwargs["tool_choice"] = released
-    if final:
-        choice_name = _tool_name(kwargs.get("tool_choice"))
-        if not tools or (choice_name is not None and pool.owns_tool(choice_name)):
-            kwargs.pop("tool_choice", None)
+    choice_name = _tool_name(kwargs.get("tool_choice"))
+    withheld = choice_name is not None and (choice_name in spent or (final and pool.owns_tool(choice_name)))
+    if not tools or withheld:
+        kwargs.pop("tool_choice", None)
     return kwargs
 
 
@@ -486,6 +515,7 @@ async def run_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     check_first_response: Callable[[ResultT], ResultT] | None = None,
     round_gate: RoundGate | None = None,
+    use_budget: ToolUseBudget | None = None,
 ) -> ResultT:
     """Non-streaming tool loop, generic over the wire format.
 
@@ -513,6 +543,9 @@ async def run_tool_loop(
     providers.
     ``check_first_response`` runs before it and may raise to refuse that
     response as a provider failure, which leaves the attempt free to fall over.
+
+    A tool whose ``max_uses`` in ``use_budget`` is used up is left out of later
+    rounds, and once every gateway tool is, the next round is the last one.
     """
     transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
@@ -527,10 +560,21 @@ async def run_tool_loop(
     written: int | None = None
     answered: ResultT | None = None
 
+    pool_names = _pool_tool_names(pool)
+
     for iteration in range(1, max_iterations + 1):
-        final = iteration == max_iterations
+        spent, all_spent = _spent_tools(use_budget, pool_names)
+        final = iteration == max_iterations or all_spent
         kwargs = _round_request(
-            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
+            strategy.transcript_key,
+            base,
+            merged_tools,
+            user_tools,
+            pool,
+            transcript,
+            first=iteration == 1,
+            final=final,
+            spent=spent,
         )
         if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
@@ -543,6 +587,7 @@ async def run_tool_loop(
                 transcript,
                 first=iteration == 1,
                 final=True,
+                spent=spent,
             )
         kwargs["stream"] = False
 
@@ -602,6 +647,7 @@ async def run_tool_loop_stream(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     round_gate: RoundGate | None = None,
+    use_budget: ToolUseBudget | None = None,
 ) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
@@ -630,6 +676,8 @@ async def run_tool_loop_stream(
     ``on_first_response`` is invoked once the first upstream stream has ended, as
     :func:`run_tool_loop` invokes it: a round can run the gateway's tools without
     forwarding anything, so this, not the first forwarded event, is the lock-in.
+
+    ``use_budget`` shapes each round as in :func:`run_tool_loop`.
     """
     transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
@@ -645,10 +693,21 @@ async def run_tool_loop_stream(
     # The last round the loop continued past, and the usage of the rounds before it.
     answered: tuple[Any, Any] | None = None
 
+    pool_names = _pool_tool_names(pool)
+
     for iteration in range(1, max_iterations + 1):
-        final = iteration == max_iterations
+        spent, all_spent = _spent_tools(use_budget, pool_names)
+        final = iteration == max_iterations or all_spent
         kwargs = _round_request(
-            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
+            strategy.transcript_key,
+            base,
+            merged_tools,
+            user_tools,
+            pool,
+            transcript,
+            first=iteration == 1,
+            final=final,
+            spent=spent,
         )
         if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
@@ -661,6 +720,7 @@ async def run_tool_loop_stream(
                 transcript,
                 first=iteration == 1,
                 final=True,
+                spent=spent,
             )
 
         try:

@@ -329,6 +329,8 @@ async def test_messages_caps_one_tool_while_the_others_keep_running(monkeypatch:
     )
 
     assert [len(b.calls) for b in (search, sandbox, mcp)] == [1, 2, 2]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert {tool["name"] for tool in sent[1]["tools"]} == {CODE_EXECUTION_TOOL_NAME, _MCP_TOOL}
     second = {block["tool_use_id"]: block["content"] for block in sent[2]["messages"][-1]["content"]}
     assert second == {"tu_s": MAX_USES_EXCEEDED_ERROR, "tu_c": "code_execution result", "tu_m": "lookup result"}
     search_results = [cast(Any, b).content for b in result.content if b.type == "web_search_tool_result"]
@@ -619,6 +621,8 @@ async def test_chat_runs_every_backend_and_caps_only_the_capped_tool(monkeypatch
 
     assert result.choices[0].message.content == "done"
     assert [len(b.calls) for b in (search, sandbox, mcp)] == [1, 2, 2]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert WEB_SEARCH_TOOL_NAME not in {tool["function"]["name"] for tool in sent[1]["tools"]}
     second = {m["tool_call_id"]: m["content"] for m in sent[2]["messages"] if m.get("role") == "tool"}
     assert second["c1"] == MAX_USES_EXCEEDED_ERROR
 
