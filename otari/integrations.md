@@ -17,6 +17,7 @@ Otari integrates with popular AI development frameworks and coding tools. Explor
 - [oh-my-pi](https://docs.otari.ai/guides/integrations/oh-my-pi)
 - [Hermes Agent](https://docs.otari.ai/guides/integrations/hermes)
 - [Mistral Vibe](https://docs.otari.ai/guides/integrations/vibe)
+- [DeepSeek Harness](https://docs.otari.ai/guides/integrations/deepseek-harness)
 - [Pydantic AI](https://docs.otari.ai/guides/integrations/pydantic-ai)
 - [LangChain](https://docs.otari.ai/guides/integrations/langchain)
 - [LangGraph](https://docs.otari.ai/guides/integrations/langgraph)

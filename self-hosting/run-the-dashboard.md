@@ -139,11 +139,13 @@ gateway process rather than to an organization:
 | Accounts | Every account on the deployment | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
 | Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](hosted-providers.md#the-hosted-providers-page) |
 | Subagent router | The decision models that pick the model a coding agent's subagent runs on | [Subagent router](#subagent-router), [Subagent routers](https://docs.otari.ai/reference/gateway/routing#subagent-routers) |
+| Deployment budgets | Every budget on the deployment, a tenant's included, and the gateway users assigned to each | [Budgets](https://docs.otari.ai/guides/control/budgets) |
 | Web search | The search and fetch tools the deployment runs for every workspace, and their prices | [Web search and Code execution pricing](#web-search-and-code-execution-pricing) |
 | Code execution pricing | The price per successful `otari:code_execution` call | [Web search and Code execution pricing](#web-search-and-code-execution-pricing) |
 
-Only a deployment operator sees Accounts, Hosted providers, Web search and Code
-execution pricing; anyone else who opens them is told they are not available.
+Only a deployment operator sees Accounts, Hosted providers, Deployment budgets,
+Web search and Code execution pricing; anyone else who opens them is told they
+are not available.
 **Tools > Web search** links an operator to the Web search page.
 
 ### Settings
@@ -260,4 +262,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/2106295735a517ddb356a59b28d0b7174f717677/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/1929560becb25f4cad0f25a654ebf38829e148e9/web/README.md).

@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/2106295735a517ddb356a59b28d0b7174f717677/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/1929560becb25f4cad0f25a654ebf38829e148e9/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -388,8 +388,8 @@ GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
 often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
-user: any other value is refused with
-`403 'user' field does not match the authenticated API key's user`. A key's
+user: any other value is refused with `403` and code `user_mismatch`, whose detail
+begins `'user' field does not match the authenticated API key's user`. A key's
 `reject_user_mismatch` (see [Mismatched `user` fields](https://docs.otari.ai/guides/control/api-keys#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
@@ -1269,7 +1269,9 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
+| `user_mismatch` | 403 | A key's request named another user than the key's own in `user` (`metadata.user_id` on Messages), and the key's [mismatched `user` field](https://docs.otari.ai/guides/control/api-keys#mismatched-user-fields) choice rejects that. Set the key's `reject_user_mismatch` to `false` to accept the value and bill the key's own user. On chat completions, Responses, Messages, file uploads and direct tool calls, a [service key](https://docs.otari.ai/guides/control/end-users) bills each end user it names instead, and chat completions and Responses take a free-form ID in `metadata`. The message names the ways the route offers | |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch. The message says where an owner or admin of the workspace allows it: Tools > Web search in the dashboard | |
+| `request_mcp_servers_disallowed` | 400 | The request named an MCP server by URL (`mcp_servers`, or a provider MCP tool), and the workspace's `request_mcp_servers_allowed` is off. Register the server and name it in `mcp_server_ids`, or have a workspace admin turn the switch on; see [Servers named in a request](mcp.md#servers-named-in-a-request) | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
