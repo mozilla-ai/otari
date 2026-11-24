@@ -2256,7 +2256,9 @@ export interface paths {
          * Reencrypt Hosted Providers
          * @description Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
          *
-         *     Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/search-tools/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``.
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
@@ -3539,8 +3541,8 @@ export interface paths {
          * Reencrypt Org Provider Keys
          * @description Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
          *
-         *     The tenant half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
          *     ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
          *     encrypted values: the provider API key, the stored client arguments and the
          *     endpoint credential. A key holding one no configured secret reads is left
@@ -6901,8 +6903,9 @@ export interface paths {
          * Reencrypt Stored Search Tool Keys
          * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
          *
-         *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be
          *     decrypted are left untouched and must be recovered by replacing the affected
          *     tool's key.
          */

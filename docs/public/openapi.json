@@ -40862,7 +40862,7 @@
     },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/search-tools/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -45778,7 +45778,7 @@
     },
     "/api/v1/organization-provider-keys/reencrypt": {
       "post": {
-        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nThe tenant half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
+        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
         "operationId": "provider-keys-reencrypt_org_provider_keys",
         "responses": {
           "200": {
@@ -57929,7 +57929,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {

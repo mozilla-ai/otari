@@ -86,8 +86,8 @@ operator_router = APIRouter(
 async def reencrypt_org_provider_keys(service: OrgProviderKeyServiceDep) -> OrgProviderKeysReencryptPublic:
     """Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
 
-    The tenant half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-    alongside ``POST /api/v1/hosted-providers/reencrypt`` and
+    Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+    ``POST /api/v1/hosted-providers/reencrypt`` and
     ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
     encrypted values: the provider API key, the stored client arguments and the
     endpoint credential. A key holding one no configured secret reads is left

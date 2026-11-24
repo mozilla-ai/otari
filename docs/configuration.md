@@ -747,13 +747,9 @@ with the database. If the database holds encrypted credentials and neither
 `OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
 than generate a key that could not decrypt them.
 
-To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
-run the hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
-router's key has no re-encryption endpoint yet: re-enter it on the Subagent
-router page after the rotation. Losing every configured encryption key makes
-stored credentials unrecoverable.
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key, then run every re-encryption endpoint: `POST /api/v1/hosted-providers/reencrypt`, `POST /api/v1/search-tools/reencrypt` and `POST /api/v1/organization-provider-keys/reencrypt`.
+
+**Keep the old key configured after that.** Only the three stores above have a re-encryption endpoint, and everything else still opens with the key it was written under. A subagent router's key is re-entered on the Subagent router page. Stored trace content is sealed under `OTARI_SECRET_KEY` too, and [Keeping trace content](trace-storage.md#keeping-trace-content) says to keep a rotated-out key for as long as you keep traces. Removing the old key while any of that remains makes it unrecoverable, as losing every configured key does.
 
 ### Hosted providers in config.yml
 
