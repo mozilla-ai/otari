@@ -20,6 +20,7 @@ from any_llm.types.completion import CompletionParams
 from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
 from fastapi import HTTPException, status
+from mcp.shared.exceptions import MCPError
 
 from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
@@ -577,6 +578,18 @@ class UpstreamFailure:
             return status_code
         mapping = self.mapping
         return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
+
+    @property
+    def is_external(self) -> bool:
+        """Whether something outside the gateway caused this failure.
+
+        The provider failed the call, cut its stream short or refused the
+        request, or an MCP server the request declared answered with an error.
+        Anything else is a fault in Otari itself.
+        """
+        if _is_upstream_failure(self.exc) or self.mapping is not None:
+            return True
+        return any(isinstance(current, MCPError) for current in upstream_exception_chain(self.exc))
 
     @property
     def logged_message(self) -> str:

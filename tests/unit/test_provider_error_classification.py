@@ -33,6 +33,8 @@ from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
 from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
+from mcp.shared.exceptions import MCPError
+from mcp.types import INTERNAL_ERROR
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
@@ -1957,3 +1959,23 @@ def test_a_400_with_another_provider_code_carries_no_structured_output_code() ->
 
     assert UpstreamFailure(exc).mapping == (400, _GROQ_JSON_FAILED_MSG)
     assert UpstreamFailure(exc).headers is None
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(402),
+        _StatusError(503),
+        openai.APIConnectionError(request=httpx2.Request("POST", "https://provider.test")),
+        IncompleteStreamError(0),
+        ProviderError("provider failed", provider_name="mistral"),
+        MCPError(INTERNAL_ERROR, "Server returned an error response"),
+    ],
+)
+def test_a_failure_from_outside_the_gateway_is_external(exc: BaseException) -> None:
+    assert UpstreamFailure(exc).is_external
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("bug in the gateway"), KeyError("missing"), ValueError("bad")])
+def test_a_fault_in_the_gateway_is_not_external(exc: BaseException) -> None:
+    assert not UpstreamFailure(exc).is_external
