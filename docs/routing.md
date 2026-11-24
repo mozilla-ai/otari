@@ -205,6 +205,87 @@ Send `Otari-Router: off` to skip weighted or priority selection for one request
 and use the policy default. There is no header that forces a router on: the
 policy decides that.
 
+## Route by deployment locality and capability
+
+Add `eligibility` to a policy to restrict every candidate, including backups.
+Declare each provider instance's `routing_locality` and the operations supported
+by each exact `instance:model` in `model_capabilities`.
+
+```yaml
+providers:
+  edge:
+    provider_type: openai-compatible
+    api_base: http://inference.internal:8000/v1
+    routing_locality: local
+  managed:
+    provider_type: openai
+    api_key: ${MANAGED_API_KEY}
+    routing_locality: cloud
+
+model_capabilities:
+  "edge:chat-model":
+    operations:
+      chat: {streaming: true}
+  "managed:gpt-5-mini":
+    operations:
+      chat: {streaming: true}
+
+routing:
+  policies:
+    local-first:
+      select:
+        - default: edge:chat-model
+      on_failure:
+        - managed:gpt-5-mini
+      eligibility:
+        allowed_localities: [local, cloud]
+```
+
+Send `model: local-first` to Chat Completions. The local target leads, and the
+managed target can serve if the local target is incompatible or fails before
+committing a response. Set `allowed_localities: [local]` to exclude the managed
+target even when the local target fails. Use `[private]` for private infrastructure
+only, or `[cloud]` with an explicit list of approved cloud targets. Declare the
+desired order in `select` and `on_failure`, or in a `priority` router's candidate
+list. A weighted router recalculates shares over its eligible candidates.
+
+| Setting | Meaning |
+| --- | --- |
+| `routing_locality` | Operator-declared `local`, `private` or `cloud` on a `providers:` instance. Local and private require an explicit HTTP(S) `api_base`. |
+| `eligibility.allowed_localities` | Nonempty allow-list. Include `cloud` and name a cloud target to authorize cloud inference through this policy. |
+| `eligibility.required_capabilities` | Optional list of `image` and `pdf`. Each target must explicitly declare the corresponding `supports_image` or `supports_pdf` capability. `image` here means vision input. |
+| `model_capabilities.<instance:model>.operations` | Map of supported operations. `chat`, `messages` and `responses` are evaluated by the corresponding completion endpoints. Set `streaming: true` per operation to enable streaming. Set `enabled: false` to take an operation out of service for these policies. |
+
+An undeclared locality, operation, streaming mode or required native capability
+excludes the target. The compiler checks the caller's model access before ranking
+and applies the same checks to fallbacks. `Otari-Router: off` skips ranking and
+still applies eligibility to the default and its backups. If every resolved
+target is excluded, the request returns `403` before dispatch.
+
+Eligibility policies use declared `providers:` instances with their own
+credentials or a keyless endpoint. Instances with `routing_locality` stay in the
+configuration file during automatic provider import. A matching instance name
+on a hosted provider, an organization credential or a tenant-owned endpoint
+cannot supply a replacement connection for an eligible target.
+
+This is a policy-level permission for model attempts. Existing workspace and
+user scoping determines which policy applies. Direct model selectors use the
+caller's existing model permissions. The operator classifies the actual
+inference destination, including where any proxy forwards the request. Configure
+guardrails, gateway-run tools, file processing and vision description separately
+if they handle sensitive data.
+
+The explain API and CLI evaluate a non-streaming Chat Completions request and
+list excluded targets and reasons. Gateway debug logs show eligibility decisions
+for the actual operation and stream mode. Provider availability during a
+request is reflected in the normal timeout and failover behavior.
+
+Add the policy field to opt in. Existing policies require no migration. For
+rollback, retire the constrained selector or restore its previous policy where
+that access is intended. Before downgrading Otari, export and remove eligibility
+policies from both config and stored policy management, then remove the instance
+metadata. Older builds cannot interpret the new policy field.
+
 ## Mandatory guardrails
 
 A policy can run guardrails even when the caller did not request them:
@@ -333,6 +414,8 @@ the deployment-wide routes.
 The authenticating API key determines which workspace resolves a policy.
 User-scoped entries take precedence over wider entries. A config-file policy
 cannot be changed through the API.
+
+Stored eligibility policies use the same API and are read-only in the dashboard.
 
 Changes apply immediately on the worker that accepts the write. Other workers
 refresh stored routing configuration within 30 seconds.

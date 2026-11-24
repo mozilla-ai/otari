@@ -77,6 +77,10 @@ export interface PolicySpec {
   select: PolicySelectEntry[]
   on_failure?: string[]
   guardrails?: PolicyGuardrail[]
+  eligibility?: {
+    allowed_localities: ("local" | "private" | "cloud")[]
+    required_capabilities?: ("image" | "pdf")[]
+  }
 }
 
 // ---------------------------------------------------------------------------

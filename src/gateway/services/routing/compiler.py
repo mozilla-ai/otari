@@ -16,10 +16,8 @@ What it deliberately does **not** do:
   matters.
 * **No dispatch.** It returns candidates; the walker tries them.
 
-Drops are values, not silence. Every candidate removed from the plan is recorded
-in :attr:`CompiledPlan.dropped` with a reason, so the caller can log it, return it
-from ``explain``, and record it on the usage row. A "failover" policy that
-silently compiled down to one attempt is the failure mode this exists to prevent.
+Candidates removed from the plan carry a reason in :attr:`CompiledPlan.dropped`
+for gateway logs and ``explain``.
 """
 
 from __future__ import annotations
@@ -35,9 +33,21 @@ from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
-from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
+from gateway.models.routing import (
+    MAX_CANDIDATES,
+    DeploymentLocality,
+    InferenceOperation,
+    PolicyEligibility,
+    PolicySpec,
+    WhenClause,
+)
 from gateway.services.model_access import is_model_allowed, organization_key_refusal
-from gateway.services.provider_kwargs import resolve_catalog_fallback, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    ResolvedProvider,
+    missing_declared_credential,
+    resolve_catalog_fallback,
+    resolve_provider_selector,
+)
 from gateway.services.providers import CountryGate, CountryNotServedError, ensure_provider_country
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
@@ -48,6 +58,7 @@ __all__ = [
     "DroppedCandidate",
     "NoEligibleCandidatesError",
     "RouterOrdering",
+    "RoutingRequirements",
     "compile_catalog_plan",
     "compile_policy",
     "needs_budget_state",
@@ -112,6 +123,15 @@ class RouterOrdering:
     selectors: list[str]
     confidence: float = 0.0
     rationale: str = ""
+    dropped: tuple[DroppedCandidate, ...] = ()
+
+
+@dataclass(frozen=True)
+class RoutingRequirements:
+    """The operation and interaction mode the request needs."""
+
+    operation: InferenceOperation = InferenceOperation.CHAT
+    streaming: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,7 +140,7 @@ class DroppedCandidate:
 
     selector: str
     reason: str
-    """Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``, ``duplicate``, ``over_cap``."""
+    """Machine-readable eligibility or plan-limit reason."""
     detail: str
     """Human-readable, for an operator."""
 
@@ -289,6 +309,7 @@ def compile_policy(
     router_ordering: RouterOrdering | None = None,
     workspace_id: uuid.UUID | None = None,
     country_gate: CountryGate | None = None,
+    requirements: RoutingRequirements = RoutingRequirements(),
 ) -> CompiledPlan:
     """Turn ``spec`` into an ordered plan for one request.
 
@@ -308,8 +329,9 @@ def compile_policy(
     ``explain`` and the CLI omit it, which only affects a bare candidate
     selector with no matching ``config.providers`` instance.
 
-    ``country_gate`` drops a candidate whose provider the request's country may
-    not reach. ``explain`` and the CLI have no request, so they omit it.
+    ``country_gate`` applies country restrictions. For a policy with eligibility
+    constraints, ``requirements`` determines which operation and stream support
+    each candidate must declare.
 
     Raises :class:`NoEligibleCandidatesError` when nothing survives. That error
     derives its own status from why the candidates went: 403 when access rules
@@ -327,24 +349,45 @@ def compile_policy(
 
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
-    attempts, dropped = _resolve_candidates(
+    candidates, dropped = _resolve_candidates(
         config,
         ordered,
         display_model=policy_name,
         allowlist=allowlist,
         workspace_id=workspace_id,
         country_gate=country_gate,
+        eligibility=spec.eligibility,
+        requirements=requirements,
     )
+    attempts = [attempt for _, attempt in candidates]
+    if (
+        router_ordering is not None
+        and router_ordering.dropped
+        and (routed or selection_consults_router(spec, user_id=user_id, key_id=key_id, budget=budget))
+    ):
+        dropped = list(dict.fromkeys((*router_ordering.dropped, *dropped)))
 
     if not attempts:
         raise NoEligibleCandidatesError(policy_name, dropped)
 
-    if dropped:
+    if spec.eligibility is not None:
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Routing eligibility policy=%s operation=%s streaming=%s selected=%s:%s reason=%s dropped=%s",
+                policy_name,
+                requirements.operation,
+                requirements.streaming,
+                attempts[0].instance,
+                attempts[0].model,
+                attempts[0].selection_reason,
+                [(item.selector, item.reason) for item in dropped],
+            )
+    elif dropped:
         logger.warning(
             "Routing policy '%s' compiled to %d of %d candidates; dropped %s",
             policy_name,
             len(attempts),
-            len(ordered),
+            len(attempts) + len(dropped),
             "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
         )
 
@@ -390,7 +433,7 @@ def compile_catalog_plan(
     if any(selector.replace(":", "/", 1) == model_selector for selector in offerings):
         candidate_limit = min(candidate_limit, MAX_CANDIDATES)
     ordered = [(selector, "catalog") for selector in offerings]
-    attempts, dropped = _resolve_candidates(
+    candidates, dropped = _resolve_candidates(
         config,
         ordered,
         display_model=model_selector,
@@ -399,6 +442,7 @@ def compile_catalog_plan(
         candidate_limit=candidate_limit,
         country_gate=country_gate,
     )
+    attempts = [attempt for _, attempt in candidates]
     if dropped and logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             "Catalog ID '%s' compiled to %d of %d offerings; dropped %s",
@@ -414,6 +458,61 @@ def compile_catalog_plan(
     return CompiledPlan(policy_name=model_selector, attempts=attempts, dropped=dropped)
 
 
+def eligible_router_pool(
+    config: GatewayConfig,
+    spec: PolicySpec,
+    *,
+    allowlist: list[str] | None,
+    workspace_id: uuid.UUID | None,
+    country_gate: CountryGate | None = None,
+    requirements: RoutingRequirements = RoutingRequirements(),
+) -> tuple[list[str], tuple[DroppedCandidate, ...]]:
+    """Apply the compiler's checks before ranking a constrained policy's pool."""
+    candidates, dropped = _resolve_candidates(
+        config,
+        [(selector, "router") for selector in spec.router_candidates],
+        display_model="",
+        allowlist=allowlist,
+        workspace_id=workspace_id,
+        country_gate=country_gate,
+        eligibility=spec.eligibility,
+        requirements=requirements,
+    )
+    return [selector for selector, _ in candidates], tuple(dropped)
+
+
+def _eligibility_refusal(
+    config: GatewayConfig,
+    selector: str,
+    resolved: ResolvedProvider,
+    eligibility: PolicyEligibility,
+    requirements: RoutingRequirements,
+) -> DroppedCandidate | None:
+    provider = config.providers.get(resolved.instance, {})
+    locality = provider.get("routing_locality")
+    if locality is None:
+        return DroppedCandidate(selector, "unknown_locality", "has no configured deployment locality")
+    if locality not in eligibility.allowed_localities:
+        return DroppedCandidate(selector, "locality_not_allowed", "has a deployment locality the policy excludes")
+    if locality != DeploymentLocality.CLOUD and not resolved.kwargs.get("api_base"):
+        return DroppedCandidate(selector, "unknown_locality", "has no explicit upstream endpoint")
+    # A hosted credential can change the deployment behind the selector.
+    if missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is not None:
+        return DroppedCandidate(selector, "target_unavailable", "has no declared credential for this deployment")
+    capabilities = config.model_capabilities.get(f"{resolved.instance}:{resolved.model}")
+    if capabilities is None or (operation := capabilities.operations.get(requirements.operation)) is None:
+        return DroppedCandidate(selector, "operation_not_supported", f"has no declaration for {requirements.operation}")
+    if not operation.enabled:
+        return DroppedCandidate(selector, "target_unavailable", f"is disabled for {requirements.operation}")
+    if requirements.streaming and not operation.streaming:
+        return DroppedCandidate(selector, "streaming_not_supported", "has no streaming declaration for this operation")
+    supported = {"image": capabilities.supports_image, "pdf": capabilities.supports_pdf}
+    missing = [name for name in eligibility.required_capabilities if not supported[name]]
+    if missing:
+        return DroppedCandidate(selector, "capability_not_supported", f"does not declare native {', '.join(missing)}")
+    return None
+
+
 def _resolve_candidates(
     config: GatewayConfig,
     ordered: list[tuple[str, str]],
@@ -423,9 +522,11 @@ def _resolve_candidates(
     workspace_id: uuid.UUID | None,
     country_gate: CountryGate | None,
     candidate_limit: int = MAX_CANDIDATES,
-) -> tuple[list[Attempt], list[DroppedCandidate]]:
+    eligibility: PolicyEligibility | None = None,
+    requirements: RoutingRequirements = RoutingRequirements(),
+) -> tuple[list[tuple[str, Attempt]], list[DroppedCandidate]]:
     """The attempts ``ordered`` resolves to for this caller, and every candidate dropped on the way."""
-    attempts: list[Attempt] = []
+    attempts: list[tuple[str, Attempt]] = []
     dropped: list[DroppedCandidate] = []
     seen: set[str] = set()
 
@@ -470,16 +571,24 @@ def _resolve_candidates(
         except CountryNotServedError as exc:
             dropped.append(DroppedCandidate(selector, "country_not_supported", _country_fragment(exc.closed)))
             continue
+        if eligibility is not None:
+            excluded = _eligibility_refusal(config, selector, resolved, eligibility, requirements)
+            if excluded is not None:
+                dropped.append(excluded)
+                continue
         seen.add(canonical)
         attempts.append(
-            Attempt(
-                position=len(attempts) + 1,
-                instance=resolved.instance,
-                provider=resolved.provider,
-                model=resolved.model,
-                kwargs=resolved.kwargs,
-                display_model=display_model,
-                selection_reason=selection_reason,
+            (
+                selector,
+                Attempt(
+                    position=len(attempts) + 1,
+                    instance=resolved.instance,
+                    provider=resolved.provider,
+                    model=resolved.model,
+                    kwargs=resolved.kwargs,
+                    display_model=display_model,
+                    selection_reason=selection_reason,
+                ),
             )
         )
 

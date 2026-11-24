@@ -26,6 +26,7 @@ from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.providers import CountryGate
 from gateway.services.routing.backends import (
     RoutingContext,
     backend_is_priority,
@@ -34,7 +35,7 @@ from gateway.services.routing.backends import (
     known_backends,
     owes_missing_backend_warning,
 )
-from gateway.services.routing.compiler import RouterOrdering
+from gateway.services.routing.compiler import RouterOrdering, RoutingRequirements, eligible_router_pool
 from gateway.services.routing.weighted import declared_shares, describe_split, explain_ordering
 
 __all__ = [
@@ -76,6 +77,8 @@ async def decide_ordering(
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
     workspace_id: uuid.UUID | None = None,
+    country_gate: CountryGate | None = None,
+    requirements: RoutingRequirements = RoutingRequirements(),
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -106,8 +109,8 @@ async def decide_ordering(
         # warning there reported a problem that did not exist.
         if owes_missing_backend_warning(workspace_id, policy_name, backend_name):
             logger.warning(
-                "Routing policy '%s' names router backend '%s', which this build does not have, so the "
-                "policy serves '%s' on every request. Available backends: %s. Logged once per policy and "
+                "Routing policy '%s' names router backend '%s', which this build does not have. Using "
+                "the policy's default '%s' and its fallbacks. Available backends: %s. Logged once per policy and "
                 "workspace per process.",
                 policy_name,
                 backend_name,
@@ -115,12 +118,25 @@ async def decide_ordering(
                 ", ".join(known_backends()),
             )
         return None
-    pool = usable_candidates(
-        config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
-    )
+    if spec.eligibility is not None:
+        pool, dropped = eligible_router_pool(
+            config,
+            spec,
+            allowlist=allowlist,
+            workspace_id=workspace_id,
+            country_gate=country_gate,
+            requirements=requirements,
+        )
+    else:
+        pool = usable_candidates(
+            config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
+        )
+        dropped = ()
     default_model = spec.default_target
     if not pool:
-        return RouterOrdering([], rationale="no candidate in the pool is usable by this caller")
+        return RouterOrdering([], rationale="no candidate in the pool is usable by this caller", dropped=dropped)
+    if spec.eligibility is not None and default_model not in pool:
+        default_model = pool[0]
 
     context = RoutingContext(
         user_id=user_id or "",
@@ -138,13 +154,16 @@ async def decide_ordering(
         # that true for every backend and every failure rather than for the ones
         # each backend thought of. Declining serves the default target, not an error.
         logger.warning(
-            "Router '%s' on policy '%s' failed or timed out (%s); serving '%s'",
+            "Router '%s' on policy '%s' failed or timed out (%s). Using the policy's default '%s' and its fallbacks.",
             backend_name,
             policy_name,
             type(exc).__name__,
             spec.default_target,
         )
-        return RouterOrdering([], rationale=f"router error ({type(exc).__name__})")
+        return RouterOrdering([], rationale=f"router error ({type(exc).__name__})", dropped=dropped)
+    ordered = list(decision.ordered_models)
+    if spec.eligibility is not None:
+        ordered = [selector for selector in ordered if selector in pool]
     # One line per routed request, at info, unless the backend's decision is
     # reconstructable (the weighted split is written in the policy, and the usage
     # row names what served): at load balancer volume this line would be the log.
@@ -155,12 +174,13 @@ async def decide_ordering(
         policy_name,
         decision.rationale,
         decision.confidence,
-        decision.ordered_models[0] if decision.ordered_models else "policy default",
+        ordered[0] if ordered else "policy default",
     )
     return RouterOrdering(
-        selectors=list(decision.ordered_models),
+        selectors=ordered,
         confidence=decision.confidence,
         rationale=decision.rationale,
+        dropped=dropped,
     )
 
 
@@ -202,35 +222,34 @@ def explain_router_ordering(
     survived this caller's allow-list. Deliberately not a sample of the draw, which
     would make the same command print a different plan on every run.
 
-    The *ordering* covers the whole declared pool, unlike the request path, which
-    filters before ranking. Filtering here too would hand the compiler a pool with
-    the forbidden candidates already gone, so they would never appear in
-    :attr:`CompiledPlan.dropped` with their reason, and that list is most of the
-    point of ``explain``: a balanced policy that compiles down to one provider for
-    this caller is exactly what an operator needs to find before an outage does.
-
-    That holds when *nothing* in the pool survives, which is the case the operator
-    most needs to see. The shares are empty, because a split over no candidate is
-    not a split, but the ordering still carries the declared pool so every filtered
-    candidate is named in ``dropped``. Returning nothing here instead would compile
-    the policy down to its ``on_failure`` chain with the whole split silently
-    missing from both lists.
+    For an eligibility policy, evaluate a non-streaming chat request and return
+    the drops with the ordering. For other policies, pass the full declared
+    ordering to the compiler so that it can report what it filtered.
     """
-    if backend_is_priority(spec.router_backend):
-        declared = spec.router_candidates
-        rationale = f"priority order ({', '.join(declared)})"
-        ordering = RouterOrdering(selectors=declared, confidence=1.0, rationale=rationale)
-        return ordering, []
-    if not backend_is_weighted(spec.router_backend):
+    if not (backend_is_priority(spec.router_backend) or backend_is_weighted(spec.router_backend)):
         return None, []
     declared = spec.router_candidates
-    usable = usable_candidates(config, declared, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
+    if spec.eligibility is not None:
+        declared, dropped = eligible_router_pool(config, spec, allowlist=allowlist, workspace_id=workspace_id)
+    else:
+        dropped = ()
+    if backend_is_priority(spec.router_backend):
+        rationale = f"priority order ({', '.join(declared)})"
+        ordering = RouterOrdering(selectors=declared, confidence=1.0, rationale=rationale, dropped=dropped)
+        return ordering, []
+    usable = (
+        usable_candidates(config, declared, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
+        if spec.eligibility is None
+        else declared
+    )
     weights = spec.router_weights
     shares = declared_shares(weights, usable)
     displayed: list[WeightedShare] = []
     for selector in explain_ordering(usable, weights):
         try:
-            resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
+            resolved = resolve_provider_selector(
+                config, selector, user_id if spec.eligibility is None else None, workspace_id=workspace_id
+            )
         except (ValueError, AnyLLMError):  # pragma: no cover - usable_candidates already resolved these
             continue
         displayed.append(
@@ -243,6 +262,7 @@ def explain_router_ordering(
     ordering = RouterOrdering(
         selectors=explain_ordering(declared, weights),
         confidence=(displayed[0].share_pct / 100.0) if displayed else 0.0,
+        dropped=dropped,
         rationale=(
             f"weighted split ({describe_split(usable, weights)})"
             if usable

@@ -23,7 +23,9 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import httpx2
 import pytest
+from any_llm import acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -50,6 +52,7 @@ from gateway.core.config import (
     RESPONSE_DURATION_HEADER,
     SERVER_TIMING_HEADER,
     GatewayConfig,
+    ModelCapabilityConfig,
 )
 from gateway.core.error_codes import (
     ERROR_CODE_HEADER,
@@ -60,7 +63,7 @@ from gateway.core.error_codes import (
     PROVIDER_ERROR,
     UPSTREAM_RATE_LIMITED,
 )
-from gateway.models.routing import RoutingConfig
+from gateway.models.routing import PolicySpec, RoutingConfig
 from gateway.services import catalog as selectors
 
 from .conftest import build_test_client, price_fake_search
@@ -208,6 +211,146 @@ def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
     payload: Any = resp.json()
     rows: list[dict[str, Any]] = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
     return rows
+
+
+@pytest.fixture
+def eligibility_client(routing_config: GatewayConfig) -> Generator[TestClient]:
+    routing_config.bootstrap_api_key = False
+    routing_config.provider_max_retries = 0
+    targets = {"edge": "http://edge.internal/v1", "cloud": "https://cloud.example/v1"}
+    for instance, base in targets.items():
+        routing_config.providers[instance] = {
+            "provider_type": "openai-compatible",
+            "api_base": base,
+            "routing_locality": "local" if instance == "edge" else "cloud",
+        }
+        routing_config.model_capabilities[f"{instance}:chat-model"] = ModelCapabilityConfig.model_validate(
+            {"operations": {"chat": {}}}
+        )
+    for name, localities in (("edge-only", ["local"]), ("edge-first", ["local", "cloud"])):
+        routing_config.routing.policies[name] = PolicySpec.model_validate(
+            {
+                "select": [{"default": "edge:chat-model"}],
+                "on_failure": ["cloud:chat-model"],
+                "eligibility": {"allowed_localities": localities},
+            }
+        )
+    yield from build_test_client(routing_config)
+
+
+@pytest.mark.parametrize(
+    ("policy", "key_allowlist", "timeout", "expected_hosts", "expected_status"),
+    [
+        ("edge-first", None, False, ["edge.internal", "cloud.example"], 200),
+        ("edge-first", None, True, ["edge.internal", "cloud.example"], 200),
+        ("edge-only", None, True, ["edge.internal"], 504),
+        ("edge-first", ["edge:chat-model"], True, ["edge.internal"], 504),
+    ],
+)
+def test_failover_uses_only_eligible_deployments_through_the_provider_sdk(
+    eligibility_client: TestClient,
+    policy: str,
+    key_allowlist: list[str] | None,
+    timeout: bool,
+    expected_hosts: list[str],
+    expected_status: int,
+) -> None:
+    _create_user(eligibility_client)
+    key = eligibility_client.post(
+        f"{API_ROOT}/keys", json={"user_id": "test-user", "allowed_models": key_allowlist}, headers=HEADERS
+    )
+    assert key.status_code == 200, key.text
+    sent: list[httpx2.Request] = []
+
+    def upstream(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        if request.url.host == "edge.internal":
+            if timeout:
+                raise httpx2.ReadTimeout("test timeout", request=request)
+            return httpx2.Response(503, json={"error": {"message": "unavailable"}})
+        return httpx2.Response(200, json=_completion("chat-model").model_dump())
+
+    async def call_with_mock_transport(**kwargs: Any) -> Any:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(upstream)) as upstream_client:
+            assert "routing_locality" not in kwargs
+            kwargs["client_args"] = {**(kwargs.get("client_args") or {}), "http_client": upstream_client}
+            return await acompletion(**kwargs)
+
+    with patch("gateway.api.routes.chat.acompletion", new=call_with_mock_transport):
+        response = eligibility_client.post(
+            f"{API_ROOT}/chat/completions",
+            headers={API_KEY_HEADER: f"Bearer {key.json()['key']}", "Otari-Router": "off"},
+            json={
+                "model": policy,
+                "messages": [{"role": "user", "content": "hi"}],
+                "api_base": "https://caller.example/v1",
+            },
+        )
+    assert [request.url.host for request in sent] == expected_hosts
+    assert all(request.url.path == "/v1/chat/completions" for request in sent)
+    assert response.status_code == expected_status, response.text
+    if expected_status == 200:
+        assert response.json()["model"] == policy
+        assert _served_by(response) == ("cloud", "chat-model", "2", "true")
+
+
+def test_eligibility_is_evaluated_for_the_actual_operation(eligibility_client: TestClient) -> None:
+    _create_user(eligibility_client)
+    with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock) as upstream:
+        response = _chat(eligibility_client, "edge-first", stream=True)
+    assert response.status_code == 403, response.text
+    upstream.assert_not_awaited()
+    assert "chat-model" not in response.text
+
+    for endpoint, body, upstream_method in (
+        (
+            "messages",
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 16,
+                "metadata": {"user_id": "test-user"},
+            },
+            "amessages",
+        ),
+        ("responses", {"input": "hi", "user": "test-user"}, "aresponses"),
+    ):
+        with patch(f"gateway.api.routes.{endpoint}.{upstream_method}", new_callable=AsyncMock) as upstream:
+            response = eligibility_client.post(
+                f"{API_ROOT}/{endpoint}", headers=HEADERS, json={"model": "edge-first", **body}
+            )
+        assert response.status_code == 403, response.text
+        upstream.assert_not_awaited()
+
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock) as embeddings:
+        response = eligibility_client.post(
+            f"{API_ROOT}/embeddings", headers=HEADERS, json={"model": "edge-first", "input": "hi", "user": "test-user"}
+        )
+    assert response.status_code == 400, response.text
+    embeddings.assert_not_awaited()
+
+
+def test_stored_eligibility_is_returned_and_explained(eligibility_client: TestClient) -> None:
+    spec = {
+        "select": [{"default": "edge:chat-model"}],
+        "on_failure": ["cloud:chat-model"],
+        "eligibility": {"allowed_localities": ["local"]},
+    }
+    created = eligibility_client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "stored-edge", "spec": spec}, headers=HEADERS
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["is_dynamic"]
+    assert created.json()["spec"]["eligibility"]["allowed_localities"] == ["local"]
+
+    explained = eligibility_client.post(
+        f"{API_ROOT}/routing/policies/explain", json={"name": "stored-edge"}, headers=HEADERS
+    )
+    assert explained.status_code == 200, explained.text
+    body = explained.json()
+    assert [candidate["instance"] for candidate in body["candidates"]] == ["edge"]
+    assert [(item["selector"], item["reason"]) for item in body["dropped"]] == [
+        ("cloud:chat-model", "locality_not_allowed")
+    ]
 
 
 # ---------------------------------------------------------------------------

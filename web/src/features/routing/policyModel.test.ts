@@ -44,6 +44,15 @@ describe("defaultTargetOf", () => {
 })
 
 describe("isEditableInForm", () => {
+  it("keeps eligibility constraints from being dropped by the form", () => {
+    expect(
+      isEditableInForm({
+        select: [{ default: "private:chat-model" }],
+        eligibility: { allowed_localities: ["private"] },
+      }),
+    ).toBe(false)
+  })
+
   it.each(["cheapest", " CHEAPEST "])(
     "keeps %s policies read-only",
     (router) => {

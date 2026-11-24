@@ -32,6 +32,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -47,6 +48,9 @@ __all__ = [
     "MAX_CANDIDATES",
     "WEIGHTED_BACKEND",
     "AgentRecommender",
+    "DeploymentLocality",
+    "InferenceOperation",
+    "PolicyEligibility",
     "PolicyGuardrail",
     "PolicySpec",
     "RoutingConfig",
@@ -68,6 +72,36 @@ MAX_CANDIDATES = 5
 WEIGHTED_BACKEND = "weighted"
 
 _COMPARATORS = ("gte", "gt", "lte", "lt")
+
+
+class InferenceOperation(StrEnum):
+    """Operations a deployment can declare for a model on a particular instance."""
+
+    CHAT = "chat"
+    MESSAGES = "messages"
+    RESPONSES = "responses"
+    EMBEDDING = "embedding"
+    IMAGE_GENERATION = "image_generation"
+    IMAGE_EDITING = "image_editing"
+    SPEECH_GENERATION = "speech_generation"
+    SPEECH_RECOGNITION = "speech_recognition"
+
+
+class DeploymentLocality(StrEnum):
+    """Operator classification of the inference endpoint."""
+
+    LOCAL = "local"
+    PRIVATE = "private"
+    CLOUD = "cloud"
+
+
+class PolicyEligibility(BaseModel):
+    """Constraints applied to every candidate in a policy, including backups."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_localities: list[DeploymentLocality] = Field(min_length=1)
+    required_capabilities: list[Literal["image", "pdf"]] = Field(default_factory=list)
 
 
 class Threshold(BaseModel):
@@ -356,6 +390,7 @@ class PolicySpec(BaseModel):
         description="Selectors to try, in order, after a provider failure on the selected candidate.",
     )
     guardrails: list[PolicyGuardrail] = Field(default_factory=list)
+    eligibility: PolicyEligibility | None = None
     # No `limits` yet, deliberately: streaming has no per-request first-chunk
     # deadline, so a per-policy override would validate, store, and do nothing.
     # It belongs here once streaming grows a deadline of its own.
@@ -458,7 +493,11 @@ class PolicySpec(BaseModel):
         surfaces that need one synchronously (pricing, the model catalog, the
         non-completion endpoints).
         """
-        return self.router_backend is not None or any(entry.when is not None for entry in self.select)
+        return (
+            self.eligibility is not None
+            or self.router_backend is not None
+            or any(entry.when is not None for entry in self.select)
+        )
 
     @property
     def default_target(self) -> str:

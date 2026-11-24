@@ -203,6 +203,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import REPORTED_SOURCE, ModelPricing, SettledSource
+from gateway.models.routing import InferenceOperation
 from gateway.models.tools import (
     CodeExecutor,
     ResolvedCodeExecutionPolicy,
@@ -360,6 +361,7 @@ from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
     NoEligibleCandidatesError,
+    RoutingRequirements,
     RoutingSignal,
     compile_catalog_plan,
     compile_policy,
@@ -2237,6 +2239,7 @@ async def _compile_request_plan(
     allowlist: list[str] | None,
     endpoint: str,
     started_at: float,
+    streaming: bool = False,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     workspace_id: uuid.UUID,
     request_id: str | None = None,
@@ -2278,6 +2281,11 @@ async def _compile_request_plan(
             strategy=config.budget_strategy,
         )
 
+    requirements = (
+        RoutingRequirements(operation=InferenceOperation(adapter.name), streaming=streaming)
+        if spec.eligibility is not None
+        else RoutingRequirements()
+    )
     # Only asked when the router entry is the one this request would reach: a `when`
     # entry ahead of it wins outright, and ranking for a plan that discards the
     # ranking is followed by a log line claiming a decision the request did not use.
@@ -2293,6 +2301,8 @@ async def _compile_request_plan(
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
             workspace_id=workspace_id,
+            country_gate=country_gate,
+            requirements=requirements,
         )
 
     try:
@@ -2307,6 +2317,7 @@ async def _compile_request_plan(
             router_ordering=router_ordering,
             workspace_id=workspace_id,
             country_gate=country_gate,
+            requirements=requirements,
         )
     except NoEligibleCandidatesError as exc:
         logger.warning("%s", exc.operator_detail)
@@ -2675,6 +2686,7 @@ async def resolve_request_context(
         allowlist=key_allowlist,
         endpoint=adapter.endpoint,
         started_at=started_at,
+        streaming=streaming,
         routing_signal=routing_signal,
         workspace_id=workspace_id,
         request_id=request_id,

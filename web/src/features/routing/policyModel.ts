@@ -176,6 +176,8 @@ export const rowKeyOf = (row: RoutingRow): string =>
  * read-only, because the form would drop them when rebuilding the spec on save.
  */
 export function isEditableInForm(spec: PolicySpec): boolean {
+  if (spec.eligibility !== undefined) return false
+
   // Sections re-emit `select` as tier-downs, then the router, then the
   // default. Selection is order-sensitive server-side, so a router ahead of a
   // condition would come back meaning something else.
