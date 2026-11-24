@@ -33,6 +33,19 @@ def _section(kind: ToolKind) -> str:
     return "search_tools" if kind == "search" else "fetch_tools"
 
 
+def blank_api_key_problem(kind: ToolKind, name: str, entry: Mapping[str, Any]) -> str | None:
+    """Why the entry is refused when it writes an ``api_key`` that came out blank, such as a variable left empty.
+
+    A provider whose key is optional would search with no key on such an
+    entry, on another account and allowance than the entry names.
+    """
+    api_key = entry.get("api_key")
+    if not isinstance(api_key, str) or api_key.strip():
+        return None
+    provider = str(entry.get("provider") or name)
+    return f"{_section(kind)}.{name}.api_key is blank; set it, or leave api_key out to call '{provider}' without a key."
+
+
 def check_tool_entry(
     name: str, entry: Mapping[str, Any], *, kind: ToolKind, inherited_api_base: str | None = None
 ) -> None:
@@ -49,6 +62,8 @@ def check_tool_entry(
             validate_fetch_tool_entry(name, dict(entry))
     except ValueError as exc:
         raise SearchToolRefusedError(str(exc)) from None
+    if problem := blank_api_key_problem(kind, name, entry):
+        raise SearchToolRefusedError(problem)
     provider = str(entry.get("provider") or name)
     api_base = entry.get("api_base")
     if not api_base and kind == "search" and provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:

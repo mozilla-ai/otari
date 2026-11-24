@@ -9,6 +9,7 @@ from gateway.core.error_codes import (
     MCP_OAUTH_ISSUER_CHANGED,
     MCP_SIGN_IN_REQUIRED,
     PRICING_REQUIRED,
+    REQUEST_MCP_SERVERS_DISALLOWED,
     WEB_ACCESS_DISABLED,
 )
 from gateway.exceptions import (
@@ -281,6 +282,12 @@ class McpServerDeclarationError(TenancyValidationError):
     """A request's MCP servers cannot be reached as it declared them."""
 
 
+class RequestMcpServersDisallowedError(McpServerDeclarationError):
+    """A request named an MCP server by URL, in a workspace whose ``request_mcp_servers_allowed`` is off."""
+
+    error_code = REQUEST_MCP_SERVERS_DISALLOWED
+
+
 class McpServerConfigurationError(TenancyError):
     """A workspace's stored MCP servers cannot be used, which is the operator's to fix and not the caller's."""
 
@@ -452,7 +459,10 @@ class WebSearchKeyUnknownProviderError(TenancyValidationError):
 
 
 class WebSearchKeyIncompleteError(TenancyValidationError):
-    """A key lacks what its provider needs, which a call would otherwise take from the server's own settings."""
+    """A key lacks the API key or endpoint a key on its provider must carry.
+
+    Without it, a call would take the server's own settings, or run keyless from the server's address.
+    """
 
     def __init__(self, provider: str, missing: str):
         super().__init__(f"A key on {provider} needs {missing}")
@@ -722,7 +732,9 @@ class WebSearchCredentialRefusedError(TenancyError):
 
     One without a key or base URL its provider needs, which the library or the
     old code would fill from the server's own settings, so the deployment's key
-    or endpoint would serve the tenant; or one naming a base URL the code that
+    or endpoint would serve the tenant; one without the key a provider with an
+    address of its own takes, whose calls would run keyless from the
+    deployment's address; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
     provider's public endpoint instead. A 502: the fault is in a stored
     credential, not in the request.

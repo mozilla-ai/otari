@@ -38,6 +38,8 @@ GUARDRAIL_NOT_CONFIGURED = "guardrail_not_configured"
 GUARDRAIL_UNAVAILABLE = "guardrail_unavailable"
 USER_BLOCKED = "user_blocked"
 USER_NOT_FOUND = "user_not_found"
+# An ordinary key named another user than its own, and its mismatched ``user`` field choice rejects that.
+USER_MISMATCH = "user_mismatch"
 RATE_LIMITED = "rate_limited"
 UPSTREAM_RATE_LIMITED = "upstream_rate_limited"
 INVALID_MODEL = "invalid_model"
@@ -62,6 +64,8 @@ WRONG_MODEL_TYPE = "wrong_model_type"
 PRICING_REQUIRED = "pricing_required"
 # A stored MCP server sends each user's own credential, and the caller's user has not signed in to it.
 MCP_SIGN_IN_REQUIRED = "mcp_sign_in_required"
+# A workspace with ``request_mcp_servers_allowed`` off refused a request that named an MCP server by URL.
+REQUEST_MCP_SERVERS_DISALLOWED = "request_mcp_servers_disallowed"
 # A stored MCP server now names another authorization server than the one its OAuth client was first used with.
 MCP_OAUTH_ISSUER_CHANGED = "mcp_oauth_issuer_changed"
 # The organization has no funds paid in to cover a request the deployment pays for.

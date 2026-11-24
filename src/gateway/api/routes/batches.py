@@ -41,7 +41,7 @@ from gateway.api.routes._pipeline import (
     _raise_for_unresolvable_model,
 )
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
+from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, USER_MISMATCH, error_headers
 from gateway.core.metered_pricing import allocate_rounded_total, calculate_token_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
@@ -51,7 +51,7 @@ from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
-from gateway.services.api_keys import resolve_user_id
+from gateway.services.api_keys import USER_MISMATCH_DETAIL, resolve_user_id
 from gateway.services.batch_service import (
     get_batch_record,
     get_batch_records,
@@ -378,7 +378,8 @@ async def create_batch(
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
+            detail=USER_MISMATCH_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=config.reject_user_mismatch,
     )

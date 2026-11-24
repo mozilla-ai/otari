@@ -80,10 +80,9 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
-- `requires`, an organization owner or admin (`manager`), someone who may
-  run things in the selected workspace (`contributor`), or either a manager or
-  the deployment's operator (`manager-or-operator`, Spend & budgets); a row on
-  the organization rail is a manager's without saying so
+- `requires`, an organization owner or admin (`manager`) or someone who may
+  run things in the selected workspace (`contributor`); a row on the
+  organization rail is a manager's without saying so
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
   caller with no organization can use (Home today); every other row,
   overlay rows included, is hidden from that caller, and from every caller

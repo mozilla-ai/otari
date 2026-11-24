@@ -4489,9 +4489,11 @@ export interface paths {
          * @description Accept an invitation addressed to the caller, resolving it to an active membership.
          *
          *     Does the same work as ``POST /api/v1/invitations/accept``, including the
-         *     workspace assignments parked at invite time, and answers the same shape.
-         *     Addressed by membership id rather than by token: the caller is already the
-         *     addressee, so a token would add nothing their session does not carry.
+         *     workspace assignments parked at invite time. Addressed by membership id
+         *     rather than by token: the caller is already the addressee, so a token would
+         *     add nothing their session does not carry. It answers the membership alone,
+         *     because the next step that route carries is for a visitor whose only
+         *     credential is a link.
          *
          *     Idempotent for any membership the caller already holds ``active``, which is
          *     what two clicks before the list refreshes produces: it answers that
@@ -9361,7 +9363,7 @@ export interface components {
             full_name?: string | null;
             /**
              * Password
-             * @description Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
+             * @description Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
              */
             password?: string | null;
             /**
@@ -9375,40 +9377,32 @@ export interface components {
         };
         /**
          * AcceptInvitationResultPublic
-         * @description What accepting produces: enough for the accept page to say where the visitor landed.
+         * @description What accepting through the link produced, and what it leaves the invitee to do.
          *
-         *     No session and no token. When the request carried a password, the identity
-         *     can sign in straight away; otherwise it stays password-less until claimed by
-         *     signup or a provider sign-in.
+         *     No session and no token: ``next_step`` is the whole of what comes next.
          */
         AcceptInvitationResultPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.
-             * @default true
-             */
-            can_sign_in: boolean;
+            /** @description What the invited address does now that it has accepted. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
-            /**
-             * Password Set
-             * @description Whether this accept set the identity's password.
-             * @default false
-             */
-            password_set: boolean;
             /** Role */
             role: string;
             /**
-             * Verification Pending
-             * @description Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.
-             * @default false
-             */
-            verification_pending: boolean;
-            /**
              * Ways In
-             * @description When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.
+             * @description What this deployment offers instead, where next_step names them, as the preview's ways_in says.
              */
-            ways_in?: ("provider" | "password_reset")[];
+            ways_in: ("provider" | "password_reset")[];
+        };
+        /**
+         * AcceptedMembershipPublic
+         * @description The membership an accepted invitation produced.
+         */
+        AcceptedMembershipPublic: {
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
         };
         /**
          * AcceptedSnapshotResponse
@@ -15572,20 +15566,30 @@ export interface components {
             total: number;
         };
         /**
+         * InvitationNextStep
+         * @description What an invitee does to get in, as Otari decides it.
+         *
+         *     The members are exclusive and cover every pending invitation.
+         *     ``set_password`` means accepting may choose this address's first password.
+         *     ``sign_in`` means the address's credentials open a session.
+         *     ``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.
+         *     ``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.
+         *
+         *     NOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.
+         *     The other two leave it empty.
+         * @enum {string}
+         */
+        InvitationNextStep: "set_password" | "sign_in" | "use_another_way_in" | "verify_email";
+        /**
          * InvitationPreviewPublic
          * @description What an unauthenticated visitor sees before committing to accept.
          *
          *     Deliberately narrow: the address it was sent to, the organization's name,
-         *     and the role on offer. The token is the caller's only credential here, not
-         *     a session, so this carries nothing that identifies who sent it or any
-         *     other member.
+         *     the role on offer, and what to do next.
+         *     The token is the caller's only credential here, not a session, so this
+         *     carries nothing that identifies who sent it or any other member.
          */
         InvitationPreviewPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can already sign in, with a password or through a provider.
-             */
-            can_sign_in: boolean;
             /** Email */
             email: string;
             /**
@@ -15593,18 +15597,15 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
-            /**
-             * Needs Password
-             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.
-             */
-            needs_password: boolean;
+            /** @description What the invited address does to get in. Accept refuses a password unless this is 'set_password'. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
             /** Role */
             role: string;
             /**
              * Ways In
-             * @description When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.
+             * @description What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.
              */
             ways_in: ("provider" | "password_reset")[];
         };
@@ -23087,6 +23088,8 @@ export interface components {
              * @default false
              */
             by_filter: boolean;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -23161,6 +23164,11 @@ export interface components {
              * @description Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.
              */
             data_location?: string | null;
+            /**
+             * Deployment Paid
+             * @default false
+             */
+            deployment_paid: boolean;
             /** Endpoint */
             endpoint: string;
             /** Error Message */
@@ -23424,6 +23432,8 @@ export interface components {
             cache_read_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -23576,6 +23586,11 @@ export interface components {
             completion_tokens: number;
             /** Cost */
             cost: number;
+            /**
+             * Deployment Paid Cost
+             * @default 0
+             */
+            deployment_paid_cost: number;
             /** Error Count */
             error_count: number;
             /** Prompt Tokens */
@@ -29158,6 +29173,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
             };
@@ -29216,6 +29233,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
@@ -32555,7 +32574,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                    "application/json": components["schemas"]["AcceptedMembershipPublic"];
                 };
             };
             /** @description Validation Error */
@@ -34202,6 +34221,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -34268,6 +34289,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -34334,6 +34357,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -34398,6 +34423,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -37815,6 +37842,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -37914,6 +37943,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -38064,6 +38095,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -38161,6 +38194,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */

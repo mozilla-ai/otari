@@ -28,7 +28,7 @@ from gateway.api.deps import (
 )
 from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import chat_targets
-from gateway.api.routes._helpers import routing_signal, with_retry_hint
+from gateway.api.routes._helpers import USER_MISMATCH_METADATA_DETAIL, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -498,7 +498,6 @@ def _held_output_tokens(output_cap: int | None, n: int | None, default_output_to
 
 
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
-_USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
 @router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
@@ -662,7 +661,7 @@ async def run_chat_completion(
                 output_cap, request.n, config.budget_estimate_default_output_tokens
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-            user_forbidden_detail=_USER_FORBIDDEN,
+            user_forbidden_detail=USER_MISMATCH_METADATA_DETAIL,
             session_principal=session_principal,
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),

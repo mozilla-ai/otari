@@ -1235,9 +1235,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # holds one pooled connection at a time.
             await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
-                stored_tools_loaded = await build_search_tool_service(
-                    uow, search_tool_session, config=config
-                ).load_at_startup()
+                search_tools = build_search_tool_service(uow, search_tool_session, config=config)
+                # A failed start, as a misconfigured entry fails the config load: on a blank
+                # key, a tool whose key is optional searches with no key at all.
+                search_tools.refuse_blank_api_keys()
+                stored_tools_loaded = await search_tools.load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a

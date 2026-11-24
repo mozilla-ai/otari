@@ -486,3 +486,37 @@ async def test_a_startup_load_that_commits_applies_the_rows_and_says_so() -> Non
     assert await service.load_at_startup() is True
     assert set(config.search_tools) == {"from-file", "first", "second"}
     assert overlay._read_settings == {"web_search_default_tool": "first"}
+
+
+def _service(config: GatewayConfig) -> SearchToolService:
+    async def read_settings() -> dict[str, Any]:
+        return {}
+
+    async def stage_setting(_key: str, value: Any) -> Any:
+        return value
+
+    return SearchToolService(
+        _UnitOfWork(),  # type: ignore[arg-type]
+        config=config,
+        tools=_Rows([]),  # type: ignore[arg-type]
+        read_settings=read_settings,
+        stage_setting=stage_setting,
+        read_rate=_no_rate,
+    )
+
+
+def test_a_configured_tool_whose_key_came_out_blank_fails_the_start() -> None:
+    """A variable left empty, such as ${KEENABLE_API_KEY}: the tool would search with no key."""
+    config = GatewayConfig(
+        search_tools={"keenable": {"api_key": " "}, "own": {"provider": "keenable", "api_key": "keen_k"}},
+        fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "  "}},
+    )
+    with pytest.raises(ValueError, match="search_tools.keenable.api_key is blank") as refused:
+        _service(config).refuse_blank_api_keys()
+    assert "fetch_tools.exa-fetch.api_key is blank" in str(refused.value)
+    assert "own" not in str(refused.value)
+
+
+def test_a_configured_tool_without_a_key_starts() -> None:
+    config = GatewayConfig(search_tools={"keenable": {}, "test": {"provider": "fake"}})
+    _service(config).refuse_blank_api_keys()

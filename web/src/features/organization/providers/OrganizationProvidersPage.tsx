@@ -834,7 +834,7 @@ export function OrganizationProvidersPage() {
       />
 
       {/* The organization's own rate for one model, opened from a model row or
-          from the Models detail page's "Set your rate" link. Mounted here
+          from the Models detail page's "Set your rate…" action. Mounted here
           rather than inside the panel because the panel lives in a table cell,
           and a dialog rendered from one closes with the row that opened it.
 
