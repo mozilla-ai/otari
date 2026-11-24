@@ -23190,6 +23190,8 @@ export interface components {
             reasoning_tokens?: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Selection Reason */
             selection_reason?: string | null;
             /** Source */

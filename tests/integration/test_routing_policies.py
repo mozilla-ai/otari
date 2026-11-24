@@ -360,6 +360,9 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     # Both belong to one request, which is what makes the history reconstructable.
     assert served[0]["request_group_id"] == absorbed[0]["request_group_id"]
     assert served[0]["request_group_id"] is not None
+    # Every attempt keeps the name the caller sent, the policy, beside what it ran.
+    assert served[0]["requested_model"] == "fast"
+    assert absorbed[0]["requested_model"] == "fast"
 
 
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:

@@ -29792,6 +29792,17 @@
             ],
             "title": "Request Group Id"
           },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
           "selection_reason": {
             "anyOf": [
               {
