@@ -559,7 +559,11 @@ async def walk_attempts(
         for skipped, refusal in unrecorded_skips:
             await on_skipped(skipped, refusal)
 
-    logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
+    # Every candidate's provider failing is answered with an error response and
+    # is the providers' fault, not the deployment's. Only a failure the
+    # classifier could not place may be the gateway's own.
+    log = logger.error if any(failure.error_class == "unknown" for failure in failures) else logger.warning
+    log("All attempts failed policy=%s failures=%s", policy_name, failures)
     # A candidate that could not serve was never called, so the last one that
     # failed is the one to name, and the status rule counts only the ones called.
     if on_terminal is not None:

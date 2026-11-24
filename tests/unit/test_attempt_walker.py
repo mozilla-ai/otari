@@ -6,6 +6,7 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Literal, cast
 
@@ -38,6 +39,7 @@ from gateway.core.error_codes import (
     UPSTREAM_RATE_LIMITED,
     error_code_of,
 )
+from gateway.log_config import logger as gateway_logger
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -1066,3 +1068,27 @@ async def test_a_skip_after_the_last_candidate_called_is_recorded_when_the_walk_
         )
 
     assert skipped == [("b", "b is full")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failures", "expected_level"),
+    [
+        ([_http_error(402), _http_error(402)], logging.WARNING),
+        ([_http_error(503), httpx.ConnectError("refused")], logging.WARNING),
+        ([_http_error(503), RuntimeError("unclassified")], logging.ERROR),
+    ],
+)
+async def test_exhaustion_is_logged_as_an_error_only_when_a_failure_is_unclassified(
+    caplog: pytest.LogCaptureFixture, failures: list[Exception], expected_level: int
+) -> None:
+    """Providers that all failed are a warning; a failure nobody could classify may be the gateway's and is an error."""
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=gateway_logger.name), pytest.raises(HTTPException):
+            await _walk([_attempt(1, "a"), _attempt(2, "b")], failures)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [record] = [r for r in caplog.records if r.getMessage().startswith("All attempts failed")]
+    assert record.levelno == expected_level
