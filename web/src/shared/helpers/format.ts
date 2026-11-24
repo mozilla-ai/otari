@@ -206,6 +206,24 @@ const usdCompact = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 })
 
+const bucketDay = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+})
+const bucketHour = new Intl.DateTimeFormat("en-US", { hour: "numeric" })
+
+// A chart tick for one bucket of a series: "Nov 11" for a day, "2 PM" for an
+// hour. A day bucket starts at UTC midnight, so it is read in UTC: read in a
+// zone west of it, the tick would name the day before.
+export function formatBucketTick(iso: string, bucket: "hour" | "day"): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return (bucket === "hour" ? bucketHour : bucketDay).format(date)
+}
+
 export function formatUsd(value: number): string {
   return usdCompact.format(value)
 }

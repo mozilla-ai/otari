@@ -57,13 +57,17 @@ to ask an owner or admin.
 
 ## Requests
 
-Open **Sessions** and pick **Requests** for the per-request log. The two views
-share one time range and the model, user, API key and status filters, which
-stay in place when you switch views and are kept in the URL. **Status** narrows
-Requests, and Sessions for errors and successes. **Provider** narrows Requests
+Open **Sessions** and pick **Requests** for the per-request log. Sessions and
+Requests share one time range and the model, user, API key and status filters,
+which stay in place when you switch between them and are kept in the URL.
+**Status** narrows Requests, and Sessions for errors and successes. **Provider** narrows Requests
 only, so it stays behind when you switch to Sessions. On Requests, dragging
 across the chart narrows the range. Both views show everyone's requests in the workspace; pick
 yourself under **User** to see only yours.
+
+The **Router savings** tab beside them has its own period control and none of
+these filters; it is covered under
+[Agent model recommendations](routing.md#agent-model-recommendations).
 
 ## Find one request
 

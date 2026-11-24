@@ -70,7 +70,7 @@ const BASE_NAV_SECTIONS = [
         to: "/sessions",
         label: "Sessions",
         icon: FiList,
-        views: ["/requests"],
+        views: ["/requests", "/router-savings"],
       },
       { to: "/people", label: "People", icon: FiUsers },
       { to: "/rules", label: "Rules", icon: FiShield },

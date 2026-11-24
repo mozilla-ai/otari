@@ -33,10 +33,11 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 /**
- * The pathless `_overview` layout over `/`, `/sessions` and `/requests`.
+ * The pathless `_overview` layout over `/`, `/sessions`, `/requests` and
+ * `/router-savings`.
  *
- * `/` is Home (`features/home/Home.tsx`, its index route), and `/sessions` and
- * `/requests` are the two views of Sessions under one title and tab row. A
+ * `/` is Home (`features/home/Home.tsx`, its index route), and the other three
+ * are the views of Sessions under one title and tab row. A
  * caller with no organization gets the page that sends them to their
  * invitations instead.
  */
@@ -157,33 +158,72 @@ function FirstRequestGuide({ isOperator }: { isOperator: boolean }) {
   return <SetupGuide canServeRequests={canServeRequests} />
 }
 
-const TABS: { view: ObserveView; label: string; surface: string }[] = [
-  { view: "sessions", label: "Sessions", surface: "traces" },
-  { view: "requests", label: "Requests", surface: "usage" },
+const SAVINGS_PATH = "/router-savings"
+
+/**
+ * A view of Sessions. `view` is what the shared filter bar reads the tab as;
+ * a tab without one has controls of its own and carries no filters across.
+ */
+interface SessionsTab {
+  path: string
+  label: string
+  surface: string
+  view?: ObserveView
+}
+
+const TABS: SessionsTab[] = [
+  {
+    path: OBSERVE_PATHS.sessions,
+    label: "Sessions",
+    surface: "traces",
+    view: "sessions",
+  },
+  {
+    path: OBSERVE_PATHS.requests,
+    label: "Requests",
+    surface: "usage",
+    view: "requests",
+  },
+  // What the subagent router saved, over a window of its own.
+  { path: SAVINGS_PATH, label: "Router savings", surface: "subagent_savings" },
 ]
 
 const hasValue = (value: DashboardSearch[string]) =>
   Array.isArray(value) ? value.length > 0 : Boolean(value)
 
-const isSessionsPath = (pathname: string) =>
-  [OBSERVE_PATHS.sessions, OBSERVE_PATHS.requests].some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`),
-  )
+const isUnder = (pathname: string, path: string) =>
+  pathname === path || pathname.startsWith(`${path}/`)
 
-/** Sessions' title and tab row over its two views, each its own route. */
+const isSessionsPath = (pathname: string) =>
+  TABS.some((tab) => isUnder(pathname, tab.path))
+
+/** Sessions' title and tab row over its views, each its own route. */
 function SessionsLayout() {
   const hasSurface = useSurfaces()
   const isMobile = useIsMobile()
-  const current = viewForPath(useLocation({ select: (loc) => loc.pathname }))
+  const pathname = useLocation({ select: (loc) => loc.pathname })
   const search = useSearch({ strict: false }) as DashboardSearch
   const tabs = TABS.filter((tab) => hasSurface(tab.surface))
-  // A view this deployment does not serve opens on the first one it does.
+  const current = tabs.find((tab) => isUnder(pathname, tab.path))
+  // The filters travel between the two views that share the filter bar.
+  const searchFor = (tab: SessionsTab) =>
+    current?.view && tab.view
+      ? carrySearch(current.view, tab.view, search)
+      : undefined
+  // A view this deployment does not serve opens on the first one it does. A
+  // tab with no view has no filters or window to carry, so the landing view
+  // opens on its own defaults.
   const landing = tabs[0]
-  if (landing && !tabs.some((tab) => tab.view === current)) {
+  if (landing && !current) {
+    const left = TABS.find((tab) => isUnder(pathname, tab.path))
     return (
       <Navigate
-        to={OBSERVE_PATHS[landing.view]}
-        search={carrySearch(current, landing.view, search)}
+        to={landing.path}
+        search={
+          landing.view && left?.view
+            ? carrySearch(viewForPath(pathname), landing.view, search)
+            : {}
+        }
         replace
       />
     )
@@ -203,15 +243,20 @@ function SessionsLayout() {
             <ViewTabs
               label="Sessions views"
               tabs={tabs.map((tab) => ({
-                to: OBSERVE_PATHS[tab.view],
+                to: tab.path,
                 label: tab.label,
-                search: carrySearch(current, tab.view, search),
+                search: searchFor(tab),
               }))}
-              current={OBSERVE_PATHS[current]}
+              current={current?.path ?? ""}
             />
           </div>
         ) : null}
-        <ObserveFilterBar view={current} usageAvailable={hasSurface("usage")} />
+        {current?.view ? (
+          <ObserveFilterBar
+            view={current.view}
+            usageAvailable={hasSurface("usage")}
+          />
+        ) : null}
       </div>
       <Outlet />
     </div>
