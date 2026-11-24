@@ -363,7 +363,7 @@ describe("OrganizationWebSearchKeysPage", () => {
     expect(add).toBeDisabled()
     expect(
       within(dialog).getByText(
-        /This provider runs without a key, but a key here brings the organization's own account/,
+        /This provider runs without a key, but a key here brings the organization's own account, so its calls never use the keyless allowance/,
       ),
     ).toBeInTheDocument()
     await user.type(within(dialog).getByLabelText(/API key/), "own-secret")
