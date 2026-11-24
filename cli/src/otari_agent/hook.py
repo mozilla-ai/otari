@@ -3270,9 +3270,10 @@ def _hook_global_registration_without_repo_only() -> Path | None:
 
 _PI_EXTENSION_PACKAGE = "@mozilla-ai/pi-otari"
 _PI_EXTENSION_SOURCE = f"npm:{_PI_EXTENSION_PACKAGE}"
-# The first pi-otari release whose extension calls `otari hook`; an older one installs and loads but
-# enforces nothing.
-_PI_EXTENSION_MIN_GUARDRAILS_VERSION = (0, 6, 0)
+# The first pi-otari release whose guardrails enforce correctly: before 0.6.0 the extension never calls
+# `otari hook`, and before 0.7.1 it sends commands that ran before the last edit, which satisfy a
+# `command_if_changed` gate that should have been run again.
+_PI_EXTENSION_MIN_GUARDRAILS_VERSION = (0, 7, 1)
 _PI_COMMAND_TIMEOUT_SECONDS = 300
 
 
@@ -3367,7 +3368,7 @@ def _hook_setup_pi_upgrade(pi_path: str, current: _PiExtensionInstall) -> None:
     if current.source != _PI_EXTENSION_SOURCE:
         raise click.ClickException(
             f"{current.source} is pinned to {found}, older than {minimum}, the first release that enforces "
-            f"Agent Guardrails. Run `pi remove {current.source}` and `pi install {_PI_EXTENSION_SOURCE}`, "
+            f"Agent Guardrails correctly. Run `pi remove {current.source}` and `pi install {_PI_EXTENSION_SOURCE}`, "
             "then re-run `otari hook setup --harness pi`."
         )
     if not click.confirm(
@@ -3375,7 +3376,7 @@ def _hook_setup_pi_upgrade(pi_path: str, current: _PiExtensionInstall) -> None:
         f"Update it (pi update {_PI_EXTENSION_SOURCE})?",
         default=True,
     ):
-        click.echo(f"Skipping. pi enforces no guardrail until `pi update {_PI_EXTENSION_SOURCE}` is run.")
+        click.echo(f"Skipping. pi's guardrails stay incomplete until `pi update {_PI_EXTENSION_SOURCE}` is run.")
         return
     updated = _hook_run_pi(pi_path, "update", _PI_EXTENSION_SOURCE, cwd=_hook_judge_workdir())
     output = (updated.stdout + updated.stderr).strip()

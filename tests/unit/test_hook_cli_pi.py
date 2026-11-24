@@ -295,7 +295,7 @@ def test_setup_pi_missing_prints_install_instructions(repo: Path, monkeypatch: p
 
 def test_setup_pi_already_installed_runs_no_install(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.0"))
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.1"))
     result = _setup(input="n\n")  # declines the starter guardrail
     assert result.exit_code == 0, result.output
     assert "already installed" in result.output
@@ -333,7 +333,7 @@ def test_setup_pi_install_failure_is_a_click_exception(repo: Path, monkeypatch: 
 
 def test_setup_pi_offers_the_starter_guardrail_in_a_repo(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.0"))
+    _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.1"))
     (repo / hook_cli.GUARDRAIL_FILE).unlink()
     result = _setup(input="y\n")
     assert result.exit_code == 0, result.output
@@ -362,10 +362,10 @@ def test_setup_pi_a_project_only_install_is_not_enough(repo: Path, monkeypatch: 
 
 def test_setup_pi_offers_to_update_a_version_without_guardrails(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.5.0"), install_out="updated")
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.0"), install_out="updated")
     result = _setup(input="y\n")
     assert result.exit_code == 0, result.output
-    assert "0.5.0" in result.output
+    assert "0.7.0" in result.output
     assert calls == [[_PI, "list"], [_PI, "update", f"npm:{_PKG}"]]
     assert "already installed" not in result.output
 

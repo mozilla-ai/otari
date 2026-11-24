@@ -514,9 +514,11 @@ user-wide install counts: a package installed for one project with `pi install -
 does not load where the judge and `otari guardrails generate` run pi. If
 `@mozilla-ai/pi-otari` is not listed there it asks, then runs
 `pi install npm:@mozilla-ai/pi-otari`. If the installed version is older than
-0.6.0, the first release that calls `otari hook`, it asks, then runs
+0.7.1 it asks, then runs
 `pi update npm:@mozilla-ai/pi-otari`; a source pinned to an older version is an
-error naming the commands that replace the pin. A non-zero exit from pi is an
+error naming the commands that replace the pin. Before 0.6.0 the extension never
+calls `otari hook`, and before 0.7.1 it sends commands that ran before the
+session's last edit as `bash_commands`. A non-zero exit from pi is an
 error. With no `pi` on `PATH` it prints the install instructions and exits 0.
 Inside a Git repository it also offers the starter `.otari/guardrails.yml`;
 it never writes `.claude` or `.codex` files for pi. `--repo-only` is refused,
