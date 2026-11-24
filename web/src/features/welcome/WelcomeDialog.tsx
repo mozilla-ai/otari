@@ -19,8 +19,6 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 export const WELCOME_ANSWERED_KEY = "otari.welcome.answered"
 
-export const PLATFORM_PLANS_URL = "https://otari.ai/subscriptions"
-
 const OFFERS = [
   "Open-weight models, hosted by Mozilla.ai",
   "Web search for your models",
@@ -73,8 +71,8 @@ function useShouldWelcome(): boolean {
 
 /**
  * The first thing a self-hosted deployment's operator sees: a welcome that
- * offers otari.ai's models and plans, once, and is gone for good however it
- * is closed.
+ * offers otari.ai's models, once, and is gone for good however it is
+ * closed.
  *
  * Only an operator who could connect is greeted, and never on a gateway
  * already connected to otari.ai. Nothing is sent to otari.ai unless Connect
@@ -170,24 +168,14 @@ function WelcomeFrame({ onClose: close }: { onClose: () => void }) {
             Cancel
           </Button>
         ) : (
-          <>
-            <a
-              href={PLATFORM_PLANS_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="self-center px-2 text-sm font-medium text-link hover:text-link-hover"
-            >
-              See plans
-            </a>
-            <Button
-              variant="primary"
-              className="min-h-11 md:min-h-9"
-              isPending={flow.isStarting}
-              onPress={flow.connect}
-            >
-              {flow.ended ? "Try again" : "Connect otari.ai"}
-            </Button>
-          </>
+          <Button
+            variant="primary"
+            className="min-h-11 md:min-h-9"
+            isPending={flow.isStarting}
+            onPress={flow.connect}
+          >
+            {flow.ended ? "Try again" : "Connect otari.ai"}
+          </Button>
         )
       }
     >

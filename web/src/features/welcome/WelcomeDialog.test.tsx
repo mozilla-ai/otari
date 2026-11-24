@@ -9,7 +9,6 @@ import type {
   PlatformConnectStatus,
 } from "@/client"
 import {
-  PLATFORM_PLANS_URL,
   WELCOME_ANSWERED_KEY,
   WelcomeDialog,
 } from "@/features/welcome/WelcomeDialog"
@@ -82,17 +81,14 @@ describe("WelcomeDialog", () => {
     localStorage.clear()
   })
 
-  it("greets an operator, links the plans, and sends nothing to otari.ai", async () => {
+  it("greets an operator without a plans link and sends nothing to otari.ai", async () => {
     const requests = mockApi()
     await renderDialog()
 
     const dialog = await screen.findByRole("dialog", { name: TITLE })
     expect(dialog).toHaveTextContent("Open-weight models")
     expect(dialog).toHaveTextContent("glm-5.3")
-    expect(screen.getByRole("link", { name: "See plans" })).toHaveAttribute(
-      "href",
-      PLATFORM_PLANS_URL,
-    )
+    expect(screen.queryByRole("link", { name: "See plans" })).toBeNull()
     expect(
       await screen.findByRole("button", { name: "Connect otari.ai" }),
     ).toBeEnabled()
