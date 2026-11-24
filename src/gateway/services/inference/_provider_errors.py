@@ -586,11 +586,11 @@ class UpstreamFailure:
 
         The provider failed the call, cut its stream short or refused the
         request, or an MCP server the request declared answered with an error.
-        Anything else is the gateway's own, including a guardrail refusing the
-        answer and a database failure, which the shape checks would otherwise
-        read as a provider's 403 and a provider's timeout.
+        Anything else is the gateway's own, including a refusal it raised (a
+        guardrail's among them) and a database failure, which the shape checks
+        would otherwise read as a provider's status and a provider's timeout.
         """
-        if isinstance(self.exc, AnswerRefused) or any(
+        if isinstance(self.exc, HTTPException) or any(
             isinstance(current, DATABASE_ERRORS) for current in upstream_exception_chain(self.exc)
         ):
             return False

@@ -1985,6 +1985,7 @@ def test_a_failure_from_outside_the_gateway_is_external(exc: BaseException) -> N
         KeyError("missing"),
         ValueError("bad"),
         AnswerRefused({"message": "Answer blocked by guardrail policy."}),
+        HTTPException(status_code=429, detail="Budget exceeded"),
         TimeoutError(),
         OperationalError("SELECT 1", {}, Exception("connection refused")),
     ],
