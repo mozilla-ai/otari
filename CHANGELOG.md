@@ -4,6 +4,31 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.56.1](https://github.com/mozilla-ai/otari/releases/tag/v0.56.1) - 2026-11-24
+
+
+
+### Bug Fixes
+
+- **routing:** Stop leading with offerings that keep failing in [#3564](https://github.com/mozilla-ai/otari/pull/3564) by [@hasangzl](https://github.com/hasangzl) ([`b0c85eb`](https://github.com/mozilla-ai/otari/commit/b0c85eb3bc5ae680fe49e708a03422e1ebc4ab26))
+- **tools:** Code execution takes a language and refuses the ones it cannot run in [#3549](https://github.com/mozilla-ai/otari/pull/3549) by [@aittalam](https://github.com/aittalam) ([`c3ac91d`](https://github.com/mozilla-ai/otari/commit/c3ac91dd7d20945c7d9a614de8b30cc9ed7ef51e))
+- **web:** An organization key's hint names the allowance it spares, not the address in [#3565](https://github.com/mozilla-ai/otari/pull/3565) by [@aittalam](https://github.com/aittalam) ([`588a70f`](https://github.com/mozilla-ai/otari/commit/588a70f351fb653b1e91ae9cb9d534c254b8c1dd))
+
+
+### Features
+
+- **hook:** Add a native pi harness to otari hook in [#2427](https://github.com/mozilla-ai/otari/pull/2427) by [@agpituk](https://github.com/agpituk) ([`dfa2a4e`](https://github.com/mozilla-ai/otari/commit/dfa2a4e48671ecfaefd543c4038bc50f93acd26c))
+- **usage:** Report which usage the deployment paid for in [#3550](https://github.com/mozilla-ai/otari/pull/3550) by [@daavoo](https://github.com/daavoo) ([`0c8b835`](https://github.com/mozilla-ai/otari/commit/0c8b8350d5f35ba49f8f36cdf89637ccae595e1c))
+- **any-search:** Add Keenable, with or without an API key in [#3555](https://github.com/mozilla-ai/otari/pull/3555) by [@aittalam](https://github.com/aittalam) ([`8cbab9b`](https://github.com/mozilla-ai/otari/commit/8cbab9b9873c80398127fd221104b3a475c4e9aa))
+- **providers:** Authenticate to a tenant endpoint behind an edge proxy in [#3532](https://github.com/mozilla-ai/otari/pull/3532) by [@peteski22](https://github.com/peteski22) ([`0adc7f6`](https://github.com/mozilla-ai/otari/commit/0adc7f6ac1e8b9d916578f48030f7de68c31abb4))
+
+
+### Security
+
+- **identity:** Do not treat an address claimed through a session as proved in [#3567](https://github.com/mozilla-ai/otari/pull/3567) by [@peteski22](https://github.com/peteski22) ([`783a445`](https://github.com/mozilla-ai/otari/commit/783a4454015da86c928ee2e9b7c4d43ed40017d0))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.56.0...v0.56.1
 ## [0.56.0](https://github.com/mozilla-ai/otari/releases/tag/v0.56.0) - 2026-11-24
 
 
