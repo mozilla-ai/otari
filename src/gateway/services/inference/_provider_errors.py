@@ -22,6 +22,7 @@ from any_llm.types.responses import ResponsesParams
 from fastapi import HTTPException, status
 from mcp.shared.exceptions import MCPError
 
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     PROVIDER_CREDENTIAL_REJECTED,
@@ -585,8 +586,14 @@ class UpstreamFailure:
 
         The provider failed the call, cut its stream short or refused the
         request, or an MCP server the request declared answered with an error.
-        Anything else is a fault in Otari itself.
+        Anything else is the gateway's own, including a guardrail refusing the
+        answer and a database failure, which the shape checks would otherwise
+        read as a provider's 403 and a provider's timeout.
         """
+        if isinstance(self.exc, AnswerRefused) or any(
+            isinstance(current, DATABASE_ERRORS) for current in upstream_exception_chain(self.exc)
+        ):
+            return False
         if _is_upstream_failure(self.exc) or self.mapping is not None:
             return True
         return any(isinstance(current, MCPError) for current in upstream_exception_chain(self.exc))

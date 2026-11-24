@@ -36,6 +36,7 @@ from fastapi import HTTPException
 from mcp.shared.exceptions import MCPError
 from mcp.types import INTERNAL_ERROR
 from openai import APITimeoutError as OpenAIAPITimeoutError
+from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
 from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
@@ -43,6 +44,7 @@ from gateway.api.routes._pipeline import with_provider_failure
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.error_details import ProviderDetail
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.services.inference import (
     UpstreamFailure,
     is_provider_credential_rejection,
@@ -1976,6 +1978,16 @@ def test_a_failure_from_outside_the_gateway_is_external(exc: BaseException) -> N
     assert UpstreamFailure(exc).is_external
 
 
-@pytest.mark.parametrize("exc", [RuntimeError("bug in the gateway"), KeyError("missing"), ValueError("bad")])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        RuntimeError("bug in the gateway"),
+        KeyError("missing"),
+        ValueError("bad"),
+        AnswerRefused({"message": "Answer blocked by guardrail policy."}),
+        TimeoutError(),
+        OperationalError("SELECT 1", {}, Exception("connection refused")),
+    ],
+)
 def test_a_fault_in_the_gateway_is_not_external(exc: BaseException) -> None:
     assert not UpstreamFailure(exc).is_external
