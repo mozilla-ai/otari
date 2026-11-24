@@ -291,7 +291,8 @@ class UsageEntry(BaseModel):
             source_label=log.source_label,
             tags=log.tags,
             counts_toward_budget=log.counts_toward_budget,
-            deployment_paid=log.deployment_paid,
+            # A row not yet flushed holds None until its column default applies.
+            deployment_paid=bool(log.deployment_paid),
             bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
