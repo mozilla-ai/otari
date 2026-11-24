@@ -3,7 +3,7 @@
 pi's payload carries pi-native tool names (`bash`, `read`, `edit`, `write`) and
 `tool_input` (`{command}` / `{path}`), and, on Stop, the session's commands as
 `bash_commands` instead of a transcript the hook would parse. The pi-otari
-extension is what registers the hook with pi; see docs/agent-guardrails.md.
+extension is what registers the hook with pi; see cli/docs/agent-guardrails.md.
 """
 
 import json
@@ -180,6 +180,34 @@ def test_stop_uses_bash_commands_and_ignores_transcript(monkeypatch: pytest.Monk
     assert captured["commands"] is None
 
 
+_LINT_GATE_YAML = (
+    'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+    "  - id: lint-after-python\n    type: command_if_changed\n"
+    "    runs: [stop.session]\n    enforcement: required\n"
+    '    when_changed: ["**/*.py"]\n    require: ["make lint"]\n    message: run make lint\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("bash_commands", "exit_code", "reason"),
+    [(["pytest -q", "make lint"], 0, ""), ([], 2, "run make lint"), (None, 2, "evidence was not submitted")],
+    ids=["ran", "empty-session", "omitted"],
+)
+def test_stop_enforces_a_required_command_gate(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, bash_commands: list[str] | None, exit_code: int, reason: str
+) -> None:
+    """Neither a session that ran nothing nor one whose commands were not sent satisfies a required gate."""
+    (repo / hook_cli.GUARDRAIL_FILE).write_text(_LINT_GATE_YAML, encoding="utf-8")
+    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root: ["src/x.py"])
+    payload: dict[str, Any] = {"hook_event_name": "Stop", "cwd": str(repo), "stop_hook_active": False}
+    if bash_commands is not None:
+        payload["bash_commands"] = bash_commands
+    result = _invoke(payload)
+    assert result.exit_code == exit_code, result.output
+    assert "could not load" not in result.output
+    assert reason in result.output
+
+
 def test_stop_blocks_on_a_protected_changed_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root: ["CHANGELOG.md"])
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "bash_commands": []}
@@ -229,6 +257,7 @@ def _fake_pi(
         calls.append(argv)
         assert argv[0] == _PI, "only pi may be run"
         if argv[1:] == ["list"]:
+            assert kwargs.get("cwd") == hook_cli._hook_judge_workdir(), "listed from the judge workdir"
             return subprocess.CompletedProcess(argv, 0, stdout=listing, stderr="")
         return subprocess.CompletedProcess(argv, install_rc, stdout=install_out, stderr="")
 
@@ -237,8 +266,16 @@ def _fake_pi(
     return calls
 
 
-def _setup(input: str | None = None) -> Any:  # noqa: A002
-    return CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "pi"], input=input)
+def _setup(input: str | None = None, *extra: str) -> Any:  # noqa: A002
+    return CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "pi", *extra], input=input)
+
+
+def _user_listing(tmp_path: Path, version: str | None, source: str = f"npm:{_PKG}") -> str:
+    install = tmp_path / "pi-npm" / _PKG
+    install.mkdir(parents=True, exist_ok=True)
+    if version is not None:
+        (install / "package.json").write_text(json.dumps({"name": _PKG, "version": version}), encoding="utf-8")
+    return f"User packages:\n  {source}\n    {install}\n"
 
 
 def _assert_no_harness_files(root: Path) -> None:
@@ -258,7 +295,7 @@ def test_setup_pi_missing_prints_install_instructions(repo: Path, monkeypatch: p
 
 def test_setup_pi_already_installed_runs_no_install(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    calls = _fake_pi(monkeypatch, listing=f"User packages:\n  npm:{_PKG}\n")
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.0"))
     result = _setup(input="n\n")  # declines the starter guardrail
     assert result.exit_code == 0, result.output
     assert "already installed" in result.output
@@ -296,7 +333,7 @@ def test_setup_pi_install_failure_is_a_click_exception(repo: Path, monkeypatch: 
 
 def test_setup_pi_offers_the_starter_guardrail_in_a_repo(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    _fake_pi(monkeypatch, listing=_PKG)
+    _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.0"))
     (repo / hook_cli.GUARDRAIL_FILE).unlink()
     result = _setup(input="y\n")
     assert result.exit_code == 0, result.output
@@ -311,3 +348,40 @@ def test_setup_pi_outside_a_repo_installs_the_extension_only(tmp_path: Path, mon
     assert result.exit_code == 0, result.output
     assert calls[-1] == [_PI, "install", f"npm:{_PKG}"]
     assert list(tmp_path.iterdir()) == []
+
+
+def test_setup_pi_a_project_only_install_is_not_enough(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The judge workdir cannot load a project's packages, so only a user-wide install counts."""
+    monkeypatch.chdir(repo)
+    listing = f"Project packages:\n  npm:{_PKG}\n    {repo}/.pi/npm/node_modules/{_PKG}\n"
+    calls = _fake_pi(monkeypatch, listing=listing)
+    result = _setup(input="y\n")
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == [_PI, "install", f"npm:{_PKG}"]
+
+
+def test_setup_pi_offers_to_update_a_version_without_guardrails(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.5.0"), install_out="updated")
+    result = _setup(input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "0.5.0" in result.output
+    assert calls == [[_PI, "list"], [_PI, "update", f"npm:{_PKG}"]]
+    assert "already installed" not in result.output
+
+
+def test_setup_pi_a_pinned_old_version_is_an_error(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.5.0", source=f"npm:{_PKG}@0.5.0"))
+    result = _setup()
+    assert result.exit_code != 0
+    assert f"pi remove npm:{_PKG}@0.5.0" in result.output
+    assert calls == [[_PI, "list"]]
+
+
+def test_setup_pi_refuses_repo_only(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not run anything"))
+    result = _setup(None, "--repo-only")
+    assert result.exit_code != 0
+    assert "--repo-only is not supported with --harness pi" in result.output

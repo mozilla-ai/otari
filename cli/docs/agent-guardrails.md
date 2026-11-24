@@ -111,8 +111,9 @@ otari hook setup --harness pi
 
 installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
 writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
-not on `PATH` it prints those install instructions instead. If `pi list` already
-shows the extension it says so; otherwise it asks before installing. Inside a Git
+not on `PATH` it prints those install instructions instead. If the extension is
+already installed for your user it says so, offers `pi update` when the installed
+version predates guardrail support, and otherwise asks before installing. Inside a Git
 repository it also offers the same starter `.otari/guardrails.yml` as the other
 harnesses; outside one it installs the extension only. The extension
 calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,

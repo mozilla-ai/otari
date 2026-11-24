@@ -293,7 +293,7 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
     judge_cli: [claude, codex]
 ```
 
-**The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. The call is billed to whatever account that CLI is signed into, not through Otari. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing. The call's environment also sets `OTARI_HOOK_IN_JUDGE`, which makes any `otari hook` it starts, such as the pi-otari extension's, exit 0 at once.
+**The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. Where that evidence goes depends on the CLI and model: `claude` and `codex` send it to whatever account the CLI is signed into, and bill it there. `pi` with no `--judge-model` sends it through Otari (`nebius:openai/gpt-oss-120b` on the pi-otari extension's `otari` provider), with the Otari credential that extension holds, so it is billed to that Otari key's budget and the provider account behind the model on that gateway. A `--judge-model` naming another pi provider sends it to that provider instead. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing. The call's environment also sets `OTARI_HOOK_IN_JUDGE`, which makes any `otari hook` it starts, such as the pi-otari extension's, exit 0 at once.
 
 **The diff** is `git diff HEAD` plus every untracked file the ignore rules do not exclude, each appended as a `new file` hunk. Bytes that are not valid UTF-8 are replaced.
 
@@ -509,11 +509,18 @@ A deterministic gate written `advisory` uses `systemMessage` alone.
 
 pi has no hook settings file. The pi-otari extension registers with pi and runs
 `otari hook --harness pi`, so `otari hook setup --harness pi` installs the
-extension instead: it runs `pi list`, and if `@mozilla-ai/pi-otari` is not
-listed asks, then runs `pi install npm:@mozilla-ai/pi-otari` (a non-zero exit is
-an error). With no `pi` on `PATH` it prints those instructions and exits 0.
+extension instead. It runs `pi list` from `~/.otari/judge-workdir/`, so only a
+user-wide install counts: a package installed for one project with `pi install -l`
+does not load where the judge and `otari guardrails generate` run pi. If
+`@mozilla-ai/pi-otari` is not listed there it asks, then runs
+`pi install npm:@mozilla-ai/pi-otari`. If the installed version is older than
+0.6.0, the first release that calls `otari hook`, it asks, then runs
+`pi update npm:@mozilla-ai/pi-otari`; a source pinned to an older version is an
+error naming the commands that replace the pin. A non-zero exit from pi is an
+error. With no `pi` on `PATH` it prints the install instructions and exits 0.
 Inside a Git repository it also offers the starter `.otari/guardrails.yml`;
-it never writes `.claude` or `.codex` files for pi.
+it never writes `.claude` or `.codex` files for pi. `--repo-only` is refused,
+because the extension has no way to leave out your own gates.
 The payload uses pi's lowercase tool names and native `tool_input`:
 
 | pi tool | `tool_input` | Evidence surface |
@@ -524,7 +531,11 @@ The payload uses pi's lowercase tool names and native `tool_input`:
 
 A `path` may be relative to `cwd`. Any other tool name is allowed. On `Stop`,
 `bash_commands` (a list of strings) replaces the transcript scan as command
-evidence; when it is absent, command evidence is `unknown`. `transcript_path`
+evidence; when it is absent, command evidence is `unknown`. The hook takes the
+list as given, so it must hold only the commands that ran after the session's
+last edit, as the Claude Code transcript scan does; otherwise a
+`command_if_changed` gate is satisfied by a command that ran before the edit it
+should have checked. `transcript_path`
 is ignored for pi, including by judge gates, because pi's session file is not
 Claude-format. Exit codes, output and fail-open behavior match Claude Code.
 
@@ -536,7 +547,7 @@ The callback a harness invokes, with its hook payload on stdin. Run at a termina
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
-| `--harness` | | `claude-code` | `claude-code` or `codex`: the integration sending the callback. |
+| `--harness` | | `claude-code` | `claude-code`, `codex` or `pi`: the integration sending the callback. |
 | `--repo-only` | | off | Enforce this repository's guardrail alone, leaving out your own in `~/.otari/`. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`, `pi`). A gate's `judge_cli` overrides it. |
@@ -566,8 +577,8 @@ Registers the hook in the current Git repository; refuses outside one. When the 
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
-| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+| `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`; `pi` installs the pi-otari extension (see [Registering it for pi](#registering-it-for-pi)). |
+| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. Refused with `--harness pi`. |
 
 Re-running `setup`:
 

@@ -539,6 +539,17 @@ def test_pi_p_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
+def test_pi_p_without_a_model_uses_pis_own_default(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unlike a judge call, generation names no model, so pi's configured one applies, as for claude and codex."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/fake/bin/pi" if name == "pi" else None)
+    calls = _stub_cli_output(monkeypatch, "[]")
+
+    result = _invoke(monkeypatch, "--cli", "pi")
+    assert result.exit_code == 0, result.output
+    assert "--model" not in calls[0]
+    assert "--provider" not in calls[0]
+
+
 def test_cli_option_overrides_the_default_preference_order(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shutil,

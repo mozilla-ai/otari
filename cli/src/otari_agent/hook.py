@@ -1576,7 +1576,7 @@ def _hook_call_codex_exec(codex_path: str, model: str | None, prompt: str, *, de
     return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="codex exec")
 
 
-def _pi_print_argv(pi_path: str, model: str | None) -> list[str]:
+def _pi_print_argv(pi_path: str, model: str | None, *, judge: bool) -> list[str]:
     """argv for one non-interactive pi call: shared by the judge and `guardrails generate` backends.
 
     `--mode json` rather than plain text: a reasoning model's thinking can
@@ -1585,9 +1585,11 @@ def _pi_print_argv(pi_path: str, model: str | None) -> list[str]:
     JSON mode emits one event per line with thinking and text as separate
     content blocks; `_pi_final_text` keeps only the answer.
 
-    With no explicit model, `_HOOK_PI_JUDGE_DEFAULT_MODEL` on the Otari
-    provider; an explicit one is passed through as given, as a pi `--model`
-    pattern (`otari/<id>`, or any other provider pi knows).
+    An explicit model is passed through as given, as a pi `--model` pattern
+    (`otari/<id>`, or any other provider pi knows). With none, a judge call
+    (`judge`) gets `_HOOK_PI_JUDGE_DEFAULT_MODEL` on the Otari provider, and a
+    `guardrails generate` call gets pi's own configured default, as the claude
+    and codex backends do there.
     """
     argv = [
         pi_path,
@@ -1601,10 +1603,10 @@ def _pi_print_argv(pi_path: str, model: str | None) -> list[str]:
         "--no-context-files",
         "--offline",
     ]
-    if model is None:
-        argv += ["--provider", _HOOK_PI_JUDGE_DEFAULT_PROVIDER, "--model", _HOOK_PI_JUDGE_DEFAULT_MODEL]
-    else:
+    if model is not None:
         argv += ["--model", model]
+    elif judge:
+        argv += ["--provider", _HOOK_PI_JUDGE_DEFAULT_PROVIDER, "--model", _HOOK_PI_JUDGE_DEFAULT_MODEL]
     return argv
 
 
@@ -1677,7 +1679,7 @@ def _hook_call_pi_p(pi_path: str, model: str | None, prompt: str, *, deadline: f
     `_hook_run_judge` never applies that retry to this backend.
     """
     return _hook_run_judge_subprocess(
-        _pi_print_argv(pi_path, model), prompt, deadline=deadline, label="pi -p", unwrap=_pi_final_text
+        _pi_print_argv(pi_path, model, judge=True), prompt, deadline=deadline, label="pi -p", unwrap=_pi_final_text
     )
 
 
@@ -2495,7 +2497,8 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     help=(
         f"Model the resolved judge CLI uses for a judge gate's model call. Defaults to "
         f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude, "
-        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} (Otari) when it is pi; when it is codex, "
+        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} through Otari when it is pi (billed to the pi-otari extension's "
+        "Otari key); when it is codex, "
         "left unset (Codex's own default model applies) unless given explicitly here."
     ),
 )
@@ -3267,13 +3270,17 @@ def _hook_global_registration_without_repo_only() -> Path | None:
 
 _PI_EXTENSION_PACKAGE = "@mozilla-ai/pi-otari"
 _PI_EXTENSION_SOURCE = f"npm:{_PI_EXTENSION_PACKAGE}"
+# The first pi-otari release whose extension calls `otari hook`; an older one installs and loads but
+# enforces nothing.
+_PI_EXTENSION_MIN_GUARDRAILS_VERSION = (0, 6, 0)
 _PI_COMMAND_TIMEOUT_SECONDS = 300
 
 
-def _hook_run_pi(pi_path: str, *args: str) -> subprocess.CompletedProcess[str]:
+def _hook_run_pi(pi_path: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
             [pi_path, *args],
+            cwd=cwd,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -3288,12 +3295,105 @@ def _hook_run_pi(pi_path: str, *args: str) -> subprocess.CompletedProcess[str]:
         raise click.ClickException(f"Could not run pi {' '.join(args)}: {exc}") from exc
 
 
+class _PiExtensionInstall(NamedTuple):
+    source: str
+    version: tuple[int, ...] | None
+
+
+def _pi_user_extension(listing: str) -> _PiExtensionInstall | None:
+    """The pi-otari entry under `pi list`'s "User packages:" heading, with the version its install directory holds.
+
+    Only the user-wide entry counts: the judge and `guardrails generate` calls run pi from
+    `_hook_judge_workdir()`, where a package installed for one project does not load, so the
+    Otari provider those calls default to would be missing.
+    """
+    in_user_section = False
+    ours = False
+    source: str | None = None
+    version: tuple[int, ...] | None = None
+    for line in listing.splitlines():
+        entry = line.strip()
+        if not entry:
+            continue
+        if not line[0].isspace():
+            in_user_section = entry.lower().startswith("user packages")
+            ours = False
+            continue
+        if not in_user_section:
+            continue
+        if line.startswith("    "):
+            # The install directory of the entry above it.
+            if ours and version is None:
+                version = _pi_extension_version(Path(entry))
+            continue
+        ours = entry == _PI_EXTENSION_SOURCE or entry.startswith(f"{_PI_EXTENSION_SOURCE}@")
+        if ours:
+            source = entry
+            # A pinned source names its version itself.
+            version = _parse_version(entry.rsplit("@", 1)[1]) if entry != _PI_EXTENSION_SOURCE else None
+    return _PiExtensionInstall(source, version) if source is not None else None
+
+
+def _parse_version(raw: str) -> tuple[int, ...] | None:
+    match = re.match(r"v?(\d+)\.(\d+)\.(\d+)", raw.strip())
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _pi_extension_version(install_dir: Path) -> tuple[int, ...] | None:
+    try:
+        manifest = json.loads((install_dir / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    return _parse_version(version) if isinstance(version, str) else None
+
+
+def _hook_setup_pi_install(pi_path: str) -> None:
+    if click.confirm(f"Install {_PI_EXTENSION_PACKAGE} into pi (pi install {_PI_EXTENSION_SOURCE})?", default=True):
+        installed = _hook_run_pi(pi_path, "install", _PI_EXTENSION_SOURCE, cwd=_hook_judge_workdir())
+        output = (installed.stdout + installed.stderr).strip()
+        if output:
+            click.echo(output)
+        if installed.returncode != 0:
+            raise click.ClickException(f"pi install {_PI_EXTENSION_SOURCE} exited {installed.returncode}.")
+        click.echo(f"Installed {_PI_EXTENSION_PACKAGE}.")
+    else:
+        click.echo(f"Skipping. Run `pi install {_PI_EXTENSION_SOURCE}` to enable Agent Guardrails in pi.")
+
+
+def _hook_setup_pi_upgrade(pi_path: str, current: _PiExtensionInstall) -> None:
+    minimum = ".".join(map(str, _PI_EXTENSION_MIN_GUARDRAILS_VERSION))
+    found = ".".join(map(str, current.version or ()))
+    if current.source != _PI_EXTENSION_SOURCE:
+        raise click.ClickException(
+            f"{current.source} is pinned to {found}, older than {minimum}, the first release that enforces "
+            f"Agent Guardrails. Run `pi remove {current.source}` and `pi install {_PI_EXTENSION_SOURCE}`, "
+            "then re-run `otari hook setup --harness pi`."
+        )
+    if not click.confirm(
+        f"{_PI_EXTENSION_PACKAGE} {found} is installed, but Agent Guardrails need {minimum} or later. "
+        f"Update it (pi update {_PI_EXTENSION_SOURCE})?",
+        default=True,
+    ):
+        click.echo(f"Skipping. pi enforces no guardrail until `pi update {_PI_EXTENSION_SOURCE}` is run.")
+        return
+    updated = _hook_run_pi(pi_path, "update", _PI_EXTENSION_SOURCE, cwd=_hook_judge_workdir())
+    output = (updated.stdout + updated.stderr).strip()
+    if output:
+        click.echo(output)
+    if updated.returncode != 0:
+        raise click.ClickException(f"pi update {_PI_EXTENSION_SOURCE} exited {updated.returncode}.")
+    click.echo(f"Updated {_PI_EXTENSION_PACKAGE}.")
+
+
 def _hook_setup_pi() -> None:
-    """Install the pi-otari extension into pi, then offer a starter guardrail inside a repo.
+    """Install or update the pi-otari extension user-wide, then offer a starter guardrail inside a repo.
 
     pi has no hook settings file: the extension registers the callback
     itself and invokes `otari hook --harness pi`, so nothing is written under
-    `.claude` or `.codex`.
+    `.claude` or `.codex`. `pi list` runs from `_hook_judge_workdir()` so a
+    package installed only for the current project is not mistaken for one
+    every pi call can load (see `_pi_user_extension`).
     """
     pi_path = shutil.which("pi")
     if pi_path is None:
@@ -3304,19 +3404,14 @@ def _hook_setup_pi() -> None:
         )
         return
 
-    listing = _hook_run_pi(pi_path, "list")
-    if listing.returncode == 0 and _PI_EXTENSION_PACKAGE in listing.stdout + listing.stderr:
-        click.echo(f"{_PI_EXTENSION_PACKAGE} is already installed in pi.")
-    elif click.confirm(f"Install {_PI_EXTENSION_PACKAGE} into pi (pi install {_PI_EXTENSION_SOURCE})?", default=True):
-        installed = _hook_run_pi(pi_path, "install", _PI_EXTENSION_SOURCE)
-        output = (installed.stdout + installed.stderr).strip()
-        if output:
-            click.echo(output)
-        if installed.returncode != 0:
-            raise click.ClickException(f"pi install {_PI_EXTENSION_SOURCE} exited {installed.returncode}.")
-        click.echo(f"Installed {_PI_EXTENSION_PACKAGE}.")
+    listing = _hook_run_pi(pi_path, "list", cwd=_hook_judge_workdir())
+    current = _pi_user_extension(listing.stdout) if listing.returncode == 0 else None
+    if current is None:
+        _hook_setup_pi_install(pi_path)
+    elif current.version is not None and current.version < _PI_EXTENSION_MIN_GUARDRAILS_VERSION:
+        _hook_setup_pi_upgrade(pi_path, current)
     else:
-        click.echo(f"Skipping. Run `pi install {_PI_EXTENSION_SOURCE}` to enable Agent Guardrails in pi.")
+        click.echo(f"{_PI_EXTENSION_PACKAGE} is already installed in pi.")
 
     root = _hook_find_repo_root(Path.cwd())
     if root is not None:
@@ -3388,9 +3483,15 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     not run invokes it on every such tool call for nothing. On claude-code, it
     also warns when `~/.claude/settings.json` registers the hook for every
     repository without the flag, since that registration still runs here.
-    pi registers through its extension, so the flag does not apply to it.
+    pi registers through its extension, which has no such flag, so the
+    combination is refused rather than silently ignored.
     """
     if harness == "pi":
+        if repo_only:
+            raise click.ClickException(
+                "--repo-only is not supported with --harness pi: the pi-otari extension always applies "
+                f"your own gates in {GuardrailOrigin.USER.directory} too."
+            )
         _hook_setup_pi()
         return
 
@@ -3621,8 +3722,9 @@ def _gates_generate_call_codex_exec(codex_path: str, model: str | None, prompt: 
 def _gates_generate_call_pi_p(pi_path: str, model: str | None, prompt: str) -> str:
     # Same argv and stdin prompt as _hook_call_pi_p (see its docstring for
     # why, including why extensions stay on and what stops a Stop-hook loop),
-    # and the same JSON-mode answer extraction (see _pi_print_argv).
-    return _pi_final_text(_gates_generate_run_cli(_pi_print_argv(pi_path, model), prompt, label="pi -p"))
+    # and the same JSON-mode answer extraction, except that no model given
+    # means pi's own default rather than the judge's (see _pi_print_argv).
+    return _pi_final_text(_gates_generate_run_cli(_pi_print_argv(pi_path, model, judge=False), prompt, label="pi -p"))
 
 
 def _gates_generate_call_cli(cli_name: str, cli_path: str, model: str | None, prompt: str) -> str:
@@ -3944,7 +4046,8 @@ def guardrails_generate(
     """Propose guardrail gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
 
     Resolves a locally installed model CLI (`claude -p`, `codex exec` or `pi -p`,
-    whichever is found on PATH first; no otari server, no otari credential)
+    whichever is found on PATH first; no otari server is called directly, and
+    the doc goes wherever that CLI's own default model is configured to send it)
     and asks the user to confirm it before sending the doc anywhere. Walks
     the proposals one at a time, screen cleared between each so only the
     current candidate is on screen: shows it and asks
@@ -4725,7 +4828,8 @@ def _echo_check_report(
     default=None,
     help=(
         f"Model a judge gate's call uses. Defaults to {_HOOK_JUDGE_DEFAULT_MODEL!r} for claude, "
-        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} (Otari) for pi, and Codex's own default for codex."
+        f"{_HOOK_PI_JUDGE_DEFAULT_MODEL!r} through Otari for pi (billed to the pi-otari extension's Otari key), "
+        "and Codex's own default for codex."
     ),
 )
 @click.option(
