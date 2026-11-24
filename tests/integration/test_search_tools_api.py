@@ -460,6 +460,7 @@ def test_search_catalog_serves_the_library_metadata(
         "brave",
         "deepseek",
         "exa",
+        "keenable",
         "mojeek",
         "perplexity",
         "searxng",
@@ -503,6 +504,22 @@ def test_a_cost_tier_the_provider_reports_no_cost_for_is_set_only_by_a_tools_con
         True,
     )
     assert not any(option["operator_only"] for option in perplexity["options"] if not option["cost_tier"])
+
+
+def test_keenable_is_listed_with_an_optional_key_and_an_operator_only_title(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    keenable = _catalog(catalog_client, headers=master_key_header)["keenable"]
+    assert (keenable["requires_api_key"], keenable["requires_api_base"]) == (False, False)
+    assert keenable["default_api_base"] == "https://api.keenable.ai"
+    operator_only = {option["name"] for option in keenable["options"] if option["operator_only"]}
+    assert operator_only == {"X-Keenable-Title"}
+
+
+def test_a_keenable_tool_needs_no_key(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = _create(client, master_key_header, name="keenable", provider="keenable", api_base=None)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["last4"] is None
 
 
 def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:

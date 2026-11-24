@@ -1,0 +1,15 @@
+{
+  "status": 401,
+  "body": {
+    "error": "Authentication failed",
+    "message": "Malformed API key",
+    "type": "authentication_error",
+    "code": "invalid_api_key",
+    "fix": "The API key was not accepted. Copy the full key from https://app.keenable.ai/console/api-keys, or create a new one there, and retry with it in the X-API-Key header.",
+    "docs_url": "https://docs.keenable.ai/errors#invalid-api-key",
+    "retryable": false,
+    "keyless": "/v1/search/public and /v1/fetch/public work without a key, rate-limited per IP. Name your app in the X-Keenable-Title header (or the keenable_title query parameter); public requests without it get a 400.",
+    "api_keys_url": "https://app.keenable.ai/console/api-keys",
+    "request_id": "01a20d3d-af06-720e-8fd1-c851219e25ea"
+  }
+}

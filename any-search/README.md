@@ -223,6 +223,44 @@ that does not parse, raises `ProviderError` with the tag `unexpected_response`. 
 cost as optional, so an answer without one reports none; the live tests check that it reports
 one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
 
+## Keenable
+
+`keenable` calls Keenable's [search API](https://docs.keenable.ai/api-reference/search) with or
+without a key. With a key, passed or read from `KEENABLE_API_KEY`, it calls `POST /v1/search` with
+the key in the `X-API-Key` header. Without one it calls `POST /v1/search/public`, which Keenable
+limits to 1,000 searches an hour and 10 a second per IP address, shared with every other caller from
+that address. The query travels in the JSON body. Keenable logs each query with the caller's IP
+address and app name; see its [data privacy](https://docs.keenable.ai/data-privacy) page.
+
+Every call carries the `X-Keenable-Title` header, which the keyless endpoint requires and Keenable
+logs to tell apps apart: `any-search`, unless the `X-Keenable-Title` option names the app. The
+option is marked operator-only, since its value can name whoever runs the host.
+
+| `SearchHit` | From Keenable |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `snippet`, Markdown cut from the page for the query, or `description` when `snippet` is blank; Keenable returns no page text, so `text` is always `None` |
+| `published` | `published_at`, ISO 8601, read as UTC when it has no zone; `None` when Keenable knows no publish date |
+
+Keenable reports a keyed call's cost in credits under `usage`, which the adapter does not read, so
+the cost is `None`. `max_results` is sent as it is, 10 when unset, at most 50. `time_range` becomes
+`published_after` as a span back from now (`1d`, `7d`, `30d` or `365d`) and wins over that option;
+Keenable then leaves out the pages it knows no publish date for. The other native options are
+Keenable's own fields, such as `mode` (`pro` or `realtime`, the same price), `site`,
+`exclude_domains`, `snippet_max_length` and `disable_cards`; `--describe keenable` lists them. An
+option set to `None` is not sent. Snippets run to a few thousand characters by default;
+`snippet_max_length` asks for less.
+
+Any status from 400 raises `ProviderError`, tagged with Keenable's `code`: `invalid_api_key` for a
+refused key, `insufficient_credits` for a 402, and `public_rate_limit_hourly`,
+`public_rate_limit_per_second` or `rate_limit_per_second` for a 429. A body without a code is
+`rate_limited` for a 429 and `http_error` otherwise. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. A `results` that is not a list, a result
+whose `url` is missing, empty or not a string, whose `title` is missing or not a string, or whose
+`snippet`, `description` or `published_at` is present and not a string, or a `published_at` that is
+not ISO 8601, raises `ProviderError` with the tag `unexpected_response`. Unread fields are ignored.
+
 ## Mojeek
 
 `mojeek` calls Mojeek's [Web Search API](https://www.mojeek.com/support/api/search/request_parameters.html),
