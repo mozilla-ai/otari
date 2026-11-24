@@ -5084,6 +5084,7 @@ async def record_usage(
     deployment_paid_cost = (
         None if model_cost is None and tool_cost is None else (model_cost or Decimal(0)) + (tool_cost or Decimal(0))
     )
+    usage_log.deployment_paid_cost = deployment_paid_cost
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced

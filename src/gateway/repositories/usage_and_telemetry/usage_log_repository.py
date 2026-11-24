@@ -314,6 +314,11 @@ def usage_conditions(filters: UsageFilters, scope: UsageScope) -> list[ColumnEle
     return conditions
 
 
+def _deployment_paid_cost_expr() -> Any:
+    """A row's deployment-paid cost: the recorded split, else its whole cost where its model call was."""
+    return func.coalesce(UsageLog.deployment_paid_cost, case((UsageLog.deployment_paid, UsageLog.cost), else_=None))
+
+
 def _tag_expr(key: str) -> Any:
     """The value of tag ``key`` on a row, or null when the row does not carry it."""
     return UsageLog.tags[key].as_string()
@@ -679,7 +684,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                     _billed_input_sum(),
                     _billed_output_sum(),
                     func.coalesce(func.sum(UsageLog.reasoning_tokens), 0),
-                    func.coalesce(func.sum(case((UsageLog.deployment_paid, UsageLog.cost), else_=0)), 0.0),
+                    func.coalesce(func.sum(_deployment_paid_cost_expr()), 0.0),
                 ).where(*usage_conditions(filters, scope))
             )
         ).one()

@@ -74,6 +74,7 @@ def _make_log(
     latency_ms: int | None = None,
     workspace_id: Any = None,
     deployment_paid: bool = False,
+    deployment_paid_cost: float | None = None,
 ) -> None:
     if user_id is not None:
         _ensure_user(db, user_id)
@@ -103,6 +104,7 @@ def _make_log(
             error_message="boom" if status == "error" else None,
             latency_ms=latency_ms,
             deployment_paid=deployment_paid,
+            deployment_paid_cost=deployment_paid_cost,
         )
     )
 
@@ -578,12 +580,14 @@ def test_usage_reads_split_what_the_deployment_paid_for(
     now = datetime.now(UTC) - timedelta(hours=1)
     _make_log(db_session, user_id="payer", timestamp=now, cost=0.10, provider="deepinfra", deployment_paid=True)
     _make_log(db_session, user_id="payer", timestamp=now, cost=0.25, provider="synthetic")
+    # The organization's model key, with a search the deployment ran.
+    _make_log(db_session, user_id="payer", timestamp=now, cost=0.05, provider="synthetic", deployment_paid_cost=0.01)
     _make_log(db_session, user_id="payer", timestamp=now, cost=None, status="error", deployment_paid=True)
     db_session.commit()
 
     totals = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "payer"}).json()["totals"]
-    assert totals["cost"] == pytest.approx(0.35)
-    assert totals["deployment_paid_cost"] == pytest.approx(0.10)
+    assert totals["cost"] == pytest.approx(0.40)
+    assert totals["deployment_paid_cost"] == pytest.approx(0.11)
 
     paid = {"user_id": "payer", "deployment_paid": "true"}
     rows = client.get(f"{API_ROOT}/usage", headers=master_key_header, params=paid).json()
@@ -591,8 +595,8 @@ def test_usage_reads_split_what_the_deployment_paid_for(
     assert all(row["deployment_paid"] for row in rows)
     assert client.get(f"{API_ROOT}/usage/count", headers=master_key_header, params=paid).json()["total"] == 2
     own = client.get(SUMMARY_PATH, headers=master_key_header, params={**paid, "deployment_paid": "false"}).json()
-    assert own["totals"]["cost"] == pytest.approx(0.25)
-    assert own["totals"]["deployment_paid_cost"] == 0.0
+    assert own["totals"]["cost"] == pytest.approx(0.30)
+    assert own["totals"]["deployment_paid_cost"] == pytest.approx(0.01)
 
 
 def test_usage_list_and_count_filter_by_session_and_provider(
