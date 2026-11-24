@@ -2569,17 +2569,19 @@ body {
     white-space: nowrap;
   }
 }
-/* The identity lane holds while the rest scrolls, as everywhere else. */
+/* The identity lane holds while the rest scrolls, as everywhere else. No
+   `.table__row` in the cell selector: with it this rule outweighs the row's
+   hover fill, and a hovered row lit everywhere but its pinned lane. */
 .otari-models-table .table__column:first-child,
-.otari-models-table .table__row .table__cell:first-child,
+.otari-models-table .table__cell:first-child,
 .otari-offerings-table .table__column:first-child,
-.otari-offerings-table .table__row .table__cell:first-child,
+.otari-offerings-table .table__cell:first-child,
 .otari-domains-table .table__column:first-child,
-.otari-domains-table .table__row .table__cell:first-child,
+.otari-domains-table .table__cell:first-child,
 .otari-providers-table .table__column:first-child,
-.otari-providers-table .table__row .table__cell:first-child,
+.otari-providers-table .table__cell:first-child,
 .otari-routing-table .table__column:first-child,
-.otari-routing-table .table__row .table__cell:first-child {
+.otari-routing-table .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
