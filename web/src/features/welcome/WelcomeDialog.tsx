@@ -6,18 +6,19 @@ import { Button } from "@/design-system/actions/Button"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { ProductMark } from "@/design-system/ProductMark"
+import { usePlatformConnectFlow } from "@/features/providers/PlatformConnect"
 import {
-  PLATFORM_PROVIDER_NAME,
-  usePlatformConnectFlow,
-} from "@/features/providers/PlatformConnect"
+  OWN_KEYS,
+  readWelcomeAnswer,
+  writeWelcomeAnswer,
+} from "@/features/welcome/welcomeAnswer"
 import { useHostedProviders } from "@/shared/api/hostedProviders"
 import {
   useDeploymentOperator,
   useProviderKeyEncryption,
 } from "@/shared/api/organizations"
+import { useProviders } from "@/shared/api/providers"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
-export const WELCOME_ANSWERED_KEY = "otari.welcome.answered"
 
 const OFFERS = [
   "Open-weight models, hosted by Mozilla.ai",
@@ -28,21 +29,7 @@ const OFFERS = [
 // As otari.ai's subscriptions page lists them. A sample, not the catalog.
 const MODELS = ["glm-5.3", "deepseek-v4-pro", "kimi-k3", "qwen3.8-27b"]
 
-function readAnswered(): boolean {
-  try {
-    return localStorage.getItem(WELCOME_ANSWERED_KEY) !== null
-  } catch {
-    return false
-  }
-}
-
-function writeAnswered() {
-  try {
-    localStorage.setItem(WELCOME_ANSWERED_KEY, new Date().toISOString())
-  } catch {
-    // Storage refused: the welcome stays away for this tab only.
-  }
-}
+const readAnswered = () => readWelcomeAnswer() !== null
 
 /**
  * Whether to greet this operator, decided once when the reads settle, so the
@@ -54,16 +41,29 @@ function useShouldWelcome(): boolean {
   const { answer, isSettled } = useDeploymentOperator()
   const canStoreKey = useProviderKeyEncryption()
   const enabled = answer === "operator"
+  const configured = useProviders(enabled)
   const hosted = useHostedProviders(enabled)
   const [decision, setDecision] = useState<"pending" | "show" | "hide">(
     "pending",
   )
-  if (decision === "pending" && isSettled && (!enabled || !hosted.isPending)) {
-    const connected = (hosted.data?.data ?? []).some(
-      (provider) => provider.name === PLATFORM_PROVIDER_NAME,
-    )
+  if (
+    decision === "pending" &&
+    isSettled &&
+    (!enabled || (!hosted.isPending && !configured.isPending))
+  ) {
+    // Any provider, configured or hosted, already answers where models come
+    // from; otari.ai being one of them is the connected case.
+    const hasProvider =
+      (configured.data?.providers ?? []).length > 0 ||
+      (hosted.data?.data ?? []).length > 0
     setDecision(
-      enabled && canStoreKey && !hosted.isError && !connected ? "show" : "hide",
+      enabled &&
+        canStoreKey &&
+        !hosted.isError &&
+        !configured.isError &&
+        !hasProvider
+        ? "show"
+        : "hide",
     )
   }
   return decision === "show"
@@ -75,7 +75,7 @@ function useShouldWelcome(): boolean {
  * closed.
  *
  * Only an operator who could connect is greeted, and never on a gateway
- * already connected to otari.ai. Nothing is sent to otari.ai unless Connect
+ * that already serves a provider, otari.ai or another. Nothing is sent to otari.ai unless Connect
  * is pressed. Mounted from the base `PostSignInGate`, which otari.ai's own
  * build replaces, so it never renders there.
  */
@@ -92,17 +92,25 @@ function Welcome() {
   if (!shouldWelcome || answered) {
     return null
   }
+  const answer = (value: string) => {
+    writeWelcomeAnswer(value)
+    setAnswered(true)
+  }
   return (
     <WelcomeFrame
-      onClose={() => {
-        writeAnswered()
-        setAnswered(true)
-      }}
+      onClose={() => answer(new Date().toISOString())}
+      onSkip={() => answer(OWN_KEYS)}
     />
   )
 }
 
-function WelcomeFrame({ onClose: close }: { onClose: () => void }) {
+function WelcomeFrame({
+  onClose: close,
+  onSkip,
+}: {
+  onClose: () => void
+  onSkip: () => void
+}) {
   const navigate = useNavigate()
   const flow = usePlatformConnectFlow(() => {
     close()
@@ -153,7 +161,7 @@ function WelcomeFrame({ onClose: close }: { onClose: () => void }) {
         <button
           type="button"
           className="min-h-11 text-sm text-muted hover:text-foreground md:min-h-9"
-          onClick={close}
+          onClick={onSkip}
         >
           Skip, I&rsquo;ll use my own keys
         </button>
