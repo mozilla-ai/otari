@@ -3,6 +3,8 @@ import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useRequestPasswordReset } from "@/shared/api/auth"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AuthEmailField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
@@ -20,8 +22,14 @@ import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
  * Enumeration-safe like its siblings, so the confirmation is written in the
  * conditional and nothing here reads the response. The address arrives from
  * the sign-in screen and goes back to it (`signInAddress.ts`).
+ *
+ * The deployment's mail state is not a fact about the address, so reading it
+ * leaks nothing. Where no link this deployment emails can be opened, the page
+ * says to ask for one rather than naming an inbox.
  */
 export function RecoverPasswordPage() {
+  const { mail } = useDeployment()
+  const delivers = mailDelivers(mail)
   const request = useRequestPasswordReset()
   const [email, setEmail] = useState(readSignInAddress)
 
@@ -48,8 +56,12 @@ export function RecoverPasswordPage() {
   if (request.isSuccess) {
     return (
       <PublicAuthLayout
-        title="Check your email"
-        description="If that address has an account on this gateway, a link to set or reset its password is on its way."
+        title={delivers ? "Check your email" : "Ask for your link"}
+        description={
+          delivers
+            ? "If that address has an account on this deployment, a link to set or reset its password is on its way."
+            : "If that address has an account on this deployment, a link to set or reset its password was created for it. This deployment cannot email you a link that works, so ask whoever runs it for yours."
+        }
         footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
       >
         <p className="text-center text-caption">
@@ -64,7 +76,11 @@ export function RecoverPasswordPage() {
     <PublicAuthLayout
       isBusy={request.isPending}
       title="Set or reset your password"
-      description="Enter your address and we will mail a link to choose a password, whether it is your first or a forgotten one."
+      description={
+        delivers
+          ? "Enter your address and we will mail a link to choose a password, whether it is your first or a forgotten one."
+          : "Enter your address to create a link for choosing a password, whether it is your first or a forgotten one. This deployment cannot email it, so ask whoever runs it for the link."
+      }
       footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <form
@@ -90,7 +106,7 @@ export function RecoverPasswordPage() {
           isPending={request.isPending}
           isDisabled={email.trim() === ""}
         >
-          Send link
+          {delivers ? "Send link" : "Create link"}
         </Button>
       </form>
     </PublicAuthLayout>

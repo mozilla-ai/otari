@@ -287,6 +287,23 @@ describe("DeploymentAccountsPage", () => {
     ).toBeInTheDocument()
   })
 
+  it.each([
+    ["sends_only", "Create the link"],
+    ["delivers", "Email the link"],
+  ] as const)(
+    "offers to %s the link by what a recipient actually receives",
+    async (mail, label) => {
+      mockApi({ accounts: [ANALYST] })
+      await renderPage(<DeploymentAccountsPage />, "/admin/accounts", mail)
+
+      const user = userEvent.setup()
+      await screen.findByText("Analyst")
+      await pressRowAction(user, "Send Analyst a password link")
+
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+    },
+  )
+
   it("says the link was emailed, and shows none, where mail went out", async () => {
     mockApi({
       accounts: [ANALYST],

@@ -1,5 +1,6 @@
 import { Outlet } from "@tanstack/react-router"
 import { screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { MailReadiness, OrganizationMember } from "@/client"
 import { PeoplePage } from "@/features/people/PeoplePage"
@@ -118,6 +119,23 @@ describe("People", () => {
     expect(await within(table).findByText("Wei")).toBeVisible()
     expect(within(table).queryByText("Hana")).toBeNull()
   })
+
+  it.each([
+    ["delivers", /They get an email with an invitation link/],
+    ["sends_only", /reaches an inbox, so you get a link to share/],
+    ["none", /reaches an inbox, so you get a link to share/],
+  ] as const)(
+    "says how an invitee is reached when mail is %s",
+    async (mail, wording) => {
+      await renderPeople("owner", "ws-platform", { mail })
+
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Invite people" }))
+
+      expect(await screen.findByText(wording)).toBeInTheDocument()
+    },
+  )
 
   it("links the organization's Members page for an owner", async () => {
     await renderPeople("owner")
