@@ -38,6 +38,7 @@ from any_llm.types.completion import (
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes._attempts import LOCKED_IN_DETAIL
 from gateway.core.config import (
@@ -57,6 +58,7 @@ from gateway.core.error_codes import (
     ERROR_RETRYABLE_HEADER,
     ERROR_STATUS_HEADER,
     ERROR_TAG_HEADER,
+    PRICING_REQUIRED,
     PROVIDER_ERROR,
     UPSTREAM_RATE_LIMITED,
 )
@@ -360,6 +362,94 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     # Both belong to one request, which is what makes the history reconstructable.
     assert served[0]["request_group_id"] == absorbed[0]["request_group_id"]
     assert served[0]["request_group_id"] is not None
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_an_unpriced_first_candidate_is_skipped_for_a_priced_fallback(
+    routing_config: GatewayConfig, stream: bool
+) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    calls: list[str] = []
+
+    async def serve(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        if not kwargs.get("stream"):
+            return _completion("claude-haiku-4-5")
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    for client in build_test_client(config):
+        _create_user(client)
+        priced = client.post(
+            f"{API_ROOT}/pricing",
+            json={
+                "model_key": "anthropic:claude-haiku-4-5",
+                "input_price_per_million": 1.0,
+                "output_price_per_million": 2.0,
+            },
+            headers=HEADERS,
+        )
+        assert priced.status_code == 200, priced.text
+        with patch("gateway.api.routes.chat.acompletion", new=serve):
+            resp = _chat(client, "fast", stream=stream)
+            resp.read()
+
+        assert resp.status_code == 200, resp.text
+        assert calls == ["anthropic:claude-haiku-4-5"]
+        assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "1", "true")
+        served = [r for r in _usage_rows(client) if r["status"] == "success"]
+        assert [(r["model"], r["cost"] is not None) for r in served] == [("claude-haiku-4-5", True)]
+
+
+def test_a_policy_none_of_whose_candidates_is_priced_is_refused(routing_config: GatewayConfig) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    serve = AsyncMock(return_value=_completion("claude-haiku-4-5"))
+
+    for client in build_test_client(config):
+        _create_user(client)
+        with patch("gateway.api.routes.chat.acompletion", new=serve):
+            resp = _chat(client, "fast")
+
+        assert resp.status_code == 402, resp.text
+        assert resp.headers[ERROR_CODE_HEADER] == PRICING_REQUIRED
+        serve.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("lost"), OperationalError("SELECT", {}, Exception("connection lost"))], ids=["error", "db"]
+)
+def test_a_failed_lookup_of_the_later_candidates_prices_releases_the_hold(
+    routing_config: GatewayConfig, failure: Exception
+) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    refund = AsyncMock()
+    abandon = AsyncMock()
+
+    for client in build_test_client(config):
+        _create_user(client)
+        with (
+            patch("gateway.api.routes._pipeline._a_later_candidate_is_priced", side_effect=failure),
+            patch("gateway.api.routes._pipeline.refund_reservation", new=refund),
+            patch("gateway.core.unit_of_work.UnitOfWork.abandon", new=abandon),
+            pytest.raises(type(failure)),
+        ):
+            _chat(client, "fast")
+
+    refund.assert_awaited_once()
+    # A failed statement leaves the session unusable, so it is rolled back before the release.
+    assert abandon.await_count == (1 if isinstance(failure, OperationalError) else 0)
 
 
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
