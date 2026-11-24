@@ -12,6 +12,7 @@ from gateway.services.secret_box import (
     encrypt_secret,
     generate_secret_key,
     get_secret_box,
+    readable_mapping,
     secret_box_configured,
     validate_secret_key,
 )
@@ -44,6 +45,21 @@ def test_an_empty_mapping_is_not_none(monkeypatch: pytest.MonkeyPatch) -> None:
     token = encrypt_mapping({})
     assert token is not None
     assert decrypt_mapping(token) == {}
+
+
+def test_a_readable_mapping_reads_what_the_key_opens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert readable_mapping(encrypt_mapping({"region_name": "us-east-2"})) == {"region_name": "us-east-2"}
+    assert readable_mapping(None) is None
+
+
+def test_a_mapping_no_configured_key_opens_reads_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    token = encrypt_mapping({"token": "t"})
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert readable_mapping(token) is None
+    monkeypatch.delenv("OTARI_SECRET_KEY")
+    assert readable_mapping(token) is None
 
 
 def test_the_box_is_built_once_per_key(monkeypatch: pytest.MonkeyPatch) -> None:

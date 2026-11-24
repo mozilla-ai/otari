@@ -50,7 +50,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceWebSearchKeyOverrideConflictError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import carries_redaction, restore_redacted_values, stored_secrets_survive
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User
 from gateway.models.tools import (
     OrgWebSearchKey,
@@ -83,11 +83,12 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
-from gateway.services.tools._web_search import in_loop_default, resolve_fetch
+from gateway.services.tools._web_search import credential_needs_api_key, in_loop_default, resolve_fetch
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 from gateway.services.web_search_providers import is_sendable_api_key
 
@@ -325,7 +326,9 @@ class WebSearchKeyService:
                 if sets_api_base and api_base is not None and api_base != key.api_base:
                     # The stored credential would go to the new host on the next call.
                     stored_options_follow = stored_secrets_survive(
-                        _readable_options(key), request.options, sent="options" in request.model_fields_set
+                        readable_mapping(key.encrypted_options),
+                        request.options,
+                        sent="options" in request.model_fields_set,
                     )
                     if (key.encrypted_api_key is not None and request.api_key is None) or stored_options_follow:
                         raise WebSearchKeyCredentialRequiredError
@@ -339,12 +342,8 @@ class WebSearchKeyService:
                 if sets_api_base:
                     values["api_base"] = api_base
                 if "options" in request.model_fields_set:
-                    stored_options = _readable_options(key)
-                    if stored_options is None and (
-                        key.encrypted_options is not None or carries_redaction(request.options)
-                    ):
-                        # Either the mask would be stored as the value, or a write
-                        # would drop ciphertext that the right key could still open.
+                    stored_options = readable_mapping(key.encrypted_options)
+                    if restore_is_unsafe(stored_options, request.options, sealed=key.encrypted_options is not None):
                         raise WebSearchKeyOptionsUnreadableError
                     options = restore_redacted_values(request.options, stored_options) or None
                     _check_options(kind, provider, options)
@@ -543,7 +542,9 @@ class WebSearchKeyService:
 
 
 def _public(key: OrgWebSearchKey) -> OrgWebSearchKeyPublic:
-    return OrgWebSearchKeyPublic.from_row(key, options=_readable_options(key), usable=key_credential(key) is not None)
+    return OrgWebSearchKeyPublic.from_row(
+        key, options=readable_mapping(key.encrypted_options), usable=key_credential(key) is not None
+    )
 
 
 def _kind(key: OrgWebSearchKey) -> ToolKind:
@@ -589,7 +590,7 @@ def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
         if kind == "fetch"
         else any_search.AnySearch.get_provider_metadata(provider)
     )
-    return False, metadata.requires_api_key, metadata.requires_api_base and not metadata.default_api_base
+    return False, credential_needs_api_key(metadata), metadata.requires_api_base and not metadata.default_api_base
 
 
 async def _check_settings(
@@ -598,7 +599,7 @@ async def _check_settings(
     """Refuse a new key a call could not be made with as written.
 
     Raises:
-        WebSearchKeyIncompleteError: the provider needs a key or an endpoint the key does not carry.
+        WebSearchKeyIncompleteError: the key lacks an API key or an endpoint a key on the provider must carry.
         WebSearchKeySettingRefusedError: the endpoint or an option is one the provider or this deployment refuses.
     """
     _, requires_key, _ = _requirements(kind, provider)
@@ -658,18 +659,6 @@ def _validated_name(name: str) -> str:
     if not stripped:
         raise WebSearchKeyNameRequiredError()
     return stripped
-
-
-def _readable_options(key: OrgWebSearchKey) -> dict[str, Any] | None:
-    """The key's stored provider options, or None when no configured key reads them.
-
-    Listing a key is not searching with one, so a row whose secret has moved is
-    named rather than failing the listing.
-    """
-    try:
-        return decrypt_mapping(key.encrypted_options)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return None
 
 
 def _encrypted_options(options: dict[str, Any] | None) -> str | None:

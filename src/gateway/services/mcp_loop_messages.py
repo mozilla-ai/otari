@@ -1000,6 +1000,7 @@ async def anthropic_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -1057,6 +1058,7 @@ async def anthropic_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

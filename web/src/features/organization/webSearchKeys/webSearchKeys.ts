@@ -50,6 +50,20 @@ export function offeredProviders(
   return catalog.filter(servesTheModel)
 }
 
+/**
+ * Whether a key on the provider needs an API key. A key brings the
+ * organization's own account or its own server, so it carries an API key when
+ * the provider requires one or calls a public address of its own. On a
+ * provider that needs an endpoint, the key names its own server.
+ */
+export function needsApiKey(provider: SearchProviderInfo | undefined): boolean {
+  if (provider === undefined) return false
+  return (
+    provider.requires_api_key ||
+    (!provider.requires_api_base && Boolean(provider.default_api_base))
+  )
+}
+
 /** One kind's keys, archived ones only when they are shown. */
 export function keysOfKind(
   keys: readonly OrgWebSearchKey[],

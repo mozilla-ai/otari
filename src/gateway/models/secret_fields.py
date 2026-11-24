@@ -172,6 +172,17 @@ def stored_secrets_survive(stored: dict[str, Any] | None, submitted: dict[str, A
     return stored is not None and redact_secret_like_values(stored) != stored
 
 
+def restore_is_unsafe(stored: dict[str, Any] | None, submitted: dict[str, Any] | None, *, sealed: bool) -> bool:
+    """Whether a submitted object cannot be restored against a stored one that was not read back.
+
+    ``stored`` is the decrypted value, None when nothing could be read, and
+    ``sealed`` says whether the row holds ciphertext. With nothing read back,
+    either the mask would be stored as the value, or the write would drop
+    ciphertext that the right key could still open.
+    """
+    return stored is None and (sealed or carries_redaction(submitted))
+
+
 def restore_redacted_values(
     incoming: dict[str, Any] | None,
     stored: dict[str, Any] | None,

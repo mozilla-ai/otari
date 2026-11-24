@@ -56,6 +56,7 @@ function mockApi(opts: {
         role: "admin",
         expires_at: "2026-01-08T00:00:00+00:00",
         needs_password: opts.needsPassword ?? false,
+        verification_pending: opts.verificationPending ?? false,
         can_sign_in: canSignIn,
         ways_in: opts.needsPassword || canSignIn ? [] : waysIn,
       } as never
@@ -181,9 +182,61 @@ describe("AcceptInvitationPage", () => {
     expect(currentRoute()).toBe("/")
   })
 
+  it("names the provider where this deployment cannot mail a link", async () => {
+    // ways_in carries password_reset only where links can be mailed, so a
+    // provider on its own means the signup's verification email went nowhere.
+    mockApi({
+      verificationPending: true,
+      canSignIn: false,
+      waysIn: ["provider"],
+    })
+    renderPage("/accept-invitation?token=abc123", {
+      oauthProviders: ["google"],
+    })
+
+    expect(
+      await screen.findByText(
+        /Accept the invitation, then sign in with Google\./,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/verification link emailed at signup/)).toBeNull()
+  })
+
+  it("names no verification link where this deployment delivers nothing", async () => {
+    // Mail is configured, so the signup ran, but the transport reaches nobody,
+    // which means the verification email reached nobody either.
+    mockApi({ verificationPending: true, canSignIn: false, waysIn: [] })
+    const user = userEvent.setup()
+    renderPage("/accept-invitation?token=abc123")
+
+    expect(
+      await screen.findByText(
+        /Accept the invitation, then ask whoever administers/,
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Accept invitation" }))
+
+    expect(
+      await screen.findByText(
+        /Verify ada@example.com first: ask whoever administers/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/verification link emailed at signup/)).toBeNull()
+    expect(
+      screen.queryByRole("link", {
+        name: "Didn't sign up? Set a password instead",
+      }),
+    ).toBeNull()
+  })
+
   it("says to verify first when the address signed up and has not verified yet", async () => {
     // Accepting never verifies: whoever signed up may not hold the mailbox.
-    mockApi({ verificationPending: true })
+    mockApi({
+      verificationPending: true,
+      canSignIn: false,
+      waysIn: ["password_reset"],
+    })
     const user = userEvent.setup()
     renderPage("/accept-invitation?token=abc123")
 
@@ -192,7 +245,9 @@ describe("AcceptInvitationPage", () => {
     )
 
     expect(
-      await screen.findByText(/Verify ada@example.com first/),
+      await screen.findByText(
+        /Verify ada@example.com first: open the verification link emailed at signup\. If you did not sign up, choose a password/,
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByText("Sign in to get started.")).toBeNull()
     // The invitee may not be who signed up, and takes the address back here.
@@ -201,6 +256,9 @@ describe("AcceptInvitationPage", () => {
         name: "Didn't sign up? Set a password instead",
       }),
     ).toHaveAttribute("href", "/recover-password")
+    // One route to the reset page, not two. The sentence above already says
+    // that verifying comes first.
+    expect(screen.queryByRole("link", { name: "Choose a password" })).toBeNull()
   })
 
   it("sets a password for an address that has never signed in, in the same step", async () => {

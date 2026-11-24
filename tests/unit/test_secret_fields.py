@@ -24,6 +24,7 @@ from gateway.models.secret_fields import (
     _MAX_NESTING_DEPTH,
     REDACTED_VALUE,
     redact_secret_like_values,
+    restore_is_unsafe,
     restore_redacted_values,
 )
 from gateway.models.tools import SearchToolCredential
@@ -361,3 +362,23 @@ class TestSerializers:
 
         public = OrganizationGuardrailPublic.from_model(row, validate_kwargs=None, workspace_ids=[])
         assert public.validate_kwargs is None
+
+
+@pytest.mark.parametrize(
+    ("stored", "submitted", "sealed", "unsafe"),
+    [
+        # Read back: whatever was sent can be restored against it.
+        ({"token": "t"}, {"token": REDACTED_VALUE}, True, False),
+        # Nothing stored and no mask sent: a plain write.
+        (None, {"region": "us"}, False, False),
+        (None, None, False, False),
+        # A mask with nothing read back would be stored as the value.
+        (None, {"token": REDACTED_VALUE}, False, True),
+        # Ciphertext no key opens would be dropped by the write.
+        (None, {"region": "us"}, True, True),
+    ],
+)
+def test_restore_is_unsafe_only_where_nothing_was_read_back(
+    stored: dict[str, str] | None, submitted: dict[str, str] | None, sealed: bool, unsafe: bool
+) -> None:
+    assert restore_is_unsafe(stored, submitted, sealed=sealed) is unsafe

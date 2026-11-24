@@ -25,6 +25,7 @@ from gateway.services.catalog import (
     Identities,
     OfferingRow,
     OrganizationSelectors,
+    apply_model_metadata,
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
@@ -169,6 +170,13 @@ def models_by_identity(
             if selector in members
         ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
         first = offerings[ranked[0]]
+        # An organization's key is addressed by its slug, which no configured
+        # instance names, so the metadata pass that built this offering asked
+        # models.dev about the slug and got nothing. The slug map names the
+        # provider the key stands for, so read the model under that provider now.
+        resolved = (slug_providers or {}).get(first.id.partition(":")[0])
+        if resolved is not None:
+            apply_model_metadata(config, catalog, first, organization_id=organization_id, provider_type=resolved)
         rows[identity.id] = first.model_copy(
             update={
                 "id": identity.id,

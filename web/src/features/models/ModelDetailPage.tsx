@@ -1,13 +1,13 @@
 import { Button, buttonVariants } from "@heroui/react"
-import { Link, useLocation } from "@tanstack/react-router"
+import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
-import { FiCheck, FiMinus } from "react-icons/fi"
+import { FiCheck, FiEdit2, FiMinus, FiTag } from "react-icons/fi"
 
 import type { CatalogOffering } from "@/client"
-import { Button as ActionButton } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -65,9 +65,9 @@ import { providerModelId } from "./modelKey"
 // drawer beside the table with the request to send; ahead of a session, where
 // there is no key to send it with, it starts an account instead.
 //
-// Read-only for everyone (otari-ai#2095, #2096): a rate is edited on Model
-// pricing, which the operator's link here points at, so the page that compares
-// prices never becomes the page that changes them.
+// Read-only for everyone (otari-ai#2095, #2096): a rate is edited on
+// Providers, which an offering's Set your rate… opens, so the page that
+// compares prices never becomes the page that changes them.
 
 function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -268,6 +268,7 @@ function offeringColumns({
   percentile,
   withSource,
   onEditDetails,
+  onSetRate,
 }: {
   canOverride: boolean
   isOperator: boolean
@@ -276,6 +277,7 @@ function offeringColumns({
   percentile: Percentile
   withSource: boolean
   onEditDetails: (offering: CatalogOffering) => void
+  onSetRate: (offering: CatalogOffering) => void
 }): DataTableColumn<OfferingRow>[] {
   // Lane order is what a laptop sees without scrolling: the provider and its
   // selector, then the prices the page exists to compare, then where each came
@@ -452,37 +454,41 @@ function offeringColumns({
     // what their own organization is billed for a model it supplies the key
     // for. An offering on one of the deployment's own instances is not one of
     // those: the deployment settles that upstream bill, and the gateway refuses
-    // an override for it (otari#1164), so no link is offered rather than one
+    // an override for it (otari#1164), so no action is offered rather than one
     // that ends in a disabled dialog. The details follow the same line: the
     // organization's for its own keys, the operator's for everything else.
     columns.push({
       id: "actions",
       header: "Actions",
+      align: "end",
       cell: ({ offering: row }) => {
         const own = row.credential === "organization"
         const editDetails = own ? canOverride : isOperator
+        const name = `${providerDisplayName(row.provider)} ${providerModelId(row.selector)}`
         return (
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {own && canOverride ? (
-              <Link
-                to="/organization/provider-keys"
-                search={{ override: row.selector }}
-                className="text-link hover:text-link-hover"
-              >
-                Set your rate
-              </Link>
-            ) : null}
+          <RowActionRow>
             {!own && canOverride ? (
-              <span className="text-caption text-subtle">
+              <span className="text-caption text-subtle whitespace-nowrap">
                 Deployment priced
               </span>
             ) : null}
-            {editDetails ? (
-              <ActionButton size="sm" onPress={() => onEditDetails(row)}>
-                Edit details
-              </ActionButton>
+            {own && canOverride ? (
+              <RowAction
+                icon={FiTag}
+                label="Set your rate…"
+                ariaLabel={`Set your rate for ${name}`}
+                onPress={() => onSetRate(row)}
+              />
             ) : null}
-          </span>
+            {editDetails ? (
+              <RowAction
+                icon={FiEdit2}
+                label="Edit details…"
+                ariaLabel={`Edit details for ${name}`}
+                onPress={() => onEditDetails(row)}
+              />
+            ) : null}
+          </RowActionRow>
         )
       },
     })
@@ -524,7 +530,7 @@ export function ModelDetailView({
   const isOperator = !publicView && operator.isOperator
   // Includes an operator: on a single-tenant deployment they are also the
   // organization's owner, and excluding them would leave the one caller who can
-  // set a rate without the link to set it.
+  // set a rate without the action to set it.
   const canOverride = !publicView && canManage(organization.data)
   // The offerings the selected workspace may call, as the list beside it shows.
   const workspace = useSelectedWorkspace()
@@ -537,6 +543,7 @@ export function ModelDetailView({
   const [useModel, setUseModel] = useState(false)
   const [editing, setEditing] = useState<CatalogOffering | undefined>(undefined)
   const setOverride = useSetModelOverride()
+  const navigate = useNavigate()
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
     direction: "asc" | "desc"
@@ -771,7 +778,9 @@ export function ModelDetailView({
                 : null}
             </p>
           </div>
-          <div className="flex flex-col gap-3 border border-border bg-surface p-3">
+          {/* No card: the table sits on the canvas, bounded by its own rules
+              (design/data.md). */}
+          <div className="flex min-w-0 flex-col gap-4">
             {quantizations.length > 0 || withSpeed ? (
               <div className="otari-toolbar flex flex-wrap items-center gap-2">
                 {quantizations.length > 0 ? (
@@ -811,6 +820,11 @@ export function ModelDetailView({
                   percentile,
                   withSource: !publicView,
                   onEditDetails: setEditing,
+                  onSetRate: (offering) =>
+                    void navigate({
+                      to: "/organization/provider-keys",
+                      search: { override: offering.selector },
+                    }),
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}

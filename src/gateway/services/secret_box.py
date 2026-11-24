@@ -232,3 +232,16 @@ def decrypt_mapping(ciphertext: str | None) -> dict[str, Any] | None:
         return None
     values: dict[str, Any] = json.loads(decrypt_secret(ciphertext))
     return values
+
+
+def readable_mapping(ciphertext: str | None) -> dict[str, Any] | None:
+    """The settings mapping a stored ciphertext holds, or None when no configured key reads it.
+
+    For reporting on a row rather than serving it: a listing names a row whose
+    secret has moved instead of failing, so a decryption that cannot be done
+    reads as nothing stored.
+    """
+    try:
+        return decrypt_mapping(ciphertext)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return None

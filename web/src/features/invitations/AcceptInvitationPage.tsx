@@ -49,7 +49,7 @@ import { currentRoute } from "@/shared/helpers/appLocation"
 import { tokenFromRoute } from "@/shared/helpers/routeParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ClaimForm } from "./ClaimForm"
-import { waysInSentence } from "./waysIn"
+import { verificationPendingSentence, waysInSentence } from "./waysIn"
 
 /**
  * Whose session this browser holds, against the invited address.
@@ -180,7 +180,7 @@ export function AcceptInvitationPage() {
                 {accept.data.password_set
                   ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
                   : accept.data.verification_pending
-                    ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link we emailed when you signed up, then sign in.`
+                    ? `Verify ${preview.data?.email ?? "the invited address"} first: ${verificationPendingSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
                     : accept.data.can_sign_in === false
                       ? `${invitedEmail ?? "The invited address"} has no password yet. To get started, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
                       : "Sign in to get started."}
@@ -196,6 +196,7 @@ export function AcceptInvitationPage() {
                 Go to sign in
               </Button>
               {accept.data.can_sign_in === false &&
+              !accept.data.verification_pending &&
               accept.data.ways_in?.includes("password_reset") ? (
                 <PublicAuthLink to="/recover-password">
                   Choose a password
@@ -203,7 +204,8 @@ export function AcceptInvitationPage() {
               ) : null}
               {/* Whoever signed up may not be this invitee, who then takes the
                   address back by choosing a password through the mailbox. */}
-              {accept.data.verification_pending ? (
+              {accept.data.verification_pending &&
+              accept.data.ways_in?.includes("password_reset") ? (
                 <PublicAuthLink to="/recover-password">
                   Didn't sign up? Set a password instead
                 </PublicAuthLink>
@@ -248,18 +250,25 @@ export function AcceptInvitationPage() {
             />
           ) : (
             <>
-              {/* Another organization has this address too, so neither link
-                  may choose its password; say which way in exists instead of
-                  ending at a sign-in screen it cannot pass. Compared with
-                  false because an older gateway sends no such field. */}
+              {/* This link may not choose the address's password, either
+                  because a signup already chose one or because another
+                  organization holds the address too; say which way in exists
+                  instead of ending at a sign-in screen it cannot pass.
+                  Compared with false because an older deployment sends no
+                  such field. */}
               {preview.data.can_sign_in !== false ? null : (
                 <InfoBanner>
                   This link can't set a password for {preview.data.email}.
                   Accept the invitation, then{" "}
-                  {waysInSentence(
-                    preview.data.ways_in ?? [],
-                    deployment.oauth_providers,
-                  )}
+                  {preview.data.verification_pending
+                    ? verificationPendingSentence(
+                        preview.data.ways_in ?? [],
+                        deployment.oauth_providers,
+                      )
+                    : waysInSentence(
+                        preview.data.ways_in ?? [],
+                        deployment.oauth_providers,
+                      )}
                 </InfoBanner>
               )}
               <ErrorBanner error={accept.error} />
