@@ -181,6 +181,59 @@ def test_a_row_carrying_no_credential_reports_none() -> None:
     assert row.endpoint_auth is None
 
 
+def _public(row: OrgProviderKey) -> OrgProviderKeyPublic:
+    return OrgProviderKeyPublic.from_row(row, client_args=None, usable=False, now=datetime.now(UTC))
+
+
+def test_a_credential_the_build_cannot_read_is_reported_as_held() -> None:
+    """Absence and an unreadable credential are different states, and only one of them is fixed by removing it."""
+    row = OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="https://proxy.example/v1",
+        endpoint_auth_method="static_header",
+        endpoint_auth_header_name="Fastly-Key",
+        encrypted_endpoint_auth_secret="gAAAA-x",
+        endpoint_auth_expires_at=LATER,
+    )
+
+    public = _public(row)
+
+    assert public.endpoint_auth is None
+    assert public.endpoint_auth_unreadable is True
+
+
+def test_a_credential_the_build_reads_is_not_reported_as_unreadable() -> None:
+    row = OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="https://proxy.example/v1",
+        endpoint_auth_method="static_header",
+        endpoint_auth_header_name="Fastly-Key",
+        encrypted_endpoint_auth_secret="gAAAA-x",
+        endpoint_auth_last4="9f2a",
+        endpoint_auth_expires_at=LATER,
+    )
+
+    public = _public(row)
+
+    assert public.endpoint_auth is not None
+    assert public.endpoint_auth_unreadable is False
+
+
+def test_a_key_carrying_no_credential_is_not_reported_as_unreadable() -> None:
+    row = OrgProviderKey(organization_id=uuid.uuid4(), provider="openai", name="k", created_at=datetime.now(UTC))
+
+    public = _public(row)
+
+    assert public.endpoint_auth is None
+    assert public.endpoint_auth_unreadable is False
+
+
 @pytest.mark.asyncio
 async def test_the_engine_probe_sends_the_endpoint_credential_beside_the_api_key() -> None:
     seen: list[httpx.Headers] = []

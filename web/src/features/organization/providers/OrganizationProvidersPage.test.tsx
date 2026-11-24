@@ -572,6 +572,50 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("marks a key whose stored endpoint credential cannot be read", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: null,
+          endpoint_auth_unreadable: true,
+          usable: false,
+        }),
+      ],
+    })
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(
+      await screen.findByText(/Endpoint credential unreadable/),
+    ).toBeInTheDocument()
+  })
+
+  // The fields come up empty for an unreadable credential, so the draft never
+  // differs from it and the save would carry nothing. Without this the only way
+  // to clear one is to delete the whole key.
+  it("removes an unreadable endpoint credential on a save that leaves the header blank", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: null,
+          endpoint_auth_unreadable: true,
+          usable: false,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ endpoint_auth: null })
+    })
+  })
+
   // The date field holds minutes, so resending an untouched credential would
   // rewrite a stored rotation date that carried seconds, and could be refused
   // on the account of a date the person saving never touched.

@@ -17,19 +17,28 @@ function auth(overrides: Partial<EndpointAuth> = {}): EndpointAuth {
 
 describe("EndpointAuthMark", () => {
   it("draws nothing for a key that carries no endpoint credential", () => {
-    const { container } = render(<EndpointAuthMark auth={null} />)
+    const { container } = render(
+      <EndpointAuthMark auth={null} isUnreadable={false} />,
+    )
 
     expect(container).toBeEmptyDOMElement()
   })
 
   it("draws nothing while the credential is inside its window", () => {
-    const { container } = render(<EndpointAuthMark auth={auth()} />)
+    const { container } = render(
+      <EndpointAuthMark auth={auth()} isUnreadable={false} />,
+    )
 
     expect(container).toBeEmptyDOMElement()
   })
 
   it("names the rotation date as due when it is near", () => {
-    render(<EndpointAuthMark auth={auth({ state: "expiring_soon" })} />)
+    render(
+      <EndpointAuthMark
+        auth={auth({ state: "expiring_soon" })}
+        isUnreadable={false}
+      />,
+    )
 
     expect(screen.getByText(/Endpoint credential due/)).toHaveClass(
       "text-warning",
@@ -37,7 +46,12 @@ describe("EndpointAuthMark", () => {
   })
 
   it("names the rotation date as passed once it has", () => {
-    render(<EndpointAuthMark auth={auth({ state: "expired" })} />)
+    render(
+      <EndpointAuthMark
+        auth={auth({ state: "expired" })}
+        isUnreadable={false}
+      />,
+    )
 
     expect(screen.getByText(/Endpoint credential expired/)).toHaveClass(
       "text-danger",
@@ -50,9 +64,29 @@ describe("EndpointAuthMark", () => {
     render(
       <EndpointAuthMark
         auth={auth({ state: "expired", expires_at: "2020-01-01T00:00:00Z" })}
+        isUnreadable={false}
       />,
     )
 
     expect(screen.getByText(/2020/)).toBeInTheDocument()
+  })
+
+  it("names a stored credential this deployment cannot read", () => {
+    render(<EndpointAuthMark auth={null} isUnreadable={true} />)
+
+    expect(screen.getByText(/Endpoint credential unreadable/)).toHaveClass(
+      "text-danger",
+    )
+  })
+
+  // The row carries one and nobody can send it, so there is no window left to
+  // report. Reporting the date would say the credential is fine until March.
+  it("reports the unreadable credential rather than its date", () => {
+    render(<EndpointAuthMark auth={auth()} isUnreadable={true} />)
+
+    expect(
+      screen.getByText(/Endpoint credential unreadable/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/due/)).not.toBeInTheDocument()
   })
 })

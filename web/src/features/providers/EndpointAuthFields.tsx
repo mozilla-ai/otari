@@ -56,6 +56,13 @@ export function isEndpointAuthComplete(
   return hasStoredSecret && !addressMoved
 }
 
+/** What the header field says, which is where a credential is entered and removed. */
+const HEADER_DESCRIPTION =
+  "Optional. The header a CDN or identity-aware proxy in front of this address expects, sent on every request. Leave blank when the address needs no credential of its own."
+
+const UNREADABLE_DESCRIPTION =
+  "This key stores a credential this deployment cannot read, so none of it is shown. Save with this blank to remove it, or enter the header and the value again to replace it."
+
 /**
  * The credential an edge proxy in front of a key's base URL requires.
  *
@@ -66,11 +73,14 @@ export function EndpointAuthFields({
   value,
   onChange,
   stored,
+  storedIsUnreadable,
 }: {
   value: EndpointAuthDraft
   onChange: (value: EndpointAuthDraft) => void
   /** The credential already held, or null for a key that carries none. */
   stored: EndpointAuth | null
+  /** Whether the key stores a credential this deployment cannot read. */
+  storedIsUnreadable: boolean
 }) {
   const last4 = stored?.last4 ?? ""
   const isSet = value.headerName.trim() !== ""
@@ -82,7 +92,9 @@ export function EndpointAuthFields({
         value={value.headerName}
         onChange={(headerName) => onChange({ ...value, headerName })}
         placeholder="Fastly-Key"
-        description="Optional. The header a CDN or identity-aware proxy in front of this address expects, sent on every request. Leave blank when the address needs no credential of its own."
+        description={
+          storedIsUnreadable ? UNREADABLE_DESCRIPTION : HEADER_DESCRIPTION
+        }
       />
 
       {isSet ? (

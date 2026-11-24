@@ -18261,6 +18261,12 @@
               }
             ]
           },
+          "endpoint_auth_unreadable": {
+            "default": false,
+            "description": "True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.",
+            "title": "Endpoint Auth Unreadable",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",

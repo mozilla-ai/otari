@@ -26,14 +26,21 @@ function stored(overrides: Partial<EndpointAuth> = {}): EndpointAuth {
 function Harness({
   initial = EMPTY_ENDPOINT_AUTH,
   held = null,
+  heldIsUnreadable = false,
 }: {
   initial?: EndpointAuthDraft
   held?: EndpointAuth | null
+  heldIsUnreadable?: boolean
 }) {
   const [value, setValue] = useState(initial)
   return (
     <>
-      <EndpointAuthFields value={value} onChange={setValue} stored={held} />
+      <EndpointAuthFields
+        value={value}
+        onChange={setValue}
+        stored={held}
+        storedIsUnreadable={heldIsUnreadable}
+      />
       <output data-testid="draft">{JSON.stringify(value)}</output>
     </>
   )
@@ -181,5 +188,16 @@ describe("EndpointAuthFields", () => {
     await userEvent.type(headerField(), "Fastly-Key")
 
     expect(screen.queryByText(/Leave blank to keep it/)).not.toBeInTheDocument()
+  })
+
+  // The fields come up empty either way, so without this the form says the key
+  // carries no credential while it carries one nobody can send.
+  it("says a stored credential cannot be read, and how to remove it", () => {
+    render(<Harness heldIsUnreadable={true} />)
+
+    expect(screen.getByText(/cannot read/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Save with this blank to remove it/),
+    ).toBeInTheDocument()
   })
 })

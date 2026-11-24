@@ -273,7 +273,14 @@ function KeyForm({
       // Sent only where the credential changed, for the same reason. The date
       // field holds minutes, so resending an untouched credential would rewrite
       // a stored rotation date that carried seconds.
-      if (endpointAuthChanged) body.endpoint_auth = endpointAuthBody
+      //
+      // A stored credential this deployment cannot read is not in the draft, so
+      // the draft never differs from it and nothing would be sent. Such a save
+      // carries the credential whether or not the fields were touched, which is
+      // what lets one be removed at all.
+      if (endpointAuthChanged || editing.endpoint_auth_unreadable) {
+        body.endpoint_auth = endpointAuthBody
+      }
       update.mutate({ keyId: editing.id, body }, { onSuccess: onClose })
       return
     }
@@ -398,6 +405,7 @@ function KeyForm({
           value={endpointAuth}
           onChange={(endpointAuth) => setDraft({ ...draft, endpointAuth })}
           stored={editing?.endpoint_auth ?? null}
+          storedIsUnreadable={editing?.endpoint_auth_unreadable ?? false}
         />
       )}
 
@@ -608,7 +616,10 @@ export function OrganizationProvidersPage() {
           <span className="text-muted">
             {row.api_base ?? "provider default"}
           </span>
-          <EndpointAuthMark auth={row.endpoint_auth} />
+          <EndpointAuthMark
+            auth={row.endpoint_auth}
+            isUnreadable={row.endpoint_auth_unreadable}
+          />
         </div>
       ),
     },

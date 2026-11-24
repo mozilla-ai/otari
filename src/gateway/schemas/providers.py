@@ -107,13 +107,13 @@ class EndpointAuthPublic(SQLModel):
     def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
         """Read one row's endpoint credential for the API, or None where it carries none.
 
-        A credential this build cannot read is reported as none, because this
-        shape has to render whatever a row holds.
+        Raises:
+            UnreadableEndpointAuthError: The row holds a credential this build
+                cannot read. Every field here is required, so there is no value
+                of this shape that reports one, and answering None would say the
+                row carries no credential when it carries one nobody can send.
         """
-        try:
-            auth = key.endpoint_auth
-        except UnreadableEndpointAuthError:
-            return None
+        auth = key.endpoint_auth
         if auth is None:
             return None
         return cls(
@@ -194,6 +194,15 @@ class OrgProviderKeyPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     last4: str | None = None
     endpoint_auth: EndpointAuthPublic | None = None
+    endpoint_auth_unreadable: bool = Field(
+        default=False,
+        description=(
+            "True where the key stores an endpoint credential this deployment cannot read, so "
+            "`endpoint_auth` is absent while the key still carries one. Holding one that cannot be read "
+            "is a third state, distinct from holding none: it is what a client needs to report it and "
+            "offer to remove it."
+        ),
+    )
     is_org_default: bool
     zero_data_retention: bool = False
     usable: bool = Field(
@@ -250,6 +259,12 @@ class OrgProviderKeyPublic(SQLModel):
         way ``encrypted_api_key`` itself stays off the wire, with only ``last4``
         coming back.
         """
+        try:
+            endpoint_auth = EndpointAuthPublic.from_row(key, now=now)
+        except UnreadableEndpointAuthError:
+            endpoint_auth, endpoint_auth_unreadable = None, True
+        else:
+            endpoint_auth_unreadable = False
         return cls(
             id=key.id,
             organization_id=key.organization_id,
@@ -258,7 +273,8 @@ class OrgProviderKeyPublic(SQLModel):
             slug=key.slug,
             api_base=key.api_base,
             client_args=redact_secret_like_values(client_args),
-            endpoint_auth=EndpointAuthPublic.from_row(key, now=now),
+            endpoint_auth=endpoint_auth,
+            endpoint_auth_unreadable=endpoint_auth_unreadable,
             last4=key.last4,
             is_org_default=key.is_org_default,
             zero_data_retention=key.zero_data_retention,

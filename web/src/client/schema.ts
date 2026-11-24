@@ -17951,6 +17951,12 @@ export interface components {
             created_at: string;
             endpoint_auth?: components["schemas"]["EndpointAuthPublic"] | null;
             /**
+             * Endpoint Auth Unreadable
+             * @description True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.
+             * @default false
+             */
+            endpoint_auth_unreadable: boolean;
+            /**
              * Id
              * Format: uuid
              */
