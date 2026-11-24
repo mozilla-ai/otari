@@ -28,10 +28,12 @@ function Harness({
   initial = EMPTY_ENDPOINT_AUTH,
   held = null,
   heldIsUnreadable = false,
+  moved = false,
 }: {
   initial?: EndpointAuthDraft
   held?: EndpointAuth | null
   heldIsUnreadable?: boolean
+  moved?: boolean
 }) {
   const [value, setValue] = useState(initial)
   return (
@@ -41,11 +43,14 @@ function Harness({
         onChange={setValue}
         stored={held}
         storedIsUnreadable={heldIsUnreadable}
+        addressMoved={moved}
       />
       <output data-testid="draft">{JSON.stringify(value)}</output>
     </>
   )
 }
+
+const secretField = () => screen.getByLabelText("Endpoint credential")
 
 const headerField = () => screen.getByLabelText("Endpoint credential header")
 
@@ -249,8 +254,82 @@ describe("EndpointAuthFields", () => {
       <Harness initial={endpointAuthDraftFrom(stored())} held={stored()} />,
     )
 
-    expect(screen.getByText(/Ending abcd/)).toBeInTheDocument()
     expect(screen.getByText(/Leave blank to keep it/)).toBeInTheDocument()
+  })
+
+  // A bare tail reads as a broken word, which is how "value" showed as "alue".
+  it("shows a stored tail masked, in the field rather than the caption", () => {
+    render(
+      <Harness initial={endpointAuthDraftFrom(stored())} held={stored()} />,
+    )
+
+    expect(secretField()).toHaveAttribute("placeholder", "Keep ••••abcd")
+    expect(screen.queryByText(/Ending abcd/)).not.toBeInTheDocument()
+  })
+
+  // The state the paragraph got wrong: a blank is refused here, so offering to
+  // keep one contradicts the disabled save.
+  it("asks for the value again while the key moves to another address", () => {
+    render(
+      <Harness
+        initial={endpointAuthDraftFrom(stored())}
+        held={stored()}
+        moved={true}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        "Enter the credential again: it goes to the new address.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Leave blank to keep it/)).not.toBeInTheDocument()
+  })
+
+  it("marks the value required on a credential being set for the first time", async () => {
+    render(<Harness />)
+
+    await userEvent.type(headerField(), "Fastly-Key")
+
+    expect(secretField()).toBeRequired()
+  })
+
+  it("marks the value required while the key moves to another address", () => {
+    render(
+      <Harness
+        initial={endpointAuthDraftFrom(stored())}
+        held={stored()}
+        moved={true}
+      />,
+    )
+
+    expect(secretField()).toBeRequired()
+  })
+
+  it("leaves the value optional where a blank keeps what is stored", () => {
+    render(
+      <Harness initial={endpointAuthDraftFrom(stored())} held={stored()} />,
+    )
+
+    expect(secretField()).not.toBeRequired()
+  })
+
+  // A blank removes an unreadable credential, so asking for one would mark a
+  // field whose whole purpose is to be left empty.
+  it("leaves the value optional where a blank removes an unreadable credential", async () => {
+    render(<Harness heldIsUnreadable={true} />)
+
+    await userEvent.type(headerField(), "Fastly-Key")
+
+    expect(secretField()).not.toBeRequired()
+  })
+
+  it("marks the rotation date required", async () => {
+    render(<Harness />)
+
+    await userEvent.type(headerField(), "Fastly-Key")
+
+    expect(screen.getByLabelText("Credential expires")).toBeRequired()
   })
 
   it("says nothing about a stored value on a credential being set for the first time", async () => {

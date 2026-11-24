@@ -420,6 +420,7 @@ function KeyForm({
           onChange={(endpointAuth) => setDraft({ ...draft, endpointAuth })}
           stored={editing?.endpoint_auth ?? null}
           storedIsUnreadable={editing?.endpoint_auth_unreadable ?? false}
+          addressMoved={addressMoved}
         />
       )}
 

@@ -26,11 +26,14 @@ export function ExpiryFields({
   value,
   onChange,
   description,
+  isRequired,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   description: ReactNode
+  /** Marks the date, which is the segment with no default of its own. */
+  isRequired?: boolean
 }) {
   const [date, time] = value ? value.split("T") : ["", undefined]
   const [pendingTime, setPendingTime] = useState(MIDNIGHT)
@@ -55,6 +58,7 @@ export function ExpiryFields({
           onChange={changeDate}
           type="date"
           description={description}
+          isRequired={isRequired}
           shouldReserveMessage
         />
       </div>

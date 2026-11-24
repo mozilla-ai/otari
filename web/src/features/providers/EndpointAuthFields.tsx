@@ -105,6 +105,28 @@ const UNREADABLE_DESCRIPTION =
   "This key stores a credential this deployment cannot read, so none of it is shown. Save with this blank to remove it, or enter the header and the value again to replace it."
 
 /**
+ * What the value field says, for the one state the form is in.
+ *
+ * One sentence per state rather than one paragraph covering them all, because
+ * the paragraph offered a blank save in the state where a blank is refused.
+ */
+function secretDescription({
+  hasStored,
+  addressMoved,
+}: {
+  hasStored: boolean
+  addressMoved: boolean
+}): string {
+  if (addressMoved && hasStored) {
+    return "Enter the credential again: it goes to the new address."
+  }
+  if (hasStored) {
+    return "Encrypted at rest and never shown again. Leave blank to keep it."
+  }
+  return `At least ${SECRET_MIN_LENGTH} characters, encrypted at rest and never shown again.`
+}
+
+/**
  * The credential an edge proxy in front of a key's base URL requires.
  *
  * Shown only for a key that has a base URL of its own, since a proxy is
@@ -115,6 +137,7 @@ export function EndpointAuthFields({
   onChange,
   stored,
   storedIsUnreadable,
+  addressMoved,
 }: {
   value: EndpointAuthDraft
   onChange: (value: EndpointAuthDraft) => void
@@ -122,10 +145,16 @@ export function EndpointAuthFields({
   stored: EndpointAuth | null
   /** Whether the key stores a credential this deployment cannot read. */
   storedIsUnreadable: boolean
+  /** Whether this save moves the key to a different address. */
+  addressMoved: boolean
 }) {
   const last4 = stored?.last4 ?? ""
   const isSet = value.headerName.trim() !== ""
   const secretError = endpointAuthSecretError(value)
+  // An unreadable credential is removed by saving this blank, so it is the one
+  // stored value the field does not ask for.
+  const secretRequired =
+    !storedIsUnreadable && (stored === null || addressMoved)
 
   return (
     <div className="flex flex-col gap-4">
@@ -145,11 +174,12 @@ export function EndpointAuthFields({
             label="Endpoint credential"
             value={value.secret}
             onChange={(secret) => onChange({ ...value, secret })}
-            description={
-              last4
-                ? `At least ${SECRET_MIN_LENGTH} characters. Encrypted at rest. Ending ${last4}. Leave blank to keep it, and retype it when you move this key to a different address.`
-                : `At least ${SECRET_MIN_LENGTH} characters. Encrypted at rest and never shown again; only the last 4 characters come back.`
-            }
+            isRequired={secretRequired}
+            placeholder={last4 ? `Keep ••••${last4}` : undefined}
+            description={secretDescription({
+              hasStored: last4 !== "",
+              addressMoved,
+            })}
             isInvalid={secretError !== undefined}
             errorMessage={secretError}
           />
@@ -158,7 +188,8 @@ export function EndpointAuthFields({
             label="Credential expires"
             value={value.expiresAt}
             onChange={(expiresAt) => onChange({ ...value, expiresAt })}
-            description="Required. When you expect to rotate it. Otari marks the key as the date nears and once it passes, and never refuses a request because of it."
+            isRequired
+            description="When you expect to rotate it. Otari marks the key near that date and never refuses a request because of it."
           />
         </>
       ) : null}
