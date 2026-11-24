@@ -9,6 +9,7 @@ extension is what registers the hook with pi; see cli/docs/agent-guardrails.md.
 import json
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -92,7 +93,10 @@ def test_tilde_name_path_is_not_expanded(repo: Path) -> None:
     assert hook_cli._hook_pi_normalize_path("~nosuchuser-xyz/x", "pi") == "~nosuchuser-xyz/x"
 
 
-@pytest.mark.parametrize("alias", [".env", "@.env", "@./.env", "file://{repo}/.env"])
+@pytest.mark.parametrize(
+    "alias",
+    [".env", "@.env", "@./.env", "file://{repo}/.env", "file://localhost{repo}/.env", "file://LOCALHOST{repo}/.env"],
+)
 def test_pi_path_aliases_reach_the_read_gate(repo: Path, alias: str) -> None:
     """pi strips a leading `@` and opens a `file://` URL's path, so each of these reads `.env`."""
     result = _invoke(_pre(repo, "read", {"path": alias.format(repo=repo)}))
@@ -104,6 +108,24 @@ def test_pi_path_aliases_reach_the_edit_gate(monkeypatch: pytest.MonkeyPatch, re
     for alias in ("@CHANGELOG.md", f"@~/{repo.name}/CHANGELOG.md", f"@{repo}/CHANGELOG.md"):
         result = _invoke(_pre(repo, "write", {"path": alias}))
         assert result.exit_code == 2, (alias, result.output)
+
+
+def test_a_remote_file_url_is_left_alone() -> None:
+    assert hook_cli._hook_pi_normalize_path("file://example.com/x/.env", "pi") == "file://example.com/x/.env"
+
+
+def test_windows_home_form_is_expanded_only_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert hook_cli._hook_pi_normalize_path("~\\project\\.env", "pi") == str(tmp_path / "project\\.env")
+    assert hook_cli._hook_pi_normalize_path("~name\\x", "pi") == "~name\\x"
+    assert hook_cli._hook_pi_normalize_path("/c/Users/a/.env", "pi") == "C:\\Users\\a\\.env"
+    assert hook_cli._hook_pi_normalize_path("@/mnt/d/x", "pi") == "D:\\x"
+    assert hook_cli._hook_pi_normalize_path("/cygdrive/e", "pi") == "E:\\"
+    assert hook_cli._hook_pi_normalize_path("/usr/local", "pi") == "/usr/local"
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert hook_cli._hook_pi_normalize_path("~\\project", "pi") == "~\\project"
+    assert hook_cli._hook_pi_normalize_path("/c/Users", "pi") == "/c/Users"
 
 
 def test_pi_normalizes_unicode_spaces_like_pi() -> None:

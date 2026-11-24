@@ -109,28 +109,38 @@ _PI_READ_TOOL_PATH_FIELDS = {"read": "path"}
 
 # The Unicode spaces pi rewrites to a plain space in a tool's path (pi-coding-agent's utils/paths.ts).
 _PI_PATH_UNICODE_SPACES = re.compile("[\u00a0\u2000-\u200a\u202f\u205f\u3000]")
+# A shell-style drive path (`/c/...`, `/mnt/c/...`, `/cygdrive/c/...`) pi opens as `C:\...` on Windows.
+_PI_WINDOWS_SHELL_PATH = re.compile(r"/(?:mnt/|cygdrive/)?([a-z])(?:/(.*))?", re.IGNORECASE | re.DOTALL)
 
 
 def _hook_pi_normalize_path(target: Any, harness: str) -> Any:
     """The path pi's read, edit and write tools actually open, so a gate sees that and not the alias.
 
     Mirrors pi's own `normalizePath` (pi-coding-agent's utils/paths.ts): Unicode spaces become plain
-    spaces, one leading `@` is stripped (so `@.env` opens `.env`), `~` and `~/...` expand to the home
-    directory, and a `file://` URL becomes its path. `~name` is left alone, as pi leaves it, and an
-    expansion that fails keeps the original so the hook fails open.
+    spaces, one leading `@` is stripped (so `@.env` opens `.env`), on Windows a shell-style drive path
+    becomes a drive path, `~`, `~/...` and on Windows `~\\...` expand to the home directory, and a
+    `file://` URL with no host or a local one becomes its path. `~name` is left alone, as pi leaves
+    it, and an expansion that fails keeps the original so the hook fails open.
     """
     if harness != "pi" or not isinstance(target, str):
         return target
     path = _PI_PATH_UNICODE_SPACES.sub(" ", target)
     path = path.removeprefix("@")
-    if path == "~" or path.startswith("~/"):
+    if sys.platform == "win32" and path.startswith("/") and not path.startswith("//") and "\\" not in path:
+        drive = _PI_WINDOWS_SHELL_PATH.fullmatch(path)
+        if drive is not None:
+            path = f"{drive.group(1).upper()}:\\{(drive.group(2) or '').replace('/', '\\')}"
+    if path == "~" or path.startswith("~/") or (sys.platform == "win32" and path.startswith("~\\")):
         try:
-            return str(Path(path).expanduser())
+            home = Path.home()
         except RuntimeError:
             return target
+        return str(home if path == "~" else home / path[2:])
     if path.startswith("file://"):
         parsed = urllib.parse.urlparse(path)
-        if parsed.netloc in ("", "localhost"):
+        # A URL's host is case-insensitive; Node's fileURLToPath, which pi uses, accepts any spelling of
+        # localhost as local.
+        if parsed.netloc.lower() in ("", "localhost"):
             return urllib.request.url2pathname(parsed.path)
     return path
 
