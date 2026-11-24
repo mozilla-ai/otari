@@ -132,6 +132,32 @@ _FIXTURES: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "a browser state leading a tool result": {
+        "tools": _TOOLS,
+        "messages": [
+            {"role": "user", "content": "open the release notes"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_b", "name": "read", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_b",
+                        "content": [
+                            {
+                                "type": "browser_state",
+                                "tabs": [{"id": 1, "url": "https://example.com/notes", "active": True}],
+                                "state_changes": ["navigated"],
+                                "ignored": "not a field the model is told",
+                            },
+                            {"type": "text", "text": "page loaded"},
+                            {"type": "text", "text": " from cache"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    },
     "forced tool, sequential": {
         "tools": _TOOLS,
         "tool_choice": {"type": "tool", "name": "read", "disable_parallel_tool_use": True},

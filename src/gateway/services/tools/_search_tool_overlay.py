@@ -40,6 +40,7 @@ from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
 )
 from gateway.services.tool_settings_service import apply_override
@@ -69,7 +70,8 @@ def _row_to_entry(row: SearchToolCredential) -> dict[str, Any]:
     """Build a config.search_tools- or config.fetch_tools-shaped overlay entry from a stored row.
 
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the row
-    has a key that cannot be decrypted; the caller decides whether to skip it.
+    has a stored secret that cannot be decrypted; the caller decides whether to
+    skip it.
     """
     entry: dict[str, Any] = {"provider": row.provider}
     if row.fetch_tool and row.kind != "fetch":
@@ -78,8 +80,8 @@ def _row_to_entry(row: SearchToolCredential) -> dict[str, Any]:
         entry["api_base"] = row.api_base
     if row.timeout_seconds:
         entry["timeout"] = row.timeout_seconds
-    if row.options:
-        entry["options"] = dict(row.options)
+    if options := decrypt_mapping(row.encrypted_options):
+        entry["options"] = options
     if row.encrypted_api_key:
         entry["api_key"] = decrypt_secret(row.encrypted_api_key)
     return entry

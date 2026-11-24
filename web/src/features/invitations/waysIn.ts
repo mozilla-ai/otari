@@ -23,3 +23,17 @@ export function waysInSentence(
   if (provider || reset) return `${provider || reset}.`
   return "ask whoever administers this gateway how to sign in."
 }
+
+/**
+ * How an invited address whose signup password is waiting on verification gets in.
+ *
+ * NOTE: This names the verification link outright, so callers must hold the
+ * `verify_email` step, which is answered only where such a link reaches the
+ * mailbox.
+ */
+export function verificationPendingSentence(
+  ways: InvitationPreview["ways_in"],
+  providers: readonly string[],
+): string {
+  return `open the verification link emailed at signup. If you did not sign up, ${waysInSentence(ways, providers)}`
+}

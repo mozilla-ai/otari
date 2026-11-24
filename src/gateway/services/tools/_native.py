@@ -48,7 +48,8 @@ class NativeCall:
 
     ``id`` is the ID the caller's own transcript gave the call. A rendering that needs an
     ID of its own mints one carrying the gateway's prefix instead. ``failed`` is whether the
-    call ran and answered with a tool error. ``token`` is minted once per call: a rendering
+    call ran and answered with a tool error, and ``raised`` whether running it raised instead,
+    so the tool kept no failure of its own. ``token`` is minted once per call: a rendering
     that announces a call both when it starts and when it ends builds the ID of both from
     it, so a caller can match the two.
     """
@@ -57,6 +58,7 @@ class NativeCall:
     id: str
     arguments: Mapping[str, Any]
     failed: bool = False
+    raised: bool = False
     token: str = field(default_factory=lambda: uuid.uuid4().hex, compare=False)
 
 

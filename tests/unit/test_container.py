@@ -49,7 +49,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import MembershipListener
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.

@@ -239,8 +239,12 @@ def _on_roster_of(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     foreign key. This is what puts a member who has not minted a key yet in
     their own organization's scope.
     """
+    # SQLite stores a UUID column as CHAR(32) hex while ``users.user_id`` holds the
+    # hyphenated string form, so the two only compare equal once the hyphens are
+    # dropped from both sides. Comparing the raw text matched on PostgreSQL alone.
+    stored = func.replace(cast(col(OrganizationMember.user_id), String), "-", "")
     condition = select(col(OrganizationMember.id)).where(
-        cast(col(OrganizationMember.user_id), String) == User.user_id,
+        stored == func.replace(User.user_id, "-", ""),
     )
     if organization_id is not None:
         condition = condition.where(col(OrganizationMember.organization_id) == organization_id)

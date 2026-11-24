@@ -480,7 +480,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/runtime_settings_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
-    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
@@ -1207,11 +1206,9 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/services/tenancy/": (
         "__init__.py",
         "authorization.py",
-        "deployment_user_service.py",
         "domain_verification.py",
         "email_address.py",
         "invitation_email.py",
-        "membership_listener.py",
         "org_provider_key_service.py",
         "organization_domain_service.py",
         "organization_guardrail_definition_service.py",
@@ -1349,7 +1346,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 76,
+    "tenancy": 67,
 }
 
 
@@ -2342,8 +2339,20 @@ def _executed_imports(tree: ast.Module) -> Iterator[ast.Import | ast.ImportFrom]
             pending.extend(statement for handler in getattr(node, "handlers", []) for statement in handler.body)
 
 
+def _namespace_read(node: ast.Import | ast.ImportFrom, targets: list[str], modules: set[str]) -> str | None:
+    """The module an import statement reads a plain name out of, or None when it reads none.
+
+    ``from pkg import name`` waits for ``pkg`` to bind ``name``, while ``from pkg import submodule``
+    waits only for the submodule, because the import system loads it when the attribute is missing.
+    """
+    if not isinstance(node, ast.ImportFrom) or not targets:
+        return None
+    base = targets[0]
+    return base if any(f"{base}.{alias.name}" not in modules for alias in node.names) else None
+
+
 def _import_graph(src_root: Path) -> dict[str, set[str]]:
-    """Each module under the scope and the modules it imports when it is itself imported.
+    """Each module under the scope and the modules it waits for when it is itself imported.
 
     NOTE: only the imports that run when the module is imported are read, which
     :func:`_executed_imports` decides.
@@ -2359,13 +2368,17 @@ def _import_graph(src_root: Path) -> dict[str, set[str]]:
             continue
         imported: set[str] = set()
         for node in _executed_imports(tree):
-            for module in _imported_modules(node, file_path, src_root):
+            targets = _imported_modules(node, file_path, src_root)
+            read = _namespace_read(node, targets, modules)
+            for module in targets:
                 # Importing a.b.c runs a, then a.b, then a.b.c, so each package above it is an edge too.
                 parts = module.split(".")
                 for candidate in (".".join(parts[: i + 1]) for i in range(len(parts))):
-                    # A package reaching its own member is the one edge a body orders: the package binds
-                    # what the member needs before the member runs, so it is not a dependency to resolve.
-                    if candidate not in modules or candidate == name or candidate.startswith(f"{name}."):
+                    if candidate not in modules or candidate == name:
+                        continue
+                    # A module's own package is already running when the module's body does, so passing
+                    # through it waits for nothing. Reading a name out of it waits for the rest of it.
+                    if name.startswith(f"{candidate}.") and candidate != read:
                         continue
                     imported.add(candidate)
         graph[name] = imported
@@ -2402,9 +2415,9 @@ def _cycle_groups(graph: dict[str, set[str]]) -> list[list[str]]:
 def check_import_cycles(src_root: Path) -> list[str]:
     """Check that no import cycle runs between modules that must each finish loading before the other.
 
-    A package reaching its own member is the one edge a package body orders, since the package binds
-    what the member needs before the member runs, so it is not read as a dependency. Every other edge
-    is, and Python refuses a cycle of them with a partially initialized module.
+    A module waits for every module it reads a plain name out of, and for every package it loads on
+    the way to one, except its own packages, which are already running when its body does. Python
+    refuses a cycle of those waits with a partially initialized module.
     """
     return [
         f"{', '.join(group)} import each other; no module in the cycle finishes loading "

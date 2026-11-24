@@ -133,12 +133,18 @@ def offered_model_types(
     return kinds
 
 
-def model_type(config: GatewayConfig, models_dev: ModelsDevCatalog | None, selector: str) -> ModelType | None:
-    """The kind of the ``provider:model`` ``selector``: its listing's word for it, then models.dev's."""
+def model_type(
+    config: GatewayConfig, models_dev: ModelsDevCatalog | None, selector: str, *, provider_type: str | None = None
+) -> ModelType | None:
+    """The kind of the ``provider:model`` ``selector``: its listing's word for it, then models.dev's.
+
+    ``provider_type`` names the provider behind an instance the config does not
+    declare, which is what an organization's key slug is.
+    """
     instance, separator, model_id = selector.partition(":")
     if not separator:
         return None
-    return offering_model_type(models_dev, instance, config.provider_instance_type(instance), model_id)
+    return offering_model_type(models_dev, instance, provider_type or config.provider_instance_type(instance), model_id)
 
 
 def catalog_model_type(offerings: Sequence[tuple[str, ModelType | None]], vendor: str | None) -> ModelType | None:

@@ -24,6 +24,7 @@ from gateway.api.deps._caller import (
     CallerWorkspaceQuery,
     CallerWorkspaces,
 )
+from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.deps.api_keys import (
     ApiKeyFormatPortDep,
     ApiKeyServiceDep,
@@ -279,6 +280,7 @@ from gateway.services.pricing_service import RequestPrices, ResolvedPricing, res
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
+    HostedServing,
     HostedSources,
     OrgProviderModelService,
     PlatformClient,
@@ -298,7 +300,6 @@ from gateway.services.routing import (
 )
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
@@ -483,7 +484,7 @@ def get_overview_service(
     return OverviewService(
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
-        DeploymentAdministrationAccess(db),
+        deployment_administration_access(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `get_workspace_service` builds.
         WorkspaceService(db, uow=uow, membership_listener=membership_listener),
@@ -687,19 +688,27 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
     """
     providers = HostedProviderRepository(uow)
     regions = HostedProviderRegionRepository(uow)
+    sources = HostedSources(config, providers, regions)
+    models = HostedProviderModelRepository(uow)
+    vendors = HostedProviderVendorRepository(uow)
+
+    def serving(*, read_all: bool) -> HostedServing:
+        return HostedServing(uow, sources=sources, models=models, vendors=vendors, read_all=read_all)
+
     return HostedProviderService(
         uow,
         config=config,
         providers=providers,
         regions=regions,
-        sources=HostedSources(config, providers, regions),
-        models=HostedProviderModelRepository(uow),
-        vendors=HostedProviderVendorRepository(uow),
+        sources=sources,
+        models=models,
+        vendors=vendors,
         endpoints=ProviderEndpointRepository(uow),
         pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
         metadata_overrides=build_model_metadata_override_service(uow),
+        serving=serving,
     )
 
 
@@ -856,7 +865,7 @@ async def master_key_caller_operates_deployment(
     ``DeploymentAdministrationAccess.has_administration_access``; without one, the caller holds the master key.
     """
     if session_identity is not None:
-        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
+        return await deployment_administration_access(db).has_administration_access(session_identity)
     return True
 
 

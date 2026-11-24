@@ -177,6 +177,37 @@ class HostedSource:
         return self.entry
 
 
+def _region_selector(name: str) -> tuple[str, str] | None:
+    """``name`` read as ``<provider>@<slug>``, or None when it names no region."""
+    base, separator, slug = name.rpartition(REGION_SEPARATOR)
+    return (base, slug) if separator and slug else None
+
+
+@dataclass(frozen=True)
+class HostedSnapshot:
+    """Every hosted provider by name, read once, on rows no session holds."""
+
+    by_name: dict[str, HostedSource]
+
+    def provider_named(self, name: str) -> bool:
+        """Whether a hosted provider goes by exactly ``name``, rather than a region of one."""
+        return name in self.by_name
+
+    def get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
+        """What :meth:`HostedSources.get_serving` answers, from the snapshot."""
+        source = self.by_name.get(lookup_name(name))
+        if source is not None:
+            return source, None
+        selector = _region_selector(name)
+        if selector is None:
+            return None
+        base, slug = selector
+        source = self.by_name.get(lookup_name(base))
+        if source is None or source.region(slug) is None:
+            return None
+        return source, slug
+
+
 class HostedSources:
     """Read the merged view. Called inside the caller's Unit of Work, for the rows."""
 
@@ -203,6 +234,21 @@ class HostedSources:
         for name, entry in entries.items():
             merged.setdefault(name, HostedSource(entry=entry))
         return [merged[name] for name in sorted(merged)]
+
+    async def snapshot(self) -> HostedSnapshot | None:
+        """Every hosted provider by name on detached rows, or None when there are more than a listing holds."""
+        rows = await self.providers.list_all_detached()
+        if rows is None:
+            return None
+        entries = self.entries()
+        regions = await self.regions.list_for_providers_detached([row.id for row in rows])
+        merged = {
+            row.name: HostedSource(row=row, shadows_config=row.name in entries, regions=tuple(regions.get(row.id, ())))
+            for row in rows
+        }
+        for name, entry in entries.items():
+            merged.setdefault(name, HostedSource(entry=entry))
+        return HostedSnapshot(merged)
 
     async def zero_data_retention_names(self, organization_id: uuid.UUID | None) -> frozenset[str]:
         """The enabled hosted providers ``organization_id`` may use that declare zero data retention, by name."""
@@ -245,9 +291,10 @@ class HostedSources:
         source = await self.get(name)
         if source is not None:
             return source, None
-        base, separator, slug = name.rpartition(REGION_SEPARATOR)
-        if not separator or not slug:
+        selector = _region_selector(name)
+        if selector is None:
             return None
+        base, slug = selector
         source = await self.get(base)
         if source is None or source.region(slug) is None:
             return None

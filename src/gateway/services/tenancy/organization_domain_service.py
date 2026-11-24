@@ -148,8 +148,8 @@ class DomainAutoJoinListener:
 
         - An unverified address is skipped. Otherwise signing up as
           ``anyone@theircompany.com`` without ever reading the mail would be
-          enough to get in. So is a vouched one (``email_vouched_at``), or an
-          admin of any organization could invite that address and claim it.
+          enough to get in. So is one no mailbox proved (``email_proven_at`` is
+          null), or an admin of any organization could invite that address and claim it.
         - A claim that is disabled, whose DNS proof has not landed, or whose
           proof has aged out past ``DOMAIN_PROOF_TTL``, is skipped.
         - An existing membership is returned untouched. A ``suspended`` row
@@ -172,9 +172,9 @@ class DomainAutoJoinListener:
         # account, told apart by `oauth_provider`: an SSO account carries it and the operator carries
         # none. Neither has a domain to match or a verification to have done, so both fall out here
         # rather than at the address check below.
-        # A vouched address is one an organization admin asserted, not one the
-        # person proved, and any organization can vouch for any address.
-        if user.email is None or user.email_verified_at is None or user.email_vouched_at is not None:
+        # Auto-join needs an address the person proved. An organization's own word for an
+        # address does not admit them to a domain any organization could have claimed.
+        if user.email is None or user.email_proven_at is None:
             return None
 
         domain = email_domain(user.email)

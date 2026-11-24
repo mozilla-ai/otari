@@ -41,6 +41,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from any_llm import LLMProvider
 from fastapi import BackgroundTasks
@@ -95,7 +96,12 @@ from gateway.services.providers._owned_endpoint_network import (
     owned_endpoint_http_client,
     owned_endpoint_sdk_client,
 )
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    SecretDecryptionError,
+    decrypt_mapping,
+    decrypt_secret,
+)
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.model_type import ModelType, OfferedModelType
@@ -119,6 +125,14 @@ _RATE_FIELDS = (
     "cache_read_price_per_million",
     "cache_write_price_per_million",
 )
+
+
+@dataclass(frozen=True)
+class _DialCredential:
+    """What a key dials its provider with, decrypted."""
+
+    api_key: str | None
+    client_args: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -865,16 +879,22 @@ class OrgProviderModelService:
         return {model: rate for model in wanted if (rate := by_key.get(f"{prefix}:{model}")) is not None}
 
     @staticmethod
-    def _credential(key: OrgProviderKey) -> dict[str, object] | None:
-        """The client arguments this key dials with, or None when it will not decrypt."""
-        if key.encrypted_api_key is None:
-            return {}
+    def _credential(key: OrgProviderKey) -> _DialCredential | None:
+        """What this key dials with, or None when it will not decrypt.
+
+        One gate for both stored secrets: the API key and the client extras are
+        sealed with the same box, so a key that reads neither is reported the
+        same way whichever of the two the row carries.
+        """
         try:
-            return {"api_key": decrypt_secret(key.encrypted_api_key)}
+            return _DialCredential(
+                api_key=None if key.encrypted_api_key is None else decrypt_secret(key.encrypted_api_key),
+                client_args=decrypt_mapping(key.encrypted_client_args),
+            )
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
-    async def _dial(self, key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
+    async def _dial(self, key: OrgProviderKey, credential: _DialCredential, *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key, and keep what its engine says.
 
         Never raises, never echoes the key.
@@ -882,8 +902,8 @@ class OrgProviderModelService:
         Kept under the key and its organization: another organization can list a
         different server under the same prefix.
         """
-        api_key = credential.get("api_key")
-        client_args: dict[str, object] = tenant_client_args(key.provider, key.client_args)
+        api_key = credential.api_key
+        client_args: dict[str, object] = tenant_client_args(key.provider, credential.client_args)
         engine_client = None
         if key.api_base:
             # The organization chose this address, so it is held to public

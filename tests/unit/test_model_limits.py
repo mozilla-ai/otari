@@ -29,7 +29,9 @@ MODELS_DEV = parse_catalog(
             },
         },
         "nebius": {"models": {"Qwen/Qwen3-30B-A3B-Instruct-2507": {"limit": {"context": 262144, "output": 8192}}}},
-        "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
+        "google": {
+            "models": {"gemini-3.5-flash-lite": {"temperature": True, "limit": {"context": 1048576, "output": 65536}}}
+        },
         # An entry with no window, so the dataset below it is asked.
         "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
         "amazon-bedrock": {
@@ -127,6 +129,15 @@ def test_response_format_is_left_out_for_a_provider_that_refuses_it_for_every_mo
     capabilities = model_capabilities(_config(), MODELS_DEV, "minimax:MiniMax-M2")
 
     assert capabilities is not None and capabilities.supported_parameters == ["tools", "tool_choice"]
+
+
+def test_a_model_flagged_for_temperature_lists_it() -> None:
+    """#3141: a client could not tell ahead of time which models take a sampling temperature."""
+    flagged = model_capabilities(_config(), MODELS_DEV, "gemini:gemini-3.5-flash-lite")
+    unflagged = model_capabilities(_config(), MODELS_DEV, "openai:gpt-4o")
+
+    assert flagged is not None and flagged.supported_parameters == ["temperature"]
+    assert unflagged is not None and "temperature" not in unflagged.supported_parameters
 
 
 def test_an_entry_without_flags_lists_no_parameters() -> None:

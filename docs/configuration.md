@@ -1381,10 +1381,12 @@ request's price.
 A transcription model that reports tokens and no length, such as
 `gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
 length Otari reads from the uploaded file. Otari reads the length of a WAV,
-MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
-not its name. A file it cannot read, such as a WebM upload, gives no length,
-so that request keeps no cost at a `minute` or `second` rate. A length the
-provider reports always wins over the length read from the file.
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF, WMA or WebM file by its
+content, not its name. A WebM file from a browser recorder states no length,
+so Otari counts it from the timestamps of the audio blocks in the file. A file
+it cannot read gives no length, so that request keeps no cost at a `minute` or
+`second` rate. A length the provider reports always wins over the length read
+from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1580,8 +1582,9 @@ file or environment, then to the built-in default.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10. A call past it gets a tool error the model can recover
-  from.
+  together. Default 10. Once it is reached, later rounds no longer offer either
+  tool, and a call past it within one round gets a tool error the model can
+  recover from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.

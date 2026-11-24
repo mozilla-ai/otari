@@ -44,12 +44,13 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchKeyNameRequiredError,
     WebSearchKeyNotArchivedError,
     WebSearchKeyNotFoundError,
+    WebSearchKeyOptionsUnreadableError,
     WebSearchKeySettingRefusedError,
     WebSearchKeyUnknownProviderError,
     WorkspaceWebSearchKeyOverrideConflictError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User
 from gateway.models.tools import (
     OrgWebSearchKey,
@@ -78,13 +79,16 @@ from gateway.schemas.tools import (
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
-from gateway.services.tools._web_search import in_loop_default, resolve_fetch
+from gateway.services.tools._web_search import credential_needs_api_key, in_loop_default, resolve_fetch
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 from gateway.services.web_search_providers import is_sendable_api_key
 
@@ -93,9 +97,10 @@ LockWorkspace = Callable[[uuid.UUID], Awaitable[None]]
 
 
 def key_credential(key: OrgWebSearchKey) -> WebToolCredential | None:
-    """The key as a credential of its kind, or ``None`` where this deployment cannot decrypt it."""
+    """The key as a credential of its kind, or ``None`` where this deployment cannot decrypt its secrets."""
     try:
         api_key = decrypt_secret(key.encrypted_api_key) if key.encrypted_api_key is not None else None
+        options = decrypt_mapping(key.encrypted_options) or {}
     except (SecretBoxUnavailableError, SecretDecryptionError):
         logger.warning("Web search key %s cannot be decrypted on this deployment", key.id)
         return None
@@ -105,7 +110,7 @@ def key_credential(key: OrgWebSearchKey) -> WebToolCredential | None:
         source=WebToolCredentialSource.ORG,
         api_key=api_key,
         api_base=key.api_base,
-        options=MappingProxyType(dict(key.options or {})),
+        options=MappingProxyType(options),
     )
 
 
@@ -280,7 +285,7 @@ class WebSearchKeyService:
                     encrypted_api_key=encrypted,
                     last4=last4,
                     api_base=api_base,
-                    options=options,
+                    encrypted_options=_encrypted_options(options),
                 )
         except WebSearchKeyConflict:
             raise WebSearchKeyAlreadyExistsError(provider, name, kind=kind) from None
@@ -321,7 +326,9 @@ class WebSearchKeyService:
                 if sets_api_base and api_base is not None and api_base != key.api_base:
                     # The stored credential would go to the new host on the next call.
                     stored_options_follow = stored_secrets_survive(
-                        key.options, request.options, sent="options" in request.model_fields_set
+                        readable_mapping(key.encrypted_options),
+                        request.options,
+                        sent="options" in request.model_fields_set,
                     )
                     if (key.encrypted_api_key is not None and request.api_key is None) or stored_options_follow:
                         raise WebSearchKeyCredentialRequiredError
@@ -335,9 +342,12 @@ class WebSearchKeyService:
                 if sets_api_base:
                     values["api_base"] = api_base
                 if "options" in request.model_fields_set:
-                    options = restore_redacted_values(request.options, key.options) or None
+                    stored_options = readable_mapping(key.encrypted_options)
+                    if restore_is_unsafe(stored_options, request.options, sealed=key.encrypted_options is not None):
+                        raise WebSearchKeyOptionsUnreadableError
+                    options = restore_redacted_values(request.options, stored_options) or None
                     _check_options(kind, provider, options)
-                    values["options"] = options
+                    values["encrypted_options"] = _encrypted_options(options)
                 name = values.get("name")
                 if (
                     name is not None
@@ -532,7 +542,9 @@ class WebSearchKeyService:
 
 
 def _public(key: OrgWebSearchKey) -> OrgWebSearchKeyPublic:
-    return OrgWebSearchKeyPublic.from_row(key, usable=key_credential(key) is not None)
+    return OrgWebSearchKeyPublic.from_row(
+        key, options=readable_mapping(key.encrypted_options), usable=key_credential(key) is not None
+    )
 
 
 def _kind(key: OrgWebSearchKey) -> ToolKind:
@@ -578,7 +590,7 @@ def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
         if kind == "fetch"
         else any_search.AnySearch.get_provider_metadata(provider)
     )
-    return False, metadata.requires_api_key, metadata.requires_api_base and not metadata.default_api_base
+    return False, credential_needs_api_key(metadata), metadata.requires_api_base and not metadata.default_api_base
 
 
 async def _check_settings(
@@ -587,7 +599,7 @@ async def _check_settings(
     """Refuse a new key a call could not be made with as written.
 
     Raises:
-        WebSearchKeyIncompleteError: the provider needs a key or an endpoint the key does not carry.
+        WebSearchKeyIncompleteError: the key lacks an API key or an endpoint a key on the provider must carry.
         WebSearchKeySettingRefusedError: the endpoint or an option is one the provider or this deployment refuses.
     """
     _, requires_key, _ = _requirements(kind, provider)
@@ -647,6 +659,14 @@ def _validated_name(name: str) -> str:
     if not stripped:
         raise WebSearchKeyNameRequiredError()
     return stripped
+
+
+def _encrypted_options(options: dict[str, Any] | None) -> str | None:
+    """Encrypt a key's provider options for storage. Nothing to store stays None."""
+    try:
+        return encrypt_mapping(options or None)
+    except SecretBoxUnavailableError:
+        raise SecretBoxUnavailableTenancyError from None
 
 
 def _encrypted(api_key: str) -> tuple[str, str]:

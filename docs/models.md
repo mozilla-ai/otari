@@ -209,9 +209,12 @@ uses:
 
 - `name`: models.dev's display name.
 - `supported_parameters`: `tools` and `tool_choice` for a model that calls
-  tools, `response_format` for one with structured output, and `reasoning` for
-  a reasoning model. It names only the parameters models.dev records a flag
-  for, not every parameter the model takes. `response_format` is left out where
+  tools, `response_format` for one with structured output, `reasoning` for
+  a reasoning model, and `temperature` for one that takes a sampling
+  temperature. It names only the parameters models.dev records a flag
+  for, not every parameter the model takes. A model models.dev records no
+  `temperature` flag for does not list `temperature`, whether or not it takes
+  one. `response_format` is left out where
   Otari cannot send it to the provider, as on Bedrock for every model but
   Anthropic's, or on MiniMax, Z.ai, Inception, SageMaker and llamafile for any
   model.
@@ -233,7 +236,7 @@ no `name`.
 
 Where a provider's server and models.dev say nothing about a model, or say it
 wrong, whoever holds the key that serves it can set its details on the model's
-page in the dashboard: **Edit details** on its row of offerings. The deployment
+page in the dashboard: choose **Edit details…** from its row's menu. The deployment
 operator sets them for the deployment's own providers, and an organization's
 owners and admins for the models its own provider keys serve, which only that
 organization's callers see.
@@ -571,7 +574,7 @@ your organization pays.
   offering is served on.
 
 The page is read-only. An organization sets its own rate on **Providers >
-Inference**, which an offering on one of its keys links to.
+Inference**, which **Set your rate…** in an offering's row menu opens.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -789,7 +792,10 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor.
+of the offering tried first, and `owned_by` is the model's vendor. A limit the
+offering tried first does not know, such as the context length of a model a vLLM
+server also serves, is the smallest one the model's other offerings report. An
+output limit filled that way is capped at the entry's context window.
 
 The caller's aliases and routing policies are listed beside the models, under
 their own names: the configured ones, and the stored ones of the key's

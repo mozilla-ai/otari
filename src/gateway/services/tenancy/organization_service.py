@@ -18,6 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
@@ -64,6 +65,7 @@ from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
     MANAGEMENT_ROLES,
     OWNER_ROLE,
+    AcceptedMembershipPublic,
     AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -78,6 +80,7 @@ from gateway.models.tenancy import (
     CallerOrganizationMembershipsPublic,
     CallerWorkspaceMembershipPublic,
     Invitation,
+    InvitationNextStep,
     InvitationPreviewPublic,
     InvitationWayIn,
     InviteOrganizationMemberRequest,
@@ -94,6 +97,7 @@ from gateway.models.tenancy import (
     OrganizationPublic,
     PendingOrganizationInvitationPublic,
     PendingOrganizationInvitationsPublic,
+    SignInMeans,
     User,
     Workspace,
     WorkspaceAssignmentRequest,
@@ -103,6 +107,7 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
 )
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
+from gateway.repositories.organizations import BootstrapMarkerRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationDomainRepository,
@@ -120,17 +125,9 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import (
-    AdmittedMember,
-    BlockedAddresses,
-    InvitationMailLimit,
-    SsoEnforcement,
-)
-from gateway.services.password_service import hash_password_async
-from gateway.services.secret_box import secret_box_configured
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
-from gateway.services.tenancy.email_address import validated_email as _validated_email
-from gateway.services.tenancy.invitation_email import render_invitation_email
+
+if TYPE_CHECKING:
+    from gateway.services.identity import DeploymentAdministrationAccess
 
 # The name first boot gives an organization's workspace, reused so a created
 # organization's first workspace is the same thing rather than a near-copy.
@@ -138,7 +135,18 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # into the tenancy graph is a function-local import), so this direction of the
 # dependency is the safe one; ``tests/unit/test_service_module_imports.py``
 # pins it.
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import (
+    AdmittedMember,
+    BlockedAddresses,
+    BootstrapOperatorMarker,
+    InvitationMailLimit,
+    MembershipListener,
+    SsoEnforcement,
+)
+from gateway.services.password_service import hash_password_async
+from gateway.services.secret_box import secret_box_configured
+from gateway.services.tenancy.email_address import validated_email as _validated_email
+from gateway.services.tenancy.invitation_email import render_invitation_email
 from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
@@ -194,9 +202,32 @@ def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
     ways: list[InvitationWayIn] = []
     if settings.sign_in_providers:
         ways.append("provider")
-    if settings.can_send_links:
+    if settings.can_deliver_links:
         ways.append("password_reset")
     return ways
+
+
+def _invitation_outcome(
+    means: SignInMeans, *, may_set_password: bool, settings: "InvitationClaimSettings"
+) -> tuple[InvitationNextStep, list[InvitationWayIn]]:
+    """What an invitee carrying these credentials does to get in, and the ways in that step names.
+
+    Pairing the two here is what holds the step's promise about them: ``verify_email``
+    cannot be answered without ``password_reset`` beside it, because both read
+    ``can_deliver_links``.
+
+    NOTE: ``verify_email`` needs a transport that delivers, not merely one that is
+    configured, because a verification link the mailbox never saw is no way in.
+    """
+    if may_set_password:
+        step = InvitationNextStep.SET_PASSWORD
+    elif means.completes_sign_in:
+        step = InvitationNextStep.SIGN_IN
+    elif means is SignInMeans.UNVERIFIED_PASSWORD and settings.can_deliver_links:
+        step = InvitationNextStep.VERIFY_EMAIL
+    else:
+        step = InvitationNextStep.USE_ANOTHER_WAY_IN
+    return step, _ways_in(settings) if step.carries_ways_in else []
 
 
 def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
@@ -230,25 +261,15 @@ def _hash_invitation_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _has_never_signed_in(user: User) -> bool:
-    """Whether an identity has no way in yet: no password, and no verified address.
+def _refuse_unproven_address(target: User, membership: OrganizationMember | None, email: str) -> None:
+    """Refuse adding an identity whose address only another organization recorded.
 
-    The verified address is what a provider sign-in leaves behind on an identity
-    that never set a password, so checking the password alone would treat an
-    account someone signs in to with Google as unclaimed.
+    An identity verified but not proved (``email_proven_at`` is null) carries a password
+    its first organization's admins could have chosen, so a second organization adding it
+    would hand them that organization's access. One this organization already holds a
+    membership for, in any status, is left alone.
     """
-    return user.is_active and user.hashed_password is None and user.email_verified_at is None
-
-
-def _refuse_address_vouched_elsewhere(target: User, membership: OrganizationMember | None, email: str) -> None:
-    """Refuse adding an identity whose address only another organization has vouched for.
-
-    A vouched identity (``email_vouched_at``) carries a password its first
-    organization's admins could have chosen, so a second organization adding it
-    would hand them that organization's access. One already on this roster in
-    any status is this organization's own, and is left alone.
-    """
-    if membership is None and target.email_vouched_at is not None:
+    if membership is None and target.email_verified_at is not None and target.email_proven_at is None:
         raise OrganizationMemberAddressUnprovenError(email)
 
 
@@ -282,7 +303,7 @@ def _invitation_accept_path(token: str) -> str:
     and left relative otherwise: still a valid link an operator can share and a
     browser already on this dashboard can follow, just not one that means
     anything outside a browser, which is why sending it by email is gated on
-    ``Mailer.can_send_links`` rather than on this.
+    ``Mailer.can_deliver_links`` rather than on this.
     """
     return f"/accept-invitation#token={token}"
 
@@ -355,12 +376,12 @@ class InvitationClaimSettings:
     """What this deployment asks of, and offers, an invitee who chooses a first password from an invitation link.
 
     ``terms_url`` is the terms the deployment publishes, which that invitee accepts as signup's do.
-    ``sign_in_providers`` (display names) and ``can_send_links`` say which other ways in a refusal can offer.
+    ``sign_in_providers`` (display names) and ``can_deliver_links`` say which other ways in a refusal can offer.
     """
 
     terms_url: str | None
     sign_in_providers: tuple[str, ...] = ()
-    can_send_links: bool = False
+    can_deliver_links: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,6 +463,18 @@ class OrganizationService:
     # Context resolution and authorization
     # ------------------------------------------------------------------
 
+    def _deployment_access(self) -> "DeploymentAdministrationAccess":
+        """Build the reader that says whether a caller operates the whole deployment.
+
+        NOTE: The import is function-local because the identity domain imports this
+        package, so a module-scope edge back to it would be a cycle.
+        """
+        from gateway.services.identity import DeploymentAdministrationAccess  # noqa: PLC0415
+
+        return DeploymentAdministrationAccess(
+            self.users, self.members, BootstrapOperatorMarker(BootstrapMarkerRepository(self.db))
+        )
+
     async def bootstrap_operator_id(self) -> uuid.UUID | None:
         """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
         bootstrap = await load_bootstrap_identity(self.db)
@@ -476,14 +509,14 @@ class OrganizationService:
         Delegated rather than re-derived, so this and the gate on the deployment-wide routers cannot
         come to disagree about who holds that authority.
         """
-        return await DeploymentAdministrationAccess(self.db).has_administration_access(user)
+        return await self._deployment_access().has_administration_access(user)
 
     async def deployment_operator_ids(self, users: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``users`` the deployment admits across every organization, in one lookup.
 
         The plural form, for deciding over several accounts without a lookup each.
         """
-        return await DeploymentAdministrationAccess(self.db).administration_access_ids(users)
+        return await self._deployment_access().administration_access_ids(users)
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, or a live membership where the pointer is stale.
@@ -800,7 +833,7 @@ class OrganizationService:
                 has_password=user.hashed_password is not None,
                 claims_deployment=await password_claims_deployment(self.db, user),
             ),
-            deployment_operator=await DeploymentAdministrationAccess(self.db).has_administration_access(user),
+            deployment_operator=await self._deployment_access().has_administration_access(user),
             provider_key_encryption_available=secret_box_configured(),
         )
 
@@ -1104,7 +1137,7 @@ class OrganizationService:
         block that commits, and so releases the identity's lock, when the caller holds none.
         """
         replaces_unproven = replaces_unproven and identity.email_verified_at is None
-        unproven = identity.email_verified_at is None or identity.email_vouched_at is not None
+        unproven = identity.email_proven_at is None
         if not replaces_unproven and not (open_signup and unproven):
             return False
         assert identity.email is not None  # a claim is always by address
@@ -1400,7 +1433,7 @@ class OrganizationService:
         # would read as a member who has spent nothing.
         spend_rows = (
             await attribution_spend(self.db, [str(member_user.id) for _, member_user in rows])
-            if await DeploymentAdministrationAccess(self.db).has_administration_access(user)
+            if await self._deployment_access().has_administration_access(user)
             else {}
         )
         spend = {
@@ -1479,7 +1512,7 @@ class OrganizationService:
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
                     raise OrganizationMemberAlreadyExistsError(email)
-                _refuse_address_vouched_elsewhere(target, membership, email)
+                _refuse_unproven_address(target, membership, email)
 
                 if membership is None:
                     # The same rule the revive branch gets from
@@ -1903,7 +1936,7 @@ class OrganizationService:
         membership = await self.members.get_by_organization_and_user(organization.id, target.id)
         if membership is not None and membership.status == "active":
             raise OrganizationMemberAlreadyExistsError(email)
-        _refuse_address_vouched_elsewhere(target, membership, email)
+        _refuse_unproven_address(target, membership, email)
         if membership is not None and membership.status == "invited":
             # Expiry is lazy: `_resolve_pending_invitation` only flips a
             # `pending` row to `expired` when someone presents its token,
@@ -1987,15 +2020,14 @@ class OrganizationService:
         accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
         mail_limited = False
-        # can_send_links, not is_configured: an accept link that is relative
-        # (no public_base_url) means nothing in an inbox, so a deployment that
-        # cannot build an absolute one falls back to the operator sharing it
-        # rather than mailing a link that goes nowhere. This is the degrading
-        # branch of the no-mail design; a surface with no such fallback calls
-        # mailer.require_ready() instead.
-        if mailer.can_send_links:
+        # can_deliver_links: the operator shares the link unless an email carrying
+        # it reaches the invitee. A relative link means nothing in an inbox, and
+        # neither does a message the transport shows the operator instead of
+        # sending. This is the degrading branch of the no-mail design; a surface
+        # with no such fallback calls mailer.require_ready() instead.
+        if mailer.can_deliver_links:
             mail_limited = not await mail_limit.admit(organization.id, email)
-        if mailer.can_send_links and not mail_limited:
+        if mailer.can_deliver_links and not mail_limited:
             delivery = await mailer.send(
                 to=email,
                 message=render_invitation_email(
@@ -2062,12 +2094,11 @@ class OrganizationService:
             raise InvitationAlreadyUsedError
         return invitation, membership, organization, invitee
 
-    async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
-        """Whether accepting an invitation from ``organization_id`` may choose ``invitee``'s first password.
+    async def _invitee_is_claimable(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
+        """Whether ``invitee`` is unclaimed and no organization but ``organization_id`` still holds it.
 
-        The inviter always holds the accept link (it is returned to them whether
-        or not mail went out), so a password chosen through it is the inviting
-        organization vouching for the address, not proof of the mailbox. That is
+        A password chosen through an accept link is the inviting organization recording
+        the address, not proof of the mailbox, because an admin may hold that link. That is
         enough for an identity no other organization knows. One another
         organization has added (as anything, an owner included) is refused, or
         any admin anywhere could create an organization, invite that address and
@@ -2076,10 +2107,10 @@ class OrganizationService:
 
         Only a live membership elsewhere counts: an active one, or an invited
         one with an invitation it can still accept. A revoked, declined, lapsed
-        or removed one vouches for nothing, and counting it would strand an
+        or removed one counts for nothing, and counting it would strand an
         invitee on a deployment with no mail and no provider.
         """
-        if invitee is None or not _has_never_signed_in(invitee):
+        if invitee is None or not invitee.is_active or invitee.sign_in_means is not SignInMeans.NONE:
             return False
         elsewhere = [m for m in await self.members.get_by_user(invitee.id) if m.organization_id != organization_id]
         if any(membership.status == "active" for membership in elsewhere):
@@ -2092,23 +2123,25 @@ class OrganizationService:
     async def get_invitation_preview(self, token: str, *, claims: InvitationClaimSettings) -> InvitationPreviewPublic:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
 
-        ``needs_password`` tells the token's holder whether accepting may set
-        the address's first password, and ``can_sign_in`` and ``ways_in`` how
-        the address gets in when it may not. That is only ever said to someone
-        holding this invitation, which already names the address, so it widens
-        nothing signup's enumeration-safety protects.
+        ``next_step`` tells the token's holder what to do to get in, and
+        ``ways_in`` what this deployment offers where that step names them.
+        That is only ever said to someone holding this invitation, which
+        already names the address, so it widens nothing signup's
+        enumeration-safety protects.
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
-        needs_password = await self._invitation_may_set_password(invitee, organization.id)
-        can_sign_in = not _has_never_signed_in(invitee)
+        next_step, ways_in = _invitation_outcome(
+            invitee.sign_in_means,
+            may_set_password=await self._invitee_is_claimable(invitee, organization.id),
+            settings=claims,
+        )
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
             role=membership.role,
             expires_at=invitation.expires_at,
-            needs_password=needs_password,
-            can_sign_in=can_sign_in,
-            ways_in=[] if needs_password or can_sign_in else _ways_in(claims),
+            next_step=next_step,
+            ways_in=ways_in,
         )
 
     async def accept_invitation(
@@ -2131,18 +2164,18 @@ class OrganizationService:
         ``password`` is what lets a deployment with no mail let an invitee in:
         signup has to mail a verification link, but the invitation link already
         stands in for what that link would, since it reached the invitee either
-        by email or from an admin who vouches for the address. It is accepted
-        only where ``_invitation_may_set_password`` allows, so a link can claim
+        by email or from an admin who holds it. It is accepted
+        only where ``_invitee_is_claimable`` allows, so a link can claim
         an unclaimed seat and never take over an account. The verification it
-        stamps is recorded as vouched (``email_vouched_at``), which domain
-        auto-join does not trust. Where the deployment publishes terms
+        stamps leaves ``email_proven_at`` null, which domain auto-join does
+        not trust. Where the deployment publishes terms
         (``claims``), a first password needs ``terms_accepted``, as signup and
         a reset claim do.
 
-        ``verification_pending`` on the result says the invitee chose a password
-        through signup and has not verified it yet, so the page can tell them to
-        verify before signing in. Accepting never verifies it: whoever signed up
-        may not be the person the invitation reached.
+        ``next_step`` on the result says where this leaves the invitee.
+        Accepting never verifies an address: whoever signed up may not be the
+        person the invitation reached, so a password waiting on verification is
+        still waiting afterwards.
         """
         if password is not None:
             # Before the lookup, so a policy refusal says nothing about the token.
@@ -2164,8 +2197,9 @@ class OrganizationService:
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
+        claimed_identity: User | None = None
         if password is not None:
-            if not await self._invitation_may_set_password(invitee, organization.id):
+            if not await self._invitee_is_claimable(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
             if sso_blocks_membership(
                 organization=organization,
@@ -2177,7 +2211,6 @@ class OrganizationService:
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
-                "email_vouched_at": now,
                 "full_name": invitee.full_name or (full_name or "").strip() or None,
             }
             if terms_accepted:
@@ -2196,23 +2229,21 @@ class OrganizationService:
             if not claimed:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-        result = await self._resolve_invitation_to_active_membership(
+            # The claim was a conditional UPDATE the session did not see, so this re-reads the row.
+            claimed_identity = await self.users.reload(invitee)
+        accepted = await self._resolve_invitation_to_active_membership(
             invitation, membership, organization, blocked_addresses
         )
-        verification_pending = invitee.hashed_password is not None and invitee.email_verified_at is None
-        can_sign_in = password is not None or not _has_never_signed_in(invitee)
-        claimed_identity = None
-        if password is not None:
-            # The claim was a conditional UPDATE the session did not see, so the name it wrote is read back.
-            claimed_identity = await self.users.reload(invitee)
+        # This link is spent, so no later call may choose a password through it.
+        next_step, ways_in = _invitation_outcome(
+            (claimed_identity or invitee).sign_in_means, may_set_password=False, settings=claims
+        )
         return InvitationAcceptance(
-            result=result.model_copy(
-                update={
-                    "password_set": password is not None,
-                    "verification_pending": verification_pending,
-                    "can_sign_in": can_sign_in,
-                    "ways_in": [] if can_sign_in else _ways_in(claims),
-                }
+            result=AcceptInvitationResultPublic(
+                organization_name=accepted.organization_name,
+                role=accepted.role,
+                next_step=next_step,
+                ways_in=ways_in,
             ),
             claimed=claimed_identity,
         )
@@ -2223,7 +2254,7 @@ class OrganizationService:
         membership: OrganizationMember,
         organization: Organization,
         blocked_addresses: BlockedAddresses,
-    ) -> AcceptInvitationResultPublic:
+    ) -> AcceptedMembershipPublic:
         """Flip a resolved pending invitation and its membership to ``active``, and commit.
 
         The whole of what accepting does, shared by the two ways to ask for it:
@@ -2263,7 +2294,7 @@ class OrganizationService:
             # directly through POST /me/members.
             await get_or_create_attribution_user(self.db, user_id=str(membership.user_id), alias=invitation.email)
 
-        return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
+        return AcceptedMembershipPublic(organization_name=organization.name, role=membership.role)
 
     async def admit(
         self,
@@ -2284,7 +2315,7 @@ class OrganizationService:
 
         Raises:
             MembershipUpdateError: the role offered would leave the organization with no active owner.
-            OrganizationMemberAddressUnprovenError: only another organization has vouched for the address.
+            OrganizationMemberAddressUnprovenError: only another organization recorded the address.
             OrganizationMemberDeactivatedError: the account is deactivated, so a membership grants nothing.
             OrganizationNotFoundError: the organization no longer exists.
 
@@ -2300,7 +2331,7 @@ class OrganizationService:
             membership, created = await self.members.add_if_absent(
                 organization_id=organization_id, user_id=user_id, role=role
             )
-            _refuse_address_vouched_elsewhere(identity, None if created else membership, identity.email or str(user_id))
+            _refuse_unproven_address(identity, None if created else membership, identity.email or str(user_id))
             if not created:
                 await self._require_an_owner_remains(
                     membership, organization_id=organization_id, new_role=role, new_status=ACTIVE_MEMBERSHIP_STATUS
@@ -2427,7 +2458,7 @@ class OrganizationService:
         user: User,
         organization_member_id: uuid.UUID,
         blocked_addresses: BlockedAddresses,
-    ) -> AcceptInvitationResultPublic:
+    ) -> AcceptedMembershipPublic:
         """Accept an invitation addressed to the caller, from their own inbox.
 
         Does exactly what the emailed link does (see
@@ -2482,7 +2513,7 @@ class OrganizationService:
         self,
         user: User,
         organization_member_id: uuid.UUID,
-    ) -> AcceptInvitationResultPublic | None:
+    ) -> AcceptedMembershipPublic | None:
         """The result an accept would have returned, if the caller already holds this membership active.
 
         ``None`` when there is still something to accept, or when the id names
@@ -2496,7 +2527,7 @@ class OrganizationService:
         organization = await self.organizations.get(membership.organization_id)
         if organization is None:
             return None
-        return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
+        return AcceptedMembershipPublic(organization_name=organization.name, role=membership.role)
 
     async def decline_pending_membership_for_user(
         self,
@@ -2764,7 +2795,7 @@ class OrganizationService:
 
         An accepted invitation says they did. A membership never invited at all
         came from sign-in, domain auto-join, SSO or a direct add, each of which
-        the holder or an operator vouched for, so it counts too.
+        the holder or an operator agreed to, so it counts too.
         """
         statuses = await self.invitations.get_statuses_by_organization_member(membership.id)
         return not statuses or "accepted" in statuses

@@ -118,11 +118,22 @@ def _declared_size(download: AsyncFileDownload) -> int:
     return 0
 
 
+def _refusal_detail(exc: Exception) -> str:
+    """The HTTP status a provider refused with, as a trailing clause, or nothing when it carried none.
+
+    NOTE: an endpoint that answers a download with a redirect is refused rather
+    than followed, and reads as an ordinary status here.
+    """
+    status = getattr(exc, "status_code", None)
+    return f" (HTTP {status})" if isinstance(status, int) else ""
+
+
 class _AnyLlmFileSession(ProviderFileSession):
     """Reads and writes one provider account's files through any-llm, with the credential that reaches it.
 
-    Owns the connection its calls run on, so a caller closes it with
-    :meth:`aclose` once it has read everything it wants.
+    Owns the connection its calls run on unless the credential carries one, and
+    a caller closes it with :meth:`aclose` either way once it has read
+    everything it wants.
     """
 
     def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ResolvedCredential) -> None:
@@ -133,14 +144,23 @@ class _AnyLlmFileSession(ProviderFileSession):
         self._credential = credential
         # Handing this client to the provider SDK replaces the one it would have
         # built, whose own default is to follow the redirect a download can answer with.
+        # A credential that carries a client is dialed through it: for an endpoint a
+        # tenant chose, that is the pinned one, which checks every address and follows
+        # no redirect. It is shared, so it is used as it is and left open.
+        given = credential.client_args.get("http_client")
+        self._owns_connection = given is None
         self._timeout: httpx.Timeout | httpx2.Timeout
         self._connection: httpx.AsyncClient | httpx2.AsyncClient
         if provider is LLMProvider.ANTHROPIC:
             self._timeout = _HTTPX2_TIMEOUT
-            self._connection = httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+            self._connection = (
+                given if given is not None else httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+            )
         else:
             self._timeout = _TIMEOUT
-            self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+            self._connection = (
+                given if given is not None else httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+            )
 
     @property
     def provider(self) -> str:
@@ -171,11 +191,13 @@ class _AnyLlmFileSession(ProviderFileSession):
         )
 
     async def aclose(self) -> None:
-        """Release the connection this client reads over.
+        """Release the connection this client reads over, and do nothing for one it was handed.
 
         A release that fails is logged rather than raised, because the caller has
         already read whatever it came for and can do nothing about it.
         """
+        if not self._owns_connection:
+            return
         try:
             await self._connection.aclose()
         except (httpx.HTTPError, httpx2.HTTPError, RuntimeError):
@@ -263,7 +285,9 @@ class _AnyLlmFileSession(ProviderFileSession):
                         raise FileOverBudgetError
                     yield chunk
         except _FILE_CALL_ERRORS as exc:
-            raise ProviderFileUnavailableError(f"{self.provider} could not serve file {file.file_id}") from exc
+            raise ProviderFileUnavailableError(
+                f"{self.provider} could not serve file {file.file_id}{_refusal_detail(exc)}"
+            ) from exc
 
     def _open(self, file: ProviderFile) -> AbstractAsyncContextManager[AsyncFileDownload]:
         if self._provider is LLMProvider.ANTHROPIC:

@@ -216,7 +216,7 @@ The glyphs, so the same act does not arrive as two shapes on two pages:
 | Regenerate | `FiRefreshCw` | Archive | `FiArchive` |
 | Restore | `FiRotateCcw` | Make default | `FiStar` |
 | History | `FiClock` | Examples | `FiList` |
-| Test | `FiActivity` | | |
+| Test | `FiActivity` | Set a rate | `FiTag` |
 
 Two splits in there are the vocabulary rather than a coincidence, and both are
 worth keeping: **an X takes something away, a strike turns something off.** So

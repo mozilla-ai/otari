@@ -958,19 +958,16 @@ def test_open_signup_gives_an_identity_whose_invitation_was_revoked_before_verif
         assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
 
 
-def test_open_signup_gives_a_removed_vouched_member_its_own_organization_when_a_reset_proves_the_address(
+def test_open_signup_gives_a_removed_unproved_member_its_own_organization_when_a_reset_proves_the_address(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A password chosen from an invitation link only vouches for the address; the reset is what claims it."""
+    """A password chosen from an invitation link does not prove the address; the reset is what claims it."""
     with _client(tmp_path, open_signup=True) as client:
-        gateway_logger.addHandler(caplog.handler)
-        caplog.set_level(logging.INFO, logger="gateway")
-        try:
-            invitation = _invite(client, email="ada@example.com")
-        finally:
-            gateway_logger.removeHandler(caplog.handler)
-        match = _TOKEN_IN_LINK.search(caplog.text)
-        assert match, caplog.text
+        invitation = _invite(client, email="ada@example.com")
+        # The console transport reaches no mailbox, so the link comes back for the inviter to pass on.
+        accept_link = str(invitation["accept_link"])
+        match = _TOKEN_IN_LINK.search(accept_link)
+        assert match, accept_link
         accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": match.group(1), "password": PASSWORD})
         assert accepted.status_code == 200, accepted.text
         inviting_organization = _master_key_organization_id(client)

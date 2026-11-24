@@ -1,4 +1,11 @@
-import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
+import {
+  AlertDialog,
+  Button,
+  buttonVariants,
+  Input,
+  Label,
+  TextField,
+} from "@heroui/react"
 import { Fragment, useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
@@ -363,10 +370,11 @@ function MasterKeyRotationDialog({
   masterKey?: string
   error: Error | null
   isPending: boolean
-  onRegenerate: () => void
+  onRegenerate: (password: string) => void
   onClose: () => void
 }) {
   const keyRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+  const [password, setPassword] = useState("")
 
   useEffect(() => {
     if (masterKey === undefined) return
@@ -415,6 +423,22 @@ function MasterKeyRotationDialog({
                   The replacement key will be shown once. Save it before closing
                   the next screen.
                 </p>
+                <TextField
+                  value={password}
+                  onChange={setPassword}
+                  type="password"
+                  isRequired
+                  className="flex flex-col gap-1"
+                >
+                  <Label className="text-body">Your current password</Label>
+                  <Input autoComplete="current-password" />
+                </TextField>
+                <p className="text-caption">
+                  Regenerating hands this browser the deployment master key, so
+                  the gateway asks for the same proof the bootstrap handover
+                  does. An account with no password cannot rotate from here;
+                  rotate with the master key instead.
+                </p>
                 <ErrorBanner error={error} />
               </>
             )}
@@ -436,7 +460,8 @@ function MasterKeyRotationDialog({
                 <Button
                   variant="danger"
                   isPending={isPending}
-                  onPress={onRegenerate}
+                  isDisabled={password === ""}
+                  onPress={() => onRegenerate(password)}
                 >
                   Regenerate key
                 </Button>
@@ -457,9 +482,11 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
 
   // Rotation revokes every dashboard session server-side and re-mints this
   // tab's session cookie on the response, so no client-side credential swap
-  // is needed; the dialog only has to reveal the new key once.
-  const rotate = () =>
-    rotateMasterKey.mutate(undefined, {
+  // is needed; the dialog only has to reveal the new key once. It hands this
+  // session the deployment credential, so the gateway asks for the caller's
+  // password, which the dialog collects before the request goes out.
+  const rotate = (password: string) =>
+    rotateMasterKey.mutate(password, {
       onSuccess: (result) => {
         setNewKey(result.master_key)
       },

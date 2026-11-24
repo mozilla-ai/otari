@@ -28,11 +28,13 @@
 
 * [Claude Code](claude-code.md)
 * [Codex](codex.md)
+* [Cursor](cursor.md)
 * [Junie](junie.md)
 * [opencode](opencode.md)
 * [pi](pi.md)
 * [oh-my-pi](oh-my-pi.md)
 * [Hermes Agent](hermes.md)
+* [Mistral Vibe](vibe.md)
 * [Pydantic AI](pydantic-ai.md)
 * [LangChain](langchain.md)
 * [LangGraph](langgraph.md)
@@ -51,6 +53,7 @@
 * [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 * [Create a multi-provider routing](create-a-multi-provider-routing.md)
 * [Configure guardrails](configure-guardrails.md)
+* [Host your own guardrail](host-your-own-guardrail.md)
 * [Track spend per end user](end-users.md)
 
 ## Organize
@@ -117,4 +120,4 @@
 
 * [Data Collection](privacy/data-collection.md)
 * [Agent Session Content](privacy/agent-session-content.md)
-* [Zero Data Retention](privacy/zdr.md)
+* [Data Retention](privacy/zdr.md)

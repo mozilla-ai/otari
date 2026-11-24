@@ -606,7 +606,7 @@ async def test_a_token_proves_nothing_about_an_address_it_was_not_sent_to(async_
     assert await _link(async_db).proof_for(_TOKEN, claimed_address="bob@example.com") is None
 
 
-async def test_a_hand_carried_link_only_vouches_for_the_address_an_emailed_one_proves(
+async def test_a_shared_link_does_not_prove_the_address_an_emailed_one_proves(
     async_db: AsyncSession,
 ) -> None:
     """A link nobody delivered proves the inviting organization's word, which auto-join does not take."""
@@ -622,4 +622,4 @@ async def test_a_hand_carried_link_only_vouches_for_the_address_an_emailed_one_p
         await lookup.proof_for(emailed, claimed_address="mailed@example.com"),
     )
 
-    assert proofs == (AddressProof.VOUCHED, AddressProof.MAILBOX)
+    assert proofs == (AddressProof.SHARED, AddressProof.MAILBOX)
