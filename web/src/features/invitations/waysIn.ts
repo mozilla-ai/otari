@@ -27,14 +27,13 @@ export function waysInSentence(
 /**
  * How an invited address whose signup password is waiting on verification gets in.
  *
- * NOTE: `ways` carries `password_reset` only where the deployment can mail a
- * link, so without it the verification link sent at signup reached nobody and
- * is not named.
+ * NOTE: This names the verification link outright, so callers must hold the
+ * `verify_email` step, which is answered only where such a link reaches the
+ * mailbox.
  */
 export function verificationPendingSentence(
   ways: InvitationPreview["ways_in"],
   providers: readonly string[],
 ): string {
-  if (!ways.includes("password_reset")) return waysInSentence(ways, providers)
   return `open the verification link emailed at signup. If you did not sign up, ${waysInSentence(ways, providers)}`
 }
