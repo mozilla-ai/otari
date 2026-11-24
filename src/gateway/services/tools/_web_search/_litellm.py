@@ -196,11 +196,23 @@ def litellm_results(provider: str, query: SearchQuery, hits: Sequence[any_search
             url=hit.url,
             snippet=(hit.text or hit.snippet)[:limit],
             date=_date(hit, mapping.date_fields),
-            image=hit.image,
-            favicon=hit.favicon,
+            image=_http_url_or_none(hit.image),
+            favicon=_http_url_or_none(hit.favicon),
         )
         for hit in hits
     ]
+
+
+def _http_url_or_none(value: str | None) -> str | None:
+    """A display URL the response may carry, else ``None``.
+
+    ``image`` and ``favicon`` come from the page, so a provider can echo any
+    scheme (``data:``, ``javascript:``). A client renders them, so only an
+    ``http(s)`` URL is passed on; anything else is dropped.
+    """
+    if value is None:
+        return None
+    return value if urlparse(value).scheme in ("http", "https") else None
 
 
 def _date(hit: any_search.SearchHit, fields: tuple[str, ...]) -> str | None:

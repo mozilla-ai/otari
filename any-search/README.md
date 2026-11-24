@@ -54,7 +54,8 @@ call.
 ## What comes back
 
 A `SearchResult`: the provider's name, a list of `SearchHit`s (`url`, `title`, `snippet`, the page
-`text` when the provider returned it, `published`, and the provider's own item as `raw`), the
+`text` when the provider returned it, `published`, an `image` and a `favicon` when the provider
+returned them, and the provider's own item as `raw`), the
 `cost` in USD the provider reported with `cost_source` (`reported` or `none`), an `error` when the
 provider signaled one inside a successful response, and the provider's whole response as `raw`.
 `raw` is left out of `repr`.

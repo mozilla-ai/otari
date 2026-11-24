@@ -149,8 +149,8 @@ class FakeProvider(AnySearch):
                 snippet=item.get("snippet") or "",
                 text=item.get("text"),
                 published=item.get("published"),
-                image=item.get("image"),
-                favicon=item.get("favicon"),
+                image=item.get("image") or None,
+                favicon=item.get("favicon") or None,
                 raw=item,
             )
             for item in items
