@@ -216,14 +216,13 @@ def code_execution_tool_definition(languages: Sequence[str]) -> dict[str, Any]:
         language["enum"] = list(languages)
         # Asked to run code in a language the sandbox does not run, a model tends
         # to rewrite it in one the sandbox does, run that, and report the output as
-        # the original program's. These sentences tell it to say so, and other
-        # languages are named because models follow the sentences when they are.
-        listed = " or ".join(language.capitalize() for language in languages)
+        # the original program's. These sentences tell it to say so.
+        listed = " or ".join(name.capitalize() for name in languages)
         description += (
-            f" The code must be {listed}: Rust, C, JavaScript or any other language's "
-            "code does not run as is. When asked to run code in another language, tell "
-            f"the user it cannot be run as is here. If you rewrite it in {listed} and "
-            "run that instead, say so, and never present the output as the original program's."
+            f" The code must be {listed}: code written in other languages does not run as is. "
+            "When asked to run code in another language, tell the user it cannot be run as is here. "
+            f"If you rewrite it in {listed} and run that instead, say so, and never present the "
+            "output as the original program's."
         )
     return {
         "type": "function",

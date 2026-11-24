@@ -1869,7 +1869,7 @@ def test_the_model_is_told_to_say_when_code_in_another_language_cannot_run() -> 
     # the code cannot run here and does not report a rewrite's output as the program's.
     [definition] = _sandbox().openai_tools
     description = definition["function"]["description"]
-    assert "The code must be Python: Rust, C, JavaScript or any other language's code" in description
+    assert "The code must be Python: code written in other languages does not run as is" in description
     assert "tell the user it cannot be run as is here" in description
     assert "If you rewrite it in Python and run that instead, say so" in description
 
