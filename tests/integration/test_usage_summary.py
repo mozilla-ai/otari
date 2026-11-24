@@ -73,6 +73,7 @@ def _make_log(
     status: str = "success",
     latency_ms: int | None = None,
     workspace_id: Any = None,
+    deployment_paid: bool = False,
 ) -> None:
     if user_id is not None:
         _ensure_user(db, user_id)
@@ -101,6 +102,7 @@ def _make_log(
             status=status,
             error_message="boom" if status == "error" else None,
             latency_ms=latency_ms,
+            deployment_paid=deployment_paid,
         )
     )
 
@@ -128,6 +130,7 @@ def test_summary_empty_range_is_all_zero(client: TestClient, master_key_header: 
         "unpriced_requests": 0,
         "billed_input_tokens": 0,
         "billed_output_tokens": 0,
+        "deployment_paid_cost": 0.0,
     }
     assert body["by_model"] == []
     assert body["by_user"] == []
@@ -567,6 +570,29 @@ def test_grouped_series_filters_by_several_models(
 
     assert {g["key"] for g in body["groups"]} == {"gpt-4", "claude"}
     assert sum(p["cost"] for p in body["points"]) == pytest.approx(0.30)
+
+
+def test_usage_reads_split_what_the_deployment_paid_for(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="payer", timestamp=now, cost=0.10, provider="deepinfra", deployment_paid=True)
+    _make_log(db_session, user_id="payer", timestamp=now, cost=0.25, provider="synthetic")
+    _make_log(db_session, user_id="payer", timestamp=now, cost=None, status="error", deployment_paid=True)
+    db_session.commit()
+
+    totals = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "payer"}).json()["totals"]
+    assert totals["cost"] == pytest.approx(0.35)
+    assert totals["deployment_paid_cost"] == pytest.approx(0.10)
+
+    paid = {"user_id": "payer", "deployment_paid": "true"}
+    rows = client.get(f"{API_ROOT}/usage", headers=master_key_header, params=paid).json()
+    assert {row["provider"] for row in rows} == {"deepinfra", "openai"}
+    assert all(row["deployment_paid"] for row in rows)
+    assert client.get(f"{API_ROOT}/usage/count", headers=master_key_header, params=paid).json()["total"] == 2
+    own = client.get(SUMMARY_PATH, headers=master_key_header, params={**paid, "deployment_paid": "false"}).json()
+    assert own["totals"]["cost"] == pytest.approx(0.25)
+    assert own["totals"]["deployment_paid_cost"] == 0.0
 
 
 def test_usage_list_and_count_filter_by_session_and_provider(

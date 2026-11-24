@@ -29325,6 +29325,17 @@
             "title": "By Filter",
             "type": "boolean"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -29641,6 +29652,11 @@
             ],
             "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
             "title": "Data Location"
+          },
+          "deployment_paid": {
+            "default": false,
+            "title": "Deployment Paid",
+            "type": "boolean"
           },
           "endpoint": {
             "title": "Endpoint",
@@ -30393,6 +30409,17 @@
             ],
             "title": "Cache Write Price Per Million"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -30793,6 +30820,11 @@
           },
           "cost": {
             "title": "Cost",
+            "type": "number"
+          },
+          "deployment_paid_cost": {
+            "default": 0.0,
+            "title": "Deployment Paid Cost",
             "type": "number"
           },
           "error_count": {
@@ -42255,6 +42287,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -42563,6 +42613,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -52234,6 +52302,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -52638,6 +52724,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -53032,6 +53136,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -53400,6 +53522,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -60219,6 +60359,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -60620,6 +60778,24 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -61155,6 +61331,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -61573,6 +61767,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {

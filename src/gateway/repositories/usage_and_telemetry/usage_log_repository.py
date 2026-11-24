@@ -193,6 +193,7 @@ class UsageFilters:
     priced: bool | None = None
     tool: str | None = None
     counts_toward_budget: bool | None = None
+    deployment_paid: bool | None = None
     request_group_id: list[str] | None = None
     workspace_id: uuid.UUID | None = None
 
@@ -308,6 +309,8 @@ def usage_conditions(filters: UsageFilters, scope: UsageScope) -> list[ColumnEle
         conditions.append(_tool_used_expr(filters.tool))
     if filters.counts_toward_budget is not None:
         conditions.append(UsageLog.counts_toward_budget.is_(filters.counts_toward_budget))
+    if filters.deployment_paid is not None:
+        conditions.append(UsageLog.deployment_paid.is_(filters.deployment_paid))
     return conditions
 
 
@@ -676,6 +679,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                     _billed_input_sum(),
                     _billed_output_sum(),
                     func.coalesce(func.sum(UsageLog.reasoning_tokens), 0),
+                    func.coalesce(func.sum(case((UsageLog.deployment_paid, UsageLog.cost), else_=0)), 0.0),
                 ).where(*usage_conditions(filters, scope))
             )
         ).one()
@@ -694,6 +698,7 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             billed_input_tokens=int(row[11]),
             billed_output_tokens=int(row[12]),
             reasoning_tokens=int(row[13]),
+            deployment_paid_cost=float(row[14]),
         )
 
     async def groups(
