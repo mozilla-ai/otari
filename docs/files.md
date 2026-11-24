@@ -252,7 +252,9 @@ those files into its store and keeps the provider's ID as the file's ID. The
 copy belongs to the user and workspace the request is billed to, like an
 upload. So `GET /v1/files/{id}/content` serves a chart whichever sandbox drew
 it, and still serves it after the provider has discarded its container. OpenAI
-discards a container 20 minutes after its last use.
+discards a container 20 minutes after its last use. Each file is read back with
+the credential the serving provider was sent, so a file an owned endpoint
+produced is read from that endpoint's account.
 
 The ID stays the provider's so that a client sending the turn back with its
 container reference still names a file the provider issued. The copy is a

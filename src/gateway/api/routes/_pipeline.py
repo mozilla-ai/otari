@@ -4606,18 +4606,25 @@ def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | Non
 
 
 async def _copy_provider_files(
-    ctx: RequestContext, files_bridge: SandboxFileBridge | None, files: list[ProviderFile], *, instance: Any
+    ctx: RequestContext,
+    files_bridge: SandboxFileBridge | None,
+    files: list[ProviderFile],
+    *,
+    instance: Any,
+    call_kwargs: Mapping[str, Any],
 ) -> None:
     """Copy the files a provider's own sandbox produced for this request into ``/v1/files``.
 
-    ``instance`` is the configured entry that served, whose credential is the one that can read the files.
+    ``instance`` is the entry that served and ``call_kwargs`` what it was sent, whose credential can read the files.
     """
     if files_bridge is None or not files or not isinstance(instance, str):
         return
     provider = _implementation_for(ctx, instance)
     if provider is None:
         return
-    await files_bridge.copy_provider_files(files, provider=provider.value, provider_instance=instance)
+    await files_bridge.copy_provider_files(
+        files, provider=provider.value, provider_instance=instance, call_kwargs=call_kwargs
+    )
 
 
 async def _copying_produced_files(
@@ -6698,8 +6705,9 @@ async def run_single_attempt_stream(
     ``streaming_first_chunk_hold_ms`` the stream is committed and keeps waiting
     (see the first-chunk regression test).
     """
-    # The tools of the candidate last opened, which is the one that served once the walk returns.
+    # The tools and kwargs of the candidate last opened, which is the one that served once the walk returns.
     served_tools = tool_ctx
+    served_kwargs = call_kwargs
     observation: AutomaticObservation | None = None
     try:
         if (
@@ -6713,10 +6721,11 @@ async def run_single_attempt_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> AsyncIterator[ChunkT]:
-                nonlocal served_tools, observation
+                nonlocal served_tools, served_kwargs, observation
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
+                served_kwargs = attempt_kwargs
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
                     _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
@@ -6778,6 +6787,7 @@ async def run_single_attempt_stream(
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
+            served_kwargs = call_kwargs
             _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             uses_deployment_credential = ctx.deployment_paid
@@ -6826,7 +6836,7 @@ async def run_single_attempt_stream(
     if files_bridge is not None:
 
         async def _copy(files: list[ProviderFile]) -> None:
-            await _copy_provider_files(ctx, files_bridge, files, instance=provider)
+            await _copy_provider_files(ctx, files_bridge, files, instance=provider, call_kwargs=served_kwargs)
 
         stream = _copying_produced_files(stream, adapter.name, _copy, files_bridge)
 
@@ -7132,8 +7142,9 @@ async def run_non_stream(
     request payload each candidate's kwargs are built from; without it, only the
     prebuilt ``call_kwargs`` can be dispatched and no fallover is possible.
     """
-    # The tools of the candidate last dispatched, which is the one that served once the walk returns.
+    # The tools and kwargs of the candidate last dispatched, which is the one that served once the walk returns.
     served_tools = tool_ctx
+    served_kwargs = call_kwargs
     try:
         if (
             ctx.plan is not None
@@ -7146,10 +7157,11 @@ async def run_non_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> ResultT:
-                nonlocal served_tools
+                nonlocal served_tools, served_kwargs
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
+                served_kwargs = attempt_kwargs
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
                     _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
@@ -7213,6 +7225,7 @@ async def run_non_stream(
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
+            served_kwargs = call_kwargs
             _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
@@ -7304,7 +7317,9 @@ async def run_non_stream(
         _attach_settled_cost(adapter, result, logged)
         if (bridge := tool_ctx.sandbox_files) is not None:
             await bridge.store_inline_outputs(adapter.name, result)
-            await _copy_provider_files(ctx, bridge, bridge.produced_files(adapter.name, result), instance=provider)
+            await _copy_provider_files(
+                ctx, bridge, bridge.produced_files(adapter.name, result), instance=provider, call_kwargs=served_kwargs
+            )
         if display_model is not None:
             relabel_model(result, display_model)
         return result
