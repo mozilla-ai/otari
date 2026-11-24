@@ -295,6 +295,7 @@ SURFACE_ROUTE_PREFIXES = {
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
+    "subagent_savings": f"{API_ROOT}/organizations/me/subagent-savings",
 }
 
 

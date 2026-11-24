@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.metered_pricing import RATE_FIELDS, calculate_token_cost, priced_per_request, quantize_cost
@@ -31,9 +31,21 @@ from gateway.models.routing import (
     SubagentDecision,
 )
 from gateway.ports.agent_model_recommender_port import SubagentSpawn
-from gateway.repositories.routing import SubagentDecisionRepository
-from gateway.schemas.routing import SubagentUsageLine
+from gateway.repositories.routing import DecisionSums, DecisionWindow, SubagentDecisionRepository, Workspaces
+from gateway.schemas.routing import (
+    SavingsAmounts,
+    SavingsByAgentType,
+    SavingsBySwap,
+    SubagentSavingsPoint,
+    SubagentSavingsPublic,
+    SubagentSavingsTotals,
+    SubagentUsageLine,
+)
 from gateway.services.routing._subagent_baseline import baseline_key, model_key
+from gateway.services.usage_and_telemetry import dense_series
+
+SAVINGS_TOP_N = 20
+_NOTHING = DecisionSums((), 0, 0, 0, 0, Decimal(0), Decimal(0), Decimal(0))
 
 SubagentRateLookup = Callable[[str, uuid.UUID], Awaitable[Any]]
 """The rate a ``<provider>:<model>`` is priced at for a workspace's organization, or None."""
@@ -97,6 +109,22 @@ def _cost(rate: _BaseRate, lines: Sequence[SubagentUsageLine]) -> Decimal:
 
 def _has_tokens(line: SubagentUsageLine) -> bool:
     return bool(line.input_tokens or line.output_tokens or line.cache_read_tokens or line.cache_write_tokens)
+
+
+def _amounts(sums: DecisionSums) -> dict[str, Any]:
+    gross = sums.baseline_cost - sums.actual_cost
+    return {
+        "decisions": sums.decisions,
+        "with_outcome": sums.with_outcome,
+        "measured": sums.measured,
+        "estimated": sums.estimated,
+        "baseline_cost": float(sums.baseline_cost),
+        "actual_cost": float(sums.actual_cost),
+        "router_cost": float(sums.router_cost),
+        "gross_saved": float(gross),
+        # Every decision's router cost comes off, also where no saving could be read.
+        "net_saved": float(gross - sums.router_cost),
+    }
 
 
 class SubagentDecisionService:
@@ -218,4 +246,50 @@ class SubagentDecisionService:
             baseline_model_key=key,
             baseline_cost=quantize_cost(_cost(_base_rate(key, baseline), lines)),
             actual_cost=quantize_cost(actual),
+        )
+
+    async def savings(
+        self,
+        *,
+        workspaces: Workspaces,
+        start: datetime,
+        end: datetime,
+        user_ids: Sequence[str] | None,
+        bucket: Literal["hour", "day"],
+        recommender_available: bool,
+        router_unanswered: int,
+    ) -> SubagentSavingsPublic:
+        """What the recommendations made from ``start`` to ``end`` saved.
+
+        In all, over time, by subagent type and by model swap. ``workspaces``
+        is the caller's scope and ``user_ids`` narrows it. ``recommender_available``
+        and ``router_unanswered`` are the caller's to find out, and are reported as given.
+        """
+        window = DecisionWindow(workspaces=workspaces, start=start, end=end, user_ids=user_ids)
+        async with self._uow:
+            totals = await self._rows.totals(window)
+            kinds = {sums.key[0]: sums for sums in await self._rows.by_outcome_kind(window)}
+            series = await self._rows.series(window, bucket)
+            agent_types = await self._rows.by_agent_type(window, limit=SAVINGS_TOP_N)
+            swaps = await self._rows.by_swap(window, limit=SAVINGS_TOP_N)
+        points = {start: SubagentSavingsPoint(bucket_start=start, **_amounts(sums)) for start, sums in series.items()}
+        return SubagentSavingsPublic(
+            recommender_available=recommender_available,
+            totals=SubagentSavingsTotals(
+                **_amounts(totals),
+                no_outcome=totals.decisions - totals.with_outcome,
+                unpriced=totals.with_outcome - totals.measured - totals.estimated,
+                router_unanswered=router_unanswered,
+            ),
+            measured=SavingsAmounts(**_amounts(kinds.get(SUBAGENT_OUTCOME_MEASURED, _NOTHING))),
+            estimated=SavingsAmounts(**_amounts(kinds.get(SUBAGENT_OUTCOME_ESTIMATED, _NOTHING))),
+            series=dense_series(
+                window.start,
+                window.end,
+                bucket,
+                points,
+                lambda start: SubagentSavingsPoint(bucket_start=start, **_amounts(_NOTHING)),
+            ),
+            by_agent_type=[SavingsByAgentType(agent_type=sums.key[0], **_amounts(sums)) for sums in agent_types],
+            by_swap=[SavingsBySwap(baseline_model=sums.key[0], ran_on=sums.key[1], **_amounts(sums)) for sums in swaps],
         )

@@ -32,6 +32,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "pricing",
       "routing",
       "settings",
+      "subagent_savings",
       "tools",
       "traces",
       "update_check",

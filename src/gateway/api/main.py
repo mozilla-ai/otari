@@ -72,6 +72,7 @@ from gateway.api.routes import (
     search,
     search_tools,
     settings,
+    subagent_savings,
     tool_settings,
     tools,
     usage,
@@ -206,9 +207,11 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # different keys.
     organization_guardrail_definitions.router,
     organization_guardrails.router,
-    # The tenant-scoped read over the rows the operator usage router serves.
-    # Grouped by what it is scoped to, which is what decides who may call it.
+    # The tenant-scoped reads: over the rows the operator usage router serves,
+    # and over the recorded subagent decisions. Grouped by what they are scoped
+    # to, which is what decides who may call them.
     organization_usage.router,
+    subagent_savings.router,
     # The tenant-scoped half of the routing and alias tables, grouped for the
     # same reason.
     organization_routing.policies_router,
