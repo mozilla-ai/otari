@@ -145,18 +145,30 @@ AVATAR_FACE_COUNT = 203_896
 class SignInMeans(StrEnum):
     """The sign-in credentials an identity carries.
 
-    The members are exclusive and cover every identity. Only ``PASSWORD`` and
-    ``WITHOUT_PASSWORD`` can complete a sign-in, because an address nobody has verified is
-    refused once the password it carries has been proven.
+    The members are exclusive and cover every identity. ``completes_sign_in`` is whether the
+    credentials alone can open a session. A password on an address nobody has verified cannot,
+    because authentication refuses an unverified address once the password it carries has been
+    proven.
+
+    NOTE: ``completes_sign_in`` answers for the credentials only. A caller that admits a sign-in
+    must read ``is_active`` as well.
 
     NOTE: ``WITHOUT_PASSWORD`` is a provider or a passkey. Nothing enforces that, so a flow that
     verifies an address must leave a password, a provider or a passkey behind.
     """
 
-    NONE = "none"
-    PASSWORD = "password"
-    UNVERIFIED_PASSWORD = "unverified_password"
-    WITHOUT_PASSWORD = "without_password"
+    NONE = ("none", False)
+    PASSWORD = ("password", True)
+    UNVERIFIED_PASSWORD = ("unverified_password", False)
+    WITHOUT_PASSWORD = ("without_password", True)
+
+    completes_sign_in: bool
+
+    def __new__(cls, value: str, completes_sign_in: bool) -> "SignInMeans":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.completes_sign_in = completes_sign_in
+        return member
 
 
 class UserBase(SQLModel):
@@ -1229,13 +1241,23 @@ class InvitationPreviewPublic(SQLModel):
     needs_password: bool = Field(
         description=(
             "Whether accepting should also set the invited address's first password. False when the address "
-            "already has a way in, and also when another organization has it as a member or invitee, since this "
-            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
-            "password whenever this is false."
+            "already has a way in, when a password it chose at signup is waiting on verification, and when "
+            "another organization has it as a member or invitee, since this link may not choose a password for "
+            "it then. can_sign_in and verification_pending tell the three apart. Accept refuses a password "
+            "whenever this is false."
+        )
+    )
+    verification_pending: bool = Field(
+        description=(
+            "Whether the invited address chose a password through signup and has not verified it yet, "
+            "so it has to open its verification link before it can sign in."
         )
     )
     can_sign_in: bool = Field(
-        description="Whether the invited address can already sign in, with a password or through a provider."
+        description=(
+            "Whether the invited address can already sign in, with a password or through a provider. A password "
+            "chosen at signup is not one of them until the address is verified."
+        )
     )
     ways_in: list[InvitationWayIn] = Field(
         description=(
@@ -1381,7 +1403,8 @@ class AcceptInvitationResultPublic(SQLModel):
         default=True,
         description=(
             "Whether the invited address can sign in now, with a password (this accept's included) or through "
-            "a provider. False when it accepted without one and has never signed in."
+            "a provider. False when it carries neither, and false while a password chosen at signup waits on "
+            "verification."
         ),
     )
     ways_in: list[InvitationWayIn] = Field(

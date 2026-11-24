@@ -350,8 +350,33 @@ def test_accepting_after_an_unverified_signup_says_the_address_still_needs_verif
 
     assert accept.status_code == 200, accept.text
     assert accept.json()["verification_pending"] is True
+    assert accept.json()["can_sign_in"] is False
+    assert accept.json()["ways_in"] == ["password_reset"]
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_in.status_code == 403
+
+
+def test_the_preview_does_not_tell_an_unverified_signup_it_can_sign_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A password on an address nobody has verified opens no session, so the page has to offer a way in."""
+    result = _invite(client, master_key_header, email="hedy@example.com")
+    _mail_on(test_config, monkeypatch)
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_up.status_code == 200, signed_up.text
+
+    token = _token_from(result["accept_link"])
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+
+    assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (
+        False,
+        False,
+        ["password_reset"],
+    )
+    assert preview["verification_pending"] is True
 
 
 def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_sign_in(
@@ -1429,6 +1454,8 @@ def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
     assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, False, [])
+    # Nobody has signed up on this address, so there is no verification to wait on.
+    assert preview["verification_pending"] is False
 
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
