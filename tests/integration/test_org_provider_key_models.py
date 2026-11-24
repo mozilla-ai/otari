@@ -13,11 +13,12 @@ network.
 
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from any_llm.types.model import Model
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -36,6 +37,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing
 from gateway.models.provider_keys import (
+    OrgProviderKey,
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import Organization, User, Workspace
@@ -49,6 +51,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.providers import (
+    EndpointAuthRequest,
     OrgProviderKeyCreateRequest,
 )
 from gateway.services.model_discovery_service import ProviderDiscovery
@@ -67,6 +70,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.endpoint_auth import EndpointAuthMethod
 from gateway.types.models_dev import parse_catalog_v2
 
 pytestmark = pytest.mark.asyncio
@@ -986,3 +990,56 @@ async def test_no_response_carries_key_material(async_db: AsyncSession, monkeypa
 
     for payload in (refreshed, listed, available):
         assert "sk-live-1234" not in payload.model_dump_json()
+
+
+async def _key_with_unreadable_endpoint_auth(db: AsyncSession, owner: User) -> uuid.UUID:
+    """A key whose stored endpoint credential names a method this build cannot read."""
+    created = await OrgProviderKeyService(db).create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai",
+            name="proxied",
+            api_key="sk-live-1234",
+            api_base="https://example.com/v1",
+            slug="proxied",
+            endpoint_auth=EndpointAuthRequest(
+                method=EndpointAuthMethod.STATIC_HEADER,
+                header_name="Fastly-Key",
+                secret="edge-s3cret",
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+            ),
+        ),
+    )
+    await db.execute(
+        update(OrgProviderKey).where(col(OrgProviderKey.id) == created.id).values(endpoint_auth_method="mtls")
+    )
+    return created.id
+
+
+async def test_discovery_refuses_a_key_whose_endpoint_credential_it_cannot_send(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dialing without the header asks the address a different question from the one dispatch asks.
+
+    An address that answers the API key alone would then list models for a key
+    that serves nothing.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key_with_unreadable_endpoint_auth(async_db, owner)
+    dialed = False
+
+    async def _stub(impl_name: str, **_: object) -> ProviderDiscovery:
+        nonlocal dialed
+        dialed = True
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-4o", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", _stub)
+
+    available = await _service(async_db).available_models(user=owner, key_id=key_id)
+
+    assert dialed is False
+    assert available.models == []
+    assert available.error is not None

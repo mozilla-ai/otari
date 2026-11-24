@@ -184,11 +184,31 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
         entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
-    if (auth := key.endpoint_auth) is not None:
-        if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
-            raise UnservableEndpointError(reason)
-        entry[ENDPOINT_AUTH_HEADERS_KEY] = auth.headers(secret=decrypt_secret(auth.encrypted_secret))
+    if headers := endpoint_auth_headers(key):
+        entry[ENDPOINT_AUTH_HEADERS_KEY] = headers
     return entry
+
+
+def endpoint_auth_headers(key: OrgProviderKey) -> dict[str, str]:
+    """The headers this key's endpoint credential adds to every request to its address.
+
+    Empty where the key carries no endpoint credential. Every path that reaches
+    the address asks here, so none of them can dial without a credential the
+    key holds.
+
+    Raises:
+        UnservableEndpointError: The key may not carry the credential it holds.
+        UnreadableEndpointAuthError: The row holds one this build cannot
+            assemble into headers.
+        SecretBoxUnavailableError: No secret key is configured.
+        SecretDecryptionError: The stored value will not decrypt under the
+            configured secret key.
+    """
+    if (auth := key.endpoint_auth) is None:
+        return {}
+    if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
+        raise UnservableEndpointError(reason)
+    return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
 
 
 def key_is_usable(key: OrgProviderKey) -> bool:

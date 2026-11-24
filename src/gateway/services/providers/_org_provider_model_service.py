@@ -102,7 +102,11 @@ from gateway.services.secret_box import (
     decrypt_mapping,
     decrypt_secret,
 )
-from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
+from gateway.services.tenancy.org_provider_key_service import (
+    OrgProviderKeyService,
+    UnservableEndpointError,
+    endpoint_auth_headers,
+)
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.endpoint_auth import UnreadableEndpointAuthError
 from gateway.types.model_type import ModelType, OfferedModelType
@@ -126,6 +130,14 @@ _UNDECRYPTABLE = (
 _ENDPOINT_CREDENTIAL_REJECTED = (
     "The endpoint or its proxy rejected a credential. This key sends an API key and an endpoint credential, "
     "so check both."
+)
+
+# What an admin needs when a stored endpoint credential cannot be sent as it
+# stands. Dialing without it would ask the address a different question from the
+# one every dispatch asks, so the credential is reported instead of a model list.
+_ENDPOINT_CREDENTIAL_UNSERVABLE = (
+    "The stored endpoint credential cannot be sent as it stands, so this key serves nothing. "
+    "Replace it, or clear the base URL to remove it."
 )
 
 _RATE_FIELDS = (
@@ -904,17 +916,6 @@ class OrgProviderModelService:
             return None
 
     @staticmethod
-    def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
-        """The headers this key's endpoint credential adds, or none where it cannot be served as stored."""
-        try:
-            auth = key.endpoint_auth
-            if auth is None or auth.refused_reason(has_api_base=bool(key.api_base)) is not None:
-                return {}
-            return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
-        except (SecretBoxUnavailableError, SecretDecryptionError, UnreadableEndpointAuthError):
-            return {}
-
-    @staticmethod
     def _carries_endpoint_auth(key: OrgProviderKey) -> bool:
         """Whether this key sends a second credential on every request, readable or not.
 
@@ -949,6 +950,12 @@ class OrgProviderModelService:
         api_key = credential.api_key
         client_args: dict[str, object] = tenant_client_args(key.provider, credential.client_args)
         engine_client = None
+        try:
+            endpoint_headers = endpoint_auth_headers(key)
+        except (SecretBoxUnavailableError, SecretDecryptionError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_UNDECRYPTABLE)
+        except (UnreadableEndpointAuthError, UnservableEndpointError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_ENDPOINT_CREDENTIAL_UNSERVABLE)
         if key.api_base:
             # The organization chose this address, so it is held to public
             # addresses and dialed through the pinned client, as dispatch is.
@@ -957,8 +964,8 @@ class OrgProviderModelService:
                 return ProviderDiscovery(provider=key.provider, models=[], error=refusal)
             client_args["http_client"] = owned_endpoint_sdk_client(LLMProvider(key.provider))
             engine_client = owned_endpoint_http_client()
-            if headers := self._endpoint_headers(key):
-                client_args["default_headers"] = headers
+            if endpoint_headers:
+                client_args["default_headers"] = endpoint_headers
         discovery = self._named_refusal(
             await test_provider_credentials(
                 key.provider,

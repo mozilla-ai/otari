@@ -27,8 +27,9 @@ from gateway.services.model_discovery_service import (
     _short_error,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
-from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
+from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
+from gateway.services.tenancy.org_provider_key_service import endpoint_auth_headers
 from gateway.types.endpoint_auth import (
     EndpointAuth,
     EndpointAuthMethod,
@@ -221,10 +222,11 @@ def test_discovery_sends_the_endpoint_credential() -> None:
         endpoint_auth_expires_at=LATER,
     )
 
-    assert OrgProviderModelService._endpoint_headers(row) == {"Fastly-Key": "edge-s3cret"}
+    assert endpoint_auth_headers(row) == {"Fastly-Key": "edge-s3cret"}
 
 
-def test_discovery_sends_no_credential_it_cannot_decrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_stored_value_that_will_not_decrypt_yields_no_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reported rather than answered as absence, so no caller dials without a credential the key holds."""
     row = OrgProviderKey(
         organization_id=uuid.uuid4(),
         provider="openai",
@@ -239,7 +241,8 @@ def test_discovery_sends_no_credential_it_cannot_decrypt(monkeypatch: pytest.Mon
     )
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
-    assert OrgProviderModelService._endpoint_headers(row) == {}
+    with pytest.raises(SecretDecryptionError):
+        endpoint_auth_headers(row)
 
 
 def _rejected(status_code: int) -> ProviderDiscovery:
