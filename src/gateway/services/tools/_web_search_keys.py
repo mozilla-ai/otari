@@ -88,7 +88,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
-from gateway.services.tools._web_search import in_loop_default, resolve_fetch
+from gateway.services.tools._web_search import credential_needs_api_key, in_loop_default, resolve_fetch
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 from gateway.services.web_search_providers import is_sendable_api_key
 
@@ -590,7 +590,7 @@ def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
         if kind == "fetch"
         else any_search.AnySearch.get_provider_metadata(provider)
     )
-    return False, metadata.requires_api_key, metadata.requires_api_base and not metadata.default_api_base
+    return False, credential_needs_api_key(metadata), metadata.requires_api_base and not metadata.default_api_base
 
 
 async def _check_settings(
