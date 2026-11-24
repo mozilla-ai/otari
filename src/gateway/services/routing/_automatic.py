@@ -101,7 +101,13 @@ class _Health:
 
 def _backoff(failures: int) -> float:
     """Cooldown after ``failures`` consecutive failures: 15 seconds, doubling up to 10 minutes."""
-    return min(_COOLDOWN * float(2 ** (failures - 1)), _MAX_COOLDOWN)
+    # Capped before exponentiation, so a long outage's count cannot overflow the float.
+    return min(_COOLDOWN * 2.0 ** min(failures - 1, 6), _MAX_COOLDOWN)
+
+
+def _consecutive(failures: int, cooled_until: float, now: float) -> int:
+    """The failure count including this one, restarted when the last cooldown ended long ago."""
+    return 1 if now - cooled_until > _MAX_COOLDOWN else failures + 1
 
 
 @dataclass
@@ -113,10 +119,23 @@ class AutomaticSelection:
     mode: str
     scope: str = ""
     observations: list[AutomaticObservation] = field(default_factory=list)
+    origins: dict[str, Attempt] = field(default_factory=dict)
+
+    def dispatched_as(self, planned: Attempt, dispatched: Attempt) -> None:
+        """Record outcomes of ``dispatched``, served on a credential resolved at dispatch, as ``planned``.
+
+        Ranking only sees the offering as planned, so health, cooldowns and session binding must be kept
+        under that identity for them to reach the next ranking.
+        """
+        self.origins[self.router.candidate_key(dispatched)] = planned
+
+    def _ranked(self, attempt: Attempt) -> Attempt:
+        """The offering ``attempt`` was ranked as."""
+        return self.origins.get(self.router.candidate_key(attempt), attempt)
 
     def forget(self, attempt: Attempt) -> None:
         """Invalidate only a binding to the refused candidate, not a newer one."""
-        self.forget_key(self.router.candidate_key(attempt))
+        self.forget_key(self.router.candidate_key(self._ranked(attempt)))
 
     def refuse(self, attempt: Attempt) -> None:
         """Rank an offering that refused this caller after the others until the refusal expires."""
@@ -135,7 +154,8 @@ class AutomaticSelection:
             observation.finish()
 
     def start(self, attempt: Attempt) -> AutomaticObservation:
-        """Track active load for the credential actually dispatched and return its observer."""
+        """Track active load for the offering dispatched and return its observer."""
+        attempt = self._ranked(attempt)
         selector = f"{attempt.instance}:{attempt.model}"
         key = self.router.candidate_key(attempt)
         health = self.router._health(key)
@@ -179,7 +199,7 @@ class AutomaticObservation:
         if self.health is not None:
             self.health.active = max(0, self.health.active - 1)
             if unhealthy:
-                self.health.failures += 1
+                self.health.failures = _consecutive(self.health.failures, self.health.cooldown, now)
                 self.health.cooldown = now + _backoff(self.health.failures)
             if success:
                 # Streaming measures first output; non-streaming measures completion.
@@ -244,7 +264,7 @@ class AutomaticRouter:
     def cool_account(self, key: str, now: float) -> None:
         """Cool every model on a failing credential, backing off further while it keeps failing."""
         previous = self.accounts.pop(key, None)
-        failures = previous[1] + 1 if previous else 1
+        failures = _consecutive(previous[1], previous[0], now) if previous else 1
         self.accounts[key] = (now + _backoff(failures), failures)
         while len(self.accounts) > _LIMIT:
             self.accounts.popitem(last=False)

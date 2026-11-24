@@ -510,7 +510,27 @@ async def test_a_walk_asks_for_each_candidate_only_when_it_reaches_it(candidate_
 
     class _Plan:
         attempts = (_uncredentialed(),) * candidate_count
-        automatic = object() if candidate_count == 1 else None
+        automatic = (
+            AutomaticRouter()
+            .rank(
+                CompiledPlan(
+                    policy_name="p",
+                    attempts=[
+                        Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4o", {}),
+                        Attempt(2, "together", LLMProvider.TOGETHER, "gpt-4o", {}),
+                    ],
+                ),
+                settings=AutomaticRouting(),
+                costs={},
+                scope="",
+                anchor="",
+                region=None,
+                mode="chat:completion",
+            )
+            .automatic
+            if candidate_count == 1
+            else None
+        )
 
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())

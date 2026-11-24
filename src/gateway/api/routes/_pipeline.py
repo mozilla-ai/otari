@@ -1560,6 +1560,8 @@ def _hosted_candidate(
         hosted = replace(
             attempt, instance=served.instance, provider=served.provider, kwargs=served.kwargs, deployment_paid=True
         )
+        if ctx.plan is not None and ctx.plan.automatic is not None:
+            ctx.plan.automatic.dispatched_as(attempt, hosted)
         await _grow_reservation(
             ctx,
             hosted.instance,

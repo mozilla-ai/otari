@@ -605,3 +605,43 @@ def test_upstream_failures_classify_for_cooldown(status: int, unhealthy: bool, a
     exc = openai.APIStatusError("upstream refused", response=response, body=None)
     assert _automatic_unhealthy(exc) is unhealthy
     assert AutomaticRouter.is_account_failure(exc) is account
+
+
+def test_a_long_outage_does_not_overflow_the_backoff(router: AutomaticRouter) -> None:
+    """Thousands of consecutive failures keep the ten-minute cap instead of raising."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    for _ in range(1100):
+        plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
+    health = router.health[router.candidate_key(plan.head)]
+    assert health.cooldown == pytest.approx(100 + 600)
+    assert next(iter(router.accounts.values()))[0] == pytest.approx(100 + 600)
+
+
+def test_an_old_failure_does_not_lengthen_a_new_cooldown(router: AutomaticRouter, now: list[float]) -> None:
+    """Failures far apart restart the count, so an occasional failure always cools for 15 seconds."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    now[0] += 30 + 601
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    now[0] += 16
+    assert _rank(router).head.instance == "us"
+
+
+def test_hosted_dispatch_feeds_the_offering_it_was_ranked_as(router: AutomaticRouter) -> None:
+    """A failure on a credential resolved at dispatch cools the offering ranking sees, and a success binds it."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    served = replace(plan.head, instance="hosted", kwargs={"api_key": "hosted-secret"}, deployment_paid=True)
+    plan.automatic.dispatched_as(plan.head, served)
+    plan.automatic.start(served).finish(unhealthy=True)
+    assert _rank(router).head.instance == "eu"
+
+    bound = _rank(AutomaticRouter())
+    assert bound.automatic is not None
+    served = replace(bound.head, instance="hosted", kwargs={"api_key": "hosted-secret"}, deployment_paid=True)
+    bound.automatic.dispatched_as(bound.head, served)
+    bound.automatic.start(served).finish(success=True)
+    assert bound.automatic.router.affinities
