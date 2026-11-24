@@ -189,7 +189,8 @@ class AutomaticObservation:
         """Release load once, then update health and session affinity for the reported outcome.
 
         ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
-        which cools every model served on it rather than this one alone.
+        which cools every model served on it rather than this one alone. It applies only with ``unhealthy``,
+        so a gateway-side refusal that carries the same status never cools a shared credential.
         """
         if self.finished:
             return
@@ -209,7 +210,7 @@ class AutomaticObservation:
                 self.health.latency[self.selection.mode] = (value, now)
                 self.health.cooldown = 0
                 self.health.failures = 0
-        if account:
+        if account and unhealthy:
             router.cool_account(self.account, now)
         elif success:
             router.accounts.pop(self.account, None)

@@ -645,3 +645,13 @@ def test_hosted_dispatch_feeds_the_offering_it_was_ranked_as(router: AutomaticRo
     bound.automatic.dispatched_as(bound.head, served)
     bound.automatic.start(served).finish(success=True)
     assert bound.automatic.router.affinities
+
+
+def test_a_gateway_refusal_does_not_cool_the_credential(router: AutomaticRouter) -> None:
+    """A 403 the gateway raised itself, such as a guardrail refusal, leaves a shared credential alone."""
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.01"), "eu:model": Decimal("0.05")}
+    plan = _rank(router, plan=_same_account_plan(), costs=costs)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(account=True)
+    assert not router.accounts
+    assert _rank(router, plan=_same_account_plan(), costs=costs).head.instance == "us"
