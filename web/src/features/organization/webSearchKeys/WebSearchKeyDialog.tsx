@@ -245,7 +245,9 @@ export function WebSearchKeyDialog({
                 ? "Enter the API key again: it goes to the new URL."
                 : isEdit
                   ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-                  : "Encrypted at rest and never shown again; only the last 4 characters come back."
+                  : keyRequired && provider?.requires_api_key === false
+                    ? "This provider runs without a key, but a key here brings the organization's own account, so searches never run on this deployment's address. Encrypted at rest and never shown again."
+                    : "Encrypted at rest and never shown again; only the last 4 characters come back."
             }
           />
           {isUncataloged ? (

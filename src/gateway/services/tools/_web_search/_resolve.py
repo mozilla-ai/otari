@@ -602,17 +602,19 @@ def credential_needs_api_key(metadata: any_search.ProviderMetadata | any_fetch.P
     """Whether an organization's key on the provider must carry an API key.
 
     A key brings the organization's own account or its own server. A provider
-    that requires a key, or that calls a public address of its own, takes the
-    account: without one, a call would run on this deployment's address, under
+    that requires a key, or that has an address of its own, takes the account:
+    without one, a call would run keyless from this deployment's address, under
     the allowance the provider gives that address.
     """
-    return metadata.requires_api_key or (not metadata.requires_api_base and metadata.default_api_base is not None)
+    return metadata.requires_api_key or bool(metadata.default_api_base)
 
 
 def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: bool) -> None:
     """Refuse a credential that would run on the server's own settings or address."""
     if requires_key and not credential.api_key:
-        raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which a key on it must carry")
+        raise WebSearchCredentialRefusedError(
+            credential.provider, "carries no API key, which every key on this provider must carry"
+        )
     if requires_base and not _base(credential.api_base):
         raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
 

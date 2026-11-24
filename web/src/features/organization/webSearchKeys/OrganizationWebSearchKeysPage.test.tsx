@@ -361,6 +361,11 @@ describe("OrganizationWebSearchKeysPage", () => {
       name: "Add search provider",
     })
     expect(add).toBeDisabled()
+    expect(
+      within(dialog).getByText(
+        /This provider runs without a key, but a key here brings the organization's own account/,
+      ),
+    ).toBeInTheDocument()
     await user.type(within(dialog).getByLabelText(/API key/), "own-secret")
     await user.click(add)
 

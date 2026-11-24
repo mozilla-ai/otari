@@ -1050,10 +1050,9 @@ archive it, and make one key of each kind the organization's default or stop it
 being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the
 last four characters of a key are ever shown. A key brings the organization's
 own account or its own server, never the deployment's: it carries an API key for
-any provider at a public address of its own, even one whose search tools may run
-without a key, while a `searxng` key names its own instance. A key may also
-carry its own `api_base` and provider `options`, which are checked against the
-provider when the key is written. An `api_base`
+any provider with an address of its own, even one whose API key is optional. A
+key may also carry its own `api_base` and provider `options`, which are checked
+against the provider when the key is written. An `api_base`
 must use https when the key carries an API key, and must reach public addresses
 only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
 rather than the operator chose it. Calls to it are held to the same rule: each

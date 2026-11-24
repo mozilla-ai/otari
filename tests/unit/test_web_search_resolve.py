@@ -930,6 +930,14 @@ def test_an_organization_key_brings_an_api_key_or_its_own_server(provider: str, 
     assert _resolve.credential_needs_api_key(any_search.AnySearch.get_provider_metadata(provider)) is needs_key
 
 
+def test_a_provider_with_a_default_address_takes_the_account_whatever_it_requires() -> None:
+    """A required address with a default runs on the default, so the key still brings the account."""
+    metadata = any_search.AnySearch.get_provider_metadata("brave")
+    keyless = metadata.model_copy(update={"requires_api_key": False, "requires_api_base": True})
+    assert _resolve.credential_needs_api_key(keyless) is True
+    assert _resolve.credential_needs_api_key(keyless.model_copy(update={"default_api_base": ""})) is False
+
+
 def test_a_key_on_a_public_address_needs_an_api_key_its_provider_does_not_require(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

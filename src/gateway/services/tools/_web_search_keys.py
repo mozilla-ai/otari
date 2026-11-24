@@ -599,7 +599,7 @@ async def _check_settings(
     """Refuse a new key a call could not be made with as written.
 
     Raises:
-        WebSearchKeyIncompleteError: the provider needs a key or an endpoint the key does not carry.
+        WebSearchKeyIncompleteError: the key lacks an API key or an endpoint a key on the provider must carry.
         WebSearchKeySettingRefusedError: the endpoint or an option is one the provider or this deployment refuses.
     """
     _, requires_key, _ = _requirements(kind, provider)
