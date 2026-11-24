@@ -16,6 +16,8 @@ export interface SubagentSavingsFilters {
   bucket: "hour" | "day"
   /** Narrows to one person's subagents. */
   user_id?: string
+  /** Narrows to one workspace of the caller's scope. */
+  workspace_id?: string
 }
 
 export function useSubagentSavings(
@@ -31,6 +33,9 @@ export function useSubagentSavings(
       })
       if (filters.end_date) params.set("end_date", filters.end_date)
       if (filters.user_id) params.set("user_id", filters.user_id)
+      if (filters.workspace_id) {
+        params.set("workspace_id", filters.workspace_id)
+      }
       return apiFetch<SubagentSavings>(
         `/organizations/me/subagent-savings?${params.toString()}`,
       )

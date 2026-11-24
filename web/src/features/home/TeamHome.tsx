@@ -24,6 +24,7 @@ import { canOpenInKeys } from "@/features/home/keyAccess"
 import { useHomeAccount } from "@/features/home/overlayHomeAccount"
 import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
+import { RouterSavingsTile } from "@/features/routerSavings/RouterSavingsTile"
 import { limitDialogCopy } from "@/features/spend/limitCopy"
 import {
   type AppliedLimit,
@@ -719,6 +720,7 @@ export function TeamHome({
           }
         />
       </KpiStrip>
+      <RouterSavingsTile window={window} workspaceId={workspaceId} />
       <section aria-label="Where it went" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
