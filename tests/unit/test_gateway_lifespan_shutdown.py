@@ -29,6 +29,7 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from gateway import main as gateway_main
 from gateway.container import build_container
@@ -340,12 +341,15 @@ async def test_the_file_sweeper_skips_a_store_it_cannot_build(monkeypatch: pytes
 class _WaitingFiles:
     """Stands in for the file service the boot check asks."""
 
-    def __init__(self, *, waiting: bool) -> None:
+    def __init__(self, *, waiting: bool, fails: Exception | None = None) -> None:
         self.waiting = waiting
+        self.fails = fails
         self.asked = False
 
     async def has_reclaimable(self) -> bool:
         self.asked = True
+        if self.fails is not None:
+            raise self.fails
         return self.waiting
 
 
@@ -461,3 +465,37 @@ async def test_the_idempotency_sweep_runs_while_the_header_is_ignored(monkeypatc
 def test_the_idempotency_sweep_cannot_be_turned_off() -> None:
     with pytest.raises(ValidationError):
         GatewayConfig(idempotency_sweep_interval_sec=0)
+
+
+@pytest.mark.asyncio
+async def test_the_boot_check_lets_the_boot_go_on_when_the_database_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    files = _WaitingFiles(waiting=True, fails=SQLAlchemyError("connection refused"))
+
+    warnings = await _unreclaimed_file_warnings(
+        _full_config(files_sweep_interval_sec=0),
+        files,
+        monkeypatch,
+        caplog,
+        storage=cast(FileStoragePort, object()),
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Could not check for files waiting to be reclaimed")
+
+
+@pytest.mark.asyncio
+async def test_the_boot_check_does_not_hide_an_error_that_is_not_the_database(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    files = _WaitingFiles(waiting=True, fails=RuntimeError("a bug in the check"))
+
+    with pytest.raises(RuntimeError, match="a bug in the check"):
+        await _unreclaimed_file_warnings(
+            _full_config(files_sweep_interval_sec=0),
+            files,
+            monkeypatch,
+            caplog,
+            storage=cast(FileStoragePort, object()),
+        )
