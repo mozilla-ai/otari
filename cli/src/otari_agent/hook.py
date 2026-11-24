@@ -2402,8 +2402,8 @@ def hook(
     `--repo-only` is for a person whose own rules do not suit one repository.
     It means what it does on `otari guardrails validate`, so a dry run there
     agrees with this. Pass it to `otari hook setup` rather than editing the
-    settings file: a later `setup` run rewrites the registered command, so a
-    flag added by hand does not survive one.
+    settings file: a later `setup` run rewrites the registered command, keeping
+    `--repo-only` and dropping any other flag added by hand.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
@@ -2977,6 +2977,8 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     if settings_path.is_file():
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError as exc:
+            raise click.ClickException(f"{settings_path} is not valid UTF-8: {exc}") from exc
         except json.JSONDecodeError as exc:
             raise click.ClickException(f"{settings_path} is not valid JSON: {exc}") from exc
         if not isinstance(settings, dict):
@@ -3064,20 +3066,22 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
-def _registered_otari_hook_argvs(settings_path: Path) -> list[list[str]]:
-    """The argv of every otari hook registration in a harness settings file, across all events.
+def _registered_otari_hook_argvs(settings_path: Path, event: str | None = None) -> list[list[str]]:
+    """The argv of every otari hook registration in a harness settings file, in `event` or across all events.
 
     A missing or unreadable file, or one not shaped like a settings file, registers nothing.
     """
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return []
     hooks_section = settings.get("hooks") if isinstance(settings, dict) else None
     if not isinstance(hooks_section, dict):
         return []
     argvs = []
-    for entries in hooks_section.values():
+    for name, entries in hooks_section.items():
+        if event is not None and name != event:
+            continue
         if not isinstance(entries, list):
             continue
         for entry in entries:
@@ -3134,13 +3138,13 @@ def hook_setup(harness: str, repo_only: bool | None) -> None:
     https://github.com/mozilla-ai/otari/blob/main/cli/docs/agent-guardrails.md.
 
     `--repo-only` writes that flag into the registered command, so the hook
-    enforces this repo's guardrail alone here. A re-run without the flag keeps
-    it when the existing registration has it, since dropping it would turn the
-    person's own gates back on; `--no-repo-only` removes it. The matcher is then picked from
+    enforces this repo's guardrail alone here. The matcher is then picked from
     the repo's own gates, because a matcher widened for a gate the hook will
     not run invokes it on every such tool call for nothing. On claude-code, it
     also warns when `~/.claude/settings.json` registers the hook for every
     repository without the flag, since that registration still runs here.
+    A re-run without either flag keeps `--repo-only` when the existing
+    PreToolUse registration has it; `--no-repo-only` removes it.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -3149,7 +3153,7 @@ def hook_setup(harness: str, repo_only: bool | None) -> None:
     setup = _HOOK_SETUP_BY_HARNESS[harness]
     settings_path = root / setup.settings_dir / setup.settings_name
     if repo_only is None:
-        repo_only = any("--repo-only" in argv for argv in _registered_otari_hook_argvs(settings_path))
+        repo_only = any("--repo-only" in argv for argv in _registered_otari_hook_argvs(settings_path, "PreToolUse"))
         if repo_only:
             click.echo("Keeping --repo-only from the existing registration; pass --no-repo-only to remove it.")
 

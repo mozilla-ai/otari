@@ -199,6 +199,56 @@ def test_rerunning_keeps_repo_only_from_the_existing_registration(repo: Path) ->
     assert settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 30
 
 
+def test_only_the_pretooluse_registration_decides_whether_repo_only_is_kept(repo: Path) -> None:
+    """A Stop entry with `--repo-only` must not turn it on for PreToolUse on a plain re-run."""
+    settings_path = repo / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    plain = f"{_FAKE_OTARI_PATH} hook --harness claude-code"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": plain}]}],
+                    "Stop": [{"hooks": [{"type": "command", "command": plain + " --repo-only"}]}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "Keeping --repo-only" not in result.output
+    settings = _read_settings(repo)
+    for event in ("PreToolUse", "Stop"):
+        assert settings["hooks"][event][0]["hooks"][0]["command"] == plain
+
+
+def test_a_kept_repo_only_warns_of_a_global_registration_without_it(repo: Path, isolated_home: Path) -> None:
+    """The global-registration warning follows the registration, not the flag typed on this run."""
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    assert _invoke("--repo-only").exit_code == 0
+
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "Keeping --repo-only" in result.output
+    assert str(global_settings) in result.output
+
+
+def test_a_settings_file_that_is_not_utf8_is_refused_with_a_message(repo: Path) -> None:
+    settings_path = repo / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_bytes(b'{"hooks": "\xff"}')
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    result = _invoke()
+    assert result.exit_code == 1, result.output
+    assert "is not valid UTF-8" in result.output
+    assert not isinstance(result.exception, UnicodeDecodeError)
+
+
 def test_no_repo_only_removes_the_flag_from_the_existing_registration(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     assert _invoke("--repo-only").exit_code == 0

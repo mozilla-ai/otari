@@ -553,7 +553,7 @@ Re-running `setup`:
 - moves otari's command to an entry of its own where an entry holds it beside another hook's, leaving that entry's matcher alone;
 - rewrites every entry in the event that runs otari hook, not only the first.
 
-On claude-code, `setup --repo-only` also warns when Claude Code's user settings file (`~/.claude/settings.json`, or `settings.json` under `CLAUDE_CONFIG_DIR` where set) registers the hook for every repository without the flag, since that entry still enforces the user's gates here. The warning suggests removing that entry and registering per repository.
+On claude-code, `setup` also warns, whenever the registration has `--repo-only`, when Claude Code's user settings file (`~/.claude/settings.json`, or `settings.json` under `CLAUDE_CONFIG_DIR` where set) registers the hook for every repository without the flag, since that entry still enforces the user's gates here. The warning suggests removing that entry and registering per repository.
 
 ### `otari guardrails validate`
 

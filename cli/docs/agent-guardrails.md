@@ -361,9 +361,10 @@ otari hook setup --repo-only
 ```
 
 The hook then enforces that repository's guardrail alone. A later `setup` run
-keeps the flag; pass `--no-repo-only` to turn your own gates back on. If your Claude Code user settings also register the hook for
-every repository, that entry still enforces your gates; `setup --repo-only` warns
-about it.
+keeps the flag; pass `--no-repo-only` to turn your own gates back on. If your
+Claude Code user settings also register the hook for every repository, that
+entry still enforces your gates; `setup` warns about it whenever the
+registration has `--repo-only`.
 
 ### Running your guardrail in every repository
 
