@@ -34,6 +34,7 @@ from gateway.services.providers._hosted_provider_service import (
     ResolvedHostedProvider,
 )
 from gateway.services.providers._hosted_runtime import (
+    HostedServing,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
     hosted_credential_for,
@@ -94,6 +95,7 @@ __all__ = [
     "HostedCatalogUpdate",
     "HostedProviderService",
     "HostedRegionIndex",
+    "HostedServing",
     "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",

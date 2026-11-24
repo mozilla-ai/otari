@@ -121,7 +121,7 @@ from gateway.services.providers._hosted_name_index import (
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
-from gateway.services.providers._hosted_runtime import HostedProviderRuntime
+from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
@@ -1152,11 +1152,9 @@ class HostedProviderService:
         regions = await self.runtime.resolve(name, model, organization_id=organization_id)
         return regions[0] if regions else None
 
-    async def resolve_regions(
-        self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
-    ) -> list[ResolvedHostedProvider]:
-        """The usable connections of the hosted provider ``name`` for ``organization_id``, in the order tried."""
-        return await self.runtime.resolve(name, model, organization_id=organization_id)
+    def serving(self) -> HostedServing:
+        """One request's resolver, reading the hosted providers once, however many candidates it is asked about."""
+        return self.runtime.serving()
 
     async def discovery_dials(self) -> dict[str, DiscoveryDial]:
         """Each provider switched on, with the dial that lists its models on its credential.

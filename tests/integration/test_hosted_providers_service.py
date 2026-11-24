@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.model import Model
-from sqlalchemy import delete, select
+from sqlalchemy import Engine, delete, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -1227,6 +1227,88 @@ async def test_the_adapter_answers_an_alias_under_the_provider_it_folds_to(
         )
         assert credential is not None, asked
         assert credential.response_provider == "openai", asked
+
+
+async def _policy_candidates(service: HostedProviderService, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Three hosted providers a policy falls back across: one switched off, then two that serve ``gpt-4o``."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    _discovery(monkeypatch, "gpt-4o")
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="openai", name="openai-off", api_key=KEY, enabled=False)
+    )
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", name="openai-eu", api_key=KEY))
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+    return ["openai-off", "openai-eu", "openai"]
+
+
+def _hosted_reads(statements: list[str]) -> list[str]:
+    return [statement for statement in statements if "FROM hosted_provider" in statement]
+
+
+async def test_the_adapter_reads_a_policys_hosted_providers_once(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request's candidates share one read of the providers and their regions, however many there are.
+
+    Each candidate read the provider and its regions on its own before, and a
+    candidate that reached the model check its row and its vendors too: ten
+    reads for these three. Now the providers, the regions and the vendors are
+    read once, and each model row once.
+    """
+    service = _service(async_db)
+    candidates = await _policy_candidates(service, monkeypatch)
+    organization_id = uuid.uuid4()
+    adapter = HostedProviderModelProviderAdapter(service)
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, statement: str, *_args: object) -> None:
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", record)
+    try:
+        served = [
+            await adapter.resolve_hosted_credential(
+                organization_id=organization_id, workspace_id=None, provider=name, model="gpt-4o"
+            )
+            for name in candidates
+        ]
+    finally:
+        event.remove(Engine, "before_cursor_execute", record)
+
+    assert [None if credential is None else credential.response_provider for credential in served] == [
+        None,
+        "openai-eu",
+        "openai",
+    ]
+    reads = _hosted_reads(statements)
+    assert len(reads) == 5, reads
+    assert sum("FROM hosted_providers " in read for read in reads) == 1, reads
+    assert sum("FROM hosted_provider_regions " in read for read in reads) == 1, reads
+    assert sum("FROM hosted_provider_disabled_vendors " in read for read in reads) == 1, reads
+    # Each answer is what a resolve read afresh gives.
+    for name, credential in zip(candidates, served, strict=True):
+        fresh = await service.resolve(name, "gpt-4o", organization_id=organization_id)
+        assert (fresh is None) == (credential is None), name
+
+
+async def test_the_adapter_still_serves_after_the_request_rolls_back(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rows it keeps are detached, so a rollback that expires the session's objects cannot reach them."""
+    service = _service(async_db)
+    await _policy_candidates(service, monkeypatch)
+    adapter = HostedProviderModelProviderAdapter(service)
+    first = await adapter.resolve_hosted_credential(
+        organization_id=uuid.uuid4(), workspace_id=None, provider="openai-eu", model="gpt-4o"
+    )
+
+    await async_db.rollback()
+    second = await adapter.resolve_hosted_credential(
+        organization_id=uuid.uuid4(), workspace_id=None, provider="openai", model="gpt-4o"
+    )
+
+    assert first is not None and first.api_key == KEY
+    assert second is not None and second.api_key == KEY
 
 
 async def test_only_a_model_switched_on_under_the_provider_serves(

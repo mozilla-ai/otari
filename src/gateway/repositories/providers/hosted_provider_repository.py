@@ -10,7 +10,7 @@ from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Never, cast
 
-from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy import CursorResult, delete, inspect, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -71,6 +71,19 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         """Every hosted provider by name, bounded."""
         result = await self.db.execute(select(HostedProvider).order_by(HostedProvider.name).limit(_ALL_PROVIDERS))
         return result.scalars().all()
+
+    async def list_all_detached(self) -> tuple[list[HostedProvider], bool]:
+        """Every hosted provider by name as objects no session holds, and whether that is all of them.
+
+        Detached so a caller may keep them past the transaction that read them:
+        a rollback expires every object its session holds, and reading one
+        afterwards is sync IO on an async session. Not all of them when the
+        bound on a listing cut it short.
+        """
+        rows = await self.list_all()
+        columns = [attribute.key for attribute in inspect(HostedProvider).column_attrs]
+        detached = [HostedProvider(**{column: getattr(row, column) for column in columns}) for row in rows]
+        return detached, len(rows) < _ALL_PROVIDERS
 
     async def list_encrypted(self) -> Sequence[HostedProvider]:
         """Every hosted provider holding a ciphertext, for a key rotation."""
