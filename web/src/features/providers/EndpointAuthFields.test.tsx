@@ -9,6 +9,7 @@ import {
   type EndpointAuthDraft,
   EndpointAuthFields,
   endpointAuthDraftFrom,
+  endpointAuthSecretError,
   isEndpointAuthComplete,
 } from "@/features/providers/EndpointAuthFields"
 
@@ -64,6 +65,29 @@ describe("endpointAuthDraftFrom", () => {
     // The input reads local time, so the calendar day follows the host. Read
     // back as local, it is still the instant the gateway reported.
     expect(new Date(seeded).toISOString()).toBe("2027-03-01T09:15:00.000Z")
+  })
+})
+
+describe("endpointAuthSecretError", () => {
+  const draft = (secret: string): EndpointAuthDraft => ({
+    headerName: "Fastly-Key",
+    secret,
+    expiresAt: "2027-03-01T00:00",
+  })
+
+  // A blank field means "keep what is stored", so it carries no complaint.
+  it("finds nothing wrong with a blank value", () => {
+    expect(endpointAuthSecretError(draft(""))).toBeUndefined()
+  })
+
+  it("names the floor for a value under it", () => {
+    expect(endpointAuthSecretError(draft("123"))).toBe(
+      "Enter at least 8 characters.",
+    )
+  })
+
+  it("finds nothing wrong with a value at the floor", () => {
+    expect(endpointAuthSecretError(draft("12345678"))).toBeUndefined()
   })
 })
 
@@ -138,6 +162,26 @@ describe("isEndpointAuthComplete", () => {
     ).toBe(true)
   })
 
+  // Without this the dialog offers a save the gateway answers with its own
+  // validator's error, which names the request field rather than the label.
+  it("refuses a value under the floor", () => {
+    expect(
+      isEndpointAuthComplete(
+        { ...complete, secret: "123" },
+        { hasStoredSecret: false, addressMoved: false },
+      ),
+    ).toBe(false)
+  })
+
+  it("refuses a value under the floor even where one is already stored", () => {
+    expect(
+      isEndpointAuthComplete(
+        { ...complete, secret: "123" },
+        { hasStoredSecret: true, addressMoved: false },
+      ),
+    ).toBe(false)
+  })
+
   it("refuses a credential with no rotation date", () => {
     expect(
       isEndpointAuthComplete(
@@ -171,6 +215,29 @@ describe("EndpointAuthFields", () => {
 
     expect(screen.getByLabelText("Endpoint credential")).toBeInTheDocument()
     expect(screen.getByLabelText("Credential expires")).toBeInTheDocument()
+  })
+
+  it("says on the field itself that a value is too short", async () => {
+    render(<Harness />)
+
+    await userEvent.type(headerField(), "Fastly-Key")
+    await userEvent.type(screen.getByLabelText("Endpoint credential"), "123")
+
+    expect(screen.getByText("Enter at least 8 characters.")).toBeInTheDocument()
+  })
+
+  it("drops the complaint once the value reaches the floor", async () => {
+    render(<Harness />)
+
+    await userEvent.type(headerField(), "Fastly-Key")
+    await userEvent.type(
+      screen.getByLabelText("Endpoint credential"),
+      "12345678",
+    )
+
+    expect(
+      screen.queryByText("Enter at least 8 characters."),
+    ).not.toBeInTheDocument()
   })
 
   it("says a stored value is kept when the field is left blank", () => {

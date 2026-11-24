@@ -51,6 +51,23 @@ export function endpointAuthExpiresAt(
   return new Date(draft.expiresAt).toISOString()
 }
 
+/** The shortest value the gateway stores, mirroring the request schema's floor. */
+const SECRET_MIN_LENGTH = 8
+
+/**
+ * What is wrong with this draft's value, or undefined when nothing is.
+ *
+ * A blank value is not wrong, because it keeps whatever is already stored.
+ */
+export function endpointAuthSecretError(
+  draft: EndpointAuthDraft,
+): string | undefined {
+  if (draft.secret === "" || draft.secret.length >= SECRET_MIN_LENGTH) {
+    return undefined
+  }
+  return `Enter at least ${SECRET_MIN_LENGTH} characters.`
+}
+
 /**
  * Whether this draft can be saved, given what the key already holds.
  *
@@ -72,6 +89,7 @@ export function isEndpointAuthComplete(
 ): boolean {
   if (draft.headerName.trim() === "") return true
   if (draft.expiresAt === "") return false
+  if (endpointAuthSecretError(draft) !== undefined) return false
   if (draft.secret !== "") return true
   return hasStoredSecret && !addressMoved
 }
@@ -104,6 +122,7 @@ export function EndpointAuthFields({
 }) {
   const last4 = stored?.last4 ?? ""
   const isSet = value.headerName.trim() !== ""
+  const secretError = endpointAuthSecretError(value)
 
   return (
     <div className="flex flex-col gap-4">
@@ -125,9 +144,11 @@ export function EndpointAuthFields({
             onChange={(secret) => onChange({ ...value, secret })}
             description={
               last4
-                ? `Encrypted at rest. Ending ${last4}. Leave blank to keep it, and retype it when you move this key to a different address.`
-                : "Encrypted at rest and never shown again; only the last 4 characters come back."
+                ? `At least ${SECRET_MIN_LENGTH} characters. Encrypted at rest. Ending ${last4}. Leave blank to keep it, and retype it when you move this key to a different address.`
+                : `At least ${SECRET_MIN_LENGTH} characters. Encrypted at rest and never shown again; only the last 4 characters come back.`
             }
+            isInvalid={secretError !== undefined}
+            errorMessage={secretError}
           />
 
           <ExpiryFields
