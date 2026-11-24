@@ -696,13 +696,13 @@ ranked independently. Region remains a preference, so fallback can cross regions
 
 Selection uses these signals:
 
-- **Health:** recent upstream 402s, 429s, 5xx responses, connection failures and
-  timeouts put an offering behind healthy alternatives for 15 seconds, doubling with
-  each consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
-  credential cools every model served on that credential. An offering the deployment
-  refuses to serve a caller on its credential ranks last for that caller for 5 minutes.
-  Each stays available as a last resort. Client cancellation and other gateway
-  refusals do not count as outages.
+- **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
+  put an offering behind healthy alternatives for 15 seconds, doubling with each
+  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  credential cools every model served on that credential the same way, for the
+  workspace that saw it. An offering the deployment refuses to serve a caller on its
+  credential ranks last for that caller for 5 minutes. Each stays available as a last
+  resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
   pricing where requested. It uses the caller's organization prices, then the

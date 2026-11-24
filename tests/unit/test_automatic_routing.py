@@ -685,3 +685,22 @@ def test_a_refused_offering_ranks_after_an_unpriced_one(router: AutomaticRouter)
     assert plan.automatic is not None and plan.head.instance == "us"
     plan.automatic.refuse(plan.head)
     assert _rank(router, costs=costs).head.instance == "eu"
+
+
+def test_a_credential_failure_with_transport_settings_stays_with_its_tenant(router: AutomaticRouter) -> None:
+    """Planned client settings that carry no credential do not share a cooldown, or its reset, across tenants."""
+    plan = CompiledPlan(
+        policy_name="acme/model",
+        attempts=[
+            Attempt(1, "us", LLMProvider.BEDROCK, "model", {"client_args": {"region_name": "us-east-1"}}),
+            Attempt(2, "eu", LLMProvider.BEDROCK, "model", {"client_args": {"region_name": "eu-west-1"}}),
+        ],
+    )
+    costs = {"us:model": Decimal("0.01"), "eu:model": Decimal("0.02")}
+    failing = _rank(router, plan=plan, costs=costs, tenant="workspace-a")
+    assert failing.automatic is not None
+    failing.automatic.start(failing.head).finish(unhealthy=True, account=True)
+    serving = _rank(router, plan=plan, costs=costs, tenant="workspace-b")
+    assert serving.automatic is not None and serving.head.instance == "us"
+    serving.automatic.start(serving.head).finish(success=True)
+    assert _rank(router, plan=plan, costs=costs, tenant="workspace-a").head.instance == "eu"

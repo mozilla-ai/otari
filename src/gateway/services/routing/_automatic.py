@@ -262,13 +262,12 @@ class AutomaticRouter:
         return upstream_exception_shape(exc)[1] == 402 or is_provider_credential_rejection(exc)
 
     def account_key(self, attempt: Attempt, tenant: str = "") -> str:
-        """Identify the credential an attempt is sent on, whatever model it names.
+        """Identify the credential an attempt is sent on, whatever model it names, for one ``tenant``.
 
-        An offering that names no credential has it resolved at dispatch, possibly per organization,
-        so its account is kept apart per ``tenant`` rather than shared by everyone reaching it.
+        Dispatch may resolve a different credential per organization behind the same planned fields,
+        so a credential's failure is kept to the tenant that saw it rather than shared by everyone.
         """
-        fields = _credential_fields(attempt.kwargs)
-        return self._digest((attempt.instance, attempt.provider.value, fields, None if fields else tenant))
+        return self._digest((attempt.instance, attempt.provider.value, _credential_fields(attempt.kwargs), tenant))
 
     def cool_account(self, key: str, now: float) -> None:
         """Cool every model on a failing credential, backing off further while it keeps failing."""
