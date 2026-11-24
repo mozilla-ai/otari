@@ -634,6 +634,8 @@ def test_a_capped_search_beside_mcp_stops_at_its_cap_while_mcp_keeps_running(
     assert response.status_code == 200, response.text
     assert backends.searches.await_count == 1
     assert backends.mcp_calls == [_MCP_TOOL, _MCP_TOOL]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert {tool["function"]["name"] for tool in sent[1]["tools"]} == {_MCP_TOOL}
     second_round = {m["tool_call_id"]: m["content"] for m in sent[2]["messages"] if m.get("role") == "tool"}
     assert second_round["call_0"] == MAX_USES_EXCEEDED_ERROR
     assert second_round["call_1"] == "mcp result"

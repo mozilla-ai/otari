@@ -143,15 +143,22 @@ request. The cap is honored on every endpoint (`/api/v1/messages`,
 `/api/v1/chat/completions`, `/api/v1/responses`) and on every declaration
 shape, including `otari_web_search`. A failed search does not count against it.
 
-`max_uses: 0` refuses every search. A negative or non-integer value (including
-`1.5` and `5.0`) is rejected with a 400.
+`max_uses: 0` refuses every search: the search is never offered. A negative or
+non-integer value (including `1.5` and `5.0`) is rejected with a 400.
 
-Past the cap, the model is told the search was refused and can answer without it.
-An Anthropic-native declaration is answered in its own vocabulary, a
-`web_search_tool_result` carrying `error_code: max_uses_exceeded`. Otherwise the
-model gets the same `[tool error]` string a failed tool produces, and a Chat
-Completions client sees the search in `otari_tool_calls` as `failed`, with the
-tag `call_limit`. Even without
+Once the cap is used up, later rounds no longer offer the search: a
+`tool_choice` loses it, and the model is told the search has reached its limit for
+the request. Other tools stay on offer. When none is left, neither one of Otari's
+nor one of your own, the next round is the last one, as described in [Combining
+tools](#combining-tools): it tells the model to answer, and a search the model asks
+for anyway is left out of the answer.
+
+A search the model asks for past the cap within one round (three at once with two
+left, say) is refused, and the model is told so. An Anthropic-native declaration
+is answered in its own vocabulary, a `web_search_tool_result` carrying
+`error_code: max_uses_exceeded`. Otherwise the model gets the same `[tool error]`
+string a failed tool produces, and a Chat Completions client sees the search in
+`otari_tool_calls` as `failed`, with the tag `call_limit`. Even without
 `max_uses`, requests remain bounded by `max_tool_iterations` and the
 [call limit Search and Fetch share](#web-fetch).
 
@@ -403,8 +410,8 @@ runs on the tool it names, and each tool keeps the rules it has alone:
   is never dropped while the others run: an attempt that needs it is refused as
   it would be alone, and [Who runs a tool](#who-runs-a-tool) says what that
   means on a fallback chain.
-- A `max_uses` caps only its own tool: once search reaches its cap, the model is
-  told so for each further search while code and MCP calls keep running.
+- A `max_uses` caps only its own tool: once search reaches its cap, later rounds
+  no longer offer it, while code and MCP calls keep running.
 - Each built-in comes back in the same native result blocks or items as it does
   alone ([What clients receive](#what-clients-receive)), and so does MCP activity.
 - Usage counts each tool's calls under the tool's own name.
@@ -416,8 +423,11 @@ bounds the rounds of the whole request, and so does a workspace code policy's
 answer from the results it already has, so a model that keeps searching ends with
 an answer rather than a failed request ([MCP](mcp.md) says the same of its loop).
 A round the request's budget cannot hold ends the loop the same way, earlier
-([Budget enforcement](budget-enforcement.md#holds-and-settlement)); in either
-case, a model that still calls one of Otari's tools fails the request.
+([Budget enforcement](budget-enforcement.md#holds-and-settlement)), and so does
+the round after every one of Otari's tools in the request has used up its
+`max_uses` when the request has no tools of its own. In each case, if the model
+calls only Otari's tools in that round, Otari does not run them: the round ends as
+the answer ([MCP](mcp.md) says how).
 
 A `tool_choice` that forces a tool (`required`, or one tool by name, such as
 `code_execution` for Otari's sandbox) applies to the first round only. Once that

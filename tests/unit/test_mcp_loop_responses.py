@@ -38,7 +38,7 @@ from openresponses_types.types import InputTokensDetails as BridgedInputTokensDe
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
-from gateway.services._tool_loop import INVALID_ARGUMENTS_ERROR
+from gateway.services._tool_loop import FINAL_ROUND_NOTE, INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
@@ -278,14 +278,21 @@ class _FakeSearchPool(_FakePool):
 
 
 @pytest.mark.asyncio
-async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_ran(
+async def test_max_uses_refuses_a_search_past_the_cap_and_announces_only_the_one_that_ran(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The refused search is a tool error, and no ``web_search_call`` claims it happened."""
+    """Two searches in one round with one left.
+
+    The refused one is a tool error, and no ``web_search_call`` claims it happened.
+    """
     responses = iter(
         [
-            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
-            _response(output=[_function_call("c2", "web_search", '{"query": "second"}')]),
+            _response(
+                output=[
+                    _function_call("c1", "web_search", '{"query": "first"}'),
+                    _function_call("c2", "web_search", '{"query": "second"}'),
+                ]
+            ),
             _response(output=[], status="completed"),
         ]
     )
@@ -309,7 +316,7 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
     assert pool.calls == [("web_search", {"query": "first"})]
     refused = next(
         item
-        for item in captured_inputs[2]
+        for item in captured_inputs[1]
         if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id") == "c2"
     )
     assert refused["output"] == "[tool error] max_uses_exceeded"
@@ -1143,6 +1150,58 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
     ]
 
 
+def _offers_search(kwargs: dict[str, Any]) -> bool:
+    return any(tool.get("name") == "web_search" for tool in kwargs.get("tools") or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_max_uses_withholds_the_search_once_used_up(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """A model that keeps searching past ``max_uses`` gets one more round, without the search (#3183)."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        arguments = '{"query": "q"}'
+        if stream:
+            return _async_iter(
+                _output_item_added(0, _function_call(call_id, "web_search", "")),
+                _function_call_args_delta(0, f"fc_{len(sent)}", arguments),
+                _function_call_args_done(0, f"fc_{len(sent)}", arguments),
+                _output_item_done(0, _function_call(call_id, "web_search", arguments)),
+                _response_completed(),
+            )
+        return _response(output=[_function_call(call_id, "web_search", arguments)])
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+    completion_kwargs = {"model": "fake", "input_data": [{"role": "user", "content": "hi"}]}
+
+    if stream:
+        async for _ in responses_tool_loop_stream(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            use_budget=_use_budget(1),
+            native_tools=_SEARCH,
+        ):
+            pass
+    else:
+        out = await responses_tool_loop(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            use_budget=_use_budget(1),
+            native_tools=_SEARCH,
+        )
+        assert not [item for item in out.output or [] if getattr(item, "type", None) == "function_call"]
+
+    assert [_offers_search(kwargs) for kwargs in sent] == [True, False]
+    assert sent[1]["input_data"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    assert pool.calls == [("web_search", {"query": "q"})]
+
+
 @pytest.mark.asyncio
 async def test_stream_max_uses_announces_only_the_search_that_ran(
     monkeypatch: pytest.MonkeyPatch,
@@ -1154,20 +1213,18 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
     Without that, the stream would announce a search the cap stopped.
     """
 
-    def _search_round(call_id: str, item_id: str, query: str) -> AsyncIterator[ResponseStreamEvent]:
+    def _search(index: int, call_id: str, item_id: str, query: str) -> list[ResponseStreamEvent]:
         arguments = json.dumps({"query": query})
-        return _async_iter(
-            _output_item_added(0, _function_call(call_id, "web_search", "")),
-            _function_call_args_delta(0, item_id, arguments),
-            _function_call_args_done(0, item_id, arguments),
-            _output_item_done(0, _function_call(call_id, "web_search", arguments)),
-            _response_completed(),
-        )
+        return [
+            _output_item_added(index, _function_call(call_id, "web_search", "")),
+            _function_call_args_delta(index, item_id, arguments),
+            _function_call_args_done(index, item_id, arguments),
+            _output_item_done(index, _function_call(call_id, "web_search", arguments)),
+        ]
 
     iter_streams = iter(
         [
-            _search_round("c1", "fc_1", "first"),
-            _search_round("c2", "fc_2", "second"),
+            _async_iter(*_search(0, "c1", "fc_1", "first"), *_search(1, "c2", "fc_2", "second"), _response_completed()),
             _async_iter(_text_delta("msg_1", 0, "done"), _response_completed()),
         ]
     )
