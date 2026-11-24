@@ -499,7 +499,7 @@ async def test_a_round_after_every_gateway_tool_used_up_its_cap_keeps_the_caller
     assert [_offers(kwargs, "web_search") for kwargs in sent] == [True, False]
     assert _offers(sent[1], "lookup")
     assert sent[1]["messages"][-1] == {"role": "user", "content": spent_tools_note(frozenset({"web_search"}))}
-    assert [call.function.name for call in result.choices[0].message.tool_calls or []] == ["lookup"]
+    assert [cast(Any, call).function.name for call in result.choices[0].message.tool_calls or []] == ["lookup"]
 
 
 @pytest.mark.asyncio
