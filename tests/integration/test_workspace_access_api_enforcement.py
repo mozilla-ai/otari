@@ -7,6 +7,7 @@ the provider is never called. The provider call is captured at the any-llm
 boundary.
 """
 
+import logging
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -16,6 +17,7 @@ from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.providers import reset_workspace_hosted_access_cache
 from gateway.services.secret_box import generate_secret_key
@@ -411,6 +413,26 @@ def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_hea
     policy = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/provider-policy", headers=master_key_header))
 
     assert policy == {"require_zero_data_retention": False, "allowed_data_locations": None}
+
+
+def test_a_policy_change_logs_who_made_it_and_the_old_and_new_values(
+    client: TestClient, master_key_header: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    workspace_id, _ = _workspace_and_key(client, master_key_header)
+    url = f"{API_ROOT}/workspaces/{workspace_id}/provider-policy"
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        _ok(client.put(url, json={"require_zero_data_retention": True}, headers=master_key_header))
+        _ok(client.put(url, json={"require_zero_data_retention": False}, headers=master_key_header))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    changes = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Workspace provider policy changed")]
+    assert len(changes) == 2
+    assert f"workspace={workspace_id} user=" in changes[0]
+    assert "require_zero_data_retention False->True" in changes[0]
+    assert "require_zero_data_retention True->False" in changes[1]
 
 
 def test_an_alias_to_a_hosted_model_the_workspace_refuses_is_not_listed(

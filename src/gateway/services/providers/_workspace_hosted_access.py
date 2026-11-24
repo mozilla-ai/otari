@@ -373,12 +373,27 @@ class WorkspaceHostedAccessService:
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
+            before = await self.policies.get_for(workspace.id)
+            # Read out before the put, which mutates the same row in place.
+            was_zero_retention = before is not None and before.require_zero_data_retention
+            was_locations = before.allowed_data_locations if before is not None else None
             policy = await self.policies.put(
                 workspace.id,
                 require_zero_data_retention=request.require_zero_data_retention,
                 allowed_data_locations=request.allowed_data_locations,
                 set_locations="allowed_data_locations" in request.model_fields_set,
             )
+        # The only record of who changed a workspace's provider policy.
+        logger.info(
+            "Workspace provider policy changed: workspace=%s user=%s require_zero_data_retention %s->%s "
+            "allowed_data_locations %s->%s",
+            workspace.id,
+            user.id,
+            was_zero_retention,
+            policy.require_zero_data_retention,
+            was_locations,
+            policy.allowed_data_locations,
+        )
         await self.refresh_cache()
         return WorkspaceProviderPolicyPublic(
             require_zero_data_retention=policy.require_zero_data_retention,
