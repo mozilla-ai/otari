@@ -13636,7 +13636,7 @@ export interface components {
             method: components["schemas"]["EndpointAuthMethod"];
             /**
              * Secret
-             * @description The value to send. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.
+             * @description The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.
              */
             secret?: string | null;
         };

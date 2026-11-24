@@ -64,12 +64,15 @@ class EndpointAuthRequest(SQLModel):
     )
     secret: str | None = Field(
         default=None,
-        min_length=1,
+        # Twice what a response publishes, so the reported tail identifies the
+        # stored value rather than revealing it. At four or fewer characters
+        # ``last4`` would be the whole credential.
+        min_length=8,
         max_length=1024,
         description=(
-            "The value to send. Write-only: responses report only its last four characters. Required when "
-            "the credential is first set, and on any change of base URL. Omit it to keep the value already "
-            "stored; an empty string is refused rather than read as keeping it."
+            "The value to send, at least 8 characters. Write-only: responses report only its last four "
+            "characters. Required when the credential is first set, and on any change of base URL. Omit it "
+            "to keep the value already stored; an empty string is refused rather than read as keeping it."
         ),
     )
     expires_at: AwareDatetime = Field(

@@ -180,6 +180,19 @@ def test_a_stored_credential_on_an_address_that_is_not_https_refuses_the_key() -
     assert store.key_is_usable(row) is False
 
 
+# Four characters come back as ``last4``, so a shorter value would be published
+# whole. Refused at the boundary rather than masked on the way out, which keeps
+# the state from existing at all.
+@pytest.mark.parametrize("secret", ["a", "ab", "abcd", "abcdefg"])
+def test_a_value_short_enough_to_be_published_whole_is_refused(secret: str) -> None:
+    with pytest.raises(ValidationError):
+        _sent(secret=secret)
+
+
+def test_a_value_long_enough_for_its_tail_to_identify_it_is_accepted() -> None:
+    assert _sent(secret="abcdefgh").secret == "abcdefgh"
+
+
 def test_a_stored_row_reports_the_credential_it_carries() -> None:
     row = OrgProviderKey(
         organization_id=uuid.uuid4(),
