@@ -51,6 +51,11 @@ releases.
 The file applies to every dsh profile, so `dsh tui` and `dsh headless` use
 Otari too. `DSH_HOME` moves `~/.dsh`.
 
+If you already have this file, add the entries to it instead of replacing it.
+Each entry replaces that entry's whole config in every profile, so a provider
+you added on dsh's **Models** page is dropped unless you list it under
+`providers` beside `otari`.
+
 Both URLs end in `/api/v1`. EU accounts use `https://eu.api.otari.ai/api/v1`,
 and a gateway you run uses its URL plus `/api/v1`. See
 [Base URL](api-reference.md#base-url).
