@@ -99,7 +99,8 @@ def test_a_value_of_printable_ascii_is_served(value: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "value", ["", " lead", "trail ", "two\nlines", "two\rlines", "nul\x00byte", "h\u00e9ader", "\tlead"]
+    "value",
+    ["", " lead", "trail ", "trail\n", "two\nlines", "two\rlines", "nul\x00byte", "h\u00e9ader", "\tlead"],
 )
 def test_a_value_a_header_field_cannot_carry_is_refused(value: str) -> None:
     """A control character ends the field, so the transport refuses the whole request rather than the value."""
@@ -150,6 +151,13 @@ def test_the_host_header_is_refused(name: str) -> None:
 
 @pytest.mark.parametrize("name", ["Otari-Key", "otari-region", "OTARI-Provider"])
 def test_a_header_in_otaris_own_namespace_is_refused(name: str) -> None:
+    assert refused_header_name_reason(name) is not None
+
+
+# Python's ``$`` also matches before a final newline, so a name that ends in one
+# satisfies the character rule and then matches no reserved name below it.
+@pytest.mark.parametrize("name", ["Authorization\n", "connection\n", "Fastly-Key\n", "Host\n", "Otari-Key\n"])
+def test_a_name_with_a_trailing_newline_is_refused(name: str) -> None:
     assert refused_header_name_reason(name) is not None
 
 

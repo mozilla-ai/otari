@@ -17,12 +17,14 @@ from enum import StrEnum
 _OTARI_PREFIX = "otari-"
 
 # No colon, so a pseudo-header such as ``:authority`` cannot be spelled.
-_HEADER_NAME = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# Matched with ``fullmatch``, which is the anchor: ``$`` also matches before
+# a final newline, so an anchored ``match`` admits a name that ends in one.
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 # A header field value, held to printable ASCII with no leading or trailing
 # space. RFC 9110 section 5.5 allows a space or a tab between visible
 # characters and no control character anywhere.
-_HEADER_VALUE = re.compile(r"^[\x21-\x7e](?:[\x20-\x7e\t]*[\x21-\x7e])?$")
+_HEADER_VALUE = re.compile(r"[\x21-\x7e](?:[\x20-\x7e\t]*[\x21-\x7e])?")
 
 # Reserved for the connection itself rather than for a credential. RFC 9110
 # section 7.6.1 and RFC 9112 section 6 name them.
@@ -79,7 +81,7 @@ def refused_header_value_reason(value: str) -> str | None:
     request rather than the value, so an unchecked value reads back as a key
     that stores and reports fine while every call to its endpoint fails.
     """
-    if not _HEADER_VALUE.match(value):
+    if not _HEADER_VALUE.fullmatch(value):
         return "a value outside the allowed characters, which are printable ASCII with no leading or trailing space"
     return None
 
@@ -91,7 +93,7 @@ def refused_header_name_reason(name: str) -> str | None:
     is what enforces it, by refusing a request whose Host is not the address it
     validated.
     """
-    if not _HEADER_NAME.match(name):
+    if not _HEADER_NAME.fullmatch(name):
         return "a name outside the allowed characters, which are letters, digits and hyphens"
     folded = name.lower()
     if folded == "host":
