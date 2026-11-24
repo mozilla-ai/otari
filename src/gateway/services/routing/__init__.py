@@ -46,7 +46,7 @@ from gateway.services.routing._service import (
     PinnedTraffic,
     RoutingService,
 )
-from gateway.services.routing._subagent_decision_service import SubagentDecisionService
+from gateway.services.routing._subagent_decision_service import SubagentDecisionService, SubagentRateLookup
 from gateway.services.routing.backends import (
     PRIORITY_BACKEND,
     WEIGHTED_BACKEND,
@@ -109,6 +109,7 @@ __all__ = [
     "RoutingSignal",
     "StoredRecommender",
     "SubagentDecisionService",
+    "SubagentRateLookup",
     "UnreadableRecommendationError",
     "active_agent_recommender",
     "apply_agent_recommenders",

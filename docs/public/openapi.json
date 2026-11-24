@@ -27018,6 +27018,85 @@
         "title": "StoredSearchToolTestRequest",
         "type": "object"
       },
+      "SubagentOutcomeReport": {
+        "additionalProperties": false,
+        "description": "What the subagent a recommendation started has consumed so far, in total.\n\nEach report replaces the one before it, so a harness sends running totals\nand may send them more than once.",
+        "example": {
+          "usage": [
+            {
+              "cache_read_tokens": 42000,
+              "cache_write_tokens": 9000,
+              "input_tokens": 1200,
+              "model": "claude-haiku-5-5",
+              "output_tokens": 800
+            }
+          ]
+        },
+        "properties": {
+          "usage": {
+            "description": "One line per model the subagent ran on.",
+            "items": {
+              "$ref": "#/components/schemas/SubagentUsageLine"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Usage",
+            "type": "array"
+          }
+        },
+        "required": [
+          "usage"
+        ],
+        "title": "SubagentOutcomeReport",
+        "type": "object"
+      },
+      "SubagentUsageLine": {
+        "additionalProperties": false,
+        "description": "What a subagent consumed on one model, as its harness counted it.\n\nThe cache counts are beside `input_tokens`, not inside it.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "description": "Input tokens that were neither read from nor written to a cache.",
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "description": "The model, as the harness names it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_tokens": {
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "SubagentUsageLine",
+        "type": "object"
+      },
       "SwitchActiveOrganizationRequest": {
         "description": "Point the caller's identity at one of the organizations they belong to.\n\nThe one request in this surface that names an organization by id, and it is\nnot a hole in the tenant boundary: an id the caller holds no active\nmembership in answers 404, so it says nothing about whether the\norganization exists.",
         "properties": {
@@ -56844,6 +56923,74 @@
         ],
         "x-otari-key-scopes": [
           "inference:run"
+        ]
+      }
+    },
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+      "put": {
+        "description": "Report what the subagent a recommendation started has consumed.\n\nThe harness sends the token counts it holds for the subagent, one line per\nmodel it ran on, as running totals: each report replaces the one before\nit. The gateway prices those tokens twice, at the models named and at the\nmodel the subagent would have started on without the recommendation, and\nkeeps both amounts as an estimate. No content is sent, nothing is charged\nand no usage row is written.\n\nAuthentication modes:\n- Master key: any decision.\n- API key: a decision made for the key's own user in the key's workspace.",
+        "operationId": "routing-report_subagent_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubagentOutcomeReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationRefusal"
+                }
+              }
+            },
+            "description": "No decision of the caller's has this id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Report Subagent Outcome",
+        "tags": [
+          "routing"
+        ],
+        "x-otari-key-scopes": [
+          "agents:write"
         ]
       }
     },

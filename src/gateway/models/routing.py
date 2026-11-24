@@ -633,6 +633,13 @@ BASELINE_PARENT = "parent"
 BASELINE_SOURCES = (BASELINE_REQUESTED, BASELINE_PARENT)
 """Where a decision's baseline model came from: the model the spawn asked for, or the parent's."""
 
+UNPRICED_BASELINE_UNRESOLVED = "baseline_unresolved"
+UNPRICED_BASELINE = "baseline_unpriced"
+UNPRICED_ACTUAL = "actual_unpriced"
+UNPRICED_PER_REQUEST = "per_request_rate"
+UNPRICED_REASONS = (UNPRICED_BASELINE_UNRESOLVED, UNPRICED_BASELINE, UNPRICED_ACTUAL, UNPRICED_PER_REQUEST)
+"""Why a reported outcome carries no costs: the baseline names no priced model, or a rate is missing or flat."""
+
 
 class SubagentDecision(Base):
     """One answered subagent model recommendation, and later what the subagent it started consumed.

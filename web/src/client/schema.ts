@@ -6520,6 +6520,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Report Subagent Outcome
+         * @description Report what the subagent a recommendation started has consumed.
+         *
+         *     The harness sends the token counts it holds for the subagent, one line per
+         *     model it ran on, as running totals: each report replaces the one before
+         *     it. The gateway prices those tokens twice, at the models named and at the
+         *     model the subagent would have started on without the recommendation, and
+         *     keeps both amounts as an estimate. No content is sent, nothing is charged
+         *     and no usage row is written.
+         *
+         *     Authentication modes:
+         *     - Master key: any decision.
+         *     - API key: a decision made for the key's own user in the key's workspace.
+         */
+        put: operations["routing-report_subagent_outcome"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -22250,6 +22281,61 @@ export interface components {
             url?: string | null;
         };
         /**
+         * SubagentOutcomeReport
+         * @description What the subagent a recommendation started has consumed so far, in total.
+         *
+         *     Each report replaces the one before it, so a harness sends running totals
+         *     and may send them more than once.
+         * @example {
+         *       "usage": [
+         *         {
+         *           "cache_read_tokens": 42000,
+         *           "cache_write_tokens": 9000,
+         *           "input_tokens": 1200,
+         *           "model": "claude-haiku-5-5",
+         *           "output_tokens": 800
+         *         }
+         *       ]
+         *     }
+         */
+        SubagentOutcomeReport: {
+            /**
+             * Usage
+             * @description One line per model the subagent ran on.
+             */
+            usage: components["schemas"]["SubagentUsageLine"][];
+        };
+        /**
+         * SubagentUsageLine
+         * @description What a subagent consumed on one model, as its harness counted it.
+         *
+         *     The cache counts are beside `input_tokens`, not inside it.
+         */
+        SubagentUsageLine: {
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Input Tokens
+             * @description Input tokens that were neither read from nor written to a cache.
+             */
+            input_tokens: number;
+            /**
+             * Model
+             * @description The model, as the harness names it.
+             */
+            model: string;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
          * SwitchActiveOrganizationRequest
          * @description Point the caller's identity at one of the organizations they belong to.
          *
@@ -36266,6 +36352,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-report_subagent_outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubagentOutcomeReport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No decision of the caller's has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationRefusal"];
                 };
             };
             /** @description Validation Error */
