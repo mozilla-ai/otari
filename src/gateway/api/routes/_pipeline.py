@@ -2712,6 +2712,7 @@ async def resolve_request_context(
             region=preferred_region(config.automatic_routing, raw_request.headers),
             mode=f"{adapter.endpoint}:{'stream' if streaming else 'completion'}",
             own=organization_offerings(workspace_id=workspace_id, organization_id=organization_id),
+            tenant=str(workspace_id),
         )
         if plan.automatic is not None:
             on_request_finished(raw_request, plan.automatic.close)

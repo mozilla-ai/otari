@@ -118,6 +118,7 @@ class AutomaticSelection:
     affinity: str | None
     mode: str
     scope: str = ""
+    tenant: str = ""
     observations: list[AutomaticObservation] = field(default_factory=list)
     origins: dict[str, Attempt] = field(default_factory=dict)
 
@@ -161,7 +162,7 @@ class AutomaticSelection:
         health = self.router._health(key)
         if health is not None:
             health.active += 1
-        account = self.router.account_key(attempt)
+        account = self.router.account_key(attempt, self.tenant)
         observation = AutomaticObservation(self, key, account, selector, health, self.router.clock())
         self.observations.append(observation)
         return observation
@@ -197,9 +198,11 @@ class AutomaticObservation:
         self.finished = True
         router = self.selection.router
         now = router.clock()
+        # A failed credential is the account's, not the offering's: it cools the account alone.
+        credential = account and unhealthy
         if self.health is not None:
             self.health.active = max(0, self.health.active - 1)
-            if unhealthy:
+            if unhealthy and not credential:
                 self.health.failures = _consecutive(self.health.failures, self.health.cooldown, now)
                 self.health.cooldown = now + _backoff(self.health.failures)
             if success:
@@ -210,7 +213,7 @@ class AutomaticObservation:
                 self.health.latency[self.selection.mode] = (value, now)
                 self.health.cooldown = 0
                 self.health.failures = 0
-        if account and unhealthy:
+        if credential:
             router.cool_account(self.account, now)
         elif success:
             router.accounts.pop(self.account, None)
@@ -258,9 +261,14 @@ class AutomaticRouter:
         """Whether the credential itself failed, not one model: exhausted quota or funds (402), or a refused key."""
         return upstream_exception_shape(exc)[1] == 402 or is_provider_credential_rejection(exc)
 
-    def account_key(self, attempt: Attempt) -> str:
-        """Identify the credential an attempt is sent on, whatever model it names."""
-        return self._digest((attempt.instance, attempt.provider.value, _credential_fields(attempt.kwargs)))
+    def account_key(self, attempt: Attempt, tenant: str = "") -> str:
+        """Identify the credential an attempt is sent on, whatever model it names.
+
+        An offering that names no credential has it resolved at dispatch, possibly per organization,
+        so its account is kept apart per ``tenant`` rather than shared by everyone reaching it.
+        """
+        fields = _credential_fields(attempt.kwargs)
+        return self._digest((attempt.instance, attempt.provider.value, fields, None if fields else tenant))
 
     def cool_account(self, key: str, now: float) -> None:
         """Cool every model on a failing credential, backing off further while it keeps failing."""
@@ -313,6 +321,7 @@ class AutomaticRouter:
         mode: str,
         own: frozenset[str] = frozenset(),
         limit: int = 5,
+        tenant: str = "",
     ) -> CompiledPlan:
         """Order by price availability, health, own key, region and cost/load/latency, preserving eligible affinity.
 
@@ -325,16 +334,15 @@ class AutomaticRouter:
         now = self.clock()
         keys = {f"{a.instance}:{a.model}": self.candidate_key(a) for a in plan.attempts}
         cooling: set[str] = set()
+        refused: set[str] = set()
         for attempt in plan.attempts:
             selector = f"{attempt.instance}:{attempt.model}"
             health = self.health.get(keys[selector])
-            account = self.accounts.get(self.account_key(attempt))
-            if (
-                (health and health.cooldown > now)
-                or (account and account[0] > now)
-                or self.refusals.get(self._digest((scope, selector)), 0) > now
-            ):
+            account = self.accounts.get(self.account_key(attempt, tenant))
+            if (health and health.cooldown > now) or (account and account[0] > now):
                 cooling.add(selector)
+            if self.refusals.get(self._digest((scope, selector)), 0) > now:
+                refused.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None
         previous = self.affinities.get(affinity) if affinity else None
         sticky = previous[0] if previous and now - previous[1] < settings.session_ttl_seconds else None
@@ -346,21 +354,24 @@ class AutomaticRouter:
                 latencies[selector] = value[0]
         neutral = median(latencies.values()) if latencies else 1.0
 
-        def group(attempt: Attempt) -> tuple[bool, bool, bool, int]:
-            """Partition candidates by missing price, cooldown or refusal, ownership and region mismatch."""
+        def group(attempt: Attempt) -> tuple[bool, bool, bool, bool, int]:
+            """Partition by a known refusal, missing price, cooldown, ownership and region mismatch.
+
+            A refusal comes first: an unpriced offering may still serve, one that refused this caller will not.
+            """
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
             locality = 0 if region is None or hint.region == region else 1
-            return costs.get(selector) is None, selector in cooling, selector not in own, locality
+            return selector in refused, costs.get(selector) is None, selector in cooling, selector not in own, locality
 
-        floors: dict[tuple[bool, bool, bool, int], Decimal] = {}
+        floors: dict[tuple[bool, bool, bool, bool, int], Decimal] = {}
         for attempt in plan.attempts:
             cost = costs.get(f"{attempt.instance}:{attempt.model}")
             if cost is not None:
                 bucket = group(attempt)
                 floors[bucket] = min(floors.get(bucket, cost), cost)
 
-        def score(attempt: Attempt) -> tuple[bool, bool, bool, int, float, int]:
+        def score(attempt: Attempt) -> tuple[bool, bool, bool, bool, int, float, int]:
             """Score cost and load within a health/region group, breaking ties by catalog order."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
@@ -380,12 +391,13 @@ class AutomaticRouter:
         ranked = sorted(plan.attempts, key=score)
         bound = next((a for a in ranked if keys[f"{a.instance}:{a.model}"] == sticky), None)
         if bound is not None:
-            unpriced, unhealthy, foreign, locality = group(bound)
+            refusing, unpriced, unhealthy, foreign, locality = group(bound)
             if (
-                not unhealthy
+                not refusing
+                and not unhealthy
                 and locality == 0
-                and (not unpriced or all(group(a)[0] for a in ranked))
-                and (not foreign or group(ranked[0])[2])
+                and (not unpriced or all(group(a)[1] for a in ranked))
+                and (not foreign or group(ranked[0])[3])
             ):
                 ranked.remove(bound)
                 ranked.insert(0, bound)
@@ -401,7 +413,7 @@ class AutomaticRouter:
         return replace(
             plan,
             attempts=attempts,
-            automatic=AutomaticSelection(self, affinity, mode, scope),
+            automatic=AutomaticSelection(self, affinity, mode, scope, tenant),
             dropped=[
                 *plan.dropped,
                 *(

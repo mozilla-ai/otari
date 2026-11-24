@@ -613,9 +613,10 @@ def test_a_long_outage_does_not_overflow_the_backoff(router: AutomaticRouter) ->
     assert plan.automatic is not None
     for _ in range(1100):
         plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
-    health = router.health[router.candidate_key(plan.head)]
-    assert health.cooldown == pytest.approx(100 + 600)
     assert next(iter(router.accounts.values()))[0] == pytest.approx(100 + 600)
+    for _ in range(1100):
+        plan.automatic.start(plan.head).finish(unhealthy=True)
+    assert router.health[router.candidate_key(plan.head)].cooldown == pytest.approx(100 + 600)
 
 
 def test_an_old_failure_does_not_lengthen_a_new_cooldown(router: AutomaticRouter, now: list[float]) -> None:
@@ -655,3 +656,32 @@ def test_a_gateway_refusal_does_not_cool_the_credential(router: AutomaticRouter)
     plan.automatic.start(plan.head).finish(account=True)
     assert not router.accounts
     assert _rank(router, plan=_same_account_plan(), costs=costs).head.instance == "us"
+
+
+def _hosted_plan() -> CompiledPlan:
+    """Build two offerings that name no credential, so dispatch resolves one for each organization."""
+    return CompiledPlan(
+        policy_name="acme/model",
+        attempts=[
+            Attempt(1, "us", LLMProvider.OPENAI, "model", {}),
+            Attempt(2, "eu", LLMProvider.OPENAI, "model", {}),
+        ],
+    )
+
+
+def test_a_credential_resolved_at_dispatch_fails_only_for_its_tenant(router: AutomaticRouter) -> None:
+    """One organization's exhausted hosted credential does not move another organization off the offering."""
+    plan = _rank(router, plan=_hosted_plan(), tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
+    assert _rank(router, plan=_hosted_plan(), tenant="workspace-a").head.instance == "eu"
+    assert _rank(router, plan=_hosted_plan(), tenant="workspace-b").head.instance == "us"
+
+
+def test_a_refused_offering_ranks_after_an_unpriced_one(router: AutomaticRouter) -> None:
+    """An unpriced offering may still serve; one that refused this caller will not."""
+    costs = {"us:model": Decimal("0.01"), "eu:model": None}
+    plan = _rank(router, costs=costs)
+    assert plan.automatic is not None and plan.head.instance == "us"
+    plan.automatic.refuse(plan.head)
+    assert _rank(router, costs=costs).head.instance == "eu"
