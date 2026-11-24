@@ -8232,10 +8232,10 @@ export interface paths {
          * Dismiss Workspace Activation
          * @description Retire the guide for this workspace. Permanent, and idempotent.
          *
-         *     Workspace owners and admins only. It retires the card and nothing else: the
-         *     key the guide issued keeps working, because the operator asked for it and
-         *     may well have pasted it somewhere already. Revoking one is the Keys page's
-         *     job.
+         *     For a member who does not manage the workspace, for them alone; a viewer is
+         *     refused. It retires the card and nothing else: the key the guide issued
+         *     keeps working, because the operator asked for it and may well have pasted it
+         *     somewhere already. Revoking one is the Keys page's job.
          */
         post: operations["workspace-activation-dismiss_workspace_activation"];
         delete?: never;
@@ -8255,12 +8255,13 @@ export interface paths {
         put?: never;
         /**
          * Create Workspace Activation Key
-         * @description Issue the workspace's setup API key, rotating the one the guide already issued.
+         * @description Issue the setup API key, rotating the one the guide already issued.
          *
-         *     Workspace owners and admins only, like every other action that changes a
-         *     workspace. The plaintext is returned once and never stored, so a reopened
-         *     guide rotates the same key row rather than collecting a second one, and
-         *     answers 409 once the workspace has activated or the guide was dismissed.
+         *     The workspace's for its owners and admins, the caller's own for a member who
+         *     does not manage it; a viewer is refused. The plaintext is returned once and
+         *     never stored, so a reopened guide rotates the same key row rather than
+         *     collecting a second one, and answers 409 once the guide is finished or was
+         *     dismissed.
          */
         post: operations["workspace-activation-create_workspace_activation_key"];
         delete?: never;
@@ -24496,12 +24497,12 @@ export interface components {
             activation_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
              * Dismissed
-             * @description Whether someone skipped the guide for this workspace.
+             * @description Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member.
              */
             dismissed: boolean;
             /**
              * Experience Eligible
-             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
+             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, and the caller may run requests there. For someone who manages the workspace, nobody dismissed it and no request in the workspace has succeeded yet; for a member who does not, they have not dismissed it and no request of their own has succeeded yet.
              */
             experience_eligible: boolean;
             /** @description The setup key the guide already issued, so a reopened guide can offer it instead of rotating it. Null until one is issued, once it is revoked, deleted or expired, when the caller is not the one it was issued to, and whenever the guide is not offered to this caller. */
@@ -24510,7 +24511,7 @@ export interface components {
             latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
              * Status
-             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.
+             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all. For a member who does not manage the workspace, only their own requests count.
              * @enum {string}
              */
             status: "waiting" | "failed" | "activated";

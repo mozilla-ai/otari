@@ -56,6 +56,8 @@ interface ApiOptions {
   apiKey?: string
   /** Whether the mint reports the fingerprint it stored; a row without one has nothing to show concealed. */
   hasFingerprint?: boolean
+  /** "member" for someone who may run requests in the workspace without managing it. */
+  role?: "owner" | "member"
 }
 
 /**
@@ -71,6 +73,7 @@ function mockApi({
   apiKey = KEY,
   hasFingerprint = true,
   models = ["openai:gpt-4o-mini"],
+  role = "owner",
 }: ApiOptions = {}) {
   let current = activation
   const mock = vi
@@ -115,7 +118,10 @@ function mockApi({
         return Response.json({})
       }
       return Response.json(
-        organizationContext({ workspace_memberships: MEMBERSHIPS }),
+        organizationContext({
+          role,
+          workspace_memberships: MEMBERSHIPS.map((one) => ({ ...one, role })),
+        }),
       )
     })
   /** Moves the state the guide is polling for, the way a real request would. */
@@ -547,6 +553,47 @@ describe("SetupGuide", () => {
     expect(screen.getByRole("dialog")).toHaveClass(
       "[--scan-ink:var(--color-danger)]",
     )
+  })
+
+  it("says an empty dashboard waits on the first request, to whoever manages the workspace", async () => {
+    mockApi()
+    await renderGuide()
+
+    expect(
+      await screen.findByText(/Usage and the activity log stay empty/),
+    ).toBeInTheDocument()
+  })
+
+  describe("for a member who does not manage the workspace", () => {
+    it("leaves out the note about an empty dashboard, which other people's traffic may already fill", async () => {
+      mockApi({ role: "member" })
+      await renderGuide()
+
+      await screen.findByRole("heading", { name: "Send your first request" })
+      await waitFor(() => {
+        expect(
+          screen.queryByText(/Usage and the activity log stay empty/),
+        ).not.toBeInTheDocument()
+      })
+    })
+
+    it("keeps the hints a member can follow", async () => {
+      mockApi({
+        role: "member",
+        activation: workspaceActivation({
+          status: "failed",
+          latest_attempt: activationAttempt({
+            status: "failed",
+            error_category: "internal",
+          }),
+        }),
+      })
+      await renderGuide()
+
+      expect(
+        await screen.findByRole("link", { name: "Open the activity log" }),
+      ).toBeInTheDocument()
+    })
   })
 
   it("sends a malformed request to the example that answers it, without leaving", async () => {

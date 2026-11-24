@@ -2860,6 +2860,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": None,
         "baseline": ("gateway/services/tenancy/workspace_activation_service.py",),
     },
+    "gateway.models.tenancy.WorkspaceMemberActivationState": {
+        "repository": "gateway/repositories/organizations/workspace_member_activation_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tenancy.WorkspaceMember": {
         "repository": "gateway/repositories/tenancy/workspace_repository.py",
         "baseline": (

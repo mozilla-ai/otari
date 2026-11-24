@@ -32347,12 +32347,12 @@
             "description": "The first request that succeeded, which is the guide's receipt. Null until one does."
           },
           "dismissed": {
-            "description": "Whether someone skipped the guide for this workspace.",
+            "description": "Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member.",
             "title": "Dismissed",
             "type": "boolean"
           },
           "experience_eligible": {
-            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
+            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, and the caller may run requests there. For someone who manages the workspace, nobody dismissed it and no request in the workspace has succeeded yet; for a member who does not, they have not dismissed it and no request of their own has succeeded yet.",
             "title": "Experience Eligible",
             "type": "boolean"
           },
@@ -32379,7 +32379,7 @@
             "description": "The most recent request, so a failure can be reported while the guide keeps waiting."
           },
           "status": {
-            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.",
+            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all. For a member who does not manage the workspace, only their own requests count.",
             "enum": [
               "waiting",
               "failed",
@@ -63813,7 +63813,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/dismiss": {
       "post": {
-        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nFor a member who does not manage the workspace, for them alone; a viewer is\nrefused. It retires the card and nothing else: the key the guide issued\nkeeps working, because the operator asked for it and may well have pasted it\nsomewhere already. Revoking one is the Keys page's job.",
         "operationId": "workspace-activation-dismiss_workspace_activation",
         "parameters": [
           {
@@ -63865,7 +63865,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/key": {
       "post": {
-        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "description": "Issue the setup API key, rotating the one the guide already issued.\n\nThe workspace's for its owners and admins, the caller's own for a member who\ndoes not manage it; a viewer is refused. The plaintext is returned once and\nnever stored, so a reopened guide rotates the same key row rather than\ncollecting a second one, and answers 409 once the guide is finished or was\ndismissed.",
         "operationId": "workspace-activation-create_workspace_activation_key",
         "parameters": [
           {

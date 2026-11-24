@@ -19,14 +19,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyConflictError
 from gateway.exceptions.organizations_exceptions import (
     NotAuthorizedError,
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
     WorkspaceNotFoundError,
 )
-from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import Organization, User, Workspace, WorkspaceActivationState
+from gateway.models.api_keys import APIKey, DisabledReason
+from gateway.models.tenancy import (
+    Organization,
+    User,
+    Workspace,
+    WorkspaceActivationState,
+    WorkspaceMemberActivationState,
+)
 from gateway.models.usage import UsageLog
 from gateway.ports.api_key_format_port import KeyRoute, Local
 from gateway.repositories.tenancy import (
@@ -36,6 +43,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
@@ -101,9 +109,15 @@ async def _usage(
     provider: str = "openai",
     cost: Decimal | None = Decimal("0.000123"),
     latency_ms: int | None = 412,
+    billed_to: User | None = None,
 ) -> UsageLog:
+    user_id = None
+    if billed_to is not None:
+        # A request on a member's own key bills to their attribution row.
+        user_id = (await get_or_create_attribution_user(db, user_id=str(billed_to.id), alias=None)).user_id
     row = UsageLog(
         workspace_id=workspace_id,
+        user_id=user_id,
         model=model,
         provider=provider,
         endpoint="/v1/chat/completions",
@@ -259,12 +273,12 @@ async def test_a_workspace_classified_out_of_the_guide_is_not_offered_it(async_d
         await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
 
-async def test_a_member_who_cannot_manage_the_workspace_is_not_offered_the_guide(async_db: AsyncSession) -> None:
+async def test_a_viewer_is_not_offered_the_guide(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme-viewer")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     viewer = await _member(async_db, organization, role="member", full_name="Viewer")
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
-    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="viewer")
 
     service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     status = await service.get_status(user=viewer, workspace_id=workspace.id)
@@ -277,6 +291,199 @@ async def test_a_member_who_cannot_manage_the_workspace_is_not_offered_the_guide
         await service.issue_api_key(user=viewer, workspace_id=workspace.id)
     with pytest.raises(NotAuthorizedError):
         await service.dismiss(user=viewer, workspace_id=workspace.id)
+
+
+async def test_an_organization_viewer_holding_member_in_the_workspace_is_not_offered_the_guide(
+    async_db: AsyncSession,
+) -> None:
+    """The more restrictive role wins, as on the member key surface."""
+    organization = await _organization(async_db, slug="acme-org-viewer")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
+
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    assert (await service.get_status(user=viewer, workspace_id=workspace.id)).experience_eligible is False
+    with pytest.raises(NotAuthorizedError):
+        await service.issue_api_key(user=viewer, workspace_id=workspace.id)
+    assert await _keys_in(async_db, workspace.id) == []
+
+
+# ----------------------------------------------------------------------
+# A member who does not manage the workspace
+# ----------------------------------------------------------------------
+
+
+async def _with_member(db: AsyncSession, *, slug: str) -> tuple[User, User, Workspace]:
+    organization = await _organization(db, slug=slug)
+    owner = await _member(db, organization, role="owner", full_name="Owner")
+    member = await _member(db, organization, role="member", full_name="Member")
+    workspace = await _workspace(db, organization, name="Engineering", owner=owner)
+    await WorkspaceMemberRepository(db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    return owner, member, workspace
+
+
+async def test_a_member_is_offered_the_guide_for_their_own_first_request(async_db: AsyncSession) -> None:
+    owner, member, workspace = await _with_member(async_db, slug="acme-member-offered")
+    # The workspace already serves its managers; the member has sent nothing.
+    await _usage(async_db, workspace.id, billed_to=owner)
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).status == "activated"
+    status = await service.get_status(user=member, workspace_id=workspace.id)
+    assert status.status == "waiting"
+    assert status.latest_attempt is None
+    assert status.experience_eligible is True
+    assert status.dismissed is False
+
+
+async def test_a_member_activates_on_their_own_first_success(async_db: AsyncSession) -> None:
+    _owner, member, workspace = await _with_member(async_db, slug="acme-member-activates")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    await _usage(async_db, workspace.id, billed_to=member, status="error", status_code=403, seconds_ago=60)
+    status = await service.get_status(user=member, workspace_id=workspace.id)
+    assert status.status == "failed"
+    assert status.latest_attempt is not None and status.latest_attempt.error_category == "policy"
+    assert status.experience_eligible is True
+
+    first = await _usage(async_db, workspace.id, billed_to=member)
+    status = await service.get_status(user=member, workspace_id=workspace.id)
+    assert status.status == "activated"
+    assert status.activation_attempt is not None and status.activation_attempt.request_id == first.id
+    assert status.experience_eligible is False
+    with pytest.raises(WorkspaceAlreadyActivatedError):
+        await service.issue_api_key(user=member, workspace_id=workspace.id)
+
+
+async def test_a_member_is_issued_a_key_of_their_own_and_the_managers_key_is_untouched(
+    async_db: AsyncSession,
+) -> None:
+    owner, member, workspace = await _with_member(async_db, slug="acme-member-key")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    managers = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    issued = await service.issue_api_key(user=member, workspace_id=workspace.id)
+
+    key = await async_db.get(APIKey, issued.key_id)
+    assert key is not None
+    assert key.key_name == ACTIVATION_KEY_NAME
+    assert key.user_id == str(member.id)
+    assert key.self_service is True, "demoting the member to viewer must switch it off with their other keys"
+    assert key.allowed_models is None and key.allowed_tools is None, "it inherits the member's access"
+    managers_key = await async_db.get(APIKey, managers.key_id)
+    assert managers_key is not None
+    assert managers_key.key_hash == hash_key(managers.key), "the managers' plaintext still authenticates"
+    assert managers_key.user_id == str(owner.id)
+
+    state = await async_db.get(WorkspaceMemberActivationState, (workspace.id, member.id))
+    assert state is not None and state.api_key_id == issued.key_id
+    workspace_state = await async_db.get(WorkspaceActivationState, workspace.id)
+    assert workspace_state is not None and workspace_state.api_key_id == managers.key_id
+
+    status = await service.get_status(user=member, workspace_id=workspace.id)
+    assert status.issued_key is not None and status.issued_key.key_id == issued.key_id
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is not None
+
+    rotated = await service.issue_api_key(user=member, workspace_id=workspace.id)
+    assert rotated.key_id == issued.key_id, "a second press rotates the member's row"
+    assert len(await _keys_in(async_db, workspace.id)) == 2
+
+
+@pytest.mark.parametrize("reason", [DisabledReason.OPERATOR, DisabledReason.REVOKED])
+async def test_a_members_key_disabled_for_a_reason_they_cannot_clear_is_not_revived(
+    async_db: AsyncSession, reason: DisabledReason
+) -> None:
+    _owner, member, workspace = await _with_member(async_db, slug=f"acme-member-disabled-{reason.value}")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    first = await service.issue_api_key(user=member, workspace_id=workspace.id)
+    key = await async_db.get(APIKey, first.key_id)
+    assert key is not None
+    key.is_active = False
+    key.disabled_reason = reason
+    await async_db.commit()
+
+    second = await service.issue_api_key(user=member, workspace_id=workspace.id)
+
+    assert second.key_id != first.key_id
+    await async_db.refresh(key)
+    assert key.is_active is False and key.disabled_reason == reason
+    assert key.key_hash == hash_key(first.key), "the disabled row keeps the hash it had"
+
+
+async def test_a_members_key_moved_to_another_owner_is_not_rotated(async_db: AsyncSession) -> None:
+    owner, member, workspace = await _with_member(async_db, slug="acme-member-moved")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    first = await service.issue_api_key(user=member, workspace_id=workspace.id)
+    key = await async_db.get(APIKey, first.key_id)
+    assert key is not None
+    key.user_id = (await get_or_create_attribution_user(async_db, user_id=str(owner.id), alias=None)).user_id
+    await async_db.commit()
+
+    second = await service.issue_api_key(user=member, workspace_id=workspace.id)
+
+    assert second.key_id != first.key_id
+    await async_db.refresh(key)
+    assert key.key_hash == hash_key(first.key)
+
+
+async def test_a_members_skip_retires_the_guide_for_them_alone(async_db: AsyncSession) -> None:
+    owner, member, workspace = await _with_member(async_db, slug="acme-member-skip")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    await service.dismiss(user=member, workspace_id=workspace.id)
+    await service.dismiss(user=member, workspace_id=workspace.id)
+
+    member_view = await service.get_status(user=member, workspace_id=workspace.id)
+    assert member_view.dismissed is True
+    assert member_view.experience_eligible is False
+    with pytest.raises(WorkspaceActivationUnavailableError):
+        await service.issue_api_key(user=member, workspace_id=workspace.id)
+    owner_view = await service.get_status(user=owner, workspace_id=workspace.id)
+    assert owner_view.dismissed is False
+    assert owner_view.experience_eligible is True
+    assert await async_db.get(WorkspaceActivationState, workspace.id) is None
+
+
+async def test_a_managers_skip_does_not_retire_a_members_guide(async_db: AsyncSession) -> None:
+    owner, member, workspace = await _with_member(async_db, slug="acme-manager-skip")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    await service.dismiss(user=owner, workspace_id=workspace.id)
+
+    assert (await service.get_status(user=member, workspace_id=workspace.id)).experience_eligible is True
+
+
+async def test_a_revoked_member_is_neither_offered_nor_given_a_setup_key(async_db: AsyncSession) -> None:
+    _owner, member, workspace = await _with_member(async_db, slug="acme-member-revoked")
+    attribution = await get_or_create_attribution_user(async_db, user_id=str(member.id), alias=None)
+    attribution.deleted_at = datetime.now(UTC)
+    await async_db.commit()
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    assert (await service.get_status(user=member, workspace_id=workspace.id)).experience_eligible is False
+    with pytest.raises(TenancyConflictError):
+        await service.issue_api_key(user=member, workspace_id=workspace.id)
+    await async_db.refresh(attribution)
+    assert attribution.deleted_at is not None, "the refusal must not revive the identity"
+    assert await _keys_in(async_db, workspace.id) == []
+
+
+@pytest.mark.parametrize(("activation_guide", "classification"), [(False, "eligible"), (True, "internal")])
+async def test_a_member_is_not_offered_the_guide_where_the_workspace_is_not(
+    async_db: AsyncSession, activation_guide: bool, classification: str
+) -> None:
+    organization = await _organization(async_db, slug=f"acme-member-off-{classification}-{activation_guide}")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner, classification=classification)
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    service = WorkspaceActivationService(async_db, _config(activation_guide=activation_guide), KEY_FORMAT)
+
+    assert (await service.get_status(user=member, workspace_id=workspace.id)).experience_eligible is False
+    with pytest.raises(WorkspaceActivationUnavailableError):
+        await service.issue_api_key(user=member, workspace_id=workspace.id)
 
 
 # ----------------------------------------------------------------------
@@ -410,7 +617,7 @@ async def test_the_issued_key_is_only_described_to_whoever_is_offered_the_guide(
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     viewer = await _member(async_db, organization, role="member", full_name="Viewer")
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
-    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="viewer")
     service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     await service.issue_api_key(user=owner, workspace_id=workspace.id)
 

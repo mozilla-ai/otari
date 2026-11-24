@@ -6,6 +6,9 @@ from gateway.repositories.organizations.organization_invitation_repository impor
     SendResult,
 )
 from gateway.repositories.organizations.organizations_repositories import OrganizationRepositories
+from gateway.repositories.organizations.workspace_member_activation_repository import (
+    WorkspaceMemberActivationRepository,
+)
 
 __all__ = [
     "BootstrapMarkerRepository",
@@ -14,4 +17,5 @@ __all__ = [
     "OrganizationRepositories",
     "SendRequest",
     "SendResult",
+    "WorkspaceMemberActivationRepository",
 ]
