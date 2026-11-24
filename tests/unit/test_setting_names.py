@@ -1,6 +1,7 @@
 """Every setting keeps the name a deployment configures it by."""
 
 import json
+import logging
 import os
 from collections.abc import Iterator
 from enum import Enum
@@ -12,6 +13,7 @@ import yaml
 from pydantic import BaseModel
 
 from gateway.core.config import GatewayConfig, load_config
+from gateway.log_config import logger as gateway_logger
 
 # Each name is a config.yml key, and OTARI_<NAME> is its environment variable.
 _SETTING_NAMES = frozenset(
@@ -66,8 +68,8 @@ _SETTING_NAMES = frozenset(
         "federation_member_rules",
         "feedback_enabled",
         "fetch_tools",
+        "files_api_enabled",
         "files_backend",
-        "files_enabled",
         "files_gemini_inline_max_bytes",
         "files_local_dir",
         "files_max_bytes",
@@ -269,3 +271,50 @@ def test_every_setting_with_a_default_is_read_from_its_environment_variable(name
     os.environ[f"OTARI_{name.upper()}"] = _environment_value(_default(name))
 
     assert name in load_config().model_fields_set
+
+
+def _load_logging(config_file: Path, caplog: pytest.LogCaptureFixture) -> GatewayConfig:
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=gateway_logger.name):
+            return load_config(str(config_file))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_a_renamed_setting_is_still_read_from_its_old_yaml_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A deployment on the old name keeps its value and is told the new one, not that the key is unknown."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_enabled: false\n", encoding="utf-8")
+
+    config = _load_logging(config_file, caplog)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert config.files_api_enabled is False
+    assert [message for message in messages if "files_enabled" in message and "files_api_enabled" in message]
+    assert not [message for message in messages if "unknown config keys" in message]
+
+
+def test_a_renamed_setting_is_still_read_from_its_old_environment_variable(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    os.environ["OTARI_FILES_ENABLED"] = "false"
+
+    config = _load_logging(config_file, caplog)
+
+    assert config.files_api_enabled is False
+    assert [record for record in caplog.records if "OTARI_FILES_ENABLED" in record.getMessage()]
+
+
+def test_the_new_name_of_a_renamed_setting_wins_over_the_old_one(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_enabled: false\nfiles_api_enabled: true\n", encoding="utf-8")
+    assert load_config(str(config_file)).files_api_enabled is True
+
+    os.environ["OTARI_FILES_ENABLED"] = "true"
+    os.environ["OTARI_FILES_API_ENABLED"] = "false"
+    assert load_config(str(config_file)).files_api_enabled is False

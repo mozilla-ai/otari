@@ -1212,9 +1212,13 @@ class GatewayConfig(
             "from the deployment list and the defaults, and nothing tenant-specific. Off by default."
         ),
     )
-    files_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
+    files_api_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
         default=True,
-        description="Enable the /api/v1/files upload/storage endpoints.",
+        description=(
+            "Serve the /api/v1/files upload and storage endpoints. This gates the API only: with it off, "
+            "the file sweep still reclaims expired and deleted files, which only files_sweep_interval_sec: 0 "
+            "stops. Formerly files_enabled, which is still read as a deprecated name."
+        ),
     )
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
@@ -2616,6 +2620,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _apply_renamed_settings(config_dict)
     _warn_about_unknown_keys(config_dict)
     _warn_about_retired_mcp_settings(config_dict)
 
@@ -2664,6 +2669,36 @@ def _warn_about_retired_mcp_settings(config: dict[str, Any]) -> None:
             "single-tenant or trusted deployment.",
             ", ".join(found),
         )
+
+
+# Settings renamed in place, old name to new. The old name still configures the
+# setting, in the config file or as its OTARI_ variable, and saying which one a
+# deployment used is how it learns the new name before the old one goes.
+_RENAMED_SETTINGS = (("files_enabled", "files_api_enabled"),)
+
+
+def _apply_renamed_settings(config: dict[str, Any]) -> None:
+    """Move a setting given under its old name onto its new one, where the new name is not set too."""
+    for old, new in _RENAMED_SETTINGS:
+        used: list[str] = []
+        if old in config:
+            used.append(old)
+            value = config.pop(old)
+            config.setdefault(new, value)
+        old_env = f"{OTARI_ENV_PREFIX}{old.upper()}"
+        raw = os.getenv(old_env)
+        if raw:
+            used.append(old_env)
+            # The new variable, applied after this, still overrides it.
+            config[new] = _coerce_scalar_env(raw, GatewayConfig.model_fields[new].annotation)
+        if used:
+            logger.warning(
+                "%s is a deprecated name for %s (%s%s); set the new name instead.",
+                " and ".join(used),
+                new,
+                OTARI_ENV_PREFIX,
+                new.upper(),
+            )
 
 
 def _warn_about_unknown_keys(config: dict[str, Any]) -> None:

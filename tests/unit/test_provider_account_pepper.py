@@ -48,14 +48,14 @@ def test_a_deployment_with_a_pepper_keeps_copies_on(monkeypatch: pytest.MonkeyPa
     assert config.files_provider_upload_enabled is True
 
 
-@pytest.mark.parametrize(("files_enabled", "copies_enabled"), [(True, False), (False, True)])
+@pytest.mark.parametrize(("files_api_enabled", "copies_enabled"), [(True, False), (False, True)])
 def test_a_deployment_making_no_copies_needs_none(
-    monkeypatch: pytest.MonkeyPatch, files_enabled: bool, copies_enabled: bool
+    monkeypatch: pytest.MonkeyPatch, files_api_enabled: bool, copies_enabled: bool
 ) -> None:
     monkeypatch.delenv("OTARI_PROVIDER_ACCOUNT_PEPPER", raising=False)
 
     _validate_provider_account_pepper(
-        GatewayConfig(files_enabled=files_enabled, files_provider_upload_enabled=copies_enabled)
+        GatewayConfig(files_api_enabled=files_api_enabled, files_provider_upload_enabled=copies_enabled)
     )
 
 

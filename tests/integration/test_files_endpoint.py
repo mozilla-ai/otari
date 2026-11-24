@@ -46,7 +46,7 @@ def tmp_file_store(client: TestClient, tmp_path: Path) -> None:
 @pytest.fixture
 def files_off_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
     """A client on a deployment that does not serve files."""
-    yield from build_test_client(test_config.model_copy(update={"files_enabled": False}))
+    yield from build_test_client(test_config.model_copy(update={"files_api_enabled": False}))
 
 
 def _make_completion() -> Any:
@@ -1075,6 +1075,51 @@ def test_sweep_reclaims_expired_and_deleted_files(
     assert client.get(f"{API_ROOT}/files/{live}", headers=api_key_header).status_code == 200
 
 
+def test_has_reclaimable_says_whether_the_sweep_has_work(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    tmp_path: Path,
+    db_session: Session,
+    test_config: Any,
+) -> None:
+    """A served file is not work for the sweep; the same file once expired is."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
+    from gateway.api.deps import build_file_service
+    from gateway.core.unit_of_work import UnitOfWork
+    from gateway.services.files import FileBackends
+
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
+    assert resp.status_code == 200, resp.text
+    file_id = str(resp.json()["id"])
+    store = LocalDirFileStore(str(tmp_path))
+
+    async def _has_reclaimable() -> bool:
+        engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with async_sessionmaker(engine)() as db:
+                files = build_file_service(
+                    UnitOfWork(db), FileBackends(storage=store, provider_files=AnyLlmProviderFiles()), test_config
+                )
+                return await files.has_reclaimable()
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(_has_reclaimable()) is False
+
+    db_session.query(FileObject).filter(FileObject.id == file_id).update(
+        {"expires_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    db_session.commit()
+
+    assert asyncio.run(_has_reclaimable()) is True
+
+
 def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -1142,7 +1187,7 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
 def test_a_deployment_that_does_not_serve_files_refuses_every_verb(
     files_off_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """``files_enabled`` off answers 404 everywhere, so the API reads as unmounted."""
+    """``files_api_enabled`` off answers 404 everywhere, so the API reads as unmounted."""
     upload = files_off_client.post(
         f"{API_ROOT}/files",
         headers=master_key_header,
