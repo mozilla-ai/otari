@@ -857,3 +857,17 @@ class OAuthAppGrantError(TenancyValidationError):
     def __init__(self, error: str, description: str) -> None:
         super().__init__(description)
         self.error, self.description = error, description
+
+
+class PersonalAccessTokenNotFoundError(TenancyNotFoundError):
+    def __init__(self, token_id: object):
+        super().__init__(f"Access token {token_id} not found")
+
+
+class PersonalAccessTokenLimitReachedError(TenancyValidationError):
+    """This identity already holds as many access tokens as it may, for the reason passkeys have a ceiling."""
+
+    def __init__(self, limit: int):
+        super().__init__(
+            f"You already have {limit} access tokens, which is the most one account may hold. Delete one first."
+        )

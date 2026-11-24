@@ -81,6 +81,11 @@ root anywhere under `src/gateway`.
 
 `verify_master_key` authenticates either a header master key or an active
 dashboard session. It does not prove that the session may act deployment-wide.
+`get_session_identity` also resolves a personal access token (`otari-pat-`) as
+its owner, on `GET` and `HEAD` only, so every route that takes a session takes
+a token for reads; a route that must refuse one asks
+`is_personal_access_token_request`. The MCP server (`api/mcp_server.py`) reads
+through the app with that token, so a route's own checks are the only ones.
 
 - Deployment-wide management routers declare
   `require_deployment_operator` on the router, not per route, so a route added

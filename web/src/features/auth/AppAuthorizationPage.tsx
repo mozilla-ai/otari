@@ -34,8 +34,10 @@ function isLimit(value: string) {
   return /^\d{1,6}(\.\d{1,2})?$/.test(value) && Number(value) > 0
 }
 
-function expirationFrom(value: string | null): AppApproval["expiration"] {
-  return EXPIRATIONS.find((choice) => choice.value === value)?.value ?? "never"
+function expirationFrom(
+  value: string | null,
+): AppApproval["expiration"] | undefined {
+  return EXPIRATIONS.find((choice) => choice.value === value)?.value
 }
 
 /** Consent stays behind the dashboard's normal session gate. */
@@ -48,7 +50,7 @@ export function AppAuthorizationPage() {
     const suggested = params.get("limit") ?? ""
     return isLimit(suggested) ? suggested : ""
   })
-  const [expiration, setExpiration] = useState(() =>
+  const [chosenExpiration, setExpiration] = useState(() =>
     expirationFrom(params.get("expiration")),
   )
   const limitInvalid = limit !== "" && !isLimit(limit)
@@ -56,9 +58,13 @@ export function AppAuthorizationPage() {
     params.get("client_id") ?? "",
     params.get("redirect_uri") ?? "",
   )
+  // A self-registered client, such as an MCP client, is given the person's own
+  // read-only access token: no workspace to bill and no limit to set.
+  const isAccessToken = app.data?.credential === "access_token"
+  const expiration = chosenExpiration ?? (isAccessToken ? "30-days" : "never")
   const workspaces = useOAuthAppWorkspaces(
     search,
-    Boolean(app.data) && !app.error,
+    Boolean(app.data) && !app.error && !isAccessToken,
   )
   const approval = useAuthorizeOAuthApp(params, app.data?.scopes ?? [])
   const choices = workspaces.data?.data ?? []
@@ -85,7 +91,10 @@ export function AppAuthorizationPage() {
   const failure = app.error ?? workspaces.error ?? approval.error
   const loading =
     (app.isPending && !app.data) ||
-    (Boolean(app.data) && workspaces.isPending && !workspaces.data)
+    (Boolean(app.data) &&
+      !isAccessToken &&
+      workspaces.isPending &&
+      !workspaces.data)
   const deny = () => {
     if (!app.data || app.error) return
     const url = new URL(app.data.redirect_uri)
@@ -135,51 +144,69 @@ export function AppAuthorizationPage() {
           )}
           <div className="flex flex-col gap-4 border-y border-border py-5">
             <h2 className="text-overline">What you’re allowing</h2>
-            <div className="flex items-start gap-3">
-              <FiCpu
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-muted"
-              />
-              <div className="flex flex-col gap-1">
-                <p className="text-emphasis">
-                  This app will be able to, with the access you have in this
-                  workspace:
-                </p>
-                <ul className="flex flex-col gap-1">
-                  {app.data.scopes.map((scope) => {
-                    // A gateway newer than this bundle can name a scope it has
-                    // no description for, which is still worth showing raw.
-                    const info = SCOPE_INFO[scope]
-                    return (
-                      <li key={scope} className="text-caption">
-                        {info ? info.label : `${scope} (not described here)`}
-                        {info?.risk ? (
-                          <span className="text-warning">
-                            {" "}
-                            &middot; {info.risk}
-                          </span>
-                        ) : null}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <FiShield
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-muted"
-              />
-              <div className="flex flex-col gap-1">
-                <p className="text-emphasis">Your limits stay in place</p>
+            {isAccessToken ? (
+              <div className="flex items-start gap-3">
+                <FiShield
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-muted"
+                />
                 <p className="text-caption">
-                  Requests count toward your existing budgets. Your provider
-                  keys stay in Otari.
+                  This app will read what you can see in Otari, as you: usage,
+                  requests, budgets and keys. It cannot change anything or call
+                  models.
                 </p>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-start gap-3">
+                  <FiCpu
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0 text-muted"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-emphasis">
+                      This app will be able to, with the access you have in this
+                      workspace:
+                    </p>
+                    <ul className="flex flex-col gap-1">
+                      {app.data.scopes.map((scope) => {
+                        // A gateway newer than this bundle can name a scope it has
+                        // no description for, which is still worth showing raw.
+                        const info = SCOPE_INFO[scope]
+                        return (
+                          <li key={scope} className="text-caption">
+                            {info
+                              ? info.label
+                              : `${scope} (not described here)`}
+                            {info?.risk ? (
+                              <span className="text-warning">
+                                {" "}
+                                &middot; {info.risk}
+                              </span>
+                            ) : null}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <FiShield
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0 text-muted"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-emphasis">Your limits stay in place</p>
+                    <p className="text-caption">
+                      Requests count toward your existing budgets. Your provider
+                      keys stay in Otari.
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-          {soleWorkspace && selectedWorkspace ? (
+          {isAccessToken ? null : soleWorkspace && selectedWorkspace ? (
             <div className="flex flex-col gap-2">
               <h2 className="text-overline">Workspace</h2>
               <div className="flex items-center gap-3 border border-border-strong bg-background p-3">
@@ -222,7 +249,7 @@ export function AppAuthorizationPage() {
             </p>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            {app.data.spend_limits && (
+            {app.data.spend_limits && !isAccessToken && (
               <Field
                 label="Spending limit (USD)"
                 value={limit}
@@ -235,7 +262,7 @@ export function AppAuthorizationPage() {
               />
             )}
             <Select
-              label="Key expires"
+              label={isAccessToken ? "Access expires" : "Key expires"}
               value={expiration}
               onChange={(value) => setExpiration(expirationFrom(value))}
               options={EXPIRATIONS}
@@ -248,20 +275,23 @@ export function AppAuthorizationPage() {
               fullWidth
               isPending={approval.isPending}
               isDisabled={
-                !selectedWorkspace ||
+                (!isAccessToken && !selectedWorkspace) ||
                 limitInvalid ||
                 Boolean(workspaces.error) ||
                 workspaces.isFetching ||
                 approval.isPending
               }
-              onPress={() =>
-                selectedWorkspace &&
-                approval.mutate({
-                  workspaceId: selectedWorkspace.id,
-                  limit: app.data.spend_limits ? limit : "",
-                  expiration,
-                })
-              }
+              onPress={() => {
+                if (isAccessToken) {
+                  approval.mutate({ limit: "", expiration })
+                } else if (selectedWorkspace) {
+                  approval.mutate({
+                    workspaceId: selectedWorkspace.id,
+                    limit: app.data.spend_limits ? limit : "",
+                    expiration,
+                  })
+                }
+              }}
             >
               Allow access{" "}
               <FiArrowRight className="size-4" aria-hidden="true" />
@@ -277,7 +307,9 @@ export function AppAuthorizationPage() {
           </div>
           <div className="flex flex-col gap-2 border-t border-border pt-4 text-center">
             <p className="text-caption">
-              You can revoke access anytime from API keys in Otari.
+              {isAccessToken
+                ? "You can revoke access anytime from Account settings in Otari."
+                : "You can revoke access anytime from API keys in Otari."}
             </p>
             <p className="text-caption text-subtle break-words">
               Return to{" "}

@@ -3,7 +3,7 @@ import functools
 import importlib.util
 import logging
 from collections.abc import AsyncGenerator, Coroutine
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -42,6 +42,7 @@ from gateway.api.deps import (
 )
 from gateway.api.error_body import BodyHTTPException
 from gateway.api.main import register_routers
+from gateway.api.mcp_server import McpEndpoint, mount_mcp_server
 from gateway.api.request_id import with_request_id
 from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
@@ -293,6 +294,7 @@ _UNAUTHENTICATED_OPERATIONS = frozenset(
         ("get", f"{API_ROOT}/oauth/apps/clients"),
         ("post", f"{API_ROOT}/oauth/apps/token"),
         ("post", f"{API_ROOT}/oauth/apps/revoke"),
+        ("post", f"{API_ROOT}/oauth/apps/register"),
     }
 )
 # Headers the official OpenAI and Anthropic JS SDKs add to every request, so a
@@ -782,6 +784,7 @@ _INFERENCE_CORS_PATHS = frozenset(
         f"{API_ROOT}/tools",
         f"{API_ROOT}/oauth/apps/token",
         f"{API_ROOT}/oauth/apps/revoke",
+        f"{API_ROOT}/oauth/apps/register",
     }
 )
 _INFERENCE_CORS_PREFIXES = (
@@ -1346,7 +1349,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         trace_writer: TraceWriter | None = None
         trace_writer_started = False
         content_check: asyncio.Task[None] | None = None
+        mcp_serving = AsyncExitStack()
         try:
+            mcp_endpoint: McpEndpoint | None = getattr(app.state, "mcp_endpoint", None)
+            if mcp_endpoint is not None:
+                await mcp_serving.enter_async_context(mcp_endpoint.serving())
             # First inside the try, after every step that can refuse to start, so a
             # refused start never leaves one open. One per app: web tools, the search
             # endpoint and the connection tests call their providers through it.
@@ -1376,6 +1383,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             )
             yield
         finally:
+            await mcp_serving.aclose()
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
                 _reset_worker_cache(worker)
@@ -1630,6 +1638,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
             url=callback_landing_target(request.app.state.config, provider, request.url.query),
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    # At the root rather than under the API, where an MCP client's configuration expects a short URL.
+    app.state.mcp_endpoint = None
+    if config.mcp_server_enabled:
+        app.state.mcp_endpoint = mount_mcp_server(app, config)
 
     @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:

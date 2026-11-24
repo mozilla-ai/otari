@@ -4,8 +4,10 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from gateway.core.oauth_apps import parse_oauth_redirect
+from gateway.models.identity import MAX_DYNAMIC_CLIENT_NAME_LENGTH
 from gateway.types.key_scope import KeyScope
 
 OAuthClientId = Annotated[str, Field(min_length=1, max_length=128)]
@@ -72,6 +74,11 @@ class AppDetails(BaseModel):
         description="Whether a spending limit the person sets binds the key. It does not where the "
         "deployment has turned budget enforcement off, so the consent screen does not offer one."
     )
+    credential: Literal["api_key", "access_token"] = Field(
+        default="api_key",
+        description="What the app is given: an API key billed to a workspace the person picks, or, for a "
+        "client that registered itself such as an MCP client, the person's own read-only access token.",
+    )
 
 
 class AppAuthorizationResponse(BaseModel):
@@ -79,17 +86,49 @@ class AppAuthorizationResponse(BaseModel):
 
 
 class AppTokenResponse(BaseModel):
-    """A minted app key, as RFC 6749 section 5.1 shapes it."""
+    """A minted app key or access token, as RFC 6749 section 5.1 shapes it."""
 
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"
-    scope: str = Field(
+    scope: str | None = Field(
+        default=None,
         description="The scopes the key holds, space delimited. Fewer than the registration names "
-        "where the person approved it before an operator narrowed it."
+        "where the person approved it before an operator narrowed it. Absent for an access token.",
     )
+    expires_in: int | None = Field(default=None, description="Seconds until an access token expires, where it does.")
     manage_url: str = Field(description="The absolute URL of the page where the person sees this key, and revokes it.")
 
 
 class AppRevocationRequest(BaseModel):
     token: str = Field(min_length=1, max_length=4096)
     token_type_hint: str | None = Field(default=None, max_length=128)
+
+
+class ClientRegistrationRequest(BaseModel):
+    """RFC 7591 client metadata. Only what Otari uses is read; anything else is ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+    client_name: Annotated[str | None, BeforeValidator(_suggestion(MAX_DYNAMIC_CLIENT_NAME_LENGTH))] = Field(
+        default=None, description="The name the consent screen shows, marked unverified."
+    )
+    redirect_uris: list[OAuthRedirectUri] = Field(min_length=1, max_length=10)
+
+    @field_validator("redirect_uris")
+    @classmethod
+    def validate_redirects(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if parse_oauth_redirect(value) is None:
+                raise ValueError("Redirect URIs must be HTTPS (HTTP only on loopback), without query or fragment")
+        return values
+
+
+class ClientRegistrationResponse(BaseModel):
+    """RFC 7591 section 3.2.1: the registration as recorded. Every client registered here is public."""
+
+    client_id: str
+    client_id_issued_at: int
+    client_name: str
+    redirect_uris: list[str]
+    grant_types: list[str] = Field(default_factory=lambda: ["authorization_code"])
+    response_types: list[str] = Field(default_factory=lambda: ["code"])
+    token_endpoint_auth_method: Literal["none"] = "none"

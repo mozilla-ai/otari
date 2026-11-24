@@ -5,6 +5,11 @@ import hashlib
 # is the default adapter's, kept here so tests and the dashboard can name it.
 API_KEY_PREFIX = "tk-"
 
+# Prefix stamped on every personal access token, distinct from a key's and a
+# generated master key's (``otari-mk-``), so authentication can tell a token
+# apart before looking anything up.
+PERSONAL_ACCESS_TOKEN_PREFIX = "otari-pat-"
+
 # Minimum length of a minted key; ``token_urlsafe(48)`` yields 64 characters.
 MIN_API_KEY_LENGTH = 50
 

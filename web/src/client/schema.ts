@@ -427,6 +427,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/access-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Access Tokens
+         * @description The caller's own access tokens, newest first. Never anybody else's, and never a token itself.
+         */
+        get: operations["auth-list_access_tokens"];
+        put?: never;
+        /**
+         * Create Access Token
+         * @description Mint an access token that reads what the caller can see on the dashboard, as them.
+         *
+         *     It authenticates `GET` requests to the management API and the MCP server at `/mcp`, and
+         *     is refused on every write. The token is in this response only.
+         */
+        post: operations["auth-create_access_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/access-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Access Token
+         * @description Revoke one of the caller's access tokens at once.
+         */
+        delete: operations["auth-delete_access_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/account": {
         parameters: {
             query?: never;
@@ -3439,6 +3486,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/apps/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Client
+         * @description Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.
+         *
+         *     What it is approved for redeems only to the approving person's read-only access token, and
+         *     the consent screen names it as unverified. Served where the MCP server is on.
+         */
+        post: operations["oauth-apps-register_client"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/oauth/apps/revoke": {
         parameters: {
             query?: never;
@@ -3470,7 +3540,10 @@ export interface paths {
         put?: never;
         /**
          * Exchange
-         * @description Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.
+         * @description Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.
+         *
+         *     A registered or open app is given an API key. A client that registered itself is given the
+         *     person's read-only access token, with ``expires_in`` where it expires.
          */
         post: operations["oauth-apps-exchange"];
         delete?: never;
@@ -9517,6 +9590,91 @@ export interface components {
             /** Model Count */
             model_count: number;
         };
+        /** AccessTokenCreate */
+        AccessTokenCreate: {
+            /**
+             * Expiration
+             * @description How long the token lives from now: 1-hour up to 1-year, or never.
+             * @default 90-days
+             * @enum {string}
+             */
+            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year" | "never";
+            /**
+             * Name
+             * @description What the token is for.
+             */
+            name: string;
+        };
+        /** AccessTokenCreated */
+        AccessTokenCreated: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * @description Null when it does not expire.
+             */
+            expires_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Last Used At
+             * @description Accurate to about a minute. Null until first used.
+             */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Token
+             * @description The token itself. Shown once: only its hash is stored.
+             */
+            token: string;
+            /**
+             * Token Suffix
+             * @description The token's last characters, to tell it apart from the account's others.
+             */
+            token_suffix: string;
+        };
+        /** AccessTokenPublic */
+        AccessTokenPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * @description Null when it does not expire.
+             */
+            expires_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Last Used At
+             * @description Accurate to about a minute. Null until first used.
+             */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Token Suffix
+             * @description The token's last characters, to tell it apart from the account's others.
+             */
+            token_suffix: string;
+        };
+        /** AccessTokensPublic */
+        AccessTokensPublic: {
+            /** Data */
+            data: components["schemas"]["AccessTokenPublic"][];
+        };
         /**
          * ActivationApiKeyPublic
          * @description The API key the guide hands out, with its plaintext.
@@ -10462,9 +10620,9 @@ export interface components {
             state: string;
             /**
              * Workspace Id
-             * Format: uuid
+             * @description The workspace the key bills. Required unless the app is given an access token.
              */
-            workspace_id: string;
+            workspace_id?: string | null;
         };
         /** AppAuthorizationResponse */
         AppAuthorizationResponse: {
@@ -10476,6 +10634,13 @@ export interface components {
          * @description What the consent screen shows about an app before a person approves it.
          */
         AppDetails: {
+            /**
+             * Credential
+             * @description What the app is given: an API key billed to a workspace the person picks, or, for a client that registered itself such as an MCP client, the person's own read-only access token.
+             * @default api_key
+             * @enum {string}
+             */
+            credential: "api_key" | "access_token";
             /** Issuer */
             issuer: string;
             /** Name */
@@ -10526,11 +10691,16 @@ export interface components {
         };
         /**
          * AppTokenResponse
-         * @description A minted app key, as RFC 6749 section 5.1 shapes it.
+         * @description A minted app key or access token, as RFC 6749 section 5.1 shapes it.
          */
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Expires In
+             * @description Seconds until an access token expires, where it does.
+             */
+            expires_in?: number | null;
             /**
              * Manage Url
              * @description The absolute URL of the page where the person sees this key, and revokes it.
@@ -10538,9 +10708,9 @@ export interface components {
             manage_url: string;
             /**
              * Scope
-             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
+             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it. Absent for an access token.
              */
-            scope: string;
+            scope?: string | null;
             /**
              * Token Type
              * @default Bearer
@@ -12053,6 +12223,30 @@ export interface components {
             type: "choice";
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ClientRegistrationResponse
+         * @description RFC 7591 section 3.2.1: the registration as recorded. Every client registered here is public.
+         */
+        ClientRegistrationResponse: {
+            /** Client Id */
+            client_id: string;
+            /** Client Id Issued At */
+            client_id_issued_at: number;
+            /** Client Name */
+            client_name: string;
+            /** Grant Types */
+            grant_types?: string[];
+            /** Redirect Uris */
+            redirect_uris: string[];
+            /** Response Types */
+            response_types?: string[];
+            /**
+             * Token Endpoint Auth Method
+             * @default none
+             * @constant
+             */
+            token_endpoint_auth_method: "none";
         };
         /**
          * CodeExecuteRequest
@@ -26305,6 +26499,88 @@ export interface operations {
             };
         };
     };
+    "auth-list_access_tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTokensPublic"];
+                };
+            };
+        };
+    };
+    "auth-create_access_token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTokenCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-delete_access_token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "auth-delete_own_account": {
         parameters: {
             query?: never;
@@ -31317,6 +31593,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "oauth-apps-register_client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientRegistrationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthErrorResponse"];
                 };
             };
         };

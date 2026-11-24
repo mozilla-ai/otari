@@ -28,7 +28,13 @@ const request = new URLSearchParams({
 function renderPage(
   workspaces = [{ id: "workspace-one", name: "Personal" }],
   appError?: Error,
-  app: { name: string; verified: boolean; spend_limits?: boolean } = {
+  app: {
+    name: string
+    verified: boolean
+    spend_limits?: boolean
+    credential?: "api_key" | "access_token"
+    scopes?: string[]
+  } = {
     name: "Thunderbolt",
     verified: true,
   },
@@ -44,10 +50,11 @@ function renderPage(
       }
     return {
       spend_limits: true,
-      ...app,
+      credential: "api_key",
       issuer: "https://auth.otari.example",
       scopes: ["inference:run"],
       redirect_uri: "http://localhost:5199/oauth/otari",
+      ...app,
     }
   })
   const client = new QueryClient({
@@ -462,4 +469,68 @@ it("searches beyond the first workspace page and retains the chosen workspace", 
         "Research",
     ),
   ).toBe(true)
+})
+
+const MCP_CLIENT = {
+  name: "Claude Code",
+  verified: false,
+  spend_limits: false,
+  credential: "access_token" as const,
+  scopes: [],
+}
+
+it("gives a self-registered client a read-only token with no workspace or limit", async () => {
+  renderPage(undefined, undefined, MCP_CLIENT)
+  expect(
+    await screen.findByRole("heading", { name: "Connect to Claude Code" }),
+  ).toBeVisible()
+  expect(screen.getByText(/Otari has not verified this site/)).toBeVisible()
+  expect(screen.getByText(/cannot change anything or call/)).toBeVisible()
+  expect(screen.queryByText("Workspace")).not.toBeInTheDocument()
+  expect(
+    screen.queryByLabelText("Spending limit (USD)"),
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByText(/Requests count toward your existing budgets/),
+  ).not.toBeInTheDocument()
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.some(([path]) => path.startsWith("/oauth/apps/workspaces")),
+  ).toBe(false)
+
+  await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
+  await waitFor(() =>
+    expect(assign).toHaveBeenCalledWith(expect.stringContaining("?code=grant")),
+  )
+  const call = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+    ...Object.fromEntries(request),
+    scopes: [],
+    expiration: "30-days",
+  })
+})
+
+it("keeps the expiry a self-registered client suggests", async () => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...realLocation,
+      ...routeLocation(`/oauth/authorize?${request}&expiration=7-days`),
+      assign,
+    },
+  })
+  renderPage(undefined, undefined, MCP_CLIENT)
+  await screen.findByRole("heading", { name: "Connect to Claude Code" })
+  await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const call = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    expiration: "7-days",
+  })
+  expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty("workspace_id")
 })

@@ -36,7 +36,8 @@ export function useOAuthAppWorkspaces(search: string, enabled: boolean) {
 
 /** What the person chose on the consent screen besides the app's own parameters. */
 export interface AppApproval {
-  workspaceId: string
+  /** Absent for an app given an access token, which bills no workspace. */
+  workspaceId?: string
   /** Blank sets no spending limit. */
   limit: string
   expiration: NonNullable<AppAuthorizationRequest["expiration"]>
@@ -58,7 +59,7 @@ export function useAuthorizeOAuthApp(
           state: params.get("state"),
           code_challenge: params.get("code_challenge"),
           code_challenge_method: params.get("code_challenge_method"),
-          workspace_id: workspaceId,
+          ...(workspaceId ? { workspace_id: workspaceId } : {}),
           scopes,
           ...(limit ? { limit } : {}),
           expiration,

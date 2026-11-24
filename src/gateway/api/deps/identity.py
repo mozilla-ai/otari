@@ -17,6 +17,7 @@ from gateway.api.deps.api_keys import (
     get_api_key_service,
 )
 from gateway.api.deps.auth import (
+    build_personal_access_token_service,
     get_session_identity,
     record_auth_failure,
     verify_master_key,
@@ -44,6 +45,7 @@ from gateway.repositories.identity import (
     OAuthPendingStateRepository,
 )
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.repositories.identity.oauth_dynamic_client_repository import OAuthDynamicClientRepository
 from gateway.repositories.organizations import BootstrapMarkerRepository, OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
@@ -57,6 +59,7 @@ from gateway.services.identity import (
     IdentityService,
     OAuthAppService,
     OIDCConnectionService,
+    PersonalAccessTokenService,
 )
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import redirect_uri
@@ -244,15 +247,18 @@ def get_oauth_app_service(
         organizations,
         workspaces,
         budgets,
+        build_personal_access_token_service(uow),
+        OAuthDynamicClientRepository(uow),
         apps=config.oauth_apps,
         open_apps=config.oauth_open_apps,
+        dynamic_clients=config.mcp_server_enabled,
         spend_limits=config.budget_strategy.strip().lower() != "disabled",
         ui_link=config.ui_link,
-        issuer=_oauth_app_issuer(request, config),
+        issuer=oauth_app_issuer(request, config),
     )
 
 
-def _oauth_app_issuer(request: Request, config: GatewayConfig) -> str:
+def oauth_app_issuer(request: Request, config: GatewayConfig) -> str:
     """The origin of ``public_base_url``, or of the request when it is unset.
 
     A proxy in front of the gateway can rewrite the host and terminate TLS, so
@@ -271,3 +277,11 @@ def _oauth_app_issuer(request: Request, config: GatewayConfig) -> str:
 
 
 OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
+
+
+def get_personal_access_token_service(uow: UnitOfWorkDep) -> PersonalAccessTokenService:
+    """Build the personal access token service on the request's Unit of Work."""
+    return build_personal_access_token_service(uow)
+
+
+PersonalAccessTokenServiceDep = Annotated[PersonalAccessTokenService, Depends(get_personal_access_token_service)]
