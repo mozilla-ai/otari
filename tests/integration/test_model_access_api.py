@@ -95,6 +95,47 @@ def test_a_key_restricted_by_catalog_id_reaches_that_model_alone(
     assert refused.status_code == 403, refused.text
 
 
+def test_a_catalog_id_on_a_narrowed_owners_key_stands_for_the_offerings_the_owner_may_use(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An owner held to groq picks a model groq and together both serve, and gets the groq offering."""
+    for selector in ("groq:openai/gpt-oss-20b", "together:openai/gpt-oss-20b"):
+        _seed_pricing(client, master_key_header, selector)
+    refreshed = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
+    assert refreshed.status_code == 200, refreshed.text
+    for user_id, allowed in (("groq-only", ["groq:*"]), ("anthropic-only", ["anthropic:*"])):
+        made = client.post(
+            f"{API_ROOT}/users", json={"user_id": user_id, "allowed_models": allowed}, headers=master_key_header
+        )
+        assert made.status_code == 200, made.text
+
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "user_id": "groq-only", "allowed_models": ["openai/gpt-oss-20b"]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["allowed_models"] == ["groq:openai/gpt-oss-20b"]
+
+    key_id = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "user_id": "groq-only"}, headers=master_key_header
+    ).json()["id"]
+    edited = client.patch(
+        f"{API_ROOT}/keys/{key_id}", json={"allowed_models": ["openai/gpt-oss-20b"]}, headers=master_key_header
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["allowed_models"] == ["groq:openai/gpt-oss-20b"]
+
+    # An owner who may use none of the offerings is still refused.
+    refused = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "user_id": "anthropic-only", "allowed_models": ["openai/gpt-oss-20b"]},
+        headers=master_key_header,
+    )
+    assert refused.status_code == 400, refused.text
+    assert "exceeds its user's default" in refused.json()["detail"]
+
+
 def test_patch_tri_state(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id = client.post(
         f"{API_ROOT}/keys",

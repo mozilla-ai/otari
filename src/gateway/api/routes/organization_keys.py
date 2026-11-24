@@ -379,6 +379,14 @@ async def create_own_key(
     )
     # A key must not grant more than its user's default, the same narrow-only
     # rule the operator surface enforces; here the user is always the caller.
+    # A catalog ID stands for the offerings that default covers.
+    if owner.allowed_models is not None:
+        try:
+            allowed_models = validate_allowed_models(
+                config, request.allowed_models, organization_id=organization.id, within=owner.allowed_models
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not is_allowlist_subset(allowed_models, owner.allowed_models, tool_keys=config.legacy_search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
     if not tools_within_user(config, allowed_tools, user_tools=owner.allowed_tools, user_models=owner.allowed_models):

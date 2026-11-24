@@ -519,11 +519,12 @@ def _validate_entry(
     *,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = None,
+    within: list[str] | None = None,
 ) -> list[str]:
     """Validate + canonicalize one allow-list entry, or raise ``ValueError``.
 
-    A catalog ID expands to those of its offerings an allow-list can name; any
-    other entry canonicalizes to itself.
+    A catalog ID expands to those of its offerings an allow-list can name and
+    ``within`` covers; any other entry canonicalizes to itself.
     """
     entry = entry.strip()
     if not entry:
@@ -545,7 +546,10 @@ def _validate_entry(
         # implementation, a hosted region, or a key reached by its slug, so the
         # model's other offerings stand for those.
         if storable := [offering for offering in offerings if _known_prefix(config, offering.partition(":")[0])]:
-            return storable
+            # Where the owner covers none, all are kept, so the list is refused as exceeding the owner's.
+            if within is None:
+                return storable
+            return [offering for offering in storable if _covers(within, offering)] or storable
         if not _known_prefix(config, prefix):
             raise ValueError(f"'{entry}' is served only through providers an allowed_models entry cannot name")
     canonical = f"{prefix}:{model}"
@@ -565,13 +569,16 @@ def validate_allowed_models(
     *,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = None,
+    within: list[str] | None = None,
 ) -> list[str] | None:
     """Validate + canonicalize a write. ``None`` and ``[]`` pass through as-is.
 
     Raises ``ValueError`` (surfaced by the caller as a 400) on any bad entry.
     Duplicates are collapsed while order is preserved. A catalog ID is stored as
     its offerings, read from the view of the organization named directly or
-    through ``workspace_id``, so the result can be longer than ``entries``.
+    through ``workspace_id``, so the result can be longer than ``entries``. A
+    key's write passes its owner's list as ``within``, and a catalog ID then
+    stands for the offerings that list covers, since the key may only narrow it.
     """
     if entries is None:
         return None
@@ -582,7 +589,7 @@ def validate_allowed_models(
         if not isinstance(entry, str):
             raise ValueError("allowed_models entries must be strings")
         canonical |= dict.fromkeys(
-            _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id)
+            _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id, within=within)
         )
     return list(canonical)
 

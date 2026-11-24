@@ -209,6 +209,27 @@ def test_validate_dedupes_a_catalog_id_against_its_own_offerings() -> None:
     ) == ["groq:mistralai/mistral-small-3", "deepinfra:mistralai/mistral-small-3"]
 
 
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize(
+    ("within", "expected"),
+    [
+        (["groq:*"], ["groq:mistralai/mistral-small-3"]),
+        (["deepinfra:mistralai/mistral-small-3"], ["deepinfra:mistralai/mistral-small-3"]),
+        # Covering none keeps every offering, so the owner check refuses the list.
+        (["anthropic:*"], ["deepinfra:mistralai/mistral-small-3", "groq:mistralai/mistral-small-3"]),
+    ],
+)
+def test_validate_narrows_a_catalog_id_to_the_offerings_the_owner_covers(
+    within: list[str], expected: list[str]
+) -> None:
+    assert validate_allowed_models(GatewayConfig(), ["mistralai/mistral-small-3"], within=within) == expected
+
+
+def test_validate_never_narrows_an_entry_that_names_its_offering() -> None:
+    """Only a catalog ID's expansion is narrowed; a selector the caller wrote is kept, and refused if it exceeds."""
+    assert validate_allowed_models(GatewayConfig(), ["openai:gpt-4o"], within=["groq:*"]) == ["openai:gpt-4o"]
+
+
 @pytest.mark.usefixtures("gpt_oss_catalog")
 def test_validate_reads_a_catalog_id_whose_author_is_also_a_provider_as_the_model() -> None:
     """``openai/gpt-oss-20b`` was stored as ``openai:gpt-oss-20b``, which OpenAI does not serve."""

@@ -306,28 +306,33 @@ class ApiKeyService:
         A list sent back unchanged grants nothing new, so it is not checked again: a
         tool deleted since, or an owner narrowed since, would otherwise refuse an
         unrelated edit. A key's changed list must fit its owner's (``owner_id``;
-        ``None`` for a user, or a key with no owner). The owner is read in a block of
-        its own, whose commit would also store what the caller had staged, so a route
-        calls this first. ``workspace_id`` or ``organization_id`` names whose catalog
-        a catalog ID in a changed list is read from.
+        ``None`` for a user, or a key with no owner), and a catalog ID in it stands
+        for the offerings the owner may use. The owner is read in a block of its own,
+        whose commit would also store what the caller had staged, so a route calls
+        this first. ``workspace_id`` or ``organization_id`` names whose catalog a
+        catalog ID in a changed list is read from.
 
         Raises:
             ValueError: a changed list names something unknown, or grants more than the owner's.
         """
         models_changed = requested.models != stored.models
         tools_changed = requested.tools != stored.tools
+        owner = None
+        if owner_id is not None and (models_changed or tools_changed):
+            async with self._uow:
+                owner = await self._users.lists(owner_id)
         checked = AccessLists(
             validate_allowed_models(
-                config, requested.models, workspace_id=workspace_id, organization_id=organization_id
+                config,
+                requested.models,
+                workspace_id=workspace_id,
+                organization_id=organization_id,
+                within=owner.models if owner is not None else None,
             )
             if models_changed
             else stored.models,
             validate_allowed_tools(config, requested.tools) if tools_changed else stored.tools,
         )
-        if owner_id is None or not (models_changed or tools_changed):
-            return checked
-        async with self._uow:
-            owner = await self._users.lists(owner_id)
         if owner is None:
             return checked
         tool_keys = config.legacy_search_tool_keys()

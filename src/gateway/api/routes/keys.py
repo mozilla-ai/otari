@@ -406,6 +406,14 @@ async def create_key(
 
     # A key must not grant more than its user's default (a freshly created user
     # has no default, so this only bites when attaching to a restricted user).
+    # A catalog ID stands for the offerings that default covers.
+    if user.allowed_models is not None:
+        try:
+            allowed_models = validate_allowed_models(
+                config, request.allowed_models, organization_id=organization_id, within=user.allowed_models
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not is_allowlist_subset(allowed_models, user.allowed_models, tool_keys=config.legacy_search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
     if not tools_within_user(config, allowed_tools, user_tools=user.allowed_tools, user_models=user.allowed_models):
