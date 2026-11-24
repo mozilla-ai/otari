@@ -369,7 +369,7 @@ class WorkspaceHostedAccessService:
     async def set_policy(
         self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceProviderPolicyRequest
     ) -> WorkspaceProviderPolicyPublic:
-        """Store what the workspace requires of every provider serving it, logging who changed it."""
+        """Store what the workspace requires of every provider serving it."""
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
