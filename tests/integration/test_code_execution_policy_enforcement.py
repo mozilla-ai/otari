@@ -28,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
+from gateway.services.tools._code_execution_admission import SANDBOX_NOT_ENABLED_DETAIL
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _REQUEST = {
@@ -89,7 +90,12 @@ def _post_with_sandbox_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen.max_iterations = max_iterations
         return _text_response("via-sandbox-loop")
@@ -138,7 +144,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     assert response.status_code == 403
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
     detail = response.json()
-    assert detail["error"]["message"] == "code execution is not enabled for this workspace"
+    assert detail["error"]["message"] == SANDBOX_NOT_ENABLED_DETAIL
     assert seen.max_iterations is None, "the tool loop must never have run"
 
 
@@ -271,7 +277,12 @@ def test_a_streaming_request_gets_the_same_ceilings(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.max_iterations = max_iterations
         yield MessageStopEvent(type="message_stop")
@@ -679,7 +690,7 @@ def test_no_policy_is_refused_like_a_disabled_one_where_code_execution_is_opt_in
     refused, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
     assert refused.status_code == 403
-    assert refused.json()["error"]["message"] == "code execution is not enabled for this workspace"
+    assert refused.json()["error"]["message"] == SANDBOX_NOT_ENABLED_DETAIL
     assert seen.max_iterations is None
 
     _set_policy(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)

@@ -85,6 +85,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyCreate,
 )
 from gateway.services.budgets import BudgetService
+from gateway.services.organizations import MembershipListener
 from gateway.services.password_service import (
     hash_password_async,
     verify_absent_password_async,
@@ -92,7 +93,6 @@ from gateway.services.password_service import (
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import SignupRegistration
 from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,

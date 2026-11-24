@@ -25,6 +25,7 @@ from gateway.services.catalog import (
     Identities,
     OfferingRow,
     OrganizationSelectors,
+    apply_model_metadata,
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
@@ -169,13 +170,44 @@ def models_by_identity(
             if selector in members
         ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
         first = offerings[ranked[0]]
+        # An organization's key is addressed by its slug, which no configured
+        # instance names, so the metadata pass that built this offering asked
+        # models.dev about the slug and got nothing. The slug map names the
+        # provider the key stands for, so read the model under that provider now.
+        resolved = (slug_providers or {}).get(first.id.partition(":")[0])
+        if resolved is not None:
+            apply_model_metadata(config, catalog, first, organization_id=organization_id, provider_type=resolved)
         rows[identity.id] = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
+                **_limits_from_others(first, [offerings[selector] for selector in sorted(members - {ranked[0]})]),
             }
         )
     return [rows[model_id] for model_id in sorted(rows)]
+
+
+def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, int]:
+    """The token limits ``first`` leaves unknown, as the smallest the model's other offerings report.
+
+    A self-hosted engine is often the one offering that knows its context
+    length, and rarely the one tried first. The smallest is the one every
+    offering that reports a limit holds, whichever a fallback reaches. A
+    filled output limit is capped at the row's context window; a limit
+    ``first`` knows is kept as it is.
+    """
+    filled: dict[str, int] = {}
+    contexts = [obj.context_window for obj in others if obj.context_window is not None]
+    if first.context_window is None and contexts:
+        filled["context_window"] = min(contexts)
+    outputs = [obj.max_output_tokens for obj in others if obj.max_output_tokens is not None]
+    if first.max_output_tokens is None and outputs:
+        filled["max_output_tokens"] = min(outputs)
+    window = filled.get("context_window", first.context_window)
+    output = filled.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        filled["max_output_tokens"] = window
+    return filled
 
 
 def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:

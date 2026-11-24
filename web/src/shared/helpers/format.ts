@@ -52,6 +52,12 @@ export function formatUnitRate(value: number): string {
     : usdPerRequest.format(value)
 }
 
+// Output tokens per second, whole: "142 tok/s". A tenth of a token a second is
+// noise in a rate that moves with every request.
+export function formatThroughput(tokensPerSecond: number): string {
+  return `${Math.round(tokensPerSecond).toLocaleString("en-US")} tok/s`
+}
+
 // A millisecond duration an operator reads at a glance: "820 ms", "1.50 s".
 // `undefined` rather than a placeholder when the row recorded none, so a table
 // cell can render the em dash that keeps it aligned and a stat card can drop

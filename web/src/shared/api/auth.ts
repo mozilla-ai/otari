@@ -42,9 +42,10 @@ import { createPasskey } from "@/shared/helpers/webauthn"
 
 export function useRotateMasterKey() {
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (currentPassword: string) =>
       apiFetch<RotateMasterKeyResponse>("/settings/master-key/rotate", {
         method: "POST",
+        body: JSON.stringify({ current_password: currentPassword }),
       }),
   })
 }

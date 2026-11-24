@@ -39,7 +39,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values
 from gateway.repositories.providers import EndpointNameConflict, ProviderEndpointRepository
 from gateway.schemas.providers import (
     ProviderEndpointCreateRequest,
@@ -51,7 +51,12 @@ from gateway.services.providers._owned_endpoint_network import (
     OwnedEndpointAddressError,
     check_owned_endpoint_api_base,
 )
-from gateway.services.secret_box import SecretBoxUnavailableError, encrypt_secret
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    encrypt_mapping,
+    encrypt_secret,
+    readable_mapping,
+)
 
 # Implementations that take nothing but a base URL and a key. A provider that
 # can authenticate from the deployment's own environment (Bedrock's instance
@@ -105,7 +110,13 @@ class ProviderEndpointService:
             rows, count = await self.endpoints.list_page(
                 workspace_id=workspace_id, user_id=user_id, skip=skip, limit=limit
             )
-        return ProviderEndpointsPublic(data=[ProviderEndpointPublic.from_row(row) for row in rows], count=count)
+        return ProviderEndpointsPublic(
+            data=[
+                ProviderEndpointPublic.from_row(row, default_params=readable_mapping(row.encrypted_default_params))
+                for row in rows
+            ],
+            count=count,
+        )
 
     async def get_endpoint(self, endpoint_id: uuid.UUID) -> ProviderEndpointPublic:
         self._require_enabled()
@@ -113,7 +124,7 @@ class ProviderEndpointService:
             row = await self.endpoints.get(endpoint_id)
         if row is None:
             raise ProviderEndpointNotFoundError(endpoint_id)
-        return ProviderEndpointPublic.from_row(row)
+        return ProviderEndpointPublic.from_row(row, default_params=readable_mapping(row.encrypted_default_params))
 
     async def create_endpoint(self, request: ProviderEndpointCreateRequest) -> ProviderEndpointPublic:
         """Create an endpoint for a workspace, or for one user in it."""
@@ -139,12 +150,12 @@ class ProviderEndpointService:
                     api_base=request.api_base,
                     encrypted_api_key=encrypted_api_key,
                     last4=last4,
-                    default_params=default_params,
+                    encrypted_default_params=_encrypt_default_params(default_params),
                 )
         except EndpointNameConflict:
             raise ProviderEndpointAlreadyExistsError(name) from None
         await self._refresh()
-        return ProviderEndpointPublic.from_row(row)
+        return ProviderEndpointPublic.from_row(row, default_params=default_params)
 
     async def update_endpoint(
         self, endpoint_id: uuid.UUID, request: ProviderEndpointUpdateRequest
@@ -166,11 +177,20 @@ class ProviderEndpointService:
         if fields.get("api_base") is not None:
             await _check_api_base(fields["api_base"])
             changes["api_base"] = fields["api_base"]
+        default_params = readable_mapping(row.encrypted_default_params)
         if "default_params" in fields:
             # The read masks credential-shaped entries, so an editor resubmitting
             # what it was shown keeps the stored values.
-            restored = restore_redacted_values(fields["default_params"], row.default_params)
-            changes["default_params"] = _validated_default_params(restored)
+            if restore_is_unsafe(
+                default_params, fields["default_params"], sealed=row.encrypted_default_params is not None
+            ):
+                raise ProviderEndpointInvalidError(
+                    "A masked default field keeps the stored value, and there is none that can be read back. "
+                    "Enter the default fields in full."
+                )
+            restored = restore_redacted_values(fields["default_params"], default_params)
+            default_params = _validated_default_params(restored)
+            changes["encrypted_default_params"] = _encrypt_default_params(default_params)
         if "api_key" in fields:
             changes["encrypted_api_key"], changes["last4"] = _encrypt_api_key(fields["api_key"])
         _require_https_for_a_key(
@@ -184,7 +204,7 @@ class ProviderEndpointService:
         except EndpointNameConflict:
             raise ProviderEndpointAlreadyExistsError(changes["name"]) from None
         await self._refresh()
-        return ProviderEndpointPublic.from_row(row)
+        return ProviderEndpointPublic.from_row(row, default_params=default_params)
 
     async def delete_endpoint(self, endpoint_id: uuid.UUID) -> None:
         self._require_enabled()
@@ -257,6 +277,14 @@ def _validated_default_params(default_params: dict[str, Any] | None) -> dict[str
     if forbidden:
         raise ProviderEndpointInvalidError(f"These fields cannot be endpoint defaults: {', '.join(forbidden)}")
     return default_params
+
+
+def _encrypt_default_params(default_params: dict[str, Any] | None) -> str | None:
+    """Encrypt an endpoint's default request fields for storage. Nothing to store stays None."""
+    try:
+        return encrypt_mapping(default_params or None)
+    except SecretBoxUnavailableError:
+        raise SecretBoxUnavailableTenancyError from None
 
 
 def _encrypt_api_key(api_key: str | None) -> tuple[str | None, str | None]:

@@ -127,6 +127,8 @@ describe("App", () => {
           organization_name: "Acme",
           role: "member",
           expires_at: "2026-01-08T00:00:00+00:00",
+          next_step: "sign_in",
+          ways_in: [],
         } as never
       }
       return [] as never
@@ -355,8 +357,7 @@ describe("App", () => {
           organization_name: "Acme",
           role: "member",
           expires_at: "2026-01-08T00:00:00+00:00",
-          needs_password: false,
-          can_sign_in: true,
+          next_step: "sign_in",
           ways_in: [],
         } as never
       }
@@ -399,6 +400,8 @@ describe("App", () => {
           organization_name: "Acme",
           role: "member",
           expires_at: "2026-01-08T00:00:00+00:00",
+          next_step: "sign_in",
+          ways_in: [],
         } as never
       }
       return [] as never

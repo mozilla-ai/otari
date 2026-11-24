@@ -943,7 +943,7 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
         last4=None,
         # A base URL with no API key still counts as BYO.
         api_base="https://openai.example.test/v1",
-        client_args=None,
+        encrypted_client_args=None,
     )
     service = OrganizationPricingService(
         async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
@@ -973,7 +973,7 @@ async def test_a_workspace_that_disabled_its_only_byo_key_defeats_the_organizati
         encrypted_api_key=None,
         last4=None,
         api_base="https://openai.example.test/v1",
-        client_args=None,
+        encrypted_client_args=None,
     )
     await WorkspaceProviderKeyOverrideRepository(async_db).create(
         workspace_id=workspace.id,
@@ -1006,7 +1006,7 @@ async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organiz
         encrypted_api_key=None,
         last4=None,
         api_base=None,
-        client_args=None,
+        encrypted_client_args=None,
     )
     service = OrganizationPricingService(
         async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
@@ -1038,7 +1038,7 @@ async def test_an_unusable_default_key_does_not_fall_back_to_a_usable_one(
         encrypted_api_key=encrypt_secret("sk-usable"),
         last4="able",
         api_base=None,
-        client_args=None,
+        encrypted_client_args=None,
     )
     unusable = await keys.create_key(
         organization_id=organization.id,
@@ -1047,7 +1047,7 @@ async def test_an_unusable_default_key_does_not_fall_back_to_a_usable_one(
         encrypted_api_key="not-a-ciphertext",
         last4=None,
         api_base=None,
-        client_args=None,
+        encrypted_client_args=None,
     )
 
     async def dispatch_falls_through_to_the_port() -> bool:

@@ -1,7 +1,7 @@
 """The runtime path: what the deployment advertises, and the credential that serves a candidate."""
 
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 from any_llm import LLMProvider
 
@@ -16,16 +16,17 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_declared_credential,
 )
-from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
+from gateway.services.providers._country_gate import ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_name_index import hosted_provider_named, remember_served_location
-from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._hosted_sources import HostedSnapshot, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.providers._workspace_hosted_access import (
     ensure_workspace_may_use_hosted,
     narrow_to_workspace_locations,
     workspace_allowed_data_locations,
 )
+from gateway.types.country_gate import CountryGate
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
@@ -147,8 +148,14 @@ async def serve_on_hosted_provider(
         credential.response_provider, resolved.instance
     ):
         return None
-    credential = ensure_hosted_country(country_gate, credential)
+    credential = await ensure_hosted_country(country_gate, credential)
     return dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
+
+
+class HostedServingBuilder(Protocol):
+    """Build a :class:`HostedServing` on the caller's unit of work; the composition root supplies it."""
+
+    def __call__(self, *, read_all: bool) -> "HostedServing": ...
 
 
 class HostedProviderRuntime:
@@ -161,11 +168,13 @@ class HostedProviderRuntime:
         sources: HostedSources,
         models: HostedProviderModelRepository,
         vendors: HostedProviderVendorRepository,
+        serving: HostedServingBuilder,
     ) -> None:
         self.uow = uow
         self.sources = sources
         self.models = models
         self.vendors = vendors
+        self.build_serving = serving
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         """Each provider serveable to ``organization_id``, with the models switched on under it.
@@ -194,6 +203,58 @@ class HostedProviderRuntime:
             for name, implementation in serveable.items()
         }
 
+    def serving(self) -> "HostedServing":
+        """A resolver that reads the hosted providers once and answers each later resolve from that read.
+
+        For one request: what it read is never read again, so a change
+        committed after its first resolve is not seen by the next.
+        """
+        return self.build_serving(read_all=True)
+
+    async def resolve(
+        self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
+    ) -> list[ResolvedHostedProvider]:
+        """The usable connections of the hosted provider ``name`` on behalf of ``organization_id``, in order.
+
+        Read afresh, and for ``name`` alone; see :meth:`HostedServing.resolve` for the rules.
+        """
+        return await self.build_serving(read_all=False).resolve(name, model, organization_id=organization_id)
+
+
+class HostedServing:
+    """Resolve hosted providers for one request, reading each table at most once where it can.
+
+    The first resolve reads every hosted provider and its regions in one
+    transaction, so each candidate of a routing policy after it costs no read
+    of either. The vendors switched off are read for every provider the first
+    time a model is checked, and a model's row once per provider and model.
+    The rows are detached, because a rollback later in the request would
+    otherwise expire them. Where there are more providers than one listing
+    holds, or ``read_all`` is false, each name is read on its own instead.
+    """
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        *,
+        sources: HostedSources,
+        models: HostedProviderModelRepository,
+        vendors: HostedProviderVendorRepository,
+        read_all: bool = True,
+    ) -> None:
+        self.uow = uow
+        self.sources = sources
+        self.models = models
+        self.vendors = vendors
+        self._read_all = read_all
+        self._snapshot: HostedSnapshot | None = None
+        self._snapshot_read = False
+        # provider -> the vendors switched off on it
+        self._disabled: dict[str, set[str]] = {}
+        self._disabled_read = False
+        # (provider, model) -> whether its row is switched on, or None for no row
+        self._offered: dict[tuple[str, str], bool | None] = {}
+
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
     ) -> list[ResolvedHostedProvider]:
@@ -210,29 +271,20 @@ class HostedProviderRuntime:
         vendor the provider has switched off is refused whatever its own row says.
         """
         async with self.uow:
-            found = await self.sources.get_serving(name)
+            found = await self._get_serving(name)
             if found is None:
                 return []
             source, pinned = found
             if not source.enabled or source.withheld_from(organization_id):
                 return []
-            if model is not None:
-                offered = await self.models.get_by_model(source.name, model)
-                if offered is None and not source.serves_unlisted_models:
-                    return []
-                if offered is not None and not offered.enabled:
-                    return []
-                disabled = await self.vendors.disabled_for(source.name)
-                if disabled and vendor_of(source.implementation, model) in disabled:
-                    return []
+            if model is not None and not await self._offers(source, model):
+                return []
             credentials = source.region_credentials(slug=pinned)
         # A provider of a region's whole name answers that selector, so the
         # region would settle under, and be priced as, a provider it is not.
-        shadowed = [
-            each
-            for each in credentials
-            if each.region and hosted_provider_named(region_instance(source.name, each.region))
-        ]
+        # Asked of the snapshot where there is one, so every candidate agrees on which names exist.
+        named = hosted_provider_named if self._snapshot is None else self._snapshot.provider_named
+        shadowed = [each for each in credentials if each.region and named(region_instance(source.name, each.region))]
         for each in shadowed:
             logger.warning(
                 "Region %r of hosted provider %r is not served: a provider is named %r",
@@ -241,3 +293,35 @@ class HostedProviderRuntime:
                 region_instance(source.name, each.region),
             )
         return [each for each in credentials if each not in shadowed]
+
+    async def _get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
+        if self._read_all and not self._snapshot_read:
+            self._snapshot = await self.sources.snapshot()
+            self._snapshot_read = True
+        if self._snapshot is None:
+            return await self.sources.get_serving(name)
+        return self._snapshot.get_serving(name)
+
+    async def _offers(self, source: HostedSource, model: str) -> bool:
+        """Whether ``source`` serves ``model``, by its roster row and by its vendor."""
+        key = (source.name, model)
+        if key not in self._offered:
+            offered = await self.models.get_by_model(source.name, model)
+            self._offered[key] = None if offered is None else offered.enabled
+        enabled = self._offered[key]
+        if enabled is None and not source.serves_unlisted_models:
+            return False
+        if enabled is False:
+            return False
+        disabled = await self._disabled_vendors(source.name)
+        return not (disabled and vendor_of(source.implementation, model) in disabled)
+
+    async def _disabled_vendors(self, provider: str) -> set[str]:
+        if not self._disabled_read and self._snapshot is not None:
+            names = list(self._snapshot.by_name)
+            found = await self.vendors.disabled_for_providers(names)
+            self._disabled = {name: found.get(name, set()) for name in names}
+            self._disabled_read = True
+        if provider not in self._disabled:
+            self._disabled[provider] = await self.vendors.disabled_for(provider)
+        return self._disabled[provider]

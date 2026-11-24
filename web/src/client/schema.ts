@@ -162,8 +162,8 @@ export interface paths {
          *
          *     Refused with 400 when the caller is another operator, when the current password is
          *     missing or wrong, for a session whose account has no password, and for a target that
-         *     is the caller, deactivated, not an operator, or without an unblocked email address that
-         *     is verified rather than only vouched for, and a password.
+         *     is the caller, deactivated, not an operator, or without an unblocked email address the
+         *     owner proved rather than one an organization recorded, and a password.
          *
          *     The master key keeps working and now acts as the new bootstrap operator, including
          *     resetting their password, so rotate it when whoever held it should no longer.
@@ -191,8 +191,8 @@ export interface paths {
          *     Where this deployment can mail links, the link goes to the account's address and is not returned, the
          *     same as "Forgot your password?". Where it cannot, or the send fails, the response carries the link for
          *     you to pass on, which is how a member who forgot their password gets back in on a deployment without
-         *     mail. A password chosen through a link that was not mailed records the address as vouched for rather
-         *     than proven. A new link replaces any earlier reset link for the account.
+         *     mail. A password chosen through a link that was not mailed leaves the address verified rather
+         *     than proved. A new link replaces any earlier reset link for the account.
          *
          *     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
          *     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
@@ -1348,7 +1348,8 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
+         *     each over the last 30 days, and how fast each answered it over the last 7, and
+         *     so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;
@@ -3262,7 +3263,10 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate. A value nobody knows is omitted rather than sent as null.
+         *     caller's own rate; a token limit that offering does not know is the smallest
+         *     the model's other offerings report, and an output limit filled that way is
+         *     capped at the entry's context window. A value nobody knows is omitted rather
+         *     than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
@@ -4485,9 +4489,11 @@ export interface paths {
          * @description Accept an invitation addressed to the caller, resolving it to an active membership.
          *
          *     Does the same work as ``POST /api/v1/invitations/accept``, including the
-         *     workspace assignments parked at invite time, and answers the same shape.
-         *     Addressed by membership id rather than by token: the caller is already the
-         *     addressee, so a token would add nothing their session does not carry.
+         *     workspace assignments parked at invite time. Addressed by membership id
+         *     rather than by token: the caller is already the addressee, so a token would
+         *     add nothing their session does not carry. It answers the membership alone,
+         *     because the next step that route carries is for a visitor whose only
+         *     credential is a link.
          *
          *     Idempotent for any membership the caller already holds ``active``, which is
          *     what two clicks before the list refreshes produces: it answers that
@@ -9357,7 +9363,7 @@ export interface components {
             full_name?: string | null;
             /**
              * Password
-             * @description Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
+             * @description Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
              */
             password?: string | null;
             /**
@@ -9371,40 +9377,32 @@ export interface components {
         };
         /**
          * AcceptInvitationResultPublic
-         * @description What accepting produces: enough for the accept page to say where the visitor landed.
+         * @description What accepting through the link produced, and what it leaves the invitee to do.
          *
-         *     No session and no token. When the request carried a password, the identity
-         *     can sign in straight away; otherwise it stays password-less until claimed by
-         *     signup or a provider sign-in.
+         *     No session and no token: ``next_step`` is the whole of what comes next.
          */
         AcceptInvitationResultPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.
-             * @default true
-             */
-            can_sign_in: boolean;
+            /** @description What the invited address does now that it has accepted. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
-            /**
-             * Password Set
-             * @description Whether this accept set the identity's password.
-             * @default false
-             */
-            password_set: boolean;
             /** Role */
             role: string;
             /**
-             * Verification Pending
-             * @description Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.
-             * @default false
-             */
-            verification_pending: boolean;
-            /**
              * Ways In
-             * @description When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.
+             * @description What this deployment offers instead, where next_step names them, as the preview's ways_in says.
              */
-            ways_in?: ("provider" | "password_reset")[];
+            ways_in: ("provider" | "password_reset")[];
+        };
+        /**
+         * AcceptedMembershipPublic
+         * @description The membership an accepted invitation produced.
+         */
+        AcceptedMembershipPublic: {
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
         };
         /**
          * AcceptedSnapshotResponse
@@ -11594,6 +11592,7 @@ export interface components {
              * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
+            speed_7d?: components["schemas"]["OfferingSpeedInfo"] | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
             /**
              * Zero Data Retention
@@ -15567,20 +15566,30 @@ export interface components {
             total: number;
         };
         /**
+         * InvitationNextStep
+         * @description What an invitee does to get in, as Otari decides it.
+         *
+         *     The members are exclusive and cover every pending invitation.
+         *     ``set_password`` means accepting may choose this address's first password.
+         *     ``sign_in`` means the address's credentials open a session.
+         *     ``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.
+         *     ``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.
+         *
+         *     NOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.
+         *     The other two leave it empty.
+         * @enum {string}
+         */
+        InvitationNextStep: "set_password" | "sign_in" | "use_another_way_in" | "verify_email";
+        /**
          * InvitationPreviewPublic
          * @description What an unauthenticated visitor sees before committing to accept.
          *
          *     Deliberately narrow: the address it was sent to, the organization's name,
-         *     and the role on offer. The token is the caller's only credential here, not
-         *     a session, so this carries nothing that identifies who sent it or any
-         *     other member.
+         *     the role on offer, and what to do next.
+         *     The token is the caller's only credential here, not a session, so this
+         *     carries nothing that identifies who sent it or any other member.
          */
         InvitationPreviewPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can already sign in, with a password or through a provider.
-             */
-            can_sign_in: boolean;
             /** Email */
             email: string;
             /**
@@ -15588,18 +15597,15 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
-            /**
-             * Needs Password
-             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.
-             */
-            needs_password: boolean;
+            /** @description What the invited address does to get in. Accept refuses a password unless this is 'set_password'. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
             /** Role */
             role: string;
             /**
              * Ways In
-             * @description When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.
+             * @description What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.
              */
             ways_in: ("provider" | "password_reset")[];
         };
@@ -17576,6 +17582,47 @@ export interface components {
             issuer: string;
         };
         /**
+         * OfferingSpeedInfo
+         * @description How fast one offering answered the viewer's organization over the last 7 days.
+         *
+         *     Read from the organization's own requests, so it describes that traffic rather
+         *     than the provider in general: an offering that served the long prompts looks
+         *     slower. Only a request a routing plan's first candidate served counts, and
+         *     only one that ran no gateway tool.
+         */
+        OfferingSpeedInfo: {
+            /**
+             * Output Tokens Per Second P50
+             * @description Median output tokens per second over the whole request, time to first token included, as OpenRouter measures it. Null on fewer than 20 measured requests.
+             */
+            output_tokens_per_second_p50: number | null;
+            /**
+             * Output Tokens Per Second P95
+             * @description The 5th percentile of output tokens per second: the slow tail.
+             */
+            output_tokens_per_second_p95: number | null;
+            /**
+             * Throughput Samples
+             * @description Requests the throughput is read from: those with 20 or more output tokens.
+             */
+            throughput_samples: number;
+            /**
+             * Ttft Ms P50
+             * @description Median milliseconds to the first token. Null on fewer than 20 streamed requests.
+             */
+            ttft_ms_p50: number | null;
+            /**
+             * Ttft Ms P95
+             * @description The 95th percentile of milliseconds to the first token, rounded: the slow tail.
+             */
+            ttft_ms_p95: number | null;
+            /**
+             * Ttft Samples
+             * @description Streamed requests the time to first token is read from.
+             */
+            ttft_samples: number;
+        };
+        /**
          * OfferingUsage
          * @description What the viewer's organization actually paid for one offering, last 30 days.
          *
@@ -18288,7 +18335,7 @@ export interface components {
          *       "credential": "sk-guardrails-...",
          *       "mode": "block",
          *       "profile": "prompt-injection",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailCreate: {
@@ -18657,7 +18704,7 @@ export interface components {
          * @example {
          *       "credential": "sk-guardrails-...",
          *       "mode": "monitor",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailUpdate: {
@@ -19268,7 +19315,7 @@ export interface components {
             expires_at: string;
             /**
              * Link
-             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it records the address as vouched for rather than proven, since the mailbox never saw the link.
+             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it leaves the address verified rather than proved, since the mailbox never saw the link.
              */
             link?: string | null;
             /**
@@ -20997,6 +21044,20 @@ export interface components {
             user?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * RotateMasterKeyRequest
+         * @description The proof a session-authenticated master-key rotation has to supply.
+         *
+         *     Only read when the caller authenticated with the dashboard session cookie. A request
+         *     carrying the master key is the deployment credential already, so it needs no further proof.
+         */
+        RotateMasterKeyRequest: {
+            /**
+             * Current Password
+             * @description The caller's current password. Required for a session-authenticated rotation.
+             */
+            current_password?: string | null;
         };
         /**
          * RotateMasterKeyResponse
@@ -23111,6 +23172,8 @@ export interface components {
             latency_ms: number | null;
             /** Model */
             model: string;
+            /** Output Tokens Per Second */
+            output_tokens_per_second: number | null;
             /** Policy Name */
             policy_name?: string | null;
             /** Pricing Breakdown */
@@ -23147,6 +23210,8 @@ export interface components {
             timestamp: string;
             /** Total Tokens */
             total_tokens: number | null;
+            /** Ttft Ms */
+            ttft_ms: number | null;
             /** User Alias */
             user_alias?: string | null;
             /** User Id */
@@ -32491,7 +32556,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                    "application/json": components["schemas"]["AcceptedMembershipPublic"];
                 };
             };
             /** @description Validation Error */
@@ -37093,7 +37158,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RotateMasterKeyRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -37102,6 +37171,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotateMasterKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

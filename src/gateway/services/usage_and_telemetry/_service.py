@@ -3,7 +3,7 @@
 import uuid
 from collections.abc import Collection
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from gateway.core.metered_pricing import quantize_cost
 from gateway.core.unit_of_work import UnitOfWork
@@ -24,6 +24,12 @@ from gateway.schemas.usage_and_telemetry import (
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.organizations import UserAccess
 from gateway.services.usage_and_telemetry._model_groups import grouped_models
+from gateway.services.usage_and_telemetry._speed import (
+    SPEED_SAMPLE_CAP,
+    SPEED_WINDOW,
+    OfferingSpeed,
+    speed_by_selector,
+)
 from gateway.services.usage_and_telemetry._window import (
     MAX_SERIES_POINTS,
     SERIES_TOP_N,
@@ -92,6 +98,23 @@ class UsageService:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key."""
         async with self._uow:
             return await self._usage_logs.served_traffic(workspace_ids=workspace_ids, since=since)
+
+    async def offering_speed(
+        self, *, workspace_ids: Collection[uuid.UUID], offerings: Collection[tuple[str, str, str]]
+    ) -> dict[str, OfferingSpeed]:
+        """How fast each offering answered these workspaces' requests lately, keyed by selector.
+
+        ``offerings`` holds ``(selector, instance, model id)``. An offering with too
+        few measured requests is absent.
+        """
+        async with self._uow:
+            samples = await self._usage_logs.speed_samples(
+                workspace_ids=workspace_ids,
+                offerings=offerings,
+                since=datetime.now(UTC) - SPEED_WINDOW,
+                per_offering=SPEED_SAMPLE_CAP,
+            )
+        return speed_by_selector(samples, offerings)
 
     async def page(self, filters: UsageFilters, scope: UsageScope, *, skip: int, limit: int) -> list[UsageEntry]:
         """The rows matching these filters inside this scope, most recent first, each labeled with its user and key.

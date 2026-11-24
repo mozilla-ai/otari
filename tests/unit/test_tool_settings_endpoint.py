@@ -500,7 +500,7 @@ def test_patch_refuses_a_fetch_default_a_stored_search_tool_has_displaced(tmp_pa
         engine = create_engine(f"sqlite:///{tmp_path / 'tool-settings-test.db'}")
         try:
             with Session(engine) as session, session.begin():
-                session.add(SearchToolCredential(name="shared", provider="fake", options={}))
+                session.add(SearchToolCredential(name="shared", provider="fake"))
         finally:
             engine.dispose()
         resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_fetch_default_tool": "shared"})

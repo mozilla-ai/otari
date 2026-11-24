@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCallError
-from gateway.services.tools._chat_tool_calls import chat_entry, refusal_error
+from gateway.services.tools._chat_tool_calls import chat_entry, ran_error, refusal_error
 from gateway.services.tools._web_display import fetch_display_url
 
 if TYPE_CHECKING:
@@ -39,14 +39,12 @@ class ChatWebFetchRendering:
 
         A failed fetch's ``error`` is the failure the fetch backend kept, which the
         old search backend forwards: the provider, its status, the tag and whether
-        a retry may help. A pool that keeps none, such as an MCP server's, gives a
-        failed entry without one.
+        a retry may help, or ``internal_error`` for a fetch that raised. A pool that
+        keeps none, such as an MCP server's, gives a failed entry without one.
         """
-        take_last_failure = getattr(pool, "take_last_failure", None)
-        failure = take_last_failure() if take_last_failure is not None else None
+        error = ran_error(call, pool)
         if not call.failed:
             return [_entry(call, "completed")]
-        error = OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
         return [_entry(call, "failed", error=error)]
 
     def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:

@@ -328,13 +328,21 @@ class WebAccessRefusedError(Exception):
         self.message = message
 
 
+def workspace_switch_hint(page: str) -> str:
+    """Where a workspace turns a tool on, for a refusal its switch caused.
+
+    The switch is the workspace's own, which its owners and admins change, so a caller can act on it.
+    """
+    return f"An owner or admin of the workspace allows it under Tools > {page} in the dashboard."
+
+
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
 
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web access is not enabled for this workspace")
+        super().__init__(f"web access is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
@@ -350,7 +358,7 @@ class WebSearchNotEnabledError(WebAccessRefusedError):
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web search is not enabled for this workspace")
+        super().__init__(f"web search is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebSearchPolicyResolutionFailure(StrEnum):
@@ -451,10 +459,28 @@ class WebSearchKeyUnknownProviderError(TenancyValidationError):
 
 
 class WebSearchKeyIncompleteError(TenancyValidationError):
-    """A key lacks what its provider needs, which a call would otherwise take from the server's own settings."""
+    """A key lacks the API key or endpoint a key on its provider must carry.
+
+    Without it, a call would take the server's own settings, or run keyless from the server's address.
+    """
 
     def __init__(self, provider: str, missing: str):
         super().__init__(f"A key on {provider} needs {missing}")
+
+
+class WebSearchKeyOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the admin enters the options in full, which is what a
+    rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
 
 
 class WebSearchKeySettingRefusedError(TenancyValidationError):
@@ -517,6 +543,21 @@ class WebSearchKeyDefaultConflictError(TenancyConflictError):
 class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
+
+
+class SearchToolOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    backend. Refused so the operator enters the options in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
 
 
 class SearchToolRefusedError(TenancyValidationError):
@@ -691,7 +732,9 @@ class WebSearchCredentialRefusedError(TenancyError):
 
     One without a key or base URL its provider needs, which the library or the
     old code would fill from the server's own settings, so the deployment's key
-    or endpoint would serve the tenant; or one naming a base URL the code that
+    or endpoint would serve the tenant; one without the key a provider with an
+    address of its own takes, whose calls would run keyless from the
+    deployment's address; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
     provider's public endpoint instead. A 502: the fault is in a stored
     credential, not in the request.
@@ -730,6 +773,7 @@ __all__ = [
     "SearchToolKeyUnstorableError",
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
+    "SearchToolOptionsUnreadableError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
     "StoredSearchToolNotFoundError",

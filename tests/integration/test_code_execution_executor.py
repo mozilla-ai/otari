@@ -24,6 +24,8 @@ from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ANTHROPIC = "anthropic:claude-3-5-sonnet-20241022"
 _OPENAI = "openai:gpt-4o-mini"
+# A model whose Messages requests are served as chat completions, and that runs no code natively.
+_CHAT_BRIDGED = "mistral:mistral-small-latest"
 _DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 _BARE = {"type": "code_execution"}
 _INTERPRETER = {"type": "code_interpreter"}
@@ -226,7 +228,7 @@ def test_auto_brings_anthropics_declaration_here_for_a_model_that_cannot_run_it(
     """The transparent model swap: same request, other model, the sandbox runs the code."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(client, api_key_header, _messages_body(_CHAT_BRIDGED, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.provider_kwargs is None
@@ -256,7 +258,7 @@ def test_without_a_sandbox_a_provider_declaration_is_forwarded_and_nothing_else_
 ) -> None:
     monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _BARE))
+    response, seen = _post_messages(client, api_key_header, _messages_body(_CHAT_BRIDGED, _BARE))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution"}
@@ -338,7 +340,7 @@ def test_a_provider_default_forwards_every_provider_declaration(
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     monkeypatch.setenv("OTARI_CODE_EXECUTION_EXECUTOR", "provider")
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(client, api_key_header, _messages_body(_CHAT_BRIDGED, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}
@@ -441,7 +443,9 @@ def test_a_header_that_agrees_with_the_pin_is_fine(
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     _pin_executor(client, master_key_header, "provider")
 
-    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(
+        client, {**api_key_header, _HEADER: "provider"}, _messages_body(_CHAT_BRIDGED, _DATED)
+    )
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}
@@ -463,7 +467,7 @@ def test_a_provider_pin_keeps_a_disabled_veto_out_of_the_way(
     )
     assert stored.status_code == 200, stored.text
 
-    response, seen = _post_messages(client, api_key_header, _messages_body(_OPENAI, _DATED))
+    response, seen = _post_messages(client, api_key_header, _messages_body(_CHAT_BRIDGED, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}
@@ -506,7 +510,7 @@ def test_the_explicit_type_beside_a_claimed_keyword_is_folded_in(
     response, seen = _post_messages(
         client,
         api_key_header,
-        _messages_body(_OPENAI, {"type": "otari_code_execution", "purpose_hint": "Show your working"}, _DATED),
+        _messages_body(_CHAT_BRIDGED, {"type": "otari_code_execution", "purpose_hint": "Show your working"}, _DATED),
     )
 
     assert response.status_code == 200, response.text

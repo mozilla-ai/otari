@@ -54,6 +54,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
@@ -67,6 +68,7 @@ from gateway.services.tools import (
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
 )
+from gateway.services.tools._code_execution_admission import SANDBOX_NOT_ENABLED_DETAIL
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
@@ -632,6 +634,8 @@ def test_a_capped_search_beside_mcp_stops_at_its_cap_while_mcp_keeps_running(
     assert response.status_code == 200, response.text
     assert backends.searches.await_count == 1
     assert backends.mcp_calls == [_MCP_TOOL, _MCP_TOOL]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert {tool["function"]["name"] for tool in sent[1]["tools"]} == {_MCP_TOOL}
     second_round = {m["tool_call_id"]: m["content"] for m in sent[2]["messages"] if m.get("role") == "tool"}
     assert second_round["call_0"] == MAX_USES_EXCEEDED_ERROR
     assert second_round["call_1"] == "mcp result"
@@ -773,7 +777,7 @@ def test_code_execution_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["error"]["message"] == "code execution is not enabled for this workspace"
+    assert response.json()["error"]["message"] == SANDBOX_NOT_ENABLED_DETAIL
     assert sent == []
     assert _ran(backends) == set()
 
@@ -798,7 +802,7 @@ def test_web_search_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.json()["error"]["message"] == WebSearchNotEnabledError().message
     assert sent == []
     assert backends.port.opened == 0
     assert _ran(backends) == set()

@@ -144,6 +144,36 @@ def test_only_an_opted_in_instance_marks_the_kwargs() -> None:
     assert with_responses_instance({"model": _MODEL}, _INSTANCE)[RESPONSES_INSTANCE_FIELD] == _INSTANCE
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"model": _MODEL},
+        {"model": "gpt-6-sol", "provider": "openai"},
+        {"model": _MODEL, "api_base": "https://api.openai.com/v1"},
+    ],
+)
+def test_openais_own_api_goes_through_responses_unless_opted_out(kwargs: dict[str, Any]) -> None:
+    assert with_responses_instance(kwargs, _INSTANCE, messages_api=None)[RESPONSES_INSTANCE_FIELD] == _INSTANCE
+    assert RESPONSES_INSTANCE_FIELD not in with_responses_instance(kwargs, _INSTANCE, messages_api="completions")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"model": "openai:qwen3", "api_base": "http://vllm.internal:8000/v1"},
+        {"model": "azureopenai:gpt-5"},
+        {"model": _MODEL, "stop_sequences": ["END"]},
+    ],
+)
+def test_no_other_call_goes_through_responses_unless_opted_in(kwargs: dict[str, Any]) -> None:
+    assert RESPONSES_INSTANCE_FIELD not in with_responses_instance(kwargs, "x", messages_api=None)
+
+
+def test_later_gpt_generations_are_reasoning_models() -> None:
+    assert _translate(_kwargs(model="openai:gpt-6-sol"))["include"] == ["reasoning.encrypted_content"]
+    assert "include" not in _translate(_kwargs(model="openai:gpt-6-chat-latest"))
+
+
 @pytest.mark.asyncio
 async def test_native_call_continuing_a_tool_turn_whose_thinking_it_drops_leaves_thinking_off() -> None:
     sent: list[dict[str, Any]] = []
@@ -354,6 +384,25 @@ def test_tool_result_with_an_image_keeps_its_parts() -> None:
             "type": "function_call_output",
             "call_id": "c",
             "output": [{"type": "input_image", "image_url": "https://example.com/a.png", "detail": "auto"}],
+        }
+    ]
+
+
+def test_a_block_with_no_part_of_its_own_is_text_beside_an_image_in_a_tool_result() -> None:
+    """Pins the mixed case the drift test cannot compare: a chat tool message takes no image."""
+    browser = {"type": "browser_state", "tabs": [{"id": 1}], "state_changes": ["clicked"], "screenshot_id": "s1"}
+    image = {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+    content = [browser, image, {"type": "text", "text": "after"}]
+    messages = [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": content}]}]
+    assert _translate(_kwargs(messages=messages))["input_data"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "c",
+            "output": [
+                {"type": "input_text", "text": '{"tabs": [{"id": 1}], "state_changes": ["clicked"]}'},
+                {"type": "input_image", "image_url": "https://example.com/a.png", "detail": "auto"},
+                {"type": "input_text", "text": "\nafter"},
+            ],
         }
     ]
 

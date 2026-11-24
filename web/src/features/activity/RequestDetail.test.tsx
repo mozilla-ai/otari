@@ -445,4 +445,20 @@ describe("RequestDetail", () => {
     })
     expect(label.parentElement?.textContent).toContain("156 ms")
   })
+
+  it("shows the time to first token and the throughput a streamed request got", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ ttft_ms: 420, output_tokens_per_second: 87.4 })}
+      />,
+    )
+    await flushRouter()
+
+    const field = (name: string) =>
+      screen.getByText(name, { selector: "span.text-overline" }).parentElement
+        ?.textContent
+    expect(field("Time to first token")).toContain("420 ms")
+    expect(field("Throughput")).toContain("87 tok/s")
+  })
 })

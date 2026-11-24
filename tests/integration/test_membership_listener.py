@@ -26,8 +26,8 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository
 from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.organizations import MembershipListener
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 from .tenancy_helpers import (

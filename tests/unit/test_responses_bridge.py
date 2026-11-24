@@ -7,8 +7,9 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import patch
 
+import httpx
 import pytest
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError, ModelNotFoundError, UnsupportedParameterError
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response
@@ -721,6 +722,149 @@ async def test_streaming_request_falls_back_to_a_bridged_event_stream() -> None:
 
     assert types[0] == "response.created"
     assert types[-1] == "response.completed"
+
+
+# ---------- a native /responses that refuses the model ----------
+
+
+def _model_refused(status_code: int = 400, message: str = "This model does not support Responses API") -> AnyLLMError:
+    return AnyLLMError(message, provider_name="nebius", status_code=status_code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "This model does not support Responses API",
+        "The Responses API is not supported for this model",
+        "model google/x is unsupported on the responses endpoint",
+        "The Responses API is unavailable for this model",
+        "This model doesn’t support Responses API",
+        "Model gemma-3 27b does not support Responses API",
+        "This model does not support the /v1/responses endpoint",
+        "Responses API is not supported for model gemma-3-27b-it.",
+    ],
+)
+async def test_native_refusal_of_the_model_is_served_as_a_chat_completion(message: str) -> None:
+    result, chat_calls = await _call_responses(
+        _model_refused(message=message), provider=LLMProvider.NEBIUS, api_base=None
+    )
+
+    assert result.output_text == "pong"
+    assert len(chat_calls) == 1
+    assert chat_calls[0]["provider"] == LLMProvider.NEBIUS
+
+
+@pytest.mark.asyncio
+async def test_native_refusal_of_a_streamed_request_is_served_as_a_bridged_event_stream() -> None:
+    async def native(**_: Any) -> Any:
+        raise _model_refused()
+
+    async def fake_acompletion(**call_kwargs: Any) -> Any:
+        assert call_kwargs["stream"] is True
+        return _aiter([_chunk({"role": "assistant", "content": "ok"}, "stop")])
+
+    request = {"provider": LLMProvider.NEBIUS, "model": "m", "input_data": "hi", "stream": True}
+    with patch(_ACOMPLETION, new=fake_acompletion):
+        stream = await call_responses(native, request)
+        types = [event.type async for event in stream]
+
+    assert types[0] == "response.created"
+    assert types[-1] == "response.completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "message"),
+    [
+        (400, "max_output_tokens must be at least 16"),
+        (400, "Responses API: unsupported parameter 'foo'"),
+        (400, "temperature is not supported by Responses API"),
+        (400, "temperature is not supported by Responses API for this model"),
+        (400, "This model does not support temperature on the Responses API"),
+        (400, "Invalid model"),
+        (400, "Responses API is not supported with model features like tools"),
+        (400, "Responses API is not supported for model reasoning items"),
+        (500, "This model does not support Responses API"),
+        (401, "This model does not support Responses API"),
+    ],
+)
+async def test_other_native_failures_without_a_model_refusal_are_not_retried(status_code: int, message: str) -> None:
+    with pytest.raises(AnyLLMError):
+        await _call_responses(_model_refused(status_code, message), provider=LLMProvider.NEBIUS, api_base=None)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_naming_a_request_field_is_not_taken_for_a_model_refusal() -> None:
+    error = AnyLLMError("This model does not support Responses API", status_code=400, param="tools")
+
+    with pytest.raises(AnyLLMError):
+        await _call_responses(error, provider=LLMProvider.NEBIUS, api_base=None)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_whose_param_is_the_model_is_served_as_a_chat_completion() -> None:
+    error = AnyLLMError("This model does not support Responses API", status_code=400, param="model")
+
+    result, _ = await _call_responses(error, provider=LLMProvider.NEBIUS, api_base=None)
+
+    assert result.output_text == "pong"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unified", ["", "1"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"detail": "This model does not support Responses API"},
+        {
+            "error": {
+                "message": "This model does not support Responses API",
+                "type": "invalid_request_error",
+                "param": "model",
+            }
+        },
+    ],
+)
+async def test_a_refusal_raised_by_the_provider_sdk_is_served_as_a_chat_completion(
+    body: dict[str, Any], unified: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal as any-llm raises it: the SDK's own error, or with unified exceptions its wrapper."""
+    monkeypatch.setenv("ANY_LLM_UNIFIED_EXCEPTIONS", unified)
+    transport = httpx.MockTransport(lambda _: httpx.Response(400, json=body))
+    chat_calls: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**call_kwargs: Any) -> Any:
+        chat_calls.append(call_kwargs)
+        return _completion({"content": "pong"})
+
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        nebius = AnyLLM.create(LLMProvider.NEBIUS, api_key="sk", http_client=http_client)
+
+        async def native(**kwargs: Any) -> Any:
+            return await nebius.aresponses(model=kwargs["model"], input_data=kwargs["input_data"])
+
+        request = {
+            "provider": LLMProvider.NEBIUS,
+            "model": "google/gemma-3-27b-it",
+            "api_key": "sk",
+            "input_data": "hi",
+        }
+        with patch(_ACOMPLETION, new=fake_acompletion):
+            result = await call_responses(native, request)
+
+    assert result.output_text == "pong"
+    assert len(chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_model_refusal_the_bridge_cannot_translate_reraises_the_native_error() -> None:
+    error = _model_refused()
+
+    with pytest.raises(AnyLLMError) as raised:
+        await _call_responses(error, provider=LLMProvider.NEBIUS, api_base=None, previous_response_id="resp_1")
+
+    assert raised.value is error
 
 
 @pytest.fixture

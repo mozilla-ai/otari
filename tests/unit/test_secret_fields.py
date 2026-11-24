@@ -1,14 +1,12 @@
 """Credential-shaped entries in a free-form settings dict never round-trip.
 
-Four tables hold arbitrary operator-supplied JSON, and all four are places a
-real credential legitimately lives. Three of them hand it to a provider SDK:
-standalone Bedrock keeps its ``aws_secret_access_key`` in ``client_args``,
-because any-llm's BedrockProvider never forwards ``api_key`` into the boto3
-client it builds. ``OrgProviderKey`` has masked its own since it shipped;
-otari-ai#1880 is the other two, where ``ProviderCredential.client_args``
-returned a live AWS secret over the API. The fourth is
-``organization_guardrails.validate_kwargs``, which a guardrail class can take
-its vendor key in (otari-ai#2118).
+Six columns hold arbitrary settings, and each is a place a real credential
+legitimately lives. Five hand it to a provider SDK: standalone Bedrock keeps
+its ``aws_secret_access_key`` in ``client_args``, because any-llm's
+BedrockProvider never forwards ``api_key`` into the boto3 client it builds. The
+sixth is ``organization_guardrails.validate_kwargs``, which a guardrail class
+can take its vendor key in. Every one of them is sealed at rest, so masking
+covers the wire alone.
 
 Masking on read creates the other half of the problem, so it is asserted here
 too: an editor that loads a row and saves it back would otherwise store the mask
@@ -22,11 +20,11 @@ import pytest
 
 from gateway.exceptions.shared_exceptions import UnresolvedRedactionError
 from gateway.models.guardrails import OrganizationGuardrail
-from gateway.models.providers import ProviderCredential
 from gateway.models.secret_fields import (
     _MAX_NESTING_DEPTH,
     REDACTED_VALUE,
     redact_secret_like_values,
+    restore_is_unsafe,
     restore_redacted_values,
 )
 from gateway.models.tools import SearchToolCredential
@@ -34,6 +32,22 @@ from gateway.services.tenancy.organization_guardrail_service import Organization
 
 
 class TestRedactSecretLikeValues:
+    @pytest.mark.parametrize(
+        "name",
+        ["bearer", "jwt", "passphrase", "private_pem", "pwd", "salt"],
+    )
+    def test_masks_a_credential_name_that_carries_none_of_the_older_markers(self, name: str) -> None:
+        """A bearer value or a passphrase is as much a credential as an entry named key or token."""
+        assert redact_secret_like_values({name: "live-value"}) == {name: REDACTED_VALUE}
+
+    @pytest.mark.parametrize(
+        "name",
+        ["auth_type", "auth_url", "region_name", "session_ttl", "signature_version", "timeout"],
+    )
+    def test_passes_a_setting_whose_name_only_reads_like_a_credential(self, name: str) -> None:
+        """Masking a benign setting hides it from the operator who has to read it back."""
+        assert redact_secret_like_values({name: "plain"}) == {name: "plain"}
+
     def test_masks_by_key_name_and_passes_the_rest_through(self) -> None:
         assert redact_secret_like_values(
             {
@@ -300,39 +314,17 @@ class TestRestoreRedactedValues:
 
 
 class TestSerializers:
-    def test_provider_credential_masks_its_client_args(self) -> None:
-        row = ProviderCredential(
-            instance="bedrock",
-            provider_type="bedrock",
-            last4="MPLE",
-            client_args={"region_name": "us-east-1", "aws_secret_access_key": "wJalrXUtnFEMI"},
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-
-        public = row.to_public_dict()
-
-        assert public["client_args"] == {"region_name": "us-east-1", "aws_secret_access_key": REDACTED_VALUE}
-        # The encrypted key was never on the wire to begin with; only last4 is.
-        assert "encrypted_api_key" not in public
-        assert public["last4"] == "MPLE"
-
     def test_search_tool_credential_masks_its_options(self) -> None:
-        row = SearchToolCredential(
-            name="searxng",
-            provider="searxng",
-            options={"engines": "google", "secondary_api_key": "live-key"},
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
+        row = SearchToolCredential(name="searxng", provider="searxng", created_at=datetime.now(UTC))
+        options = {"engines": "google", "secondary_api_key": "live-key"}
 
-        assert row.to_public_dict()["options"] == {"engines": "google", "secondary_api_key": REDACTED_VALUE}
+        assert row.to_public_dict(options)["options"] == {"engines": "google", "secondary_api_key": REDACTED_VALUE}
 
-    def test_an_empty_settings_dict_still_serializes_as_an_object(self) -> None:
-        # The column is non-null and the response type is a dict, so masking must
-        # not turn "no options" into null.
-        row = ProviderCredential(instance="openai", client_args={}, created_at=datetime.now(UTC))
-        assert row.to_public_dict()["client_args"] == {}
+    def test_no_settings_still_serializes_as_an_object(self) -> None:
+        # The response type is a dict, so masking must not turn "no options" into null.
+        row = SearchToolCredential(name="searxng", provider="searxng", created_at=datetime.now(UTC))
+        assert row.to_public_dict(None)["options"] == {}
+        assert row.to_public_dict({})["options"] == {}
 
     def test_organization_guardrail_masks_its_validate_kwargs(self) -> None:
         row = OrganizationGuardrail(
@@ -341,31 +333,52 @@ class TestSerializers:
             profile="patronus",
             mode="block",
             on_unavailable="block",
-            validate_kwargs={"threshold": 0.8, "patronus_api_key": "live-key"},
             enabled=True,
             applies_to_all_workspaces=True,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
 
-        public = OrganizationGuardrailPublic.from_model(row, workspace_ids=[])
+        public = OrganizationGuardrailPublic.from_model(
+            row, validate_kwargs={"threshold": 0.8, "patronus_api_key": "live-key"}, workspace_ids=[]
+        )
 
         assert public.validate_kwargs == {"threshold": 0.8, "patronus_api_key": REDACTED_VALUE}
 
     def test_organization_guardrail_with_no_validate_kwargs_stays_null(self) -> None:
-        # The column is nullable here, unlike the two above, and null is what the
-        # API stores for "no kwargs": masking must not turn it into an object.
+        # Null is what the API stores for "no kwargs", so masking must not turn
+        # it into an object.
         row = OrganizationGuardrail(
             id=uuid.uuid4(),
             organization_id=uuid.uuid4(),
             profile="prompt-injection",
             mode="monitor",
             on_unavailable="block",
-            validate_kwargs=None,
             enabled=True,
             applies_to_all_workspaces=True,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
 
-        assert OrganizationGuardrailPublic.from_model(row, workspace_ids=[]).validate_kwargs is None
+        public = OrganizationGuardrailPublic.from_model(row, validate_kwargs=None, workspace_ids=[])
+        assert public.validate_kwargs is None
+
+
+@pytest.mark.parametrize(
+    ("stored", "submitted", "sealed", "unsafe"),
+    [
+        # Read back: whatever was sent can be restored against it.
+        ({"token": "t"}, {"token": REDACTED_VALUE}, True, False),
+        # Nothing stored and no mask sent: a plain write.
+        (None, {"region": "us"}, False, False),
+        (None, None, False, False),
+        # A mask with nothing read back would be stored as the value.
+        (None, {"token": REDACTED_VALUE}, False, True),
+        # Ciphertext no key opens would be dropped by the write.
+        (None, {"region": "us"}, True, True),
+    ],
+)
+def test_restore_is_unsafe_only_where_nothing_was_read_back(
+    stored: dict[str, str] | None, submitted: dict[str, str] | None, sealed: bool, unsafe: bool
+) -> None:
+    assert restore_is_unsafe(stored, submitted, sealed=sealed) is unsafe

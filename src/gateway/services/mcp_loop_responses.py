@@ -216,6 +216,12 @@ def _add_round_usage(acc: dict[str, Any], usage: Any) -> None:
 def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
     """A copy of ``usage`` that reports ``counts``, its token details included."""
     input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0, cache_write_tokens=0)
+    # A round's retention breakdown no longer adds up once earlier rounds' writes join it.
+    # Read leniently: a provider any-llm bridges to Responses reports openresponses-types
+    # usage, whose input details carry ``cached_tokens`` alone.
+    writes_details = getattr(input_details, "cache_write_tokens_details", None)
+    if counts["cache_write_tokens"] != (getattr(input_details, "cache_write_tokens", 0) or 0):
+        writes_details = None
     output_details = usage.output_tokens_details or OutputTokensDetails(reasoning_tokens=0)
     return usage.model_copy(
         update={
@@ -224,8 +230,7 @@ def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
                 update={
                     "cached_tokens": counts["cached_tokens"],
                     "cache_write_tokens": counts["cache_write_tokens"],
-                    # One round's retention breakdown would not add up to the summed writes.
-                    "cache_write_tokens_details": None,
+                    "cache_write_tokens_details": writes_details,
                 }
             ),
             "output_tokens": counts["output_tokens"],
@@ -823,7 +828,7 @@ def _strategy_for(
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed a tool's native items, has anything
+    Only a request with a budget, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
@@ -870,6 +875,7 @@ async def responses_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -911,6 +917,7 @@ async def responses_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

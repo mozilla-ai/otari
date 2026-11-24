@@ -35,7 +35,7 @@ from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import encrypt_mapping, generate_secret_key
 from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
@@ -87,9 +87,12 @@ def _create(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
     return client.post(f"{API_ROOT}/search-tools", json=payload, headers=headers)
 
 
-def _store_row(db_session: Session, **fields: Any) -> None:
-    """Store a row as a release before the write rules could have, bypassing the route."""
-    db_session.add(SearchToolCredential(**{"options": {}, **fields}))
+def _store_row(db_session: Session, *, options: dict[str, Any] | None = None, **fields: Any) -> None:
+    """Store a row as a release before the write rules could have, bypassing the route.
+
+    The options are sealed here, as the database holds them.
+    """
+    db_session.add(SearchToolCredential(encrypted_options=encrypt_mapping(options), **fields))
     db_session.commit()
 
 
@@ -696,6 +699,28 @@ def test_reencrypt_allows_secret_key_retirement(
     monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
     listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert listed["stored"][0]["decryptable"] is True
+
+
+def test_reencrypt_reseals_the_options_of_a_keyless_tool(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A keyless backend holds no API key, so a rotation keyed on one would strand its sealed options."""
+    old_key, new_key = generate_secret_key(), generate_secret_key()
+    monkeypatch.setenv("OTARI_SECRET_KEY", old_key)
+    _store_row(db_session, name="old", provider="fake", options={"bogus": 1})
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
+    resp = client.post(f"{API_ROOT}/search-tools/reencrypt", headers=master_key_header)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"reencrypted": 1, "unreadable": 0, "skipped": 0}
+
+    # The retired key is dropped, which is the step a rotation ends with.
+    monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
+    stored = {
+        row["name"]: row for row in client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()["stored"]
+    }
+    assert stored["old"]["decryptable"] is True
+    assert stored["old"]["options"] == {"bogus": 1}
 
 
 def test_list_flags_a_key_that_can_no_longer_be_decrypted(

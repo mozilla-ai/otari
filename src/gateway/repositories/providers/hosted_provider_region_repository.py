@@ -9,7 +9,7 @@ from collections import defaultdict
 from collections.abc import Collection, Sequence
 from typing import Any, Never, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -68,6 +68,16 @@ class HostedProviderRegionRepository(BaseRepository[HostedProviderRegion, Never,
         for row in result.scalars().all():
             regions[row.hosted_provider_id].append(row)
         return dict(regions)
+
+    async def list_for_providers_detached(
+        self, provider_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, list[HostedProviderRegion]]:
+        """:meth:`list_for_providers` as objects no session holds, for a caller that keeps them past its transaction."""
+        columns = [attribute.key for attribute in inspect(HostedProviderRegion).column_attrs]
+        return {
+            provider_id: [HostedProviderRegion(**{column: getattr(row, column) for column in columns}) for row in rows]
+            for provider_id, rows in (await self.list_for_providers(provider_ids)).items()
+        }
 
     async def list_encrypted(self) -> Sequence[HostedProviderRegion]:
         """Every region holding a ciphertext of its own, for a key rotation."""

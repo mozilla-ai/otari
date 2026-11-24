@@ -4,7 +4,6 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { useSetPassword } from "@/shared/api/auth"
 import {
-  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
@@ -205,7 +204,7 @@ export function PasswordDialog({
           clearError()
         }}
         autoComplete="new-password"
-        description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+        description={`At least ${MIN_PASSWORD_LENGTH} characters.`}
       />
       <PasswordField
         label="Confirm new password"

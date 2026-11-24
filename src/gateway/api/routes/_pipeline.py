@@ -1038,17 +1038,18 @@ def _end_user(
         raise adapter.error(502, NO_UPSTREAM_USER_DETAIL, ErrorKind.API) from exc
 
 
-def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception, *, detail: str | None = None) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
     resolve_provider_selector raises ValueError for an unparseable
     selector (no provider: prefix) and AnyLLMError for an unknown
     provider.  Both are client input errors; surfacing them as a bare 500 is
-    confusing.
+    confusing. ``detail`` replaces the general one where the caller has a
+    more specific reason.
     """
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=unresolvable_model_detail(model_selector),
+        detail=detail or unresolvable_model_detail(model_selector),
         headers=error_headers(INVALID_MODEL),
     ) from exc
 
@@ -1664,6 +1665,11 @@ async def _serve_from_hosted_credential(
             provider=resolved.instance,
             model=resolved.model,
         )
+        country_gate = ctx.country_gate
+        if country_gate is not None and credential is not None:
+            # Read here, so a failed read of the account's country releases the reservation as a failed lookup does.
+            for candidate in credential.candidates():
+                country_gate = await country_gate.for_list(candidate.supported_countries)
     except HostedAccessDeniedError as exc:
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
@@ -1750,7 +1756,7 @@ async def _serve_from_hosted_credential(
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
-        credential = ensure_hosted_country(ctx.country_gate, credential)
+        credential = await ensure_hosted_country(country_gate, credential)
     except CountryNotServedError as exc:
         detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
@@ -2654,10 +2660,12 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(
+        config, raw_request, db, organization_id, api_key=api_key, session=session_principal is not None
+    )
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
@@ -3117,7 +3125,7 @@ async def resolve_request_context(
             if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.
-            hosted = ensure_hosted_country(country_gate, hosted)
+            hosted = await ensure_hosted_country(country_gate, hosted)
             if hosted.api_key is None:
                 return None
             return ResolvedCredential(
@@ -3146,7 +3154,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
-                    client_country=country_gate.country,
+                    country_gate=country_gate,
                 )
             )
             # Bill the vision describe side-call before the reservation
@@ -3405,9 +3413,11 @@ class ToolContext:
         # other attempts spend, where they are dispatched with tools of their own.
         if shared is None:
             caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
+            web_call_cap = WebToolCallCap(effective_web_search_max_calls(config))
+            web_tools = _web_tool_names(self.web_search_tool_entry, self.web_fetch_tool_entry)
             shared = SharedToolUse(
-                use_budget=ToolUseBudget(caps) if caps else None,
-                web_call_cap=WebToolCallCap(effective_web_search_max_calls(config)),
+                use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+                web_call_cap=web_call_cap,
             )
         self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
@@ -3636,6 +3646,24 @@ def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, A
         (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
     )
     return {name: cap for name, cap in caps if cap is not None}
+
+
+def _web_tool_names(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> frozenset[str]:
+    """The built-in web tools a request runs, from the declarations the workspace's policy narrowed."""
+    declared = ((WEB_SEARCH_TOOL_NAME, search_entry), (WEB_FETCH_TOOL_NAME, fetch_entry))
+    return frozenset(name for name, entry in declared if entry is not None)
+
+
+def _request_use_budget(
+    caps: dict[str, int], *, web_tools: frozenset[str], web_call_cap: WebToolCallCap
+) -> ToolUseBudget | None:
+    """The request's budget, where it has something to bound.
+
+    That is a ``max_uses`` cap, or the request's ``web_tools`` under the ``web_call_cap`` they share.
+    """
+    if not caps and not web_tools:
+        return None
+    return ToolUseBudget(caps, call_cap=web_call_cap, call_capped=web_tools)
 
 
 @dataclass(eq=False)
@@ -3934,9 +3962,16 @@ async def prepare_gateway_tools(
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+    web_call_cap = WebToolCallCap(effective_web_search_max_calls(ctx.config))
+    web_tools = frozenset[str]().union(
+        *(
+            _web_tool_names(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+            for answer in admitted.values()
+        )
+    )
     shared = SharedToolUse(
-        use_budget=ToolUseBudget(caps) if caps else None,
-        web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
+        use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+        web_call_cap=web_call_cap,
     )
     shared.tally.spend_gate = ReservationToolGate(ctx)
     shared.round_gate = ReservationRoundGate(ctx)
@@ -5098,6 +5133,7 @@ async def record_usage(
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
             ttft_ms=ttft_ms,
+            completion_tokens=usage_log.completion_tokens,
         )
 
     await log_writer.put(usage_log)
@@ -6413,11 +6449,21 @@ def build_streaming_response(
             attach_settlement=_attach_inline_cost,
             on_first_chunk=_on_first_chunk,
             error_payload=lambda exc: adapter.stream_error_payload(exc, provider),
+            is_external_failure=lambda exc: UpstreamFailure(exc).is_external,
             completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+def _failure_log(failure: UpstreamFailure) -> Callable[..., None]:
+    """The log call for a failed completion: a warning for a fault outside the gateway, an error for Otari's own.
+
+    The deployment answers a provider's outage, quota or refusal with an error
+    response and a usage row, so it is not an error of the deployment's.
+    """
+    return logger.warning if failure.is_external else logger.error
 
 
 async def _prepared(
@@ -6801,7 +6847,7 @@ async def run_single_attempt_stream(
             usage=answered_rounds_usage(adapter, exc),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
+        _failure_log(failure)("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise with_provider_failure(
             adapter.provider_error(exc, _model_as_named(provider, model, display_model)), exc, provider
         ) from exc
@@ -7346,7 +7392,7 @@ async def run_non_stream(
             usage=answered_rounds_usage(adapter, e),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
+        _failure_log(failure)("Provider call failed for %s:%s: %s", provider, model, e)
         raise with_provider_failure(
             adapter.provider_error(e, _model_as_named(provider, model, display_model)), e, provider
         ) from e

@@ -19,6 +19,7 @@ from gateway.exceptions.identity_exceptions import (
     DeploymentUserNotFoundError,
     DeploymentUserSelfChangeError,
     InvalidBlockedEmailEntryError,
+    MasterKeyRotationRefusedError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
@@ -37,7 +38,7 @@ from gateway.models.identity import (
     ProviderIdentity,
     is_organization_connection_provider,
 )
-from gateway.models.tenancy import Organization, OrganizationDomainRole, User
+from gateway.models.tenancy import Organization, OrganizationDomainRole, SignInMeans, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
@@ -160,7 +161,7 @@ class IdentityService:
         """Sign in the account that an identity a provider has proven belongs to.
 
         An identity linked to an account signs in as that account, and its password and verification stay as they are,
-        unless its address is only vouched for: the sign-in then proves it, as a first sign-in does.
+        unless the address is verified but unproved: the sign-in then proves it, as a first sign-in does.
         An identity with no link signs in as the account the identity provider policy returns, and is linked to it,
         except an identity from one organization's own OIDC connection, which instead signs in to the one account
         that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
@@ -435,6 +436,36 @@ class IdentityService:
             "master_key" if by_master_key else "session",
         )
 
+    async def confirm_master_key_rotation(self, *, actor: User, current_password: str | None) -> None:
+        """Refuse a session-authenticated master-key rotation that did not re-prove the password.
+
+        Rotation hands the caller the deployment credential itself, which is what
+        ``hand_over_bootstrap_operator`` and ``_refuse_bootstrap_password_link`` assume a session
+        cannot hold. From a session it is therefore held to the same proof as the handover: only
+        the identity the master key acts as may do it, and only after re-proving its password, so
+        a stolen cookie cannot mint the master key and reach those two operations. A request
+        carrying the master key is that credential already and needs no further proof.
+
+        Raises:
+            MasterKeyRotationRefusedError: If the caller is not the bootstrap operator, or its
+                account has no password to prove.
+            CurrentPasswordIncorrectError: If the current password given does not match.
+        """
+        async with self._uow:
+            bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id != actor.id:
+            raise MasterKeyRotationRefusedError(
+                "Only the bootstrap operator, or a request carrying the master key, can rotate the master key"
+            )
+        if actor.hashed_password is None:
+            raise MasterKeyRotationRefusedError(
+                "Set a password for your account first, or rotate the key with the master key"
+            )
+        if not current_password:
+            raise MasterKeyRotationRefusedError("Enter your current password to rotate the master key")
+        if not await verify_password_async(current_password, actor.hashed_password):
+            raise CurrentPasswordIncorrectError
+
     async def _require_handover_target(self, target: User) -> None:
         if not target.is_active:
             raise BootstrapHandoverRefusedError("Reactivate this account before handing it the role")
@@ -446,10 +477,11 @@ class IdentityService:
             raise BootstrapHandoverRefusedError("This account has no password; its owner sets one first")
         if target.email_verified_at is None:
             raise BootstrapHandoverRefusedError("This account's email address is not verified yet")
-        if target.email_vouched_at is not None:
+        if target.email_proven_at is None:
             # Its first provider sign-in would remove the password that keeps master-key sign-in retired.
             raise BootstrapHandoverRefusedError(
-                "This account's email address is only vouched for; its owner proves it by email first"
+                "This account's email address was recorded by an organization, not proved by its owner; "
+                "its owner proves it by email first"
             )
         if await self.blocked_among([target.email]):
             raise BootstrapHandoverRefusedError("This account's address is blocked")
@@ -459,7 +491,7 @@ class IdentityService:
 
         Where this deployment can mail links, the link is mailed to the account's address and not returned.
         Otherwise, or when the send fails, a shared link is returned for the caller to pass on; redeeming it
-        records the address as vouched for rather than proven, since the mailbox never saw it.
+        leaves the address verified rather than proved, since the mailbox never saw it.
         A new link replaces any earlier reset link.
 
         Raises:
@@ -471,7 +503,7 @@ class IdentityService:
                 would set its password without the current one and so get past the handover's step-up.
 
         """
-        mailed = self._mailer.can_send_links
+        mailed = self._mailer.can_deliver_links
         async with self._uow:
             # Before the row lock, in the order a handover takes the two, so neither waits on the other in a cycle.
             await self._blocked_emails.lock_shared()
@@ -518,7 +550,7 @@ class IdentityService:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
         if await self.blocked_among([account.email]):
             raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
-        if account.hashed_password is None and account.email_verified_at is not None:
+        if account.sign_in_means is SignInMeans.WITHOUT_PASSWORD:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "
                 "Once signed in, its owner can add a password from Account settings."
@@ -560,7 +592,7 @@ class IdentityService:
             if is_organization_connection_provider(external.provider):
                 await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
-            password_removed = await self._prove_vouched_address(account)
+            password_removed = await self._prove_unproved_address(account)
             self._take_display_name_from_sso(account, external)
             self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
@@ -636,17 +668,19 @@ class IdentityService:
         account.full_name = external.full_name
         self._users.stage(account)
 
-    async def _prove_vouched_address(self, account: User) -> bool:
-        """Treat a sign-in through a provider link as proof of a vouched address, and say if a password went.
+    async def _prove_unproved_address(self, account: User) -> bool:
+        """Prove a verified address nobody proved, and say whether a password went with it.
 
         The link was made when the provider verified this account's address, so its holder owns the account.
-        A vouched address had a password chosen through a link its mailbox never saw, so that password, the
+        Such an address had a password chosen through a link its mailbox never saw, so that password, the
         reset and verification links, the sessions and the passkeys set up since go, as on a first sign-in.
+
+        NOTE: An unverified address is left alone. A first sign-in handles that case instead.
         """
-        if account.email_vouched_at is None:
+        if account.email_verified_at is None or account.email_proven_at is not None:
             return False
         password_removed = account.hashed_password is not None
-        account.email_vouched_at = None
+        account.email_proven_at = datetime.now(UTC)
         account.hashed_password = None
         account.email_verification_token_hash = None
         account.email_verification_token_expires_at = None

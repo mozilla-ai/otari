@@ -28,8 +28,8 @@ from gateway.repositories.tenancy import (
     UserRepository,
     WorkspaceMemberRepository,
 )
+from gateway.services.organizations import MembershipListener
 from gateway.services.tenancy import WorkspaceService
-from gateway.services.tenancy.membership_listener import MembershipListener
 
 pytestmark = pytest.mark.asyncio
 

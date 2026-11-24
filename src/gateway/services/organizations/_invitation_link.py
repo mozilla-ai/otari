@@ -64,7 +64,7 @@ class InvitationLink(SignupInvitePort):
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
                 return None
-        return AddressProof.VOUCHED if is_shared_token(token) else AddressProof.MAILBOX
+        return AddressProof.SHARED if is_shared_token(token) else AddressProof.MAILBOX
 
     async def _refuses_the_address(
         self, invitation: OrganizationInvitation, *, hand_carried: bool, now: datetime

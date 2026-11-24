@@ -23,7 +23,15 @@ from gateway.services.traces._context import ContextWeights
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turn_content import TurnContent, arguments_of
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SPAN_CONTENT_MAX_LENGTH, SpanRecord, TraceWrite, is_endpoint, is_identifier
+from gateway.types.traces import (
+    IDENTIFIER_MAX_LENGTH,
+    LIST_SEPARATOR,
+    SPAN_CONTENT_MAX_LENGTH,
+    SpanRecord,
+    TraceWrite,
+    is_endpoint,
+    is_identifier,
+)
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -58,6 +66,22 @@ class LlmCall:
 def identifier_or_none(value: object) -> str | None:
     """A client-supplied value as it may be stored, or None when it is not an identifier-shaped string."""
     return value if isinstance(value, str) and is_identifier(value) else None
+
+
+def _identifier_list(values: tuple[str, ...]) -> str | None:
+    """The leading identifiers of ``values`` joined as a list attribute stores them, or None when none fits.
+
+    The stored value is capped as a whole, so the elements past the cap are left
+    off rather than the whole list, and with it the span.
+    """
+    kept: list[str] = []
+    for value in values:
+        if identifier_or_none(value) is None:
+            continue
+        if len(LIST_SEPARATOR.join([*kept, value])) > IDENTIFIER_MAX_LENGTH:
+            break
+        kept.append(value)
+    return LIST_SEPARATOR.join(kept) or None
 
 
 # Longer than any call id a provider issues; past it the value is not one.
@@ -288,13 +312,15 @@ class RequestTrace:
         event: str | None = None,
         tool: str | None = None,
         withheld: bool = False,
+        categories: tuple[str, ...] = (),
     ) -> None:
         """One guardrail check. ``valid`` is None when the check could not be evaluated.
 
         ``event`` is where it ran: ``before_model`` for input, ``after_tool`` for
         a tool result, ``before_tool`` for a tool call and ``after_model`` for the
         answer, with ``tool`` naming the tool where it is known. ``withheld`` marks
-        a tool result or call the model read a replacement for.
+        a tool result or call the model read a replacement for. ``categories`` are
+        what the guardrail says fired.
         """
         attributes: dict[str, str | int | float | bool] = {}
         if (safe_profile := identifier_or_none(profile)) is not None:
@@ -307,6 +333,8 @@ class RequestTrace:
             attributes["otari.guardrail.tool"] = safe_tool
         if withheld:
             attributes["otari.guardrail.action"] = "withheld"
+        if (safe_categories := _identifier_list(categories)) is not None:
+            attributes["otari.guardrail.categories"] = safe_categories
         self._add(
             SpanRecord(
                 span_id=_span_id(),

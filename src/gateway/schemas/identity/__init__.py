@@ -52,8 +52,8 @@ class PasswordLinkPublic(BaseModel):
         default=None,
         description=(
             "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a "
-            "password through it records the address as vouched for rather than proven, since the mailbox never "
-            "saw the link."
+            "password through it leaves the address verified rather than proved, since the mailbox never saw "
+            "the link."
         ),
     )
     expires_at: datetime = Field(description="When the link stops working.")

@@ -24,9 +24,8 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
-from gateway.services.organizations import InvitationMailLimit
+from gateway.services.organizations import InvitationMailLimit, MembershipListener
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 
 

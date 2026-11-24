@@ -60,3 +60,13 @@ export function groupModels(rows: readonly UsageGroupRow[]): ModelGroup[] {
   }
   return [...groups.values()]
 }
+
+/**
+ * A summary's models (`groupModels`) without the fold of smaller ones, which is
+ * no model: the costliest first, then the most tokens.
+ */
+export function rankedModels(rows: readonly UsageGroupRow[]): ModelGroup[] {
+  return groupModels(rows)
+    .filter((model) => !model.isOther)
+    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)
+}

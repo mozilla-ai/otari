@@ -521,7 +521,7 @@ providers:
 | `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
 | `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
 | `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |
-| `messages_api` | `completions` (default) or `responses`. See [Messages through the Responses API](#messages-through-the-responses-api). |
+| `messages_api` | `completions` or `responses`; unset, `responses` for OpenAI's own API and `completions` otherwise. See [Messages through the Responses API](#messages-through-the-responses-api). |
 | `credentials`, `project`, `location` | Vertex AI only: configure its client. |
 | Any other key | Passed to the provider's any-llm call as it is. |
 
@@ -641,19 +641,27 @@ gateway's own values through it. Chat completions only.
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its
-own is served as a chat completion by default. An OpenAI instance (or any
-instance whose provider has a Responses API, such as Azure OpenAI) can serve it
-through the Responses API instead:
+own is served as a chat completion, except on OpenAI's own API, which serves it
+through the Responses API. That holds for a configured instance, a hosted
+provider and an organization's own key alike; an OpenAI instance with another
+`api_base` (an OpenAI-compatible server) stays on chat completions, and so does
+a request that sends `stop_sequences`, which the Responses API cannot carry.
+
+An instance whose provider has a Responses API (such as Azure OpenAI) can opt in
+with `messages_api: responses`, and an OpenAI instance can opt out with
+`messages_api: completions`:
 
 ```yaml
 providers:
   openai:
     api_key: ${OPENAI_API_KEY}
-    messages_api: responses   # default: completions
+    messages_api: completions   # unset: responses for OpenAI's own API
 ```
 
-This reaches models OpenAI serves only on the Responses API (the codex and pro
-variants), and keeps a reasoning model's reasoning across turns:
+The Responses path reaches models OpenAI serves only on the Responses API (the codex and pro
+variants), lets a reasoning model call function tools with its reasoning on,
+which chat completions refuses for the newer ones, and keeps a reasoning model's
+reasoning across turns:
 
 - Each reasoning item comes back as a `thinking` block whose signature carries
   its encrypted content. When a client such as Claude Code sends the block back,
@@ -668,8 +676,8 @@ variants), and keeps a reasoning model's reasoning across turns:
   answers that turn without extended thinking.
 
 Reasoning fields are sent only to a model whose name looks like a reasoning
-model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
-`-chat` variants, and anything with `codex` in it), whether or not the client
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5` and later
+except their `-chat` variants, and anything with `codex` in it), whether or not the client
 asked for thinking, because any other model fails the call over them. An Azure
 OpenAI deployment is called by its deployment name, so name a reasoning
 deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
@@ -963,9 +971,22 @@ that list or for the supported countries of an enabled hosted provider. A
 private address, or one the file does not hold, has no country, and
 a listed provider refuses it.
 
-A VPN changes the country a request appears to come from, so this check does
-not replace the account and billing checks a provider may also ask for, which
-need billing data a self-hosted Otari does not hold.
+A VPN changes the country a request appears to come from, so the gate also
+reads where the account lives, when the deployment knows. That country comes
+from the build, not from a setting: a self-hosted Otari holds no billing data
+and knows no account's country, and a build that bills its customers, such as
+otari.ai, answers it from the billing address of the organization the API key
+belongs to. A list refuses a request when either country is off it. An unknown
+account country is no opinion, so a deployment that knows none is gated on
+the request's country alone, while an unknown request country still refuses.
+The account is looked up only where a list could refuse it: a provider type
+lists countries, or the hosted credential a request is served on has a list.
+A build that holds the country but cannot read it at the moment refuses on
+every listed provider rather than going by the request's country alone. A
+master key is the operator, not an account, so its requests are gated on the
+request's country alone. A refusal names the request's country and never the
+account's, nor which of the two the list left out; the usage row's detail, a
+dropped candidate's operator detail and the log say which.
 
 ## Pricing
 
@@ -1357,10 +1378,12 @@ request's price.
 A transcription model that reports tokens and no length, such as
 `gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
 length Otari reads from the uploaded file. Otari reads the length of a WAV,
-MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
-not its name. A file it cannot read, such as a WebM upload, gives no length,
-so that request keeps no cost at a `minute` or `second` rate. A length the
-provider reports always wins over the length read from the file.
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF, WMA or WebM file by its
+content, not its name. A WebM file from a browser recorder states no length,
+so Otari counts it from the timestamps of the audio blocks in the file. A file
+it cannot read gives no length, so that request keeps no cost at a `minute` or
+`second` rate. A length the provider reports always wins over the length read
+from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1556,8 +1579,9 @@ file or environment, then to the built-in default.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10. A call past it gets a tool error the model can recover
-  from.
+  together. Default 10. Once it is reached, later rounds no longer offer either
+  tool, and a call past it within one round gets a tool error the model can
+  recover from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.

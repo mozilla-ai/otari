@@ -1023,7 +1023,7 @@ async def test_get_byo_providers(
             encrypted_api_key=_stored_api_key(key_state),
             last4=None,
             api_base=None,
-            client_args=None,
+            encrypted_client_args=None,
         )
         if disabled_in_last_workspace:
             await WorkspaceProviderKeyOverrideRepository(async_db).create(

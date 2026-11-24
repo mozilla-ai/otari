@@ -104,7 +104,7 @@ The bootstrap operator is the account the master key acts as (see
 someone else:
 
 1. Make sure their account is active, has a password and an email address it
-   verified by email (not one only vouched for by a passed-on link), and is not
+   verified by email (not one an organization supplied through a passed-on link), and is not
    blocked.
 2. On **Accounts**, choose **Make operator** from the menu on their row if they
    are not an operator yet.

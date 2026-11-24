@@ -32,6 +32,10 @@ BILLING_URL_HEADER = "Otari-Billing-Url"
 BUDGET_EXCEEDED = "budget_exceeded"
 # A guardrail refused the request's input or the model's answer.
 GUARDRAIL_VIOLATION = "guardrail_violation"
+# A guardrail that enforces has no guardrails service configured, so the request was refused unchecked.
+GUARDRAIL_NOT_CONFIGURED = "guardrail_not_configured"
+# A guardrail that enforces could not be evaluated for any other reason, so the request was refused unchecked.
+GUARDRAIL_UNAVAILABLE = "guardrail_unavailable"
 USER_BLOCKED = "user_blocked"
 USER_NOT_FOUND = "user_not_found"
 # An ordinary key named another user than its own, and its mismatched ``user`` field choice rejects that.
