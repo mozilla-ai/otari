@@ -52,7 +52,7 @@ spend this period against it. See [Budgets](budgets.md).
 
 A request can name a user (`user` on most routes, `metadata.user_id` on
 Messages). By default, an API key only accepts its own user there and refuses
-anything else with `403`.
+anything else with `403` (`user_mismatch`).
 
 Some clients fill that field with a value of their own: Claude Code and Junie
 do, and so do applications that pass their customers' ids. For those keys, set
@@ -155,7 +155,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.55.1/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.56.1/docs/public/openapi.json).
 
 ### Model and search tool access
 
@@ -163,6 +163,16 @@ The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/
 own list. No list allows any model, an empty list allows none, and entries may
 use provider wildcards such as `openai:*`. A key can narrow its user's access,
 never widen it.
+
+An entry may also be a model's catalog id, as `GET /api/v1/models` lists it
+(`mistralai/mistral-small-3`). Otari stores it as the `instance:model` selector
+of each provider offering the model when the list is saved, and the key's
+response shows those selectors. On a key whose user has a list of their own,
+it stands for the offerings that list allows, so a user held to `groq:*` gets
+the model's Groq offering. A provider that starts offering the model later
+is not on the list until you save it again. An entry that is also the legacy
+`provider/model` spelling of a model that provider serves (`openai/gpt-4o`)
+still means that one offering.
 
 **Search and fetch tools.** These have their own list, `allowed_tools`, which
 governs `POST /api/v1/search` and `POST /api/v1/fetch`:
@@ -256,7 +266,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.55.1/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.56.1/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page

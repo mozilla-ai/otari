@@ -236,7 +236,7 @@ no `name`.
 
 Where a provider's server and models.dev say nothing about a model, or say it
 wrong, whoever holds the key that serves it can set its details on the model's
-page in the dashboard: **Edit details** on its row of offerings. The deployment
+page in the dashboard: choose **Edit details…** from its row's menu. The deployment
 operator sets them for the deployment's own providers, and an organization's
 owners and admins for the models its own provider keys serve, which only that
 organization's callers see.
@@ -574,7 +574,7 @@ your organization pays.
   offering is served on.
 
 The page is read-only. An organization sets its own rate on **Providers >
-Inference**, which an offering on one of its keys links to.
+Inference**, which **Set your rate…** in an offering's row menu opens.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -697,8 +697,12 @@ ranked independently. Region remains a preference, so fallback can cross regions
 Selection uses these signals:
 
 - **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
-  put an offering behind healthy alternatives for 15 seconds. It stays available
-  as a last resort. Client cancellation and gateway refusals do not count as outages.
+  put an offering behind healthy alternatives for 15 seconds, doubling with each
+  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  credential cools every model served on that credential the same way, for the
+  workspace that saw it. An offering the deployment refuses to serve a caller on its
+  credential ranks last for that caller for 5 minutes. Each stays available as a last
+  resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
   pricing where requested. It uses the caller's organization prices, then the
@@ -792,7 +796,10 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor.
+of the offering tried first, and `owned_by` is the model's vendor. A limit the
+offering tried first does not know, such as the context length of a model a vLLM
+server also serves, is the smallest one the model's other offerings report. An
+output limit filled that way is capped at the entry's context window.
 
 The caller's aliases and routing policies are listed beside the models, under
 their own names: the configured ones, and the stored ones of the key's

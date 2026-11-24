@@ -143,15 +143,22 @@ request. The cap is honored on every endpoint (`/api/v1/messages`,
 `/api/v1/chat/completions`, `/api/v1/responses`) and on every declaration
 shape, including `otari_web_search`. A failed search does not count against it.
 
-`max_uses: 0` refuses every search. A negative or non-integer value (including
-`1.5` and `5.0`) is rejected with a 400.
+`max_uses: 0` refuses every search: the search is never offered. A negative or
+non-integer value (including `1.5` and `5.0`) is rejected with a 400.
 
-Past the cap, the model is told the search was refused and can answer without it.
-An Anthropic-native declaration is answered in its own vocabulary, a
-`web_search_tool_result` carrying `error_code: max_uses_exceeded`. Otherwise the
-model gets the same `[tool error]` string a failed tool produces, and a Chat
-Completions client sees the search in `otari_tool_calls` as `failed`, with the
-tag `call_limit`. Even without
+Once the cap is used up, later rounds no longer offer the search: a
+`tool_choice` loses it, and the model is told the search has reached its limit for
+the request. Other tools stay on offer. When none is left, neither one of Otari's
+nor one of your own, the next round is the last one, as described in [Combining
+tools](#combining-tools): it tells the model to answer, and a search the model asks
+for anyway is left out of the answer.
+
+A search the model asks for past the cap within one round (three at once with two
+left, say) is refused, and the model is told so. An Anthropic-native declaration
+is answered in its own vocabulary, a `web_search_tool_result` carrying
+`error_code: max_uses_exceeded`. Otherwise the model gets the same `[tool error]`
+string a failed tool produces, and a Chat Completions client sees the search in
+`otari_tool_calls` as `failed`, with the tag `call_limit`. Even without
 `max_uses`, requests remain bounded by `max_tool_iterations` and the
 [call limit Search and Fetch share](#web-fetch).
 
@@ -403,8 +410,8 @@ runs on the tool it names, and each tool keeps the rules it has alone:
   is never dropped while the others run: an attempt that needs it is refused as
   it would be alone, and [Who runs a tool](#who-runs-a-tool) says what that
   means on a fallback chain.
-- A `max_uses` caps only its own tool: once search reaches its cap, the model is
-  told so for each further search while code and MCP calls keep running.
+- A `max_uses` caps only its own tool: once search reaches its cap, later rounds
+  no longer offer it, while code and MCP calls keep running.
 - Each built-in comes back in the same native result blocks or items as it does
   alone ([What clients receive](#what-clients-receive)), and so does MCP activity.
 - Usage counts each tool's calls under the tool's own name.
@@ -416,8 +423,11 @@ bounds the rounds of the whole request, and so does a workspace code policy's
 answer from the results it already has, so a model that keeps searching ends with
 an answer rather than a failed request ([MCP](mcp.md) says the same of its loop).
 A round the request's budget cannot hold ends the loop the same way, earlier
-([Budget enforcement](budget-enforcement.md#holds-and-settlement)); in either
-case, a model that still calls one of Otari's tools fails the request.
+([Budget enforcement](budget-enforcement.md#holds-and-settlement)), and so does
+the round after every one of Otari's tools in the request has used up its
+`max_uses` when the request has no tools of its own. In each case, if the model
+calls only Otari's tools in that round, Otari does not run them: the round ends as
+the answer ([MCP](mcp.md) says how).
 
 A `tool_choice` that forces a tool (`required`, or one tool by name, such as
 `code_execution` for Otari's sandbox) applies to the first round only. Once that
@@ -460,6 +470,20 @@ Request it with:
 }
 ```
 
+The model calls the tool with a `language` and the `code`. `language` takes only
+the languages the deployment's sandbox runs, which the tool's definition lists,
+and so does `GET /api/v1/tools`. Both providers run `python`, in every
+[sandbox environment](#sandbox-environments): Otari takes a protocol backend's
+`code_execution` kind to run Python, as the bundled sandbox does, and on E2B it
+runs the sandbox's default Python context. A call naming another language, or
+none, is refused before anything runs, with an error that names the languages
+to call the tool again with. Like a call with no code, it counts as a failed
+call and is not billed. The tool's description also asks the model, when asked
+to run code in another language, to tell the user it cannot run as is, and to
+say so when it rewrote that code in Python and ran the rewrite. Models differ in
+how well they follow this: some report a rewrite's output as the original
+program's anyway.
+
 The sandbox speaks the [code-execution protocol](code-execution-protocol.md),
 which is what `sandbox_url` points at. A deployment that would rather not run
 one sets `sandbox_provider: e2b` instead and Otari runs the code on
@@ -486,7 +510,7 @@ sandbox but no model, such as rerunning a script to check its output:
 {"code": "print(1 + 1)", "container": "auto"}
 ```
 
-The code reaches the sandbox exactly as sent. The run is admitted as an
+The code is Python, and reaches the sandbox exactly as sent. The run is admitted as an
 `otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
 can turn it off, and its `exec_timeout_s` and pinned image apply. `environment`
 names the [sandbox environment](#sandbox-environments) to run in. It is priced
@@ -782,7 +806,11 @@ limits.
 Search and Fetch share a limit of `web_search_max_calls` attempted calls per
 request, 10 unless the operator sets another, across model turns and routing
 attempts. Invalid, blocked, and failed calls consume that allowance; enriching a
-search's results does not. A call past it gets
+search's results does not. Once the limit is reached, later rounds no longer
+offer Search or Fetch, as for a used-up
+[`max_uses`](#bounding-the-searches-one-request-runs): the model is told they
+reached their limit, and when no other tool is left the next round is the last
+one. A call past the limit within one round gets
 `[tool error] web search call limit reached for this request` (or `web fetch`),
 which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
@@ -1038,9 +1066,11 @@ organization Providers > Web search page, or under
 `/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
 archive it, and make one key of each kind the organization's default or stop it
 being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the
-last four characters of a key are ever shown. A key carries an API key when its
-provider needs one, and may carry its own `api_base` and provider `options`,
-which are checked against the provider when the key is written. An `api_base`
+last four characters of a key are ever shown. A key brings the organization's
+own account or its own server, never the deployment's: it carries an API key for
+any provider with an address of its own, even one whose API key is optional. A
+key may also carry its own `api_base` and provider `options`, which are checked
+against the provider when the key is written. An `api_base`
 must use https when the key carries an API key, and must reach public addresses
 only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
 rather than the operator chose it. Calls to it are held to the same rule: each
@@ -1210,6 +1240,37 @@ refuse such a value when a tool is saved.
   10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
   can cost. A search with no results reported a cost of 0 when the adapter was
   written.
+- **Keenable** (`keenable`) takes an API key but needs none. Without one, a tool
+  searches Keenable's free endpoint, which allows 1,000 searches an hour and 10 a
+  second per IP address, shared with everything else calling from the gateway's
+  address; past that, a search fails with `public_rate_limit_hourly` or
+  `public_rate_limit_per_second` (HTTP 429). Some sites Keenable serves only with
+  a key, which a keyless search restricted to one fails with
+  `public_domain_requires_api_key`. With a key in the tool's `api_key`, such as
+  `${KEENABLE_API_KEY}`, no hourly limit applies; an `api_key` that comes out
+  empty, such as that variable left blank, stops the gateway at start, so leave
+  `api_key` out to search keyless. An
+  [organization key](#organization-search-keys) on Keenable always carries an API
+  key, so an organization's searches run on its own account, never on the keyless
+  allowance the gateway's address shares.
+  Keenable logs every search, keyed or not, with its query, the caller's IP
+  address and the app name each call sends, and its
+  [terms](https://keenable.ai/terms) let it use what it receives to improve and
+  train its products; its zero data retention plan covers keyed calls from an
+  organization that has it, never keyless ones (see its
+  [data privacy](https://docs.keenable.ai/data-privacy) page). Each call names
+  the app `any-search`; set `X-Keenable-Title` in the tool's `options` to name
+  your deployment, which only the tool's configuration or an organization key's
+  options can set. Otari does not read the cost a keyed answer reports, so a
+  search is billed at the tool's own rate (its `price_per_call`, or a `search`
+  price set on the dashboard's Web search page or through the API); a keyless
+  tool can be priced at 0. Keenable's [pricing](https://docs.keenable.ai/pricing),
+  read 2026-11-24: keyless searches are free; with a key, 100,000 a month are
+  free, then $4 per 1,000, in `pro` and `realtime` mode alike. A search returns
+  at most 50 results, and its hits carry a snippet but no page text. Snippets run
+  to a few thousand characters, which Otari cuts before a model or a direct
+  search sees them; `snippet_max_length` in the tool's `options` asks for less. A
+  `time_range` keeps only the pages Keenable knows a publish date for.
 - **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
   `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
   which Otari keeps out of its logs. It reports no cost, so a search is billed at

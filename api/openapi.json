@@ -26,7 +26,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
+            "description": "Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
             "title": "Password"
           },
           "terms_accepted": {
@@ -47,36 +47,22 @@
         "type": "object"
       },
       "AcceptInvitationResultPublic": {
-        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
+        "description": "What accepting through the link produced, and what it leaves the invitee to do.\n\nNo session and no token: ``next_step`` is the whole of what comes next.",
         "properties": {
-          "can_sign_in": {
-            "default": true,
-            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.",
-            "title": "Can Sign In",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does now that it has accepted."
           },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
           },
-          "password_set": {
-            "default": false,
-            "description": "Whether this accept set the identity's password.",
-            "title": "Password Set",
-            "type": "boolean"
-          },
           "role": {
             "title": "Role",
             "type": "string"
           },
-          "verification_pending": {
-            "default": false,
-            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
-            "title": "Verification Pending",
-            "type": "boolean"
-          },
           "ways_in": {
-            "description": "When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+            "description": "What this deployment offers instead, where next_step names them, as the preview's ways_in says.",
             "items": {
               "enum": [
                 "provider",
@@ -90,9 +76,30 @@
         },
         "required": [
           "organization_name",
-          "role"
+          "role",
+          "next_step",
+          "ways_in"
         ],
         "title": "AcceptInvitationResultPublic",
+        "type": "object"
+      },
+      "AcceptedMembershipPublic": {
+        "description": "The membership an accepted invitation produced.",
+        "properties": {
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_name",
+          "role"
+        ],
+        "title": "AcceptedMembershipPublic",
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
@@ -9018,6 +9025,103 @@
         "title": "EndUsersDeleted",
         "type": "object"
       },
+      "EndpointAuthMethod": {
+        "description": "How the credential for one endpoint is produced.",
+        "enum": [
+          "static_header"
+        ],
+        "title": "EndpointAuthMethod",
+        "type": "string"
+      },
+      "EndpointAuthPublic": {
+        "description": "What an endpoint credential reports. Never carries the value, only its last four characters.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "title": "Header Name",
+            "type": "string"
+          },
+          "last4": {
+            "description": "The last four characters of the stored value.",
+            "title": "Last4",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced."
+          },
+          "state": {
+            "$ref": "#/components/schemas/EndpointAuthState",
+            "description": "How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request."
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "last4",
+          "expires_at",
+          "state"
+        ],
+        "title": "EndpointAuthPublic",
+        "type": "object"
+      },
+      "EndpointAuthRequest": {
+        "description": "The credential an edge proxy in front of a key's base URL requires.\n\n``method`` is a closed set of ways to produce request headers. TLS client\nauthentication is not one of them: it is presented when the connection is\nmade, so it would be a field of its own rather than a method here.",
+        "properties": {
+          "expires_at": {
+            "description": "When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "description": "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Header Name",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced. `static_header` sends one stored value as one header."
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.",
+            "title": "Secret"
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "expires_at"
+        ],
+        "title": "EndpointAuthRequest",
+        "type": "object"
+      },
+      "EndpointAuthState": {
+        "description": "How a stored credential stands against its own expiry.\n\nReported so every reader draws the line in the same place. None of the\nmembers refuses a request.",
+        "enum": [
+          "expired",
+          "expiring_soon",
+          "valid"
+        ],
+        "title": "EndpointAuthState",
+        "type": "string"
+      },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
         "enum": [
@@ -13314,14 +13418,20 @@
         "title": "InFlightResponse",
         "type": "object"
       },
+      "InvitationNextStep": {
+        "description": "What an invitee does to get in, as Otari decides it.\n\nThe members are exclusive and cover every pending invitation.\n``set_password`` means accepting may choose this address's first password.\n``sign_in`` means the address's credentials open a session.\n``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.\n``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.\n\nNOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.\nThe other two leave it empty.",
+        "enum": [
+          "set_password",
+          "sign_in",
+          "use_another_way_in",
+          "verify_email"
+        ],
+        "title": "InvitationNextStep",
+        "type": "string"
+      },
       "InvitationPreviewPublic": {
-        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
+        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nthe role on offer, and what to do next.\nThe token is the caller's only credential here, not a session, so this\ncarries nothing that identifies who sent it or any other member.",
         "properties": {
-          "can_sign_in": {
-            "description": "Whether the invited address can already sign in, with a password or through a provider.",
-            "title": "Can Sign In",
-            "type": "boolean"
-          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -13331,10 +13441,9 @@
             "title": "Expires At",
             "type": "string"
           },
-          "needs_password": {
-            "description": "Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.",
-            "title": "Needs Password",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does to get in. Accept refuses a password unless this is 'set_password'."
           },
           "organization_name": {
             "title": "Organization Name",
@@ -13345,7 +13454,7 @@
             "type": "string"
           },
           "ways_in": {
-            "description": "When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.",
+            "description": "What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.",
             "items": {
               "enum": [
                 "provider",
@@ -13362,8 +13471,7 @@
           "organization_name",
           "role",
           "expires_at",
-          "needs_password",
-          "can_sign_in",
+          "next_step",
           "ways_in"
         ],
         "title": "InvitationPreviewPublic",
@@ -17834,6 +17942,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`."
+          },
           "name": {
             "maxLength": 255,
             "title": "Name",
@@ -18132,6 +18251,22 @@
             "title": "Created At",
             "type": "string"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endpoint_auth_unreadable": {
+            "default": false,
+            "description": "True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.",
+            "title": "Endpoint Auth Unreadable",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -18200,7 +18335,7 @@
             "title": "Updated At"
           },
           "usable": {
-            "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
+            "description": "False when the key cannot be served as stored, so it supplies nothing at dispatch and the catalog withholds its provider: a credential this deployment cannot decrypt or read, a provider that cannot take a custom base URL, or an endpoint credential the key may not carry. Such a row is still listed, because deleting or replacing it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
           },
@@ -18262,6 +18397,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored."
+          },
           "name": {
             "anyOf": [
               {
@@ -18308,6 +18454,30 @@
           "count"
         ],
         "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
+      "OrgProviderKeysReencryptPublic": {
+        "description": "What re-encrypting the stored organization provider credentials did.\n\nEach count is keys, not values, because a key holding one value no\nconfigured secret reads has to be re-entered whole: it serves nothing until\nit is. ``unreadable`` counts those, left exactly as they were;\n``skipped`` those edited while the rotation ran, already written under the\nprimary secret.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "OrgProviderKeysReencryptPublic",
         "type": "object"
       },
       "OrgProviderModelsRefreshPublic": {
@@ -29325,6 +29495,17 @@
             "title": "By Filter",
             "type": "boolean"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -29641,6 +29822,11 @@
             ],
             "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
             "title": "Data Location"
+          },
+          "deployment_paid": {
+            "default": false,
+            "title": "Deployment Paid",
+            "type": "boolean"
           },
           "endpoint": {
             "title": "Endpoint",
@@ -30393,6 +30579,17 @@
             ],
             "title": "Cache Write Price Per Million"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -30793,6 +30990,11 @@
           },
           "cost": {
             "title": "Cost",
+            "type": "number"
+          },
+          "deployment_paid_cost": {
+            "default": 0.0,
+            "title": "Deployment Paid Cost",
             "type": "number"
           },
           "error_count": {
@@ -34320,7 +34522,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.55.1"
+    "version": "0.56.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -40660,7 +40862,7 @@
     },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/search-tools/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -42255,6 +42457,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -42563,6 +42783,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -44749,7 +44987,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
+        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate; a token limit that offering does not know is the smallest\nthe model's other offerings report, and an output limit filled that way is\ncapped at the entry's context window. A value nobody knows is omitted rather\nthan sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
         "operationId": "models-list_models",
         "parameters": [
           {
@@ -45535,6 +45773,36 @@
         "summary": "Exchange Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/v1/organization-provider-keys/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
+        "operationId": "provider-keys-reencrypt_org_provider_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeysReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Org Provider Keys",
+        "tags": [
+          "provider-keys"
         ]
       }
     },
@@ -48399,7 +48667,7 @@
     },
     "/api/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
       "post": {
-        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time. Addressed by membership id\nrather than by token: the caller is already the addressee, so a token would\nadd nothing their session does not carry. It answers the membership alone,\nbecause the next step that route carries is for a visitor whose only\ncredential is a link.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
         "operationId": "organizations-accept_caller_pending_membership",
         "parameters": [
           {
@@ -48418,7 +48686,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                  "$ref": "#/components/schemas/AcceptedMembershipPublic"
                 }
               }
             },
@@ -52234,6 +52502,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -52638,6 +52924,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -53032,6 +53336,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -53400,6 +53722,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -57589,7 +57929,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
@@ -60219,6 +60559,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -60620,6 +60978,24 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -61155,6 +61531,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -61573,6 +61967,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
