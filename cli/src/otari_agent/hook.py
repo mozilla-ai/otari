@@ -3025,6 +3025,20 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     return not updated
 
 
+def _refuse_write_outside_repo(root: Path, path: Path) -> None:
+    """Refuse to write `path` when a symlink on the way to it leaves `root`.
+
+    A repository can ship the file, or a directory above it, as a symlink, and
+    a write that follows one lands wherever the repository chose: the user's
+    own `~/.claude/settings.json`, say.
+    """
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise click.ClickException(
+            f"{path.relative_to(root)} resolves to {resolved}, outside this repository, so it was not written."
+        )
+
+
 class _HookSetup(NamedTuple):
     """Where one harness reads its own hook registration from, and the matcher vocabulary
     (see _HOOK_EDIT_TOOL_PATH_FIELDS, _CODEX_PATCH_TOOL_NAME, _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS)
@@ -3148,6 +3162,7 @@ def hook_setup(harness: str, repo_only: bool | None) -> None:
             click.echo(moved)
         starter = root / GUARDRAIL_FILE
         if click.confirm(f"No guardrail found in {root}. Create a starter {GUARDRAIL_FILE}?", default=True):
+            _refuse_write_outside_repo(root, starter)
             starter.parent.mkdir(parents=True, exist_ok=True)
             starter.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
             click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
@@ -3178,6 +3193,7 @@ def hook_setup(harness: str, repo_only: bool | None) -> None:
         argv.append("--repo-only")
     command = shlex.join(argv)
 
+    _refuse_write_outside_repo(root, settings_path)
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
     uncovered = [
@@ -3725,8 +3741,26 @@ def guardrails_generate(
     # Resolved, not as typed: `--guardrail-file` accepts any spelling, and
     # every check below compares it against paths under the resolved repo
     # root. See `_joins_the_composed_set`.
-    target = (guardrail_file_option if guardrail_file_option is not None else _generate_target(root)).resolve()
+    default_target = _generate_target(root)
+    target = (guardrail_file_option if guardrail_file_option is not None else default_target).resolve()
     target_file = GuardrailFile(target, _guardrail_file_origin(target, root))
+
+    # Asked, not refused: a directory of rules shared between repositories is
+    # a symlink out of each, and so is one a repository ships to carry
+    # accepted gates into the user's own `~/.otari/`. Asked before the checks
+    # below read the file, so none of them reports on a file nobody agreed to.
+    if (
+        guardrail_file_option is None
+        and not target.is_relative_to(root.resolve())
+        and _gates_generate_read_choice(
+            f"{default_target.relative_to(root)} resolves to {target}, outside this repository. "
+            "Append accepted gates there? [y/N]: ",
+            "yn",
+            "n",
+        )
+        == "n"
+    ):
+        raise click.Abort()
 
     # Before the model call, not after: writing the file that takes the set
     # past MAX_POLICY_FILES would report success and leave the repo with a

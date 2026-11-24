@@ -52,7 +52,7 @@ spend this period against it. See [Budgets](budgets.md).
 
 A request can name a user (`user` on most routes, `metadata.user_id` on
 Messages). By default, an API key only accepts its own user there and refuses
-anything else with `403`.
+anything else with `403` (`user_mismatch`).
 
 Some clients fill that field with a value of their own: Claude Code and Junie
 do, and so do applications that pass their customers' ids. For those keys, set

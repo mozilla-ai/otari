@@ -667,6 +667,9 @@ export type AcceptInvitationRequest = Defaulted<
   "terms_accepted"
 >
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
+// Accepting from the invitee's own inbox answers the membership alone: that
+// caller is already signed in, so there is no next step to carry.
+export type AcceptedMembership = Schemas["AcceptedMembershipPublic"]
 
 // The invitee's side of the same flow: what is waiting on the signed-in
 // identity, rather than what this organization has sent out. Addressed by

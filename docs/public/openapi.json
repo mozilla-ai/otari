@@ -26,7 +26,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
+            "description": "Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
             "title": "Password"
           },
           "terms_accepted": {
@@ -47,36 +47,22 @@
         "type": "object"
       },
       "AcceptInvitationResultPublic": {
-        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
+        "description": "What accepting through the link produced, and what it leaves the invitee to do.\n\nNo session and no token: ``next_step`` is the whole of what comes next.",
         "properties": {
-          "can_sign_in": {
-            "default": true,
-            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it carries neither, and false while a password chosen at signup waits on verification.",
-            "title": "Can Sign In",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does now that it has accepted."
           },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
           },
-          "password_set": {
-            "default": false,
-            "description": "Whether this accept set the identity's password.",
-            "title": "Password Set",
-            "type": "boolean"
-          },
           "role": {
             "title": "Role",
             "type": "string"
           },
-          "verification_pending": {
-            "default": false,
-            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
-            "title": "Verification Pending",
-            "type": "boolean"
-          },
           "ways_in": {
-            "description": "When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+            "description": "What this deployment offers instead, where next_step names them, as the preview's ways_in says.",
             "items": {
               "enum": [
                 "provider",
@@ -90,9 +76,30 @@
         },
         "required": [
           "organization_name",
-          "role"
+          "role",
+          "next_step",
+          "ways_in"
         ],
         "title": "AcceptInvitationResultPublic",
+        "type": "object"
+      },
+      "AcceptedMembershipPublic": {
+        "description": "The membership an accepted invitation produced.",
+        "properties": {
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_name",
+          "role"
+        ],
+        "title": "AcceptedMembershipPublic",
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
@@ -13314,14 +13321,20 @@
         "title": "InFlightResponse",
         "type": "object"
       },
+      "InvitationNextStep": {
+        "description": "What an invitee does to get in, as Otari decides it.\n\nThe members are exclusive and cover every pending invitation.\n``set_password`` means accepting may choose this address's first password.\n``sign_in`` means the address's credentials open a session.\n``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.\n``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.\n\nNOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.\nThe other two leave it empty.",
+        "enum": [
+          "set_password",
+          "sign_in",
+          "use_another_way_in",
+          "verify_email"
+        ],
+        "title": "InvitationNextStep",
+        "type": "string"
+      },
       "InvitationPreviewPublic": {
-        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
+        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nthe role on offer, and what to do next.\nThe token is the caller's only credential here, not a session, so this\ncarries nothing that identifies who sent it or any other member.",
         "properties": {
-          "can_sign_in": {
-            "description": "Whether the invited address can already sign in, with a password or through a provider. A password chosen at signup is not one of them until the address is verified.",
-            "title": "Can Sign In",
-            "type": "boolean"
-          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -13331,10 +13344,9 @@
             "title": "Expires At",
             "type": "string"
           },
-          "needs_password": {
-            "description": "Whether accepting should also set the invited address's first password. False when the address already has a way in, when a password it chose at signup is waiting on verification, and when another organization has it as a member or invitee, since this link may not choose a password for it then. can_sign_in and verification_pending tell the three apart. Accept refuses a password whenever this is false.",
-            "title": "Needs Password",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does to get in. Accept refuses a password unless this is 'set_password'."
           },
           "organization_name": {
             "title": "Organization Name",
@@ -13344,13 +13356,8 @@
             "title": "Role",
             "type": "string"
           },
-          "verification_pending": {
-            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
-            "title": "Verification Pending",
-            "type": "boolean"
-          },
           "ways_in": {
-            "description": "When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.",
+            "description": "What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.",
             "items": {
               "enum": [
                 "provider",
@@ -13367,9 +13374,7 @@
           "organization_name",
           "role",
           "expires_at",
-          "needs_password",
-          "verification_pending",
-          "can_sign_in",
+          "next_step",
           "ways_in"
         ],
         "title": "InvitationPreviewPublic",
@@ -48405,7 +48410,7 @@
     },
     "/api/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
       "post": {
-        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time. Addressed by membership id\nrather than by token: the caller is already the addressee, so a token would\nadd nothing their session does not carry. It answers the membership alone,\nbecause the next step that route carries is for a visitor whose only\ncredential is a link.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
         "operationId": "organizations-accept_caller_pending_membership",
         "parameters": [
           {
@@ -48424,7 +48429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                  "$ref": "#/components/schemas/AcceptedMembershipPublic"
                 }
               }
             },

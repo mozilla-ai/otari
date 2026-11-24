@@ -239,7 +239,8 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
         }
       } catch (error) {
         // A budget made for this key alone and left capping nothing would sit
-        // in Spend & budgets, and a retry would make a second one.
+        // in Deployment budgets (a deployment key) or Spend & budgets (an
+        // organization key), and a retry would make a second one.
         if (created) {
           const deleteBudget = isDeploymentWide
             ? deleteDeploymentBudget
@@ -280,12 +281,15 @@ export function KeyBudgetField({
   budgets,
   isLoading,
   isExempt,
+  isDeploymentWide,
   current,
 }: {
   value: KeyBudgetDraft
   onChange: (draft: KeyBudgetDraft) => void
   budgets: readonly CappingBudget[]
   isLoading: boolean
+  /** Whose budgets `budgets` are, which decides the page that lists them. */
+  isDeploymentWide: boolean
   /** A budget-exempt key is never gated, so a cap on it would never bind. */
   isExempt: boolean
   /**
@@ -328,12 +332,21 @@ export function KeyBudgetField({
           ) : (
             <>
               Caps this key's own spend. Pick a budget from{" "}
-              <Link
-                to="/budgets"
-                className="font-medium text-link hover:text-link-hover"
-              >
-                Spend &amp; budgets
-              </Link>
+              {isDeploymentWide ? (
+                <Link
+                  to="/admin/budgets"
+                  className="font-medium text-link hover:text-link-hover"
+                >
+                  Deployment budgets
+                </Link>
+              ) : (
+                <Link
+                  to="/budgets"
+                  className="font-medium text-link hover:text-link-hover"
+                >
+                  Spend &amp; budgets
+                </Link>
+              )}
               , or set an amount for this key alone.
             </>
           )

@@ -65,6 +65,7 @@ from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
     MANAGEMENT_ROLES,
     OWNER_ROLE,
+    AcceptedMembershipPublic,
     AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -79,6 +80,7 @@ from gateway.models.tenancy import (
     CallerOrganizationMembershipsPublic,
     CallerWorkspaceMembershipPublic,
     Invitation,
+    InvitationNextStep,
     InvitationPreviewPublic,
     InvitationWayIn,
     InviteOrganizationMemberRequest,
@@ -203,6 +205,29 @@ def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
     if settings.can_deliver_links:
         ways.append("password_reset")
     return ways
+
+
+def _invitation_outcome(
+    means: SignInMeans, *, may_set_password: bool, settings: "InvitationClaimSettings"
+) -> tuple[InvitationNextStep, list[InvitationWayIn]]:
+    """What an invitee carrying these credentials does to get in, and the ways in that step names.
+
+    Pairing the two here is what holds the step's promise about them: ``verify_email``
+    cannot be answered without ``password_reset`` beside it, because both read
+    ``can_deliver_links``.
+
+    NOTE: ``verify_email`` needs a transport that delivers, not merely one that is
+    configured, because a verification link the mailbox never saw is no way in.
+    """
+    if may_set_password:
+        step = InvitationNextStep.SET_PASSWORD
+    elif means.completes_sign_in:
+        step = InvitationNextStep.SIGN_IN
+    elif means is SignInMeans.UNVERIFIED_PASSWORD and settings.can_deliver_links:
+        step = InvitationNextStep.VERIFY_EMAIL
+    else:
+        step = InvitationNextStep.USE_ANOTHER_WAY_IN
+    return step, _ways_in(settings) if step.carries_ways_in else []
 
 
 def _way_in_without_the_link(settings: "InvitationClaimSettings") -> str:
@@ -2098,25 +2123,25 @@ class OrganizationService:
     async def get_invitation_preview(self, token: str, *, claims: InvitationClaimSettings) -> InvitationPreviewPublic:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
 
-        ``needs_password`` tells the token's holder whether accepting may set
-        the address's first password, and ``verification_pending``,
-        ``can_sign_in`` and ``ways_in`` how the address gets in when it may
-        not. That is only ever said to someone holding this invitation, which
+        ``next_step`` tells the token's holder what to do to get in, and
+        ``ways_in`` what this deployment offers where that step names them.
+        That is only ever said to someone holding this invitation, which
         already names the address, so it widens nothing signup's
         enumeration-safety protects.
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
-        needs_password = await self._invitee_is_claimable(invitee, organization.id)
-        can_sign_in = invitee.sign_in_means.completes_sign_in
+        next_step, ways_in = _invitation_outcome(
+            invitee.sign_in_means,
+            may_set_password=await self._invitee_is_claimable(invitee, organization.id),
+            settings=claims,
+        )
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
             role=membership.role,
             expires_at=invitation.expires_at,
-            needs_password=needs_password,
-            verification_pending=invitee.sign_in_means is SignInMeans.UNVERIFIED_PASSWORD,
-            can_sign_in=can_sign_in,
-            ways_in=[] if needs_password or can_sign_in else _ways_in(claims),
+            next_step=next_step,
+            ways_in=ways_in,
         )
 
     async def accept_invitation(
@@ -2147,10 +2172,10 @@ class OrganizationService:
         (``claims``), a first password needs ``terms_accepted``, as signup and
         a reset claim do.
 
-        ``verification_pending`` on the result says the invitee chose a password
-        through signup and has not verified it yet, so the page can tell them to
-        verify before signing in. Accepting never verifies it: whoever signed up
-        may not be the person the invitation reached.
+        ``next_step`` on the result says where this leaves the invitee.
+        Accepting never verifies an address: whoever signed up may not be the
+        person the invitation reached, so a password waiting on verification is
+        still waiting afterwards.
         """
         if password is not None:
             # Before the lookup, so a policy refusal says nothing about the token.
@@ -2172,6 +2197,7 @@ class OrganizationService:
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
+        claimed_identity: User | None = None
         if password is not None:
             if not await self._invitee_is_claimable(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
@@ -2203,23 +2229,21 @@ class OrganizationService:
             if not claimed:
                 await self.db.rollback()
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
-        result = await self._resolve_invitation_to_active_membership(
+            # The claim was a conditional UPDATE the session did not see, so this re-reads the row.
+            claimed_identity = await self.users.reload(invitee)
+        accepted = await self._resolve_invitation_to_active_membership(
             invitation, membership, organization, blocked_addresses
         )
-        verification_pending = invitee.sign_in_means is SignInMeans.UNVERIFIED_PASSWORD
-        can_sign_in = password is not None or invitee.sign_in_means.completes_sign_in
-        claimed_identity = None
-        if password is not None:
-            # The claim was a conditional UPDATE the session did not see, so the name it wrote is read back.
-            claimed_identity = await self.users.reload(invitee)
+        # This link is spent, so no later call may choose a password through it.
+        next_step, ways_in = _invitation_outcome(
+            (claimed_identity or invitee).sign_in_means, may_set_password=False, settings=claims
+        )
         return InvitationAcceptance(
-            result=result.model_copy(
-                update={
-                    "password_set": password is not None,
-                    "verification_pending": verification_pending,
-                    "can_sign_in": can_sign_in,
-                    "ways_in": [] if can_sign_in else _ways_in(claims),
-                }
+            result=AcceptInvitationResultPublic(
+                organization_name=accepted.organization_name,
+                role=accepted.role,
+                next_step=next_step,
+                ways_in=ways_in,
             ),
             claimed=claimed_identity,
         )
@@ -2230,7 +2254,7 @@ class OrganizationService:
         membership: OrganizationMember,
         organization: Organization,
         blocked_addresses: BlockedAddresses,
-    ) -> AcceptInvitationResultPublic:
+    ) -> AcceptedMembershipPublic:
         """Flip a resolved pending invitation and its membership to ``active``, and commit.
 
         The whole of what accepting does, shared by the two ways to ask for it:
@@ -2270,7 +2294,7 @@ class OrganizationService:
             # directly through POST /me/members.
             await get_or_create_attribution_user(self.db, user_id=str(membership.user_id), alias=invitation.email)
 
-        return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
+        return AcceptedMembershipPublic(organization_name=organization.name, role=membership.role)
 
     async def admit(
         self,
@@ -2434,7 +2458,7 @@ class OrganizationService:
         user: User,
         organization_member_id: uuid.UUID,
         blocked_addresses: BlockedAddresses,
-    ) -> AcceptInvitationResultPublic:
+    ) -> AcceptedMembershipPublic:
         """Accept an invitation addressed to the caller, from their own inbox.
 
         Does exactly what the emailed link does (see
@@ -2489,7 +2513,7 @@ class OrganizationService:
         self,
         user: User,
         organization_member_id: uuid.UUID,
-    ) -> AcceptInvitationResultPublic | None:
+    ) -> AcceptedMembershipPublic | None:
         """The result an accept would have returned, if the caller already holds this membership active.
 
         ``None`` when there is still something to accept, or when the id names
@@ -2503,7 +2527,7 @@ class OrganizationService:
         organization = await self.organizations.get(membership.organization_id)
         if organization is None:
             return None
-        return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
+        return AcceptedMembershipPublic(organization_name=organization.name, role=membership.role)
 
     async def decline_pending_membership_for_user(
         self,
