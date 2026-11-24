@@ -37,6 +37,7 @@ import {
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
 import { rememberSignInAddress } from "@/features/auth/signInAddress"
+import { rememberSignInReason } from "@/features/auth/signInReason"
 import { useProfile } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
 import {
@@ -197,6 +198,14 @@ export function AcceptInvitationPage() {
                 fullWidth
                 onPress={() => {
                   if (invitedEmail) rememberSignInAddress(invitedEmail)
+                  const organizationName =
+                    accept.data.organization_name ||
+                    preview.data?.organization_name
+                  rememberSignInReason(
+                    organizationName
+                      ? `Sign in to join ${organizationName}.`
+                      : "Sign in to accept your invitation.",
+                  )
                   goToPublicAuthPage("/")
                 }}
               >

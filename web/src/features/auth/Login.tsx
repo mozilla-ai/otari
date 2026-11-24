@@ -15,6 +15,7 @@ import {
   LOGIN_REFUSAL_HINT_ID,
   LoginRefusalHint,
 } from "@/features/auth/overlayLoginRefusalHint"
+import { useSignInReason } from "@/features/auth/overlaySignInReason"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -56,6 +57,7 @@ import {
   rememberSignInAddress,
 } from "./signInAddress"
 import { forgetSignInNotice, readSignInNotice } from "./signInNotice"
+import { forgetSignInReason } from "./signInReason"
 
 /** Whether the primary pointer is a mouse or a trackpad rather than a finger. */
 function hasFinePointer(): boolean {
@@ -314,9 +316,12 @@ export function Login() {
   const [prefilledEmail] = useState(readSignInAddress)
   // Why a link landed here instead of where it pointed (the setup page).
   const [notice] = useState(readSignInNotice)
+  // Why a page sent the visitor here (an invitation), said as the description.
+  const reason = useSignInReason()
   useEffect(() => {
     forgetSignInAddress()
     forgetSignInNotice()
+    forgetSignInReason()
   }, [])
   const [email, setEmail] = useState(prefilledEmail)
   const [password, setPassword] = useState("")
@@ -713,9 +718,10 @@ export function Login() {
         <div className="flex flex-col gap-1.5 text-center">
           <h1 className={HEADING}>Sign in to Otari</h1>
           <p className="text-sm text-pretty text-muted">
-            {usesPassword
-              ? "One account for every model."
-              : "Sign in with your master key to browse models, set pricing, and manage settings."}
+            {reason ??
+              (usesPassword
+                ? "One account for every model."
+                : "Sign in with your master key to browse models, set pricing, and manage settings.")}
           </p>
         </div>
 

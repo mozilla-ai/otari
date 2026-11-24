@@ -133,7 +133,9 @@ request snippets show when the API has a host of its own),
 `features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
 pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
 header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
-line under the password field after a refused sign-in), `app/nav/overlayAccountMenuRows.tsx` (extra
+line under the password field after a refused sign-in), `features/auth/overlaySignInReason.ts`
+(the reason the sign-in card gives in place of its default description, such as
+an invitation's organization), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
 the account control, the person's avatar here). Three more carry account state
 into the chrome: `app/overlayShellBanner.tsx` (a band above the header on every
