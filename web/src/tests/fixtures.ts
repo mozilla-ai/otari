@@ -35,7 +35,10 @@ import type {
   OrgProviderModel,
   PendingOrganizationInvitation,
   PricingResponse,
+  SavingsAmounts,
   ScopedBudget,
+  SubagentSavings,
+  SubagentSavingsTotals,
   UpdateCheckStatus,
   UsageTotals,
   User,
@@ -160,6 +163,7 @@ export const SURFACES = [
   "pricing",
   "routing",
   "settings",
+  "subagent_savings",
   "tools",
   "update_check",
   "usage",
@@ -1111,5 +1115,141 @@ export function updateCheckStatus(
     update_available: false,
     advisories: [],
     ...overrides,
+  }
+}
+
+/** A group of subagent decisions with no money in it. */
+export function savingsAmounts(
+  overrides: Partial<SavingsAmounts> = {},
+): SavingsAmounts {
+  return {
+    decisions: 0,
+    with_outcome: 0,
+    measured: 0,
+    estimated: 0,
+    baseline_cost: 0,
+    actual_cost: 0,
+    router_cost: 0,
+    gross_saved: 0,
+    net_saved: 0,
+    ...overrides,
+  }
+}
+
+/**
+ * What the subagent router saved: six recommendations, four priced, one never
+ * reported and one that could not be priced.
+ */
+export function subagentSavings(
+  overrides: Omit<Partial<SubagentSavings>, "totals"> & {
+    totals?: Partial<SubagentSavingsTotals>
+  } = {},
+): SubagentSavings {
+  const { totals, ...rest } = overrides
+  return {
+    recommender_available: true,
+    totals: {
+      ...savingsAmounts({
+        decisions: 6,
+        with_outcome: 5,
+        measured: 1,
+        estimated: 3,
+        baseline_cost: 8.1,
+        actual_cost: 2.5,
+        router_cost: 0.1,
+        gross_saved: 5.6,
+        net_saved: 5.5,
+      }),
+      no_outcome: 1,
+      unpriced: 1,
+      router_unanswered: 0,
+      ...totals,
+    },
+    measured: savingsAmounts({
+      decisions: 1,
+      with_outcome: 1,
+      measured: 1,
+      baseline_cost: 2,
+      actual_cost: 1,
+      gross_saved: 1,
+      net_saved: 1,
+    }),
+    estimated: savingsAmounts({
+      decisions: 4,
+      with_outcome: 4,
+      estimated: 3,
+      baseline_cost: 6.1,
+      actual_cost: 1.5,
+      router_cost: 0.08,
+      gross_saved: 4.6,
+      net_saved: 4.52,
+    }),
+    series: [
+      {
+        ...savingsAmounts({
+          decisions: 6,
+          with_outcome: 5,
+          measured: 1,
+          estimated: 3,
+          baseline_cost: 8.1,
+          actual_cost: 2.5,
+          router_cost: 0.1,
+          gross_saved: 5.6,
+          net_saved: 5.5,
+        }),
+        bucket_start: "2026-11-20T00:00:00Z",
+      },
+    ],
+    by_agent_type: [
+      {
+        ...savingsAmounts({
+          decisions: 4,
+          with_outcome: 3,
+          measured: 1,
+          estimated: 1,
+          baseline_cost: 3,
+          actual_cost: 1.2,
+          router_cost: 0.04,
+          gross_saved: 1.8,
+          net_saved: 1.76,
+        }),
+        agent_type: "Explore",
+      },
+      {
+        ...savingsAmounts({
+          decisions: 1,
+          with_outcome: 1,
+          estimated: 1,
+          baseline_cost: 0.1,
+          actual_cost: 0.3,
+          router_cost: 0.01,
+          gross_saved: -0.2,
+          net_saved: -0.21,
+        }),
+        agent_type: "Plan",
+      },
+    ],
+    by_swap: [
+      {
+        ...savingsAmounts({
+          decisions: 3,
+          with_outcome: 3,
+          estimated: 3,
+          baseline_cost: 6.1,
+          actual_cost: 1.5,
+          router_cost: 0.07,
+          gross_saved: 4.6,
+          net_saved: 4.53,
+        }),
+        baseline_model: "anthropic:claude-opus-5",
+        ran_on: "claude-haiku-5",
+      },
+      {
+        ...savingsAmounts({ decisions: 1, with_outcome: 1, router_cost: 0.01 }),
+        baseline_model: "opus",
+        ran_on: "claude-haiku-5",
+      },
+    ],
+    ...rest,
   }
 }

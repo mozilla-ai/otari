@@ -119,6 +119,8 @@ export const HOSTED_PRICE_RESET_PREVIEW = "hosted-price-reset-preview"
 // The decision models that pick a subagent's model. One root: switching one on
 // switches the others off on the server, so every write refetches the list.
 export const AGENT_RECOMMENDERS = "agent-recommenders"
+// What the subagent router saved, read per window and scope.
+export const SUBAGENT_SAVINGS = "subagent-savings"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.

@@ -284,6 +284,18 @@ parent's), and keeps both amounts with the record. They are an estimate: the
 counts are the harness's own, a long-context price tier is not applied, and a
 different model would not have used exactly the same tokens.
 
+The **Router savings** tab of the dashboard's Sessions page adds these up for a
+window: what the routed subagents would have cost, what they did cost, and the
+difference less what the recommendations themselves cost. It reads the
+workspace selected in the dashboard, which for an owner or admin is any
+workspace of the organization and for anyone else one they belong to, and
+**Just me** narrows it to the reader's own subagents. Three things keep the figure
+honest. Every recommendation's cost comes off, also one whose subagent never
+reported or could not be priced, so a saving can be negative. An outcome with
+no price on either side is shown as not priced and left out of the money. And
+the baseline assumes a subagent with no model asked for would have run on the
+parent's, which reads high for a subagent type that sets a model of its own.
+
 The harness that asks picks the candidates: Claude Code chooses among
 `agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
 default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
