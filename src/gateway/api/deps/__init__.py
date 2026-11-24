@@ -389,7 +389,7 @@ def build_sandbox_file_bridge(
     and otherwise under the one the request arrived on.
     """
     backends = _file_backends(raw_request)
-    if not config.files_enabled or backends is None or user_id is None or workspace_id is None:
+    if not config.files_api_enabled or backends is None or user_id is None or workspace_id is None:
         return None
     base = (config.public_base_url or str(raw_request.base_url)).rstrip("/")
     return SandboxFileBridge(

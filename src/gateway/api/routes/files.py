@@ -85,7 +85,7 @@ async def _require_files_enabled(config: Annotated[GatewayConfig, Depends(get_co
     feature answer like an unmounted one instead of leaking, through the
     refusal it picks, that the paths are there at all.
     """
-    if not config.files_enabled:
+    if not config.files_api_enabled:
         raise FilesDisabledError
 
 
