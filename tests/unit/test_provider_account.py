@@ -69,3 +69,30 @@ def test_neither_the_account_nor_the_credential_shows_the_key() -> None:
     assert "sk-secret-value" not in account.identity
     assert "sk-secret-value" not in repr(account)
     assert "sk-secret-value" not in repr(credential)
+
+
+def _proxied(header_value: str) -> ResolvedCredential:
+    return effective_credential(
+        LLMProvider.ANTHROPIC,
+        {
+            "api_key": "sk-one",
+            "api_base": "https://proxy/v1",
+            "client_args": {"default_headers": {"Fastly-Key": header_value}},
+        },
+    )
+
+
+def test_a_changed_endpoint_credential_names_another_account() -> None:
+    """A proxy in front of one address can reach a different account for each credential it accepts.
+
+    Two keys alike in every other field then name one account, and a file
+    uploaded on either is offered to the other, which does not hold it.
+    """
+    assert _account(_proxied("edge-one")) != _account(_proxied("edge-two"))
+
+
+def test_a_credential_with_no_endpoint_header_keeps_the_name_it_had() -> None:
+    """Pinned because a moved digest orphans every provider file copy already recorded under it."""
+    assert _account(ResolvedCredential(api_key="sk-one")) == (
+        "f9c0bdd9e11daa0385c2a181461a6f8b3db20c7fd146e33f64a72f0c1ba146f5"
+    )

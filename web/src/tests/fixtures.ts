@@ -868,6 +868,7 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    endpoint_auth_unreadable: false,
     // Never refreshed: the key offers no rows and is unnarrowed.
     offered_count: 0,
     serving_count: 0,

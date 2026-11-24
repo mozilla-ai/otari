@@ -9,7 +9,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { BudgetExemptToggle } from "@/features/keys/BudgetExemptToggle"
-import { ExpiryFields } from "@/features/keys/ExpiryFields"
+import { ExpiryFields, toDatetimeLocal } from "@/features/keys/ExpiryFields"
 import {
   ceilingLabel,
   draftFor,
@@ -39,15 +39,6 @@ import { KeyMcpAccess } from "@/features/tools/KeyMcpAccess"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import { useUpdateKey } from "@/shared/api/apiKeys"
 import { useUsers } from "@/shared/api/users"
-
-// datetime-local wants "YYYY-MM-DDTHH:mm" in local time.
-function toDatetimeLocal(iso: string | null): string {
-  if (!iso) return ""
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ""
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 /**
  * Everything about an existing key that its caller may change, in one dialog:
