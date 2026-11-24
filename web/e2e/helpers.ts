@@ -85,6 +85,17 @@ export async function openOrganization(page: Page): Promise<void> {
 }
 
 /**
+ * Enter the deployment's own rail, from the account menu as an operator does.
+ */
+export async function openDeployment(page: Page): Promise<void> {
+  const menu = await openAccountMenu(page)
+  await menu.getByRole("link", { name: "Deployment" }).click()
+  await expect(
+    nav(page).getByRole("link", { name: "Deployment budgets" }),
+  ).toBeVisible()
+}
+
+/**
  * Open the account menu at the foot of the sidebar.
  *
  * The one way to the deployment's own pages: they are registry entries like any

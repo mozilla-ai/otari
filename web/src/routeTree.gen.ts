@@ -31,6 +31,7 @@ import { Route as OverviewIndexRouteImport } from './routes/_overview.index'
 import { Route as OverviewRequestsRouteImport } from './routes/_overview.requests'
 import { Route as OverviewSessionsRouteImport } from './routes/_overview.sessions'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminBudgetsRouteImport } from './routes/admin.budgets'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
@@ -172,6 +173,11 @@ const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
   id: '/admin/accounts',
   path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminBudgetsRoute = AdminBudgetsRouteImport.update({
+  id: '/admin/budgets',
+  path: '/admin/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCodeExecutionRoute = AdminCodeExecutionRouteImport.update({
@@ -366,6 +372,7 @@ export interface FileRoutesByFullPath {
   '/requests': typeof OverviewRequestsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -416,6 +423,7 @@ export interface FileRoutesByTo {
   '/requests': typeof OverviewRequestsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
@@ -472,6 +480,7 @@ export interface FileRoutesById {
   '/_overview/requests': typeof OverviewRequestsRoute
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -531,6 +540,7 @@ export interface FileRouteTypes {
     | '/requests'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -581,6 +591,7 @@ export interface FileRouteTypes {
     | '/requests'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/recommender'
     | '/admin/web-search'
@@ -636,6 +647,7 @@ export interface FileRouteTypes {
     | '/_overview/requests'
     | '/_overview/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -692,6 +704,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminBudgetsRoute: typeof AdminBudgetsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRouteWithChildren
   AdminRecommenderRoute: typeof AdminRecommenderRoute
@@ -857,6 +870,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/budgets': {
+      id: '/admin/budgets'
+      path: '/admin/budgets'
+      fullPath: '/admin/budgets'
+      preLoaderRoute: typeof AdminBudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/code-execution': {
@@ -1242,6 +1262,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminBudgetsRoute: AdminBudgetsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRouteWithChildren,
   AdminRecommenderRoute: AdminRecommenderRoute,
