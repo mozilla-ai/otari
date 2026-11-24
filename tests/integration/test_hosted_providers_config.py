@@ -21,22 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from gateway.api.deps import build_model_metadata_override_service
+from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError, HostedProviderReadOnlyError
 from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.providers import HostedProvider, HostedProviderModel
-from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
-from gateway.repositories.providers import (
-    HostedProviderModelRepository,
-    HostedProviderRegionRepository,
-    HostedProviderRepository,
-    HostedProviderVendorRepository,
-    ProviderEndpointRepository,
-)
-from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository
 from gateway.schemas.providers import (
     HostedModelCreateRequest,
     HostedModelUpdateRequest,
@@ -44,8 +35,7 @@ from gateway.schemas.providers import (
     HostedProviderUpdateRequest,
 )
 from gateway.services.model_discovery_service import ProviderDiscovery
-from gateway.services.pricing import DeploymentPricingService
-from gateway.services.providers import HostedProviderService, HostedSources
+from gateway.services.providers import HostedProviderService
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client, shared_test_config
@@ -91,24 +81,7 @@ def _configured(**entry: Any) -> GatewayConfig:
 
 
 def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
-    uow = UnitOfWork(db)
-    providers = HostedProviderRepository(uow)
-    return HostedProviderService(
-        uow,
-        config=config,
-        providers=providers,
-        regions=HostedProviderRegionRepository(uow),
-        sources=HostedSources(config, providers, HostedProviderRegionRepository(uow)),
-        models=HostedProviderModelRepository(uow),
-        vendors=HostedProviderVendorRepository(uow),
-        endpoints=ProviderEndpointRepository(uow),
-        pricing=DeploymentPricingService(
-            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
-        ),
-        live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
-        organization_exists=OrganizationRepository(uow).exists,
-        metadata_overrides=build_model_metadata_override_service(uow),
-    )
+    return build_hosted_provider_service(UnitOfWork(db), config=config)
 
 
 async def _store(service: HostedProviderService) -> None:

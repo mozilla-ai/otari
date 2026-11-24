@@ -274,11 +274,14 @@ the destination, the transport, the headers or an ambient credential.
 Provider resolution asks `ModelProviderPort` for a deployment-owned credential
 only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`
-tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
-hosted credential must never move ahead of BYO or leave its trusted gateway.
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. The
+adapter resolves every candidate of a request on one `HostedServing`, which
+reads the providers and their regions once, as detached rows, rather than once
+per candidate. A hosted credential must never move ahead of BYO or leave its
+trusted gateway.
 A vendor switched off on a hosted provider (`hosted_provider_disabled_vendors`,
 vendor read by `_hosted_vendors.vendor_of`) is refused in both
-`HostedProviderRuntime.resolve` and `serveable_models`, so dispatch and the
+`HostedServing.resolve` and `serveable_models`, so dispatch and the
 catalog agree; change one and change the other.
 
 A hosted provider with regions (`hosted_provider_regions`, `_hosted_regions.py`)
