@@ -1,7 +1,7 @@
 """The runtime path: what the deployment advertises, and the credential that serves a candidate."""
 
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 from any_llm import LLMProvider
 
@@ -152,6 +152,12 @@ async def serve_on_hosted_provider(
     return dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
 
 
+class HostedServingBuilder(Protocol):
+    """Build a :class:`HostedServing` on the caller's unit of work; the composition root supplies it."""
+
+    def __call__(self, *, read_all: bool) -> "HostedServing": ...
+
+
 class HostedProviderRuntime:
     """Answer the two questions the dispatch path and the catalog ask."""
 
@@ -162,11 +168,13 @@ class HostedProviderRuntime:
         sources: HostedSources,
         models: HostedProviderModelRepository,
         vendors: HostedProviderVendorRepository,
+        serving: HostedServingBuilder,
     ) -> None:
         self.uow = uow
         self.sources = sources
         self.models = models
         self.vendors = vendors
+        self.build_serving = serving
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         """Each provider serveable to ``organization_id``, with the models switched on under it.
@@ -201,7 +209,7 @@ class HostedProviderRuntime:
         For one request: what it read is never read again, so a change
         committed after its first resolve is not seen by the next.
         """
-        return HostedServing(self.uow, sources=self.sources, models=self.models, vendors=self.vendors)
+        return self.build_serving(read_all=True)
 
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
@@ -210,10 +218,7 @@ class HostedProviderRuntime:
 
         Read afresh, and for ``name`` alone; see :meth:`HostedServing.resolve` for the rules.
         """
-        serving = HostedServing(
-            self.uow, sources=self.sources, models=self.models, vendors=self.vendors, read_all=False
-        )
-        return await serving.resolve(name, model, organization_id=organization_id)
+        return await self.build_serving(read_all=False).resolve(name, model, organization_id=organization_id)
 
 
 class HostedServing:
@@ -277,11 +282,9 @@ class HostedServing:
             credentials = source.region_credentials(slug=pinned)
         # A provider of a region's whole name answers that selector, so the
         # region would settle under, and be priced as, a provider it is not.
-        shadowed = [
-            each
-            for each in credentials
-            if each.region and hosted_provider_named(region_instance(source.name, each.region))
-        ]
+        # Asked of the snapshot where there is one, so every candidate agrees on which names exist.
+        named = hosted_provider_named if self._snapshot is None else self._snapshot.provider_named
+        shadowed = [each for each in credentials if each.region and named(region_instance(source.name, each.region))]
         for each in shadowed:
             logger.warning(
                 "Region %r of hosted provider %r is not served: a provider is named %r",

@@ -280,6 +280,7 @@ from gateway.services.pricing_service import RequestPrices, ResolvedPricing, res
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
+    HostedServing,
     HostedSources,
     OrgProviderModelService,
     PlatformClient,
@@ -687,19 +688,27 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
     """
     providers = HostedProviderRepository(uow)
     regions = HostedProviderRegionRepository(uow)
+    sources = HostedSources(config, providers, regions)
+    models = HostedProviderModelRepository(uow)
+    vendors = HostedProviderVendorRepository(uow)
+
+    def serving(*, read_all: bool) -> HostedServing:
+        return HostedServing(uow, sources=sources, models=models, vendors=vendors, read_all=read_all)
+
     return HostedProviderService(
         uow,
         config=config,
         providers=providers,
         regions=regions,
-        sources=HostedSources(config, providers, regions),
-        models=HostedProviderModelRepository(uow),
-        vendors=HostedProviderVendorRepository(uow),
+        sources=sources,
+        models=models,
+        vendors=vendors,
         endpoints=ProviderEndpointRepository(uow),
         pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
         metadata_overrides=build_model_metadata_override_service(uow),
+        serving=serving,
     )
 
 

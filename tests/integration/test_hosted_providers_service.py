@@ -13,13 +13,14 @@ from decimal import Decimal
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.model import Model
-from sqlalchemy import Engine, delete, event, select
+from sqlalchemy import Engine, delete, event, select, update
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
-from gateway.api.deps import build_model_metadata_override_service
+from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -40,13 +41,9 @@ from gateway.models.providers import HostedProvider, HostedProviderModel, Provid
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.models.tenancy import Organization
 from gateway.ports.model_provider_port import HostedCredential
-from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
-    HostedProviderRegionRepository,
-    HostedProviderRepository,
     HostedProviderVendorRepository,
-    ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository, WorkspaceRepository
 from gateway.schemas.providers import (
@@ -57,10 +54,10 @@ from gateway.schemas.providers import (
     HostedProviderUpdateRequest,
 )
 from gateway.services.model_discovery_service import ProviderDiscovery, get_model_cache
-from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import configure_default_pricing
-from gateway.services.providers import HostedProviderService, HostedSources
+from gateway.services.providers import HostedProviderService
 from gateway.services.providers._hosted_catalog import KEEP_FETCH_TOOL, KEEP_OWNED_ENDPOINT
+from gateway.services.providers._hosted_name_index import reset_hosted_name_index
 from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.secret_box import generate_secret_key
 from gateway.types.models_dev import parse_catalog_v2
@@ -82,25 +79,7 @@ def _secret_key_and_default_pricing(monkeypatch: pytest.MonkeyPatch) -> Iterator
 
 
 def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedProviderService:
-    uow = UnitOfWork(db)
-    config = config or GatewayConfig()
-    providers = HostedProviderRepository(uow)
-    return HostedProviderService(
-        uow,
-        config=config,
-        providers=providers,
-        regions=HostedProviderRegionRepository(uow),
-        sources=HostedSources(config, providers, HostedProviderRegionRepository(uow)),
-        models=HostedProviderModelRepository(uow),
-        vendors=HostedProviderVendorRepository(uow),
-        endpoints=ProviderEndpointRepository(uow),
-        pricing=DeploymentPricingService(
-            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
-        ),
-        live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
-        organization_exists=OrganizationRepository(uow).exists,
-        metadata_overrides=build_model_metadata_override_service(uow),
-    )
+    return build_hosted_provider_service(UnitOfWork(db), config=config or GatewayConfig())
 
 
 def _discovery(
@@ -1386,16 +1365,44 @@ async def test_the_adapter_still_serves_after_the_request_rolls_back(
     await _policy_candidates(service, monkeypatch)
     adapter = HostedProviderModelProviderAdapter(service)
     first = await adapter.resolve_hosted_credential(
-        organization_id=uuid.uuid4(), workspace_id=None, provider="openai-eu", model="gpt-4o"
-    )
-
-    await async_db.rollback()
-    second = await adapter.resolve_hosted_credential(
         organization_id=uuid.uuid4(), workspace_id=None, provider="openai", model="gpt-4o"
     )
+    # A row the session holds, read in a transaction the rollback then ends.
+    control = (await async_db.execute(select(HostedProvider).where(HostedProvider.name == "openai"))).scalar_one()
 
-    assert first is not None and first.api_key == KEY
-    assert second is not None and second.api_key == KEY
+    await async_db.rollback()
+
+    assert sa_inspect(control).expired
+    # openai-eu is answered from the snapshot's region rows, which the rollback did not expire.
+    second = await adapter.resolve_hosted_credential(
+        organization_id=uuid.uuid4(), workspace_id=None, provider="openai-eu", model="gpt-4o"
+    )
+    assert _served(first) == [("openai", KEY)]
+    assert _served(second) == [("openai-eu@de", KEY), ("openai-eu@sg", REGION_KEY)]
+
+
+async def test_the_adapter_finds_a_shadowed_region_in_its_snapshot(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A region a provider of its whole name shadows is withheld by the names the request read, not the live index.
+
+    The live index is emptied, as a worker that has not refreshed since the
+    provider appeared would hold it, so only the snapshot knows the name.
+    """
+    service = _service(async_db)
+    await _policy_candidates(service, monkeypatch)
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", name="shadow", api_key=KEY))
+    # A name holding the separator, as one stored before regions could be.
+    await async_db.execute(update(HostedProvider).where(HostedProvider.name == "shadow").values(name="openai-eu@sg"))
+    await async_db.commit()
+    reset_hosted_name_index()
+    adapter = HostedProviderModelProviderAdapter(service)
+
+    eu = await adapter.resolve_hosted_credential(
+        organization_id=uuid.uuid4(), workspace_id=None, provider="openai-eu", model=None
+    )
+
+    assert _served(eu) == [("openai-eu@de", KEY)]
 
 
 async def test_only_a_model_switched_on_under_the_provider_serves(

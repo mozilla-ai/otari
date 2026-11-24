@@ -121,7 +121,7 @@ from gateway.services.providers._hosted_name_index import (
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
-from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing
+from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing, HostedServingBuilder
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
@@ -177,6 +177,7 @@ class HostedProviderService:
         live_byo_pairs: LiveByoPairs,
         organization_exists: OrganizationExists,
         metadata_overrides: ModelMetadataOverrideService,
+        serving: HostedServingBuilder,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
@@ -187,7 +188,7 @@ class HostedProviderService:
         organizations hold a live key for each of the given providers, and
         ``organization_exists`` whether the deployment holds an organization a
         restriction names; callables, because the rows they read are another
-        domain's.
+        domain's. ``serving`` builds the resolver a request's candidates share.
         """
         self.metadata_overrides = metadata_overrides
         self.uow = uow
@@ -208,7 +209,7 @@ class HostedProviderService:
             validate_api_base=self._validate_api_base,
         )
         self.offers = HostedOffers(models, pricing)
-        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors)
+        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors, serving=serving)
         self.sweep = HostedCatalogSweep(
             uow,
             config=config,

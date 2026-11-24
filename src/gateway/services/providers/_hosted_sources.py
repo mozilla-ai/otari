@@ -189,6 +189,10 @@ class HostedSnapshot:
 
     by_name: dict[str, HostedSource]
 
+    def provider_named(self, name: str) -> bool:
+        """Whether a hosted provider goes by exactly ``name``, rather than a region of one."""
+        return name in self.by_name
+
     def get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
         """What :meth:`HostedSources.get_serving` answers, from the snapshot."""
         source = self.by_name.get(lookup_name(name))
