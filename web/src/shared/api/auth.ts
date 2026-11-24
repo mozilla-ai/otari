@@ -316,15 +316,6 @@ export function useDeletePasskey() {
   })
 }
 
-/**
- * The deployment's outgoing-mail configuration, for the Settings page.
- *
- * Distinct from `useDeployment().mail_ready`, which the shell already carries:
- * that one boolean gates a mail-dependent affordance anywhere in the app, while
- * this reports *why* mail is (un)available and is worth a request only on the
- * page that shows it.
- */
-
 export function useSignup() {
   return useMutation({
     mutationFn: (body: SignupRequest) =>
