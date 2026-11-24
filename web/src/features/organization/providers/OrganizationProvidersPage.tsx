@@ -564,10 +564,12 @@ export function OrganizationProvidersPage() {
             </span>
           ) : null}
           {/* The exception to the rule above, because this one *is* a problem:
-              the credential is stored but this deployment cannot decrypt it, so
-              the key serves nothing and its models are absent from the catalog.
-              Nothing else on the page says so, and the row is otherwise
-              indistinguishable from a working one. */}
+              the key cannot be served as it stands, so it serves nothing and
+              its models are absent from the catalog. Nothing else on the page
+              says so, and the row is otherwise indistinguishable from a working
+              one. Not named for one cause: a credential that will not decrypt
+              is the common one, and a row whose own fields make it unservable
+              lands here too. */}
           {row.usable ? null : (
             <span className="flex items-center gap-2 text-mono-caption text-danger">
               <Dot className="bg-danger" />
@@ -800,11 +802,14 @@ export function OrganizationProvidersPage() {
       {canEdit && secretKeyConfigured && unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount === 1
-            ? "One provider key can't be decrypted on this deployment, so it serves nothing and its models are absent from the catalog."
-            : `${unreadableCount} provider keys can't be decrypted on this deployment, so they serve nothing and their models are absent from the catalog.`}{" "}
-          This happens when <code>OTARI_SECRET_KEY</code> changed since they
+            ? "One provider key cannot be served as it stands, so it serves nothing and its models are absent from the catalog."
+            : `${unreadableCount} provider keys cannot be served as they stand, so they serve nothing and their models are absent from the catalog.`}{" "}
+          The usual cause is <code>OTARI_SECRET_KEY</code> changing since they
           were stored. One key seals every stored credential, so re-enter both
-          the API key and the endpoint credential on each that carries one.
+          the API key and the endpoint credential on each that carries one. A
+          key the row itself makes unservable, such as one whose address the
+          credential it holds may not be sent to, is fixed by editing the key
+          rather than by re-entering it.
         </InfoBanner>
       ) : null}
 

@@ -174,7 +174,7 @@ describe("OrganizationProvidersPage", () => {
 
     expect(await screen.findByText("UNREADABLE")).toBeInTheDocument()
     expect(
-      screen.getByText(/can't be decrypted on this deployment/i),
+      screen.getByText(/cannot be served as it stands/i),
     ).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -222,7 +222,7 @@ describe("OrganizationProvidersPage", () => {
     await screen.findByText("Production")
     expect(screen.queryByText("UNREADABLE")).not.toBeInTheDocument()
     expect(
-      screen.queryByText(/can't be decrypted on this deployment/i),
+      screen.queryByText(/cannot be served as it stands/i),
     ).not.toBeInTheDocument()
   })
 
