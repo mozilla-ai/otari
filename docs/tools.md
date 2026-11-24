@@ -792,7 +792,11 @@ limits.
 Search and Fetch share a limit of `web_search_max_calls` attempted calls per
 request, 10 unless the operator sets another, across model turns and routing
 attempts. Invalid, blocked, and failed calls consume that allowance; enriching a
-search's results does not. A call past it gets
+search's results does not. Once the limit is reached, later rounds no longer
+offer Search or Fetch, as for a used-up
+[`max_uses`](#bounding-the-searches-one-request-runs): the model is told they
+reached their limit, and when no other tool is left the next round is the last
+one. A call past the limit within one round gets
 `[tool error] web search call limit reached for this request` (or `web fetch`),
 which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
