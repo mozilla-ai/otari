@@ -190,7 +190,7 @@ class EndpointAuth:
         if not api_base:
             return "an endpoint credential on a key that dials the provider's own endpoint"
         if not _is_https(api_base):
-            return "an endpoint credential on an address that is not https, which would send it in clear"
+            return "an endpoint credential on an address that is not HTTPS, which would send it in clear"
         return refused_header_name_reason(self.header_name)
 
     def refused_expiry_reason(self, *, now: datetime) -> str | None:
