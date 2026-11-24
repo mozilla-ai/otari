@@ -106,6 +106,53 @@ class AgentModelRecommendation(BaseModel):
     )
 
 
+TokenCount = Annotated[int, Field(ge=0, le=10**10)]
+
+
+class SubagentUsageLine(BaseModel):
+    """What a subagent consumed on one model, as its harness counted it.
+
+    The cache counts are beside `input_tokens`, not inside it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1, max_length=256, description="The model, as the harness names it.")
+    input_tokens: TokenCount = Field(description="Input tokens that were neither read from nor written to a cache.")
+    output_tokens: TokenCount
+    cache_read_tokens: TokenCount = 0
+    cache_write_tokens: TokenCount = 0
+
+
+class SubagentOutcomeReport(BaseModel):
+    """What the subagent a recommendation started has consumed so far, in total.
+
+    Each report replaces the one before it, so a harness sends running totals
+    and may send them more than once.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "usage": [
+                    {
+                        "model": "claude-haiku-5-5",
+                        "input_tokens": 1200,
+                        "output_tokens": 800,
+                        "cache_read_tokens": 42000,
+                        "cache_write_tokens": 9000,
+                    }
+                ]
+            }
+        },
+    )
+
+    usage: list[SubagentUsageLine] = Field(
+        min_length=1, max_length=16, description="One line per model the subagent ran on."
+    )
+
+
 class RecommendationRefusal(BaseModel):
     """The body of a recommendation request the gateway refuses."""
 

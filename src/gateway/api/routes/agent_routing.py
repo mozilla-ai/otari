@@ -15,6 +15,8 @@ else is dispatched here, which is why any active API key may ask rather than
 only an operator. See ``docs/claude-code.md``.
 
 Each answer is also recorded as a subagent decision, whose id the answer carries.
+``PUT /api/v1/routing/decisions/{decision_id}/outcome`` is how the harness says
+what the subagent then consumed.
 """
 
 import uuid
@@ -46,7 +48,12 @@ from gateway.exceptions.routing_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
-from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest, RecommendationRefusal
+from gateway.schemas.routing import (
+    AgentModelRecommendation,
+    AgentModelRecommendationRequest,
+    RecommendationRefusal,
+    SubagentOutcomeReport,
+)
 from gateway.services.routing import ROUTER_LABEL, build_decision_request, candidates_for
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 from gateway.types.key_scope import KeyScope
@@ -177,4 +184,44 @@ async def recommend_model_for_agent(
         reason=recommendation.reason,
         probabilities=dict(recommendation.probabilities) if recommendation.probabilities is not None else None,
         decision_id=decision_id,
+    )
+
+
+@router.put(
+    "/decisions/{decision_id}/outcome",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": RecommendationRefusal,
+            "description": "No decision of the caller's has this id.",
+        },
+    },
+    openapi_extra=key_scope(KeyScope.AGENTS_WRITE),
+)
+async def report_subagent_outcome(
+    decision_id: uuid.UUID,
+    report: SubagentOutcomeReport,
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    decisions: SubagentDecisionServiceDep,
+) -> None:
+    """Report what the subagent a recommendation started has consumed.
+
+    The harness sends the token counts it holds for the subagent, one line per
+    model it ran on, as running totals: each report replaces the one before
+    it. The gateway prices those tokens twice, at the models named and at the
+    model the subagent would have started on without the recommendation, and
+    keeps both amounts as an estimate. No content is sent, nothing is charged
+    and no usage row is written.
+
+    Authentication modes:
+    - Master key: any decision.
+    - API key: a decision made for the key's own user in the key's workspace.
+    """
+    api_key, _ = auth_result
+    await decisions.report_outcome(
+        decision_id,
+        user_id=api_key.user_id if api_key else None,
+        workspace_id=api_key.workspace_id if api_key else None,
+        api_key_id=api_key.id if api_key is not None and api_key.user_id is None else None,
+        lines=report.usage,
     )

@@ -1175,6 +1175,43 @@ stored one switched off, is a `400`. The decision model's refusal of the request
 403) a `424` with `provider_credential_rejected`, and any other failure, or an
 answer that names no candidate, a `502`.
 
+### Report what the subagent consumed
+
+`PUT /api/v1/routing/decisions/{decision_id}/outcome` tells Otari what the
+subagent a recommendation started has consumed, with a key holding the
+`agents` scope. Send it when the subagent finishes, or more than once as it
+runs: each report holds running totals and replaces the one before it.
+
+```bash
+curl -X PUT "$OTARI_URL/api/v1/routing/decisions/$DECISION_ID/outcome" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usage": [
+      {
+        "model": "claude-haiku-5-5",
+        "input_tokens": 1200,
+        "output_tokens": 800,
+        "cache_read_tokens": 42000,
+        "cache_write_tokens": 9000
+      }
+    ]
+  }'
+```
+
+| Field | Meaning |
+|---|---|
+| `usage` | One to 16 lines, one per model the subagent ran on. |
+| `usage[].model` | The model, as the harness names it. |
+| `usage[].input_tokens` | Input tokens that were neither read from nor written to a cache. |
+| `usage[].output_tokens` | Output tokens. |
+| `usage[].cache_read_tokens`, `usage[].cache_write_tokens` | Cache tokens, counted beside `input_tokens`. Zero when left out. |
+
+The answer is a `204` with no body. Nothing is charged and no usage row is
+written. An id that is not a decision of the caller's own is a `404`: an API
+key reaches the decisions made for its user in its workspace, and the master
+key reaches any.
+
 ## Provider error details
 
 Otari may return a short, sanitized provider diagnostic when the upstream

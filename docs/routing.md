@@ -275,6 +275,15 @@ subagent type, the parent's model, the model the caller asked for, the model
 recommended and what the call cost. The task and its description are not kept.
 The answer names the record in `decision_id`.
 
+A harness can then say what the subagent consumed, through
+`PUT /api/v1/routing/decisions/{decision_id}/outcome`: the token counts it
+holds, one line per model. Otari prices those tokens twice from its own rates,
+at the models the subagent ran on and at the model it would have started on
+without the recommendation (the model the caller asked for, else the
+parent's), and keeps both amounts with the record. They are an estimate: the
+counts are the harness's own, a long-context price tier is not applied, and a
+different model would not have used exactly the same tokens.
+
 The harness that asks picks the candidates: Claude Code chooses among
 `agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
 default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
