@@ -226,7 +226,7 @@ def test_a_command_gate_is_reported_as_unable_to_run(repo: Path) -> None:
     assert "cannot run against a change, which carries no commands: no-force-push." in result.output
 
 
-def test_a_gate_that_does_not_apply_still_has_a_text_result_line(repo: Path) -> None:
+def test_a_gate_that_does_not_apply_is_only_counted_in_the_text_summary(repo: Path) -> None:
     guardrail = _CHANGELOG_GATE.replace(
         "runs: [pre_tool_use.edit_target, stop.working_tree]", "runs: [pre_tool_use.edit_target]"
     )
@@ -235,7 +235,8 @@ def test_a_gate_that_does_not_apply_still_has_a_text_result_line(repo: Path) -> 
     result = _invoke()
 
     assert result.exit_code == 0, result.output
-    assert re.search(r"^  not_applicable +no-hand-edited-changelog \(path, required\)", result.output, re.MULTILINE)
+    assert not re.search(r"^  not_applicable +no-hand-edited-changelog \(path, required\)", result.output, re.MULTILINE)
+    assert "1 gate(s) do not apply to this change." in result.output
 
 
 def test_a_failing_required_verifier_exits_one_and_runs_in_the_checked_repo(repo: Path) -> None:
@@ -258,6 +259,19 @@ def test_a_verifier_cannot_run_against_a_commit(repo: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "cannot run  tree-is-clean (verifier, required)" in result.output
+
+
+def test_json_report_omits_detail_for_a_verifier_checked_at_a_commit(repo: Path) -> None:
+    _write_guardrail(repo, _VERIFIER_GATE)
+    _write_verifier(repo, "exit 1")
+    head = _commit(repo)
+
+    result = _invoke("--base", f"{head}~1", "--head", head, "--format", "json")
+
+    assert result.exit_code == 0, result.output
+    [gate] = json.loads(result.output)["gates"]
+    assert gate["outcome"] == "not_applicable"
+    assert gate["detail"] is None
 
 
 def test_guardrails_from_another_checkout_cannot_be_changed_by_the_change(repo: Path, tmp_path: Path) -> None:

@@ -92,20 +92,29 @@ jobs:
           uv sync --frozen --no-dev --package otari-agent
           npm install --global --no-fund --no-audit @anthropic-ai/claude-code@2.1.292
 
-      # A base commit from before the command existed, such as an old pull
-      # request's, cannot judge anything. Only the usage error for an unknown
-      # command (exit 2) means that; any other failure is a broken install.
+      # A base commit from before the command or JSON report existed, such as
+      # an old pull request's, cannot judge anything. Only the usage error for
+      # an unknown command (exit 2) means that; any other failure is a broken
+      # install.
       - name: Check that the base commit can run the gates
         id: cli
         if: steps.fetch.outputs.fetched == 'true'
         run: |
-          if .venv/bin/otari guardrails check --help > /dev/null 2> "$RUNNER_TEMP/probe.txt"; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          elif [ "$?" -eq 2 ]; then
-            echo "::notice title=Judge gates skipped::The base commit's CLI has no \`otari guardrails check\`."
+          help="$RUNNER_TEMP/guardrails-check-help.txt"
+          if .venv/bin/otari guardrails check --help > "$help" 2> "$RUNNER_TEMP/probe.txt"; then
+            if grep -q -- '--format' "$help"; then
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice title=Judge gates skipped::The base commit's CLI has no \`otari guardrails check --format json\`."
+            fi
           else
-            cat "$RUNNER_TEMP/probe.txt"
-            exit 1
+            status=$?
+            if [ "$status" -eq 2 ]; then
+              echo "::notice title=Judge gates skipped::The base commit's CLI has no \`otari guardrails check\`."
+            else
+              cat "$RUNNER_TEMP/probe.txt"
+              exit 1
+            fi
           fi
 
       # The judge runs `claude -p` with every tool and MCP server disabled,
@@ -142,12 +151,21 @@ jobs:
             --format json > "$report" || status=$?
           token=$(openssl rand -hex 16)
           echo "::stop-commands::$token"
-          jq . "$report"
+          jq . "$report" 2>/dev/null || true
           echo "::$token::"
-          jq . "$report" | sed "s/\`\`\`/'''/g" > "$RUNNER_TEMP/judges-fenced.txt"
+          jq -r '
+            def indented($prefix; $value):
+              if $value == null then ""
+              else "\n" + ($value | split("\n") | map($prefix + .) | join("\n"))
+              end;
+            .gates[]
+            | ("  \(.outcome) \(.id) (\(.type), \(.enforcement))"
+              + indented("    "; .message)
+              + indented("      "; .detail))
+          ' "$report" 2>/dev/null | sed "s/\`\`\`/'''/g" > "$RUNNER_TEMP/judges-fenced.txt" || true
           {
             echo '### Judge gates'
-            echo '```json'
+            echo '```text'
             cat "$RUNNER_TEMP/judges-fenced.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -177,7 +195,7 @@ jobs:
             echo
             echo "A model read the diff up to $HEAD_SHA against each judge gate. Its findings are advisory and do not block the merge."
             echo
-            echo '```json'
+            echo '```text'
             cat "$RUNNER_TEMP/judges-fenced.txt"
             echo '```'
             echo
@@ -188,7 +206,7 @@ jobs:
           existing=${existing%%$'\n'*}
           if [ -n "$existing" ]; then
             gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" > /dev/null
-          elif jq -e '.gates[] | select(.outcome == "fail")' "$RUNNER_TEMP/judges.json" > /dev/null; then
+          elif jq -e '.gates[] | select(.outcome == "fail")' "$RUNNER_TEMP/judges.json" > /dev/null 2>/dev/null; then
             gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
           fi
 
@@ -203,13 +221,13 @@ jobs:
         if: steps.judges.outcome == 'success'
         run: |
           report="$RUNNER_TEMP/judges.json"
-          required=$(jq -r '.exit_status' "$report")
+          required=$(jq -r '.exit_status' "$report" 2>/dev/null || true)
           if [ "$required" = "null" ] || [ -z "$required" ]; then
-            echo "::warning title=Judge gates::Could not read the required/advisory gate summary; see the job summary."
+            echo "::warning title=Judge gates::Could not read the JSON judge report; see the job summary."
           elif [ "$required" != "0" ]; then
             echo "::error title=Judge gates::A required gate did not pass. See the job summary."
             exit 1
           fi
-          if jq -e '.gates[] | select(.outcome == "fail")' "$report" > /dev/null; then
+          if jq -e '.gates[] | select(.outcome == "fail")' "$report" > /dev/null 2>/dev/null; then
             echo "::warning title=Judge gates::A judge gate did not pass. Its finding is advisory; see the job summary."
           fi

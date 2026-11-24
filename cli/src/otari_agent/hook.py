@@ -4417,6 +4417,8 @@ def _echo_check_report(
         spec, results, gate_types, head
     )
     for entry in entries:
+        if entry.unable_reason is None and entry.result.outcome is Outcome.NOT_APPLICABLE:
+            continue
         if entry.unable_reason is not None:
             _echo_check_result(entry.gate, entry.result, entry.unable_reason)
         else:
@@ -4449,7 +4451,7 @@ def _echo_json_check_report(
                 "enforcement": entry.gate.enforcement,
                 "outcome": "not_applicable" if entry.unable_reason is not None else entry.result.outcome.value,
                 "message": entry.unable_reason or entry.result.message or None,
-                "detail": entry.result.detail,
+                "detail": None if entry.unable_reason is not None else entry.result.detail,
                 "source": entry.result.source,
             }
             for entry in entries

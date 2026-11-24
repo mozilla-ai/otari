@@ -642,7 +642,7 @@ It exits 1 when a `required` gate fails, errors or gets no result. A gate the ch
       "enforcement": "required",
       "outcome": "fail",
       "message": "CHANGELOG.md is generated at release time.",
-      "detail": null,
+      "detail": "CHANGELOG.md",
       "source": null
     }
   ],
