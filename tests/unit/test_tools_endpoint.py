@@ -73,8 +73,8 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (False, "not_configured")
-    # A deployment with no sandbox runs no language.
-    assert tools["otari_code_execution"]["input_schema"]["properties"]["language"]["enum"] == []
+    # A deployment with no sandbox runs no language, so none is listed.
+    assert "enum" not in tools["otari_code_execution"]["input_schema"]["properties"]["language"]
 
 
 def test_configured_tools_report_available(tmp_path: Path) -> None:

@@ -176,23 +176,26 @@ EMPTY_CODE_TEXT = (
     f"{TOOL_ERROR_SENTINEL} invalid_input: the call had no code, so nothing was run. "
     "Call the tool again with the Python code to run."
 )
+# How much of a language the sandbox does not run a refusal repeats back.
+_SHOWN_LANGUAGE_CHARS = 40
 
 
 def _language_refusal(language: str, languages: Sequence[str]) -> str:
     """What the model sees for a call naming no language, or one the sandbox does not run.
 
     It carries the sentinel, so the call is counted as a failure and never billed,
-    and names the languages to call the tool again with.
+    and names the languages to call the tool again with. The value the call named
+    is the model's and can be any length, so it is shortened.
     """
-    runs = ", ".join(languages)
-    if not language:
-        return (
-            f"{TOOL_ERROR_SENTINEL} invalid_input: the call named no language, so nothing was run. "
-            f"Call the tool again with `language` set to one of: {runs}."
-        )
+    if language:
+        if len(language) > _SHOWN_LANGUAGE_CHARS:
+            language = f"{language[:_SHOWN_LANGUAGE_CHARS]}..."
+        reason = f"{language} is not a language this sandbox runs"
+    else:
+        reason = "the call named no language"
     return (
-        f"{TOOL_ERROR_SENTINEL} invalid_input: {language} does not run here, so nothing was run. "
-        f"This sandbox runs: {runs}."
+        f"{TOOL_ERROR_SENTINEL} invalid_input: {reason}, so nothing was run. "
+        f"Call the tool again with `language` set to one of: {', '.join(languages)}."
     )
 
 
@@ -201,16 +204,16 @@ def code_execution_tool_definition(languages: Sequence[str]) -> dict[str, Any]:
 
     ``languages`` are the ones the deployment's sandbox runs
     (:attr:`gateway.ports.code_execution_port.CodeExecutionPort.languages`), and
-    the only values ``language`` takes. Module-level, and returning a fresh dict
-    per call, so the ``/v1/tools`` discovery endpoint can advertise the same
-    schema the tool loop injects without constructing a backend. Mirrors
-    :func:`gateway.services.web_retrieval_backend.web_search_tool_definition`.
+    the only values ``language`` takes. Fresh on every call, so a caller can
+    publish the schema the model is given without constructing a backend.
     """
     description = (
         "Execute code in a sandboxed REPL. Returns stdout, stderr, and any rich "
         "result blocks. State persists across calls within the same request."
     )
+    language: dict[str, Any] = {"type": "string", "description": "The language the code is written in."}
     if languages:
+        language["enum"] = list(languages)
         # Asked to run code in a language the sandbox does not run, a model tends
         # to rewrite it in one the sandbox does, run that, and report the output as
         # the original program's. These sentences tell it to say so, and other
@@ -230,11 +233,7 @@ def code_execution_tool_definition(languages: Sequence[str]) -> dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "language": {
-                        "type": "string",
-                        "enum": list(languages),
-                        "description": "The language the code is written in.",
-                    },
+                    "language": language,
                     "code": {
                         "type": "string",
                         "description": "The code to execute, written in `language`.",
@@ -259,8 +258,9 @@ class CodeExecution:
 
     code: str
     result: ResultBlock | None
-    # True for a call refused before it reached the sandbox because it had no code,
-    # so a loop can report a bad input rather than an unreachable sandbox.
+    # True for a call refused before it reached the sandbox, because it had no code
+    # or named no language the sandbox runs, so a loop can report a bad input rather
+    # than an unreachable sandbox.
     invalid_input: bool = False
     # Produced filename -> the ``file_id`` it was stored under in ``/v1/files``,
     # for the files a bridge collected. A produced file with no entry here is

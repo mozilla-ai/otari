@@ -1877,7 +1877,7 @@ def test_the_model_is_told_to_say_when_code_in_another_language_cannot_run() -> 
 def test_a_definition_for_no_language_names_none() -> None:
     """A deployment with no sandbox lists the tool with no language to call it in."""
     definition = code_execution_tool_definition(())
-    assert definition["function"]["parameters"]["properties"]["language"]["enum"] == []
+    assert "enum" not in definition["function"]["parameters"]["properties"]["language"]
     assert "must be" not in definition["function"]["description"]
 
 
@@ -1888,9 +1888,10 @@ def test_a_definition_for_no_language_names_none() -> None:
         ({"code": "print(1)"}, "the call named no language, so nothing was run"),
         ({"language": "", "code": "print(1)"}, "the call named no language, so nothing was run"),
         ({"language": None, "code": "print(1)"}, "the call named no language, so nothing was run"),
-        ({"language": "rust", "code": "fn main() {}"}, "rust does not run here, so nothing was run"),
+        ({"language": "rust", "code": "fn main() {}"}, "rust is not a language this sandbox runs, so nothing was run"),
+        ({"language": "x" * 500, "code": "1"}, f"{'x' * 40}... is not a language this sandbox runs"),
     ],
-    ids=["missing", "empty", "null", "unrun"],
+    ids=["missing", "empty", "null", "unrun", "long"],
 )
 async def test_a_call_in_no_language_the_sandbox_runs_is_refused_before_the_sandbox(
     arguments: dict[str, Any], said: str

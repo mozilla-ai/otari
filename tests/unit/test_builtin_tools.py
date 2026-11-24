@@ -103,6 +103,16 @@ def test_the_backend_that_runs_a_tool_advertises_a_new_definition_of_it_on_every
     assert tool.name in dict(backend.purpose_hints())
 
 
+def test_the_listing_publishes_the_code_execution_definition_the_model_is_given() -> None:
+    port = ProtocolCodeExecutionAdapter("http://sandbox.invalid")
+    config = GatewayConfig(sandbox_url="http://sandbox.invalid")
+    listed = _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability(), port.languages)
+    [code_execution] = [tool for tool in listed if tool.id == Tool.CODE_EXECUTION]
+    [given] = SandboxBackend(port=port).openai_tools
+    assert code_execution.input_schema == given["function"]["parameters"]
+    assert code_execution.description == given["function"]["description"]
+
+
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
 def test_a_listed_tool_is_reachable_by_name_in_every_dialect_it_renders(tool: BuiltinTool) -> None:
     """The registry is how a loop finds a rendering, so every declared one must answer."""

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
+from gateway.api.routes.code_execution import SANDBOX_RUNS_NO_PYTHON_DETAIL
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
@@ -73,7 +74,7 @@ class _FakeSession:
 
 class _FakePort:
     label = "fake-provider"
-    languages = ("python",)
+    languages: tuple[str, ...] = ("python",)
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []
@@ -439,6 +440,18 @@ def test_an_unpriced_run_is_refused_where_pricing_is_required(
     assert resp.status_code == 402, resp.text
     assert "otari:code_execution" in resp.json()["detail"]
     assert COST_USD_HEADER not in resp.headers, "a refused run was not charged"
+    assert port.opened == []
+
+
+def test_a_sandbox_that_runs_no_python_is_refused_before_anything_is_reserved(
+    client: TestClient, port: _FakePort, api_key_header: dict[str, str]
+) -> None:
+    port.languages = ("bash",)
+
+    resp = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == SANDBOX_RUNS_NO_PYTHON_DETAIL
     assert port.opened == []
 
 

@@ -168,7 +168,7 @@ const TOOLS: ToolsResponse = {
       input_schema: {
         type: "object",
         properties: {
-          language: { type: "string", enum: [] },
+          language: { type: "string" },
           code: { type: "string" },
         },
         required: ["language", "code"],
