@@ -6,7 +6,8 @@ result carries ``title``, ``url`` and ``snippet`` as strings, which a provider
 hit without a title or a snippet used to break with a null. The two models
 below mirror LiteLLM's, from ``litellm/llms/base_llm/search/transformation.py``;
 LiteLLM allows extra fields, and otari adds only ``search_tool``, ``raw`` when
-asked, and ``image`` and ``favicon`` on a result when the provider returned them.
+asked, and ``image`` and ``favicon`` on every result, each null when the provider
+returned no value for it.
 """
 
 from typing import Any
