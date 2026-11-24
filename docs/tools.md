@@ -470,6 +470,15 @@ Request it with:
 }
 ```
 
+The bundled sandbox and E2B run the code as Python, in every
+[sandbox environment](#sandbox-environments): an environment changes the
+packages installed, not the language, and a package it lacks fails the run with
+an `ImportError` the model sees. The tool's description says the code must be
+Python, and asks the model to tell the user when code in another language
+cannot run as is, or when it rewrote that code in Python and ran the rewrite.
+Models differ in how well they follow this: some report a Python rewrite's
+output as the original program's anyway.
+
 The sandbox speaks the [code-execution protocol](code-execution-protocol.md),
 which is what `sandbox_url` points at. A deployment that would rather not run
 one sets `sandbox_provider: e2b` instead and Otari runs the code on

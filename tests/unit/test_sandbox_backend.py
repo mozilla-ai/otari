@@ -270,6 +270,17 @@ async def test_purpose_hint_is_emitted() -> None:
     assert hints[0][0] == CODE_EXECUTION_TOOL_NAME
 
 
+def test_the_model_is_told_the_sandbox_runs_python_only() -> None:
+    # The sentences a model asked to run another language's code needs, so it says
+    # the code cannot run here and does not report a Python rewrite's output as its own.
+    backend = _sandbox()
+    description = backend.openai_tools[0]["function"]["description"]
+    assert "The code must be Python: Rust, C, JavaScript or any other language's code" in description
+    assert "tell the user it cannot be run as is here" in description
+    assert "never present the output as the original program's" in description
+    assert "Python only" in backend.purpose_hints()[0][1]
+
+
 @pytest.mark.asyncio
 async def test_sandbox_calls_carry_no_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = _patched_async_client(

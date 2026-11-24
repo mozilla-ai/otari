@@ -129,7 +129,7 @@ _MAX_SESSION_TTL_S = 3600.0
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
-    "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
+    "Python only, with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
     "user attached are in the working directory under their own names. A file "
     "you write there comes back with a file_id; give the user that file_id so "
     "they can download it."
@@ -190,10 +190,18 @@ def code_execution_tool_definition() -> dict[str, Any]:
         "type": "function",
         "function": {
             "name": CODE_EXECUTION_TOOL_NAME,
+            # Asked to run code in another language, a model tends to rewrite it in
+            # Python, run that, and report the output as the original program's. The
+            # last two sentences tell it to say so, and the languages are named
+            # because models follow the sentences when they are.
             "description": (
-                "Execute Python code in a sandboxed REPL. Returns stdout, "
-                "stderr, and any rich result blocks. State persists across "
-                "calls within the same request."
+                "Run Python code in a sandboxed REPL and return its stdout, "
+                "stderr and rich results. State persists across calls within "
+                "the same request. The code must be Python: Rust, C, JavaScript "
+                "or any other language's code does not run as is. When asked to "
+                "run code in another language, tell the user it cannot be run "
+                "as is here. If you rewrite it in Python and run that instead, "
+                "say so, and never present the output as the original program's."
             ),
             "parameters": {
                 "type": "object",
