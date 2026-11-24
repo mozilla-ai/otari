@@ -837,7 +837,7 @@ _CHAT_STRATEGY = _ChatToolLoopStrategy()
 def _strategy_for(
     budget: ToolUseBudget | None, native_tools: frozenset[str] = frozenset(), *, emit_activity: bool = False
 ) -> _ChatToolLoopStrategy:
-    """The shared strategy, or a per-request one when the caller capped searches, is owed a report or wants activity.
+    """The shared strategy, or a per-request one when the request has a budget, is owed a report or wants activity.
 
     Only such a request has anything per-request to hold, so every other request
     keeps reusing the single module-level instance.

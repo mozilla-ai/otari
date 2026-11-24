@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gateway.services.tool_usage import is_tool_error
-from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -39,9 +38,18 @@ class ToolUseBudget:
     because a request's rounds run one after another.
     """
 
-    def __init__(self, max_uses: Mapping[str, int], *, call_cap: WebToolCallCap | None = None) -> None:
+    def __init__(
+        self,
+        max_uses: Mapping[str, int],
+        *,
+        call_cap: WebToolCallCap | None = None,
+        call_capped: frozenset[str] = frozenset(),
+    ) -> None:
         self._remaining = dict(max_uses)
         self._call_cap = call_cap
+        # The request's own Search and Fetch, which ``call_cap`` bounds; an MCP tool of
+        # the same name, possible when the request runs only the other one, is not.
+        self._call_capped = call_capped
 
     def caps(self, pool: ToolBackend, name: str) -> bool:
         """Whether ``name`` on ``pool`` is a gateway-run call this budget bounds.
@@ -60,13 +68,12 @@ class ToolUseBudget:
     def used_up(self, name: str) -> bool:
         """Whether no further call of ``name`` can run this request, which the tool loop then stops offering.
 
-        Either its own cap is spent, or it is Search or Fetch and the request has
-        reached the ``web_search_max_calls`` they share.
+        Either its own cap is spent, or it is the request's own Search or Fetch and the
+        request has reached the ``web_search_max_calls`` they share.
         """
         if self.exhausted(name):
             return True
-        shared = name in (WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME)
-        return shared and self._call_cap is not None and self._call_cap.reached
+        return name in self._call_capped and self._call_cap is not None and self._call_cap.reached
 
     def record(self, name: str, result: str) -> None:
         """Charge ``result``'s call against ``name``'s cap unless it failed.

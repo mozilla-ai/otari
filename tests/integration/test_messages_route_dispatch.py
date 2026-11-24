@@ -1744,7 +1744,9 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
     budget = budgets_seen[0]
     if cap is None:
         # With no max_uses, the budget carries only the search and fetch calls the request shares.
-        assert not budget.used_up(WEB_SEARCH_TOOL_NAME)
+        for _ in range(20):
+            budget.record(WEB_SEARCH_TOOL_NAME, "results")
+        assert not budget.exhausted(WEB_SEARCH_TOOL_NAME), "an uncapped declaration got a max_uses"
     else:
         # The cap arrived by value, not just as "some budget": spending it exactly
         # ``max_uses`` times is what exhausts it.

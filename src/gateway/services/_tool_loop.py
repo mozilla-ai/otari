@@ -389,7 +389,7 @@ FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer no
 
 
 def spent_tools_note(spent: frozenset[str]) -> str:
-    """What a round tells the model of the tools it no longer offers because their ``max_uses`` is used up.
+    """What a round tells the model of the tools it no longer offers because they are used up (see ``_spent_tools``).
 
     Withholding a tool says nothing on its own, and a model denied a call it wants
     mid-task can end with no answer (see :data:`FINAL_ROUND_NOTE`).
@@ -497,7 +497,7 @@ def _round_kwargs(
     the loop anyway. Every provider the loop serves accepts a transcript holding
     calls of a tool the round no longer declares.
 
-    A gateway tool in ``spent`` has used up its ``max_uses``, so the round leaves it
+    A gateway tool in ``spent`` is used up (see :func:`_spent_tools`), so the round leaves it
     out too, since a call of it could only be refused. A ``tool_choice`` loses every
     tool the round withholds (see :func:`_without_withheld`).
     """
@@ -598,8 +598,9 @@ async def run_tool_loop(
     ``check_first_response`` runs before it and may raise to refuse that
     response as a provider failure, which leaves the attempt free to fall over.
 
-    A tool whose ``max_uses`` in ``use_budget`` is used up is left out of later
-    rounds, and once every gateway tool is, the next round is the last one.
+    A tool ``use_budget`` reports used up (its ``max_uses``, or the request's shared
+    ``web_search_max_calls``) is left out of later rounds, and once every gateway tool
+    is, with none of the caller's, the next round is the last one.
     """
     transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,

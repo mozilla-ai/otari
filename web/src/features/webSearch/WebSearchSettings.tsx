@@ -23,7 +23,7 @@ import { isNoSearch } from "./webTools"
 const COPY: Readonly<Record<string, SettingCopy>> = {
   web_search_max_calls: {
     label: "Calls per request",
-    help: "How many searches and fetches one request may make together, on any tool. A call past it gets a tool error the model can recover from.",
+    help: "How many searches and fetches one request may make together, on any tool. Once reached, the model is no longer offered either tool, and a call past it gets a tool error it can recover from.",
     placeholder: "10",
   },
   web_search_max_results: {

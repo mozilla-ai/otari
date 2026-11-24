@@ -301,6 +301,9 @@ def test_a_model_that_keeps_searching_past_web_search_max_calls_answers_one_roun
     assert search.await_count == 1, "the call limit did not stop the second search"
     assert [_offers_search(kwargs) for kwargs in captured] == [True, False]
     assert captured[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    [choice] = response.json()["choices"]
+    assert choice["finish_reason"] == "stop"
+    assert not choice["message"].get("tool_calls")
 
 
 def test_max_uses_zero_offers_no_search_rather_than_uncapping_it(
