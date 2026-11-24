@@ -1048,9 +1048,11 @@ organization Providers > Web search page, or under
 `/api/v1/organizations/me/web-search-keys`: add, rename or replace a key,
 archive it, and make one key of each kind the organization's default or stop it
 being the default (`POST` or `DELETE` on `/{key_id}/default`). Only the
-last four characters of a key are ever shown. A key carries an API key when its
-provider needs one, and may carry its own `api_base` and provider `options`,
-which are checked against the provider when the key is written. An `api_base`
+last four characters of a key are ever shown. A key brings the organization's
+own account or its own server, never the deployment's: it carries an API key for
+any provider with an address of its own, even one whose API key is optional. A
+key may also carry its own `api_base` and provider `options`, which are checked
+against the provider when the key is written. An `api_base`
 must use https when the key carries an API key, and must reach public addresses
 only, whatever `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` says, since an organization
 rather than the operator chose it. Calls to it are held to the same rule: each
