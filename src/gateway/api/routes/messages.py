@@ -79,7 +79,7 @@ from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, gateway_container_value
-from gateway.services.content_normalizer import stage_container_blocks
+from gateway.services.content_normalizer import names_stored_file, stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     CONVERSATION_CACHE_KEY_FIELD,
@@ -1078,6 +1078,7 @@ async def create_message(
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             declared=declared,
+            attaches_stored_file=files is not None and names_stored_file(request.messages, "anthropic"),
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,

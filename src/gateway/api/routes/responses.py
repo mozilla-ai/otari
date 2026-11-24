@@ -53,6 +53,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
+from gateway.services.content_normalizer import names_stored_file
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     UpstreamFailure,
@@ -531,6 +532,7 @@ async def create_response(
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             declared=declared,
+            attaches_stored_file=files is not None and names_stored_file(request_body.input, "responses"),
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,

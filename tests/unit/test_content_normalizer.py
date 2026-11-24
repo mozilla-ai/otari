@@ -21,7 +21,12 @@ from gateway.exceptions.files_exceptions import (
     ProviderUploadFailedError,
 )
 from gateway.services import content_normalizer as cn
-from gateway.services.content_normalizer import name_container_copies, normalize_messages, stage_container_blocks
+from gateway.services.content_normalizer import (
+    name_container_copies,
+    names_stored_file,
+    normalize_messages,
+    stage_container_blocks,
+)
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.files import FileScope, StagedFile
 from gateway.services.model_capabilities import Capabilities
@@ -824,3 +829,43 @@ async def test_a_caller_that_may_not_read_files_is_refused_only_for_one_it_named
             await call
     else:
         await call
+
+
+@pytest.mark.parametrize(
+    ("fmt", "block", "named"),
+    [
+        ("openai", {"type": "file", "file": {"file_id": "file_1"}}, True),
+        ("openai", {"type": "file", "file_id": "file_1"}, True),
+        ("openai", {"type": "image_url", "file_id": "file_1"}, True),
+        ("openai", {"type": "file", "file": {"file_data": "data:text/plain;base64,aGk="}}, False),
+        ("openai", {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}, False),
+        ("openai", {"type": "text", "text": "file_id lives in prose"}, False),
+        ("anthropic", {"type": "image", "source": {"type": "file", "file_id": "file_1"}}, True),
+        ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file_1"}}, True),
+        ("anthropic", {"type": "container_upload", "file_id": "file_1"}, True),
+        ("anthropic", {"type": "document", "source": {"type": "base64", "data": "aGk="}}, False),
+        ("anthropic", {"type": "image", "source": {"type": "url", "url": "https://x/i.png"}}, False),
+        ("responses", {"type": "input_file", "file_id": "file_1"}, True),
+        ("responses", {"type": "input_image", "file_id": "file_1"}, True),
+        ("responses", {"type": "input_file", "file_data": "data:text/plain;base64,aGk="}, False),
+        # A block shape only the other dialect reads names nothing under this one.
+        ("openai", {"type": "container_upload", "file_id": "file_1"}, False),
+        ("anthropic", {"type": "input_file", "file_id": "file_1"}, False),
+    ],
+)
+def test_names_stored_file(fmt: str, block: dict[str, Any], named: bool) -> None:
+    messages = [{"role": "user", "content": [block]}]
+    assert names_stored_file(messages, cast("Any", fmt)) is named
+
+
+def test_names_stored_file_reads_a_bare_responses_item() -> None:
+    items = [{"type": "input_file", "file_id": "file_1"}]
+    assert names_stored_file(items, "responses")
+    assert not names_stored_file([{"type": "input_file", "file_id": "file_1"}], "openai")
+
+
+def test_names_stored_file_tolerates_non_message_shapes() -> None:
+    assert not names_stored_file("a bare string input", "responses")
+    assert not names_stored_file([{"role": "user", "content": "plain text"}], "openai")
+    assert not names_stored_file([{"role": "user", "content": ["a stray string"]}], "openai")
+    assert not names_stored_file([], "openai")

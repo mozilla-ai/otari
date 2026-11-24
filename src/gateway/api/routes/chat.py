@@ -58,6 +58,7 @@ from gateway.ports.billing_port import BillingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.schemas.inference import SettledCost
+from gateway.services.content_normalizer import names_stored_file
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
     UpstreamFailure,
@@ -667,6 +668,7 @@ async def run_chat_completion(
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
             declared=declared,
+            attaches_stored_file=files is not None and names_stored_file(request.messages, "openai"),
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,

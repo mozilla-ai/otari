@@ -316,6 +316,59 @@ async def _resolve_from_ref(
     return None
 
 
+def _file_ref(block: dict[str, Any], fmt: WireFormat) -> dict[str, Any] | None:
+    """The descriptor a stored ``file_id`` would be read from for ``block``, or ``None``.
+
+    The one list of the block shapes a request body can name a stored upload
+    in. ``_classify`` resolves the same descriptors, and
+    :func:`names_stored_file` asks the same question of the body alone, ahead
+    of the request pipeline's pricing gate, so the early scope check and the
+    resolution cannot disagree about what counts.
+    """
+    btype = block.get("type")
+    if fmt == "anthropic":
+        if btype == _CONTAINER:
+            return block
+        if btype in ("image", "document"):
+            source = block.get("source")
+            if isinstance(source, dict) and source.get("type") == "file":
+                return source
+        return None
+    if btype in ("image_url", "input_image"):
+        return block
+    if btype == "file":
+        nested = block.get("file", block)
+        return nested if isinstance(nested, dict) else None
+    if btype == "input_file":
+        return block
+    return None
+
+
+def names_stored_file(messages: Any, fmt: WireFormat) -> bool:
+    """Whether ``messages`` names a stored upload anywhere ``fmt`` lets a block carry a ``file_id``.
+
+    The same walk :func:`normalize_messages` makes over the request body,
+    reduced to the yes/no the ``files:read`` scope check answers, so a key
+    attaching a stored file it may not read can be refused before the pricing
+    gate rather than inside normalization after it.
+    """
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        blocks = list(content) if isinstance(content, list) else []
+        if fmt == "responses" and message.get("type") in _RESPONSES_ITEM_TYPES:
+            blocks.append(message)
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            if (ref := _file_ref(block, fmt)) is not None and ref.get("file_id"):
+                return True
+    return False
+
+
 async def _classify(
     block: dict[str, Any],
     fmt: WireFormat,
@@ -353,9 +406,9 @@ async def _classify(
             if src.get("type") == "base64":
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
-            if src.get("type") == "file":
+            if (ref := _file_ref(block, fmt)) is not None:
                 resolved = await _resolve_from_ref(
-                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                    ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
                 )
                 if resolved:
                     return resolved.source(_IMAGE)
@@ -363,9 +416,9 @@ async def _classify(
         # openai / responses image
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
-        if block.get("file_id"):
+        if (ref := _file_ref(block, fmt)) is not None and ref.get("file_id"):
             resolved = await _resolve_from_ref(
-                block, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
             )
             if resolved:
                 return resolved.source(_IMAGE)
@@ -385,19 +438,19 @@ async def _classify(
             if src.get("type") == "base64":
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
-            if src.get("type") == "file":
+            if (ref := _file_ref(block, fmt)) is not None:
                 resolved = await _resolve_from_ref(
-                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                    ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
                 )
                 if resolved:
                     return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
-        ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(
-            ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
-        )
-        if resolved:
-            return resolved.attachment()
+        if (ref := _file_ref(block, fmt)) is not None:
+            resolved = await _resolve_from_ref(
+                ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+            )
+            if resolved:
+                return resolved.attachment()
         return None
 
     return None

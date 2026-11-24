@@ -2498,6 +2498,7 @@ async def resolve_request_context(
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
     declared: DeclaredTools,
+    attaches_stored_file: bool = False,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
@@ -2539,6 +2540,11 @@ async def resolve_request_context(
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
+
+    ``attaches_stored_file`` is the route's precomputed answer to whether the
+    request body names a stored upload (``names_stored_file`` on the messages,
+    gated on a files backend existing), so a key that may not read it is
+    refused beside the declared-tool scopes rather than inside normalization.
 
     ``turn`` is also where the content of a request that keeps it is read from
     (``Otari-Trace-Content``): the prompt and the answered tool calls.
@@ -2600,6 +2606,10 @@ async def resolve_request_context(
         # not run a declared tool is told that rather than what the deployment prices. It
         # also runs before the end user is resolved, because resolving one may create it.
         _require_declared_tool_scopes(adapter, api_key, declared)
+        # A stored file attached to the request gets the same early refusal:
+        # without it a key lacking files:read would hear the pricing gate's
+        # 402 instead, since normalization's own check runs after it.
+        _require_stored_file_scope(adapter, api_key, attaches_stored_file)
         # Zero I/O for a keyed request: `api_key.workspace_id` is already an
         # in-memory attribute on the row just loaded. Only a master-key request
         # pays a lookup, which `resolve_workspace_id` itself accepts as
@@ -4170,6 +4180,25 @@ async def _release_unused_claims(claims: Iterable[_DeclaredClaims | _ToolRefusal
 def _declares_mcp(declared: DeclaredTools) -> bool:
     """Whether the request asks to reach an MCP server, its own or one its IDs name."""
     return bool(declared.mcp_servers or declared.mcp_server_ids or declares_provider_mcp(declared.tools))
+
+
+def _require_stored_file_scope(
+    adapter: FormatAdapter[Any, Any], api_key: APIKey | None, attaches_stored_file: bool
+) -> None:
+    """Hold ``api_key`` to ``files:read`` when the request attaches a stored file.
+
+    The same refusal the content normalizer raises inside normalization, asked
+    beside :func:`_require_declared_tool_scopes` so it lands before the pricing
+    gate either way. ``attaches_stored_file`` is the route's answer to
+    :func:`names_stored_file`, and is false on a deployment with no files
+    backend, where a ``file_id`` is a provider's own reference rather than a
+    stored upload's.
+
+    Raises:
+        HTTPException: the key attaches a stored file it may not read.
+    """
+    if attaches_stored_file and (missing := _missing_scope(api_key, KeyScope.FILES_READ, "attaching a stored file")):
+        raise domain_error(adapter, missing)
 
 
 def _require_declared_tool_scopes(
