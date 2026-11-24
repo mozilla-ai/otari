@@ -268,11 +268,6 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
     if _requires_api_key(kind, provider) and not entry.get("api_key"):
         msg = f"{section}.{name}.api_key is required for provider '{provider}'."
         raise ValueError(msg)
-    api_key = entry.get("api_key")
-    if isinstance(api_key, str) and not api_key.strip():
-        # A variable left blank, such as ${KEENABLE_API_KEY}, comes out as an empty key.
-        msg = f"{section}.{name}.api_key is blank; set it, or leave api_key out to call '{provider}' without a key."
-        raise ValueError(msg)
     _validate_transport(section, name, entry.get("api_base"), entry.get("api_key"))
     timeout = entry.get("timeout")
     if timeout is not None:

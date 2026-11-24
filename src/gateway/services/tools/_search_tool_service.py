@@ -65,6 +65,7 @@ from gateway.services.tools._search_tool_overlay import (
     stored_tool_names,
 )
 from gateway.services.tools._search_tool_writes import (
+    blank_api_key_problem,
     check_kind_unchanged,
     check_tool_entry,
     check_tool_name_is_free,
@@ -474,6 +475,28 @@ class SearchToolService:
         """Reload the stored rows and the runtime tool settings, apply both, and return shadowed names."""
         async with self.uow:
             return await self._reload_stored_tools()
+
+    def refuse_blank_api_keys(self) -> None:
+        """Refuse to start on a configured search or fetch tool whose ``api_key`` came out blank.
+
+        Run at boot before the stored tools load, so only config-file entries
+        are read, as a write through the API is refused the same way.
+
+        Raises:
+            ValueError: every such tool, by name.
+        """
+        configured: tuple[tuple[ToolKind, Mapping[str, Any]], ...] = (
+            ("search", self.config.search_tools),
+            ("fetch", self.config.fetch_tools),
+        )
+        problems = [
+            problem
+            for kind, tools in configured
+            for name, entry in tools.items()
+            if isinstance(entry, Mapping) and (problem := blank_api_key_problem(kind, name, entry))
+        ]
+        if problems:
+            raise ValueError("; ".join(problems))
 
     async def load_at_startup(self) -> bool:
         """Prime the overlay so the first request does not race the first refresh, and return whether it did.
