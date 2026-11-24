@@ -118,22 +118,25 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
         require_zero_data_retention: bool | None,
         allowed_data_locations: list[str] | None = None,
         set_locations: bool = False,
-    ) -> WorkspaceProviderPolicy:
+    ) -> tuple[WorkspaceProviderPolicy, bool]:
         """Stage the workspace's policy, creating its row when it has none.
 
-        Two writers may both find no row; the primary key refuses the second,
-        which applies its value over the winner's instead, in a SAVEPOINT.
+        Returns the row and the ``require_zero_data_retention`` it replaced. The
+        row is locked before it is read, so concurrent writers see each other's
+        value. Two writers may both find no row; the primary key refuses the
+        second, which applies its value over the winner's instead, in a SAVEPOINT.
         """
-        policy = await self.get_for(workspace_id)
+        policy = await self._locked(workspace_id)
         if policy is None:
             policy = WorkspaceProviderPolicy(workspace_id=workspace_id)
             try:
                 async with self.db.begin_nested():
                     self.db.add(policy)
             except IntegrityError:
-                policy = await self.get_for(workspace_id)
+                policy = await self._locked(workspace_id)
                 if policy is None:
                     raise  # not the race: nothing is there to have collided with
+        replaced = bool(policy.require_zero_data_retention)
         # Each requirement is written only when the caller sent it, also on the
         # row a concurrent writer inserted, so one never undoes the other's.
         if require_zero_data_retention is not None:
@@ -143,4 +146,13 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
             policy.allowed_data_locations = allowed_data_locations
         await self.db.flush()
         await self.db.refresh(policy)
-        return policy
+        return policy, replaced
+
+    async def _locked(self, workspace_id: uuid.UUID) -> WorkspaceProviderPolicy | None:
+        result = await self.db.execute(
+            select(WorkspaceProviderPolicy)
+            .where(WorkspaceProviderPolicy.workspace_id == workspace_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()

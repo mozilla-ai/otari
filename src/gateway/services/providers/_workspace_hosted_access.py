@@ -373,9 +373,7 @@ class WorkspaceHostedAccessService:
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
-            previous = await self.policies.get_for(workspace.id)
-            was_required = previous is not None and previous.require_zero_data_retention
-            policy = await self.policies.put(
+            policy, was_required = await self.policies.put(
                 workspace.id,
                 require_zero_data_retention=request.require_zero_data_retention,
                 allowed_data_locations=request.allowed_data_locations,

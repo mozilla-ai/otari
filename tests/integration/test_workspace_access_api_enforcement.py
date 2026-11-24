@@ -411,6 +411,10 @@ def test_a_policy_change_is_logged_with_who_made_it(
     client: TestClient, master_key_header: dict[str, str], caplog: pytest.LogCaptureFixture
 ) -> None:
     workspace_id, _ = _workspace_and_key(client, master_key_header)
+    user_id = _ok(client.get(f"{API_ROOT}/auth/profile", headers=master_key_header))["user_id"]
+    organization_id = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}", headers=master_key_header))[
+        "organization_id"
+    ]
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
@@ -428,11 +432,11 @@ def test_a_policy_change_is_logged_with_who_made_it(
 
     changes = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Workspace provider policy changed")]
 
-    assert len(changes) == 2, "a write that changes nothing is not logged"
-    assert f"workspace={workspace_id}" in changes[0]
-    assert "user=" in changes[0]
-    assert changes[0].endswith("False -> True")
-    assert changes[1].endswith("True -> False")
+    who = f"workspace={workspace_id} organization={organization_id} user={user_id} "
+    assert changes == [
+        f"Workspace provider policy changed: {who}require_zero_data_retention False -> True",
+        f"Workspace provider policy changed: {who}require_zero_data_retention True -> False",
+    ], "a write that changes nothing is not logged"
 
 
 def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_header: dict[str, str]) -> None:
