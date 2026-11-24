@@ -318,3 +318,12 @@ def test_the_new_name_of_a_renamed_setting_wins_over_the_old_one(tmp_path: Path)
     os.environ["OTARI_FILES_ENABLED"] = "true"
     os.environ["OTARI_FILES_API_ENABLED"] = "false"
     assert load_config(str(config_file)).files_api_enabled is False
+
+
+def test_an_old_name_in_the_structured_environment_beats_the_new_name_in_the_file(tmp_path: Path) -> None:
+    """Each source is renamed before the sources merge, so the environment still overrides the file."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_api_enabled: true\n", encoding="utf-8")
+    os.environ["OTARI_CONFIG_YAML"] = "files_enabled: false\n"
+
+    assert load_config(str(config_file)).files_api_enabled is False

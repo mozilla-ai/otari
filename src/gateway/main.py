@@ -425,8 +425,8 @@ async def _warn_about_unreclaimed_files(
     try:
         async with create_unit_of_work() as uow:
             waiting = await build_file_service(uow, backends, config).has_reclaimable()
-    except Exception as exc:
-        # Advisory only, like the other boot reports.
+    except DATABASE_ERRORS as exc:
+        # Advisory only: a database that cannot answer leaves the boot to go on.
         logger.warning("Could not check for files waiting to be reclaimed: %s", describe_database_error(exc))
         return
     if waiting:

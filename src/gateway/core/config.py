@@ -2616,11 +2616,14 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
             if yaml_config:
                 config_dict = _resolve_env_vars(yaml_config)
 
+    renamed_keys = _rename_old_keys(config_dict)
     structured_env_config = _load_structured_env_config()
     if structured_env_config:
+        # Within each source before they merge, so the environment's old name still beats the file's new one.
+        renamed_keys += _rename_old_keys(structured_env_config)
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
-    _apply_renamed_settings(config_dict)
+    _apply_renamed_settings(config_dict, renamed_keys)
     _warn_about_unknown_keys(config_dict)
     _warn_about_retired_mcp_settings(config_dict)
 
@@ -2677,14 +2680,24 @@ def _warn_about_retired_mcp_settings(config: dict[str, Any]) -> None:
 _RENAMED_SETTINGS = (("files_enabled", "files_api_enabled"),)
 
 
-def _apply_renamed_settings(config: dict[str, Any]) -> None:
-    """Move a setting given under its old name onto its new one, where the new name is not set too."""
+def _rename_old_keys(source: dict[str, Any]) -> list[str]:
+    """Move each old key in one config source onto its new name, where that source does not set the new one too."""
+    found: list[str] = []
     for old, new in _RENAMED_SETTINGS:
-        used: list[str] = []
-        if old in config:
-            used.append(old)
-            value = config.pop(old)
-            config.setdefault(new, value)
+        if old in source:
+            found.append(old)
+            source.setdefault(new, source.pop(old))
+    return found
+
+
+def _apply_renamed_settings(config: dict[str, Any], renamed_keys: list[str]) -> None:
+    """Read each old OTARI_ variable into its new name, and name every old spelling still in use.
+
+    ``renamed_keys`` are the old keys ``_rename_old_keys`` already moved out of the
+    config file and the structured environment.
+    """
+    for old, new in _RENAMED_SETTINGS:
+        used = [old] if old in renamed_keys else []
         old_env = f"{OTARI_ENV_PREFIX}{old.upper()}"
         raw = os.getenv(old_env)
         if raw:
