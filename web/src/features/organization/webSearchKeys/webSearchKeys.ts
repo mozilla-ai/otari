@@ -54,7 +54,9 @@ export function offeredProviders(
  * Whether a key on the provider needs an API key. A key brings the
  * organization's own account or its own server, so it carries an API key when
  * the provider requires one or calls a public address of its own. On a
- * provider that needs an endpoint, the key names its own server.
+ * provider that needs an endpoint, the key names its own server, and the
+ * default the catalog shows an operator there is this deployment's own
+ * endpoint (`web_search_url` for SearXNG), which a key never uses.
  */
 export function needsApiKey(provider: SearchProviderInfo | undefined): boolean {
   if (provider === undefined) return false
