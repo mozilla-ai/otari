@@ -2773,6 +2773,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),
     },
+    "gateway.models.routing.SubagentDecision": {
+        "repository": "gateway/repositories/routing/subagent_decision_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.RoutingPolicy": {
         "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (

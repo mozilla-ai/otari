@@ -35,12 +35,24 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, false, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
 from gateway.models.guardrails import DEFAULT_DIRECTIONS, GuardrailDirection, GuardrailMode, distinct_directions
-from gateway.models.money import UsdRate
+from gateway.models.money import UsdCost, UsdRate
 
 __all__ = [
     "AGENT_RECOMMENDER_ENABLED_INDEX",
@@ -608,3 +620,67 @@ class AgentRecommender(Base):
     enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=lambda: datetime.now(UTC))
+
+
+SUBAGENT_OUTCOME_NONE = "none"
+SUBAGENT_OUTCOME_ESTIMATED = "estimated"
+SUBAGENT_OUTCOME_MEASURED = "measured"
+SUBAGENT_OUTCOME_KINDS = (SUBAGENT_OUTCOME_NONE, SUBAGENT_OUTCOME_ESTIMATED, SUBAGENT_OUTCOME_MEASURED)
+"""How much is known of what a routed subagent consumed: nothing, the harness's own count, or metered usage."""
+
+BASELINE_REQUESTED = "requested"
+BASELINE_PARENT = "parent"
+BASELINE_SOURCES = (BASELINE_REQUESTED, BASELINE_PARENT)
+"""Where a decision's baseline model came from: the model the spawn asked for, or the parent's."""
+
+
+class SubagentDecision(Base):
+    """One answered subagent model recommendation, and later what the subagent it started consumed.
+
+    The id is the request id of the decision call, which its usage row carries
+    as ``request_group_id``. The baseline is the model the subagent would have
+    started on with no recommendation; the outcome columns stay empty until the
+    harness reports the run. The task and its description are never stored.
+    """
+
+    __tablename__ = "subagent_decisions"
+    __table_args__ = (
+        Index("ix_subagent_decisions_workspace_id_created_at", "workspace_id", "created_at"),
+        Index("ix_subagent_decisions_user_id_created_at", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    harness: Mapped[str] = mapped_column(String(16))
+    agent_type: Mapped[str] = mapped_column(String(128))
+    requested_model: Mapped[str | None] = mapped_column(String(256))
+    parent_model: Mapped[str] = mapped_column(String(256))
+    baseline_model: Mapped[str] = mapped_column(String(256))
+    baseline_source: Mapped[str] = mapped_column(String(16))
+    """One of ``BASELINE_SOURCES``."""
+    recommended_model: Mapped[str] = mapped_column(String(256))
+    router_cost: Mapped[Decimal | None] = mapped_column(UsdCost)
+    """What the decision call itself was charged."""
+    outcome_kind: Mapped[str] = mapped_column(
+        String(16), default=SUBAGENT_OUTCOME_NONE, server_default=SUBAGENT_OUTCOME_NONE
+    )
+    """One of ``SUBAGENT_OUTCOME_KINDS``."""
+    outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ran_on: Mapped[str | None] = mapped_column(String(256))
+    """The model the subagent ran on, as the harness reports it."""
+    usage: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    """Token counts per model the subagent ran on."""
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cache_read_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    baseline_model_key: Mapped[str | None] = mapped_column(String(256))
+    """The ``<provider>:<model>`` the baseline was priced as."""
+    baseline_cost: Mapped[Decimal | None] = mapped_column(UsdCost)
+    """The subagent's tokens priced at the baseline model."""
+    actual_cost: Mapped[Decimal | None] = mapped_column(UsdCost)
+    unpriced_reason: Mapped[str | None] = mapped_column(String(32))
+    """Why the two costs are empty though an outcome was reported."""

@@ -22,6 +22,7 @@ subagent should start on. That is put to a decision model, not compiled from
 a policy, and the harness acts on the answer itself. The decision model it is
 put to is the stored subagent router switched on (``_agent_recommenders.py``
 holds the rows in memory, ``_agent_recommender_service.py`` administers them).
+``_subagent_decision_service.py`` keeps what each answer decided.
 """
 
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
@@ -45,6 +46,7 @@ from gateway.services.routing._service import (
     PinnedTraffic,
     RoutingService,
 )
+from gateway.services.routing._subagent_decision_service import SubagentDecisionService
 from gateway.services.routing.backends import (
     PRIORITY_BACKEND,
     WEIGHTED_BACKEND,
@@ -106,6 +108,7 @@ __all__ = [
     "RoutingService",
     "RoutingSignal",
     "StoredRecommender",
+    "SubagentDecisionService",
     "UnreadableRecommendationError",
     "active_agent_recommender",
     "apply_agent_recommenders",

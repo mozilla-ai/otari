@@ -90,6 +90,7 @@ class AgentModelRecommendation(BaseModel):
                 "model": "sonnet",
                 "reason": "sonnet with 72%",
                 "probabilities": {"haiku": 0.21, "sonnet": 0.72, "opus": 0.07},
+                "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
             }
         }
     )
@@ -98,6 +99,10 @@ class AgentModelRecommendation(BaseModel):
     reason: str | None = Field(default=None, description="Why, in one short sentence the harness may show.")
     probabilities: dict[str, float] | None = Field(
         default=None, description="The decision model's probability for each candidate, when it reports them."
+    )
+    decision_id: uuid.UUID | None = Field(
+        default=None,
+        description="The gateway's record of this recommendation. Absent where the record could not be kept.",
     )
 
 

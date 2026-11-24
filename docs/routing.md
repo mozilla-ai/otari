@@ -270,6 +270,11 @@ recommendation. The model the caller asked for is left out of the question, and
 only the task's first 32,000 characters are sent. The call is charged at the
 router's own rates.
 
+Otari keeps a record of each recommendation it answers: the harness, the
+subagent type, the parent's model, the model the caller asked for, the model
+recommended and what the call cost. The task and its description are not kept.
+The answer names the record in `decision_id`.
+
 The harness that asks picks the candidates: Claude Code chooses among
 `agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
 default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
