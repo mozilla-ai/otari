@@ -117,6 +117,7 @@ from gateway.api.routes._tools import (
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     END_USER_BUDGET_HEADER,
     FALLBACK_HEADER,
     MODEL_HEADER,
@@ -938,6 +939,7 @@ def _served_by_headers(
     opening for a streamed one.
     """
     fell_back = chosen is not None and ctx.plan is not None and ctx.plan.is_fallback(chosen)
+    deployment_paid = chosen.deployment_paid if chosen is not None else ctx.deployment_paid
     headers = {PROVIDER_HEADER: provider_key(provider)}
     # A plain request's model is the caller's own string, and one a provider accepted
     # but a header cannot carry would fail the response after the provider answered.
@@ -950,6 +952,7 @@ def _served_by_headers(
         | {
             ATTEMPT_COUNT_HEADER: str(sent),
             FALLBACK_HEADER: "true" if fell_back else "false",
+            DEPLOYMENT_PAID_HEADER: "true" if deployment_paid else "false",
             RESPONSE_DURATION_HEADER: str(round((now - ctx.started_at) * 1000)),
         }
         | _server_timing(ctx, now)

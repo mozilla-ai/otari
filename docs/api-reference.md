@@ -166,8 +166,8 @@ refusals as well, and records it on the request's usage rows, so
 finds the request's cost by it.
 
 The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
-`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
-request and how long it took; see
+`Otari-Deployment-Paid`, `Otari-Response-Duration-Ms` and `Server-Timing` headers
+say what served the request, who paid for it and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
