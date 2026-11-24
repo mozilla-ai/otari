@@ -478,6 +478,9 @@ def _round_kwargs(
     withheld = choice_name is not None and (choice_name in spent or (final and pool.owns_tool(choice_name)))
     if not tools or withheld:
         kwargs.pop("tool_choice", None)
+    if not tools:
+        # OpenAI refuses parallel_tool_calls on a request that declares no tools.
+        kwargs.pop("parallel_tool_calls", None)
     return kwargs
 
 

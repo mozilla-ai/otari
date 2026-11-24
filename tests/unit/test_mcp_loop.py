@@ -505,6 +505,34 @@ async def test_a_round_after_every_gateway_tool_used_up_its_cap_is_the_last(
 
 
 @pytest.mark.asyncio
+async def test_a_round_that_declares_no_tools_drops_parallel_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenAI answers 400 to ``parallel_tool_calls`` without ``tools``, which the round after the cap would send."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            return _completion(finish="tool_calls", tool_calls=[_search_call("c1", "q")])
+        return _completion(finish="stop", content="done")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    await mcp_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "parallel_tool_calls": False,
+        },
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+        use_budget=_use_budget(1),
+    )
+
+    assert sent[0]["parallel_tool_calls"] is False
+    assert "tools" not in sent[1]
+    assert "parallel_tool_calls" not in sent[1]
+
+
+@pytest.mark.asyncio
 async def test_a_tool_choice_naming_a_used_up_search_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     """``max_uses: 0`` leaves the search out of the first round, and a choice naming it would force a missing tool."""
     sent: list[dict[str, Any]] = []
