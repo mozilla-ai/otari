@@ -81,13 +81,19 @@ describe("endpointAuthSecretError", () => {
   })
 
   it("names the floor for a value under it", () => {
-    expect(endpointAuthSecretError(draft("123"))).toBe(
-      "Enter at least 8 characters.",
-    )
+    expect(endpointAuthSecretError(draft("123"))).toBe("At least 8 characters.")
   })
 
   it("finds nothing wrong with a value at the floor", () => {
     expect(endpointAuthSecretError(draft("12345678"))).toBeUndefined()
+  })
+
+  // Eight UTF-16 units and four code points. The gateway counts code points,
+  // so passing this would offer a save it refuses.
+  it("counts what the gateway counts, not UTF-16 units", () => {
+    expect(
+      endpointAuthSecretError(draft("\u{1F510}\u{1F510}\u{1F510}\u{1F510}")),
+    ).toBe("At least 8 characters.")
   })
 })
 
@@ -223,7 +229,7 @@ describe("EndpointAuthFields", () => {
     await userEvent.type(headerField(), "Fastly-Key")
     await userEvent.type(screen.getByLabelText("Endpoint credential"), "123")
 
-    expect(screen.getByText("Enter at least 8 characters.")).toBeInTheDocument()
+    expect(screen.getByText("At least 8 characters.")).toBeInTheDocument()
   })
 
   it("drops the complaint once the value reaches the floor", async () => {
@@ -235,9 +241,7 @@ describe("EndpointAuthFields", () => {
       "12345678",
     )
 
-    expect(
-      screen.queryByText("Enter at least 8 characters."),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText("At least 8 characters.")).not.toBeInTheDocument()
   })
 
   it("says a stored value is kept when the field is left blank", () => {

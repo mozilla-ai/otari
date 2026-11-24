@@ -62,10 +62,13 @@ const SECRET_MIN_LENGTH = 8
 export function endpointAuthSecretError(
   draft: EndpointAuthDraft,
 ): string | undefined {
-  if (draft.secret === "" || draft.secret.length >= SECRET_MIN_LENGTH) {
+  // Code points, which is what the gateway counts. `String.length` counts
+  // UTF-16 units, so four astral characters would pass here and be refused
+  // there, which is the round trip this exists to pre-empt.
+  if (draft.secret === "" || [...draft.secret].length >= SECRET_MIN_LENGTH) {
     return undefined
   }
-  return `Enter at least ${SECRET_MIN_LENGTH} characters.`
+  return `At least ${SECRET_MIN_LENGTH} characters.`
 }
 
 /**
