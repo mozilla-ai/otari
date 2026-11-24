@@ -162,17 +162,6 @@ def _requires_api_key(kind: ToolKind, provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
-def _takes_an_optional_key(kind: ToolKind, provider: str) -> bool:
-    """Whether the provider takes an API key, which its library reads from ``env_key``, without requiring one."""
-    if kind == "fetch":
-        metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata = any_fetch.AnyFetch.get_provider_metadata(
-            provider
-        )
-    else:
-        metadata = any_search.AnySearch.get_provider_metadata(provider)
-    return metadata.env_key is not None and not metadata.requires_api_key
-
-
 def _option_enums(kind: ToolKind, provider: str) -> dict[str, list[str] | None] | None:
     """The provider's option names, each with the values it is limited to, if any.
 
@@ -280,10 +269,9 @@ def _validate_tool_entry(kind: ToolKind, name: str, entry: Any) -> str:
         msg = f"{section}.{name}.api_key is required for provider '{provider}'."
         raise ValueError(msg)
     api_key = entry.get("api_key")
-    if isinstance(api_key, str) and not api_key.strip() and _takes_an_optional_key(kind, provider):
-        # The tool runs keyless without a key, so a key that came out empty, such as a variable left
-        # blank, would switch it to keyless unnoticed.
-        msg = f"{section}.{name}.api_key is empty; set it, or leave api_key out to call '{provider}' without a key."
+    if isinstance(api_key, str) and not api_key.strip():
+        # A variable left blank, such as ${KEENABLE_API_KEY}, comes out as an empty key.
+        msg = f"{section}.{name}.api_key is blank; set it, or leave api_key out to call '{provider}' without a key."
         raise ValueError(msg)
     _validate_transport(section, name, entry.get("api_base"), entry.get("api_key"))
     timeout = entry.get("timeout")
