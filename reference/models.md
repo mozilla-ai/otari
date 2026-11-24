@@ -236,7 +236,7 @@ no `name`.
 
 Where a provider's server and models.dev say nothing about a model, or say it
 wrong, whoever holds the key that serves it can set its details on the model's
-page in the dashboard: **Edit details** on its row of offerings. The deployment
+page in the dashboard: choose **Edit details…** from its row's menu. The deployment
 operator sets them for the deployment's own providers, and an organization's
 owners and admins for the models its own provider keys serve, which only that
 organization's callers see.
@@ -574,7 +574,7 @@ your organization pays.
   offering is served on.
 
 The page is read-only. An organization sets its own rate on **Providers >
-Inference**, which an offering on one of its keys links to.
+Inference**, which **Set your rate…** in an offering's row menu opens.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
