@@ -201,21 +201,27 @@ describe("AcceptInvitationPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("offers no reset link where this deployment cannot deliver one", async () => {
-    // Mail is configured, so the signup ran, but the transport reaches nobody.
+  it("names no verification link where this deployment delivers nothing", async () => {
+    // Mail is configured, so the signup ran, but the transport reaches nobody,
+    // which means the verification email reached nobody either.
     mockApi({ verificationPending: true, canSignIn: false, waysIn: [] })
     const user = userEvent.setup()
     renderPage("/accept-invitation?token=abc123")
 
-    await user.click(
-      await screen.findByRole("button", { name: "Accept invitation" }),
-    )
+    expect(
+      await screen.findByText(
+        /Accept the invitation, then ask whoever administers/,
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Accept invitation" }))
 
     expect(
       await screen.findByText(
-        /If you did not sign up, ask whoever administers/,
+        /Verify ada@example.com first: ask whoever administers/,
       ),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/verification link emailed at signup/)).toBeNull()
     expect(
       screen.queryByRole("link", {
         name: "Didn't sign up? Set a password instead",
@@ -239,7 +245,7 @@ describe("AcceptInvitationPage", () => {
 
     expect(
       await screen.findByText(
-        /Verify ada@example.com first: open the verification link emailed at signup, then sign in\. If you did not sign up, choose a password/,
+        /Verify ada@example.com first: open the verification link emailed at signup\. If you did not sign up, choose a password/,
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText("Sign in to get started.")).toBeNull()

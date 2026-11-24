@@ -49,7 +49,7 @@ import { currentRoute } from "@/shared/helpers/appLocation"
 import { tokenFromRoute } from "@/shared/helpers/routeParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ClaimForm } from "./ClaimForm"
-import { waysInSentence } from "./waysIn"
+import { verificationPendingSentence, waysInSentence } from "./waysIn"
 
 /**
  * Whose session this browser holds, against the invited address.
@@ -180,7 +180,7 @@ export function AcceptInvitationPage() {
                 {accept.data.password_set
                   ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
                   : accept.data.verification_pending
-                    ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link emailed at signup, then sign in. If you did not sign up, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
+                    ? `Verify ${preview.data?.email ?? "the invited address"} first: ${verificationPendingSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
                     : accept.data.can_sign_in === false
                       ? `${invitedEmail ?? "The invited address"} has no password yet. To get started, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
                       : "Sign in to get started."}
@@ -261,7 +261,10 @@ export function AcceptInvitationPage() {
                   This link can't set a password for {preview.data.email}.
                   Accept the invitation, then{" "}
                   {preview.data.verification_pending
-                    ? `open the verification link emailed at signup. If you did not sign up, ${waysInSentence(preview.data.ways_in ?? [], deployment.oauth_providers)}`
+                    ? verificationPendingSentence(
+                        preview.data.ways_in ?? [],
+                        deployment.oauth_providers,
+                      )
                     : waysInSentence(
                         preview.data.ways_in ?? [],
                         deployment.oauth_providers,
