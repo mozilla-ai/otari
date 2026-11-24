@@ -39,6 +39,7 @@ import {
   type EndpointAuthDraft,
   EndpointAuthFields,
   endpointAuthDraftFrom,
+  endpointAuthExpiresAt,
   isEndpointAuthComplete,
 } from "@/features/providers/EndpointAuthFields"
 import { EndpointAuthMark } from "@/features/providers/EndpointAuthMark"
@@ -254,7 +255,10 @@ function KeyForm({
         : {
             method: "static_header" as const,
             header_name: headerName,
-            expires_at: new Date(endpointAuth.expiresAt).toISOString(),
+            expires_at: endpointAuthExpiresAt(
+              endpointAuth,
+              editing?.endpoint_auth ?? null,
+            ),
             ...(endpointAuth.secret !== ""
               ? { secret: endpointAuth.secret }
               : {}),

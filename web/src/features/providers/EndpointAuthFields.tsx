@@ -32,6 +32,26 @@ export function endpointAuthDraftFrom(
 }
 
 /**
+ * The rotation date to send, given what the key already holds.
+ *
+ * The inputs hold minutes, so a stored date that carried seconds does not
+ * survive the round trip through the draft. A save that did not touch the
+ * field has to send the instant already stored: converting the draft back
+ * would move a rotation date nobody edited, and the gateway re-checks the date
+ * whenever the credential changes, so one inside the current minute would move
+ * into the past and be refused.
+ */
+export function endpointAuthExpiresAt(
+  draft: EndpointAuthDraft,
+  stored: EndpointAuth | null,
+): string {
+  if (stored && draft.expiresAt === toDatetimeLocal(stored.expires_at)) {
+    return stored.expires_at
+  }
+  return new Date(draft.expiresAt).toISOString()
+}
+
+/**
  * Whether this draft can be saved, given what the key already holds.
  *
  * A stored value stands in for a retyped one, except where the key is moving to

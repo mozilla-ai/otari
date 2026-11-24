@@ -649,6 +649,45 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  // The inputs hold minutes, so converting the draft back would move a rotation
+  // date the person never touched, and the gateway re-checks the date whenever
+  // the credential changes.
+  it("keeps the stored rotation instant when only the secret is rotated", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:37+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "rotated-value",
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({
+        endpoint_auth: {
+          secret: "rotated-value",
+          expires_at: "2027-03-01T00:00:37+00:00",
+        },
+      })
+    })
+  })
+
   // The gateway refuses to carry a stored value to a host the person saving it
   // never proved they hold, so the dialog asks rather than offering the save.
   it("asks for the endpoint credential again when the key moves to another address", async () => {
