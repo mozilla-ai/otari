@@ -221,10 +221,22 @@ describe("buildTypescriptSnippet", () => {
 })
 
 describe("buildAgentPrompt", () => {
-  it("names the variable and the Bearer header, never the key", () => {
+  it("hands the agent one setup command aimed at this gateway, never the key", () => {
     const prompt = buildAgentPrompt(INPUT)
-    expect(prompt).toContain("Authorization: Bearer $OTARI_API_KEY")
+    expect(prompt).toContain(
+      "otari setup --yes --url https://otari.example.com --model openai:gpt-4o-mini",
+    )
     expect(prompt).not.toContain("gw-abc123")
+    expect(prompt).not.toContain("OTARI_API_KEY")
+  })
+
+  it("leaves the model to the command when none is known", () => {
+    const prompt = buildAgentPrompt({ baseUrl: INPUT.baseUrl })
+    expect(prompt).toContain(
+      "otari setup --yes --url https://otari.example.com\n",
+    )
+    expect(prompt).not.toContain("--model")
+    expect(prompt).not.toContain(SNIPPET_MODEL_PLACEHOLDER)
   })
 })
 

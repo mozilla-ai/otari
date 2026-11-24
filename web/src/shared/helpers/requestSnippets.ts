@@ -203,38 +203,44 @@ export function buildTypescriptSnippet({
 }
 
 /**
- * A prompt to paste into a coding agent, for the operator whose first request
- * is going to be made by one.
+ * How the prompt names the `otari` command. A build may point it at a checkout
+ * with VITE_OTARI_CLI; otherwise it runs the released CLI without installing it.
+ */
+const OTARI_CLI: string =
+  (import.meta.env.VITE_OTARI_CLI as string | undefined) ||
+  "uvx --from otari-agent otari"
+
+/**
+ * A prompt to paste into a coding agent, for the operator whose setup is going
+ * to be done by one.
  *
- * Deliberately not a snippet with the key in it. It names the variable, the
- * base URL and the model, tells the agent where to read the secret from, and
- * tells it to stop rather than guess if the variable is missing. The last line
- * asks for the reply, which is what makes a failed call visible in the agent's
- * own output rather than only here.
+ * It hands the agent one command, `otari setup`, which asks this gateway for a
+ * key in the browser, stores it, writes each coding tool's settings and sends a
+ * test request. The key is never in the prompt, and the agent is told not to
+ * ask for one or print one: the person's only step is approving the spending
+ * limit in the browser.
  */
 export function buildAgentPrompt({
   baseUrl,
   model = SNIPPET_MODEL_PLACEHOLDER,
-  message = DEFAULT_MESSAGE,
 }: Omit<RequestSnippetInput, "apiKey">): string {
-  const endpoint = `${baseUrl}${API_ROOT}/chat/completions`
+  const command = [
+    `${OTARI_CLI} setup --yes`,
+    `--url ${baseUrl}`,
+    ...(model === SNIPPET_MODEL_PLACEHOLDER ? [] : [`--model ${model}`]),
+  ].join(" ")
   return [
-    "Call Otari once with an OpenAI-compatible chat completion.",
-    "Do not change any of my editor or IDE settings.",
+    "Set up Otari on this machine for me.",
     "",
-    `base URL    ${baseUrl}${API_ROOT}`,
-    `env var     ${SNIPPET_KEY_ENV_VAR}`,
-    `model       ${model}`,
+    "Run this command and wait for it to finish. Give it up to five minutes:",
+    "it opens my browser and waits while I approve a key with a spending limit.",
     "",
-    `Read ${SNIPPET_KEY_ENV_VAR} from my environment. Never request, print, or hardcode it.`,
-    "If it is not set, stop and tell me how to export it.",
+    command,
     "",
-    `POST ${endpoint}`,
-    `Authorization: Bearer $${SNIPPET_KEY_ENV_VAR}`,
-    `Content-Type: application/json`,
-    `Body: {"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`,
-    "",
-    "Show me the assistant's reply.",
+    "Do not ask me for an API key and never print one. The command stores the key itself.",
+    "Do not edit any of my editor or tool settings yourself.",
+    "When it finishes, tell me which coding tools it set up, how to start each one,",
+    "and what the test request replied.",
   ].join("\n")
 }
 

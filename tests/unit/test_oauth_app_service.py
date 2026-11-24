@@ -181,3 +181,47 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
     assert clock.call_count == 1
     assert grants.find_bound.call_args.kwargs["now"] == now
     grants.consume.assert_awaited_once_with("hash", now)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepts", [True, False])
+async def test_an_apps_key_accepts_a_clients_own_user_only_when_its_registration_says_so(accepts: bool) -> None:
+    now = datetime(2026, 11, 24, tzinfo=UTC)
+    grants = AsyncMock(spec=OAuthAppGrantRepository)
+    grants.find_bound.return_value = OAuthAppGrant(
+        code_hash="hash",
+        user_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        scopes=KeyScopeSet.checked(["inference:run"], is_service_key=False),
+        expires_at=now + timedelta(seconds=1),
+    )
+    grants.consume.return_value = True
+    keys = AsyncMock(spec=ApiKeyService)
+    keys.issue_app_key.return_value = ("issued-token", "key-id")
+    organizations = AsyncMock(spec=OrganizationService)
+    organizations.hold_delegated_workspace_access.return_value = User(id=uuid.uuid4())
+    service = OAuthAppService(
+        cast(UnitOfWork, MagicMock(spec=UnitOfWork)),
+        grants,
+        keys,
+        cast(ApiKeyFormatPort, Mock()),
+        organizations,
+        cast(WorkspaceService, Mock()),
+        AsyncMock(spec=BudgetService),
+        apps={
+            "cli": OAuthAppConfig(name="CLI", redirect_uris=["http://localhost/callback"], accept_client_user=accepts)
+        },
+        ui_link=lambda path: path,
+        issuer="https://otari.example",
+        clock=Mock(return_value=now),
+    )
+    await service.exchange(
+        AppTokenRequest(
+            grant_type="authorization_code",
+            client_id="cli",
+            redirect_uri="http://localhost:53682/callback",
+            code="c" * 43,
+            code_verifier="v" * 43,
+        )
+    )
+    assert keys.issue_app_key.call_args.kwargs["accept_client_user"] is accepts

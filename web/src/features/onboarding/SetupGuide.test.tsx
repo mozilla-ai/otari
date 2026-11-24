@@ -448,7 +448,7 @@ describe("SetupGuide", () => {
     // rather than carrying the key.
     expect(
       await screen.findByRole("region", { name: "agent code" }),
-    ).toHaveTextContent("OTARI_API_KEY")
+    ).toHaveTextContent("otari setup --yes")
 
     for (const [label, region] of [
       ["cURL", "curl"],

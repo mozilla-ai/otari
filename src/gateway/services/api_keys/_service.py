@@ -82,6 +82,7 @@ class ApiKeyService:
         scopes: Iterable[KeyScope],
         key_format: ApiKeyFormatPort,
         expires_at: datetime | None = None,
+        accept_client_user: bool = False,
     ) -> tuple[str, str]:
         """Mint a budget-enforced app credential inside the caller's authority transaction.
 
@@ -107,6 +108,8 @@ class ApiKeyService:
             client_id=client_id,
             scopes=held,
             expires_at=expires_at,
+            # Only ever an explicit "accept": an app that does not ask inherits the deployment's setting.
+            reject_user_mismatch=False if accept_client_user else None,
         )
         return key, key_id
 

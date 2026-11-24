@@ -156,13 +156,15 @@ class OAuthAppService:
             raise OAuthAppGrantError("invalid_client", "Unknown app")
         try:
             app = self.require_app(request.client_id, request.redirect_uri)
-            return await self._exchange(request, app.name)
+            return await self._exchange(request, app.name, accept_client_user=app.accept_client_user)
         except (OAuthAppGrantError, NotAuthorizedError, WorkspaceNotFoundError, AppKeyOwnerInactiveError) as exc:
             # Refusals contain no request credentials. Unexpected failures must remain server errors.
             logger.warning("OAuth app exchange refused: client_id=%s reason=%s", request.client_id, str(exc))
             raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant") from None
 
-    async def _exchange(self, request: AppTokenRequest, app_name: str) -> tuple[str, KeyScopeSet]:
+    async def _exchange(
+        self, request: AppTokenRequest, app_name: str, *, accept_client_user: bool = False
+    ) -> tuple[str, KeyScopeSet]:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
@@ -192,6 +194,7 @@ class OAuthAppService:
                 scopes=held,
                 key_format=self.key_format,
                 expires_at=None if grant.key_lifetime_sec is None else now + timedelta(seconds=grant.key_lifetime_sec),
+                accept_client_user=accept_client_user,
             )
             if grant.spend_limit is not None:
                 await self.budgets.cap_app_key(
