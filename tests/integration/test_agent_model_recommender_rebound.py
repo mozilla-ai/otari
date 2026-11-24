@@ -16,6 +16,7 @@ price.
 import itertools
 import logging
 import sys
+import uuid
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from decimal import Decimal
@@ -236,7 +237,9 @@ def test_the_bound_recommender_answers_at_the_price_it_quotes(rebound: tuple[Tes
     response = client.post(RECOMMEND, json=SPAWN, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
 
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert response.json() == {"model": "haiku", "reason": "the probe always says haiku", "probabilities": None}
+    answer = response.json()
+    assert uuid.UUID(answer.pop("decision_id"))
+    assert answer == {"model": "haiku", "reason": "the probe always says haiku", "probabilities": None}
     assert probe.ASKED == [("Explore", "requested-xyz", ["haiku", "opus", "sonnet"])]
 
     (row,) = _usage_rows(client, key["user_id"])
@@ -373,7 +376,8 @@ def test_the_release_is_committed_with_the_settlement(rebound: tuple[TestClient,
 
     assert response.status_code == status.HTTP_200_OK, response.text
     steps = [entry[0] for entry in probe.LEDGER]
-    assert steps[steps.index("hold") :] == ["hold", "commit", "release", "charge", "commit"]
+    # The last commit stores the record of the decision, after the settlement's.
+    assert steps[steps.index("hold") :] == ["hold", "commit", "release", "charge", "commit", "commit"]
 
 
 def test_a_failed_recommendation_commits_the_release_with_the_refund(rebound: tuple[TestClient, ModuleType]) -> None:

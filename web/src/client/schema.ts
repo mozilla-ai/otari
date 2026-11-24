@@ -6621,7 +6621,8 @@ export interface paths {
          *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
-         *     and its probability for each candidate.
+         *     and its probability for each candidate. `decision_id` names the record of
+         *     this answer, and is absent where the record could not be kept.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -9673,6 +9674,7 @@ export interface components {
          * AgentModelRecommendation
          * @description The model recommended for the subagent.
          * @example {
+         *       "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
          *       "model": "sonnet",
          *       "probabilities": {
          *         "haiku": 0.21,
@@ -9683,6 +9685,11 @@ export interface components {
          *     }
          */
         AgentModelRecommendation: {
+            /**
+             * Decision Id
+             * @description The gateway's record of this recommendation. Absent where the record could not be kept.
+             */
+            decision_id?: string | null;
             /**
              * Model
              * @description A model alias or id the harness can start the subagent on.

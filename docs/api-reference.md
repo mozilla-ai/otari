@@ -1157,7 +1157,8 @@ Anthropic itself and resolves the alias on its side; it may not send
 {
   "model": "haiku",
   "reason": "haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 },
+  "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11"
 }
 ```
 
@@ -1166,6 +1167,7 @@ Anthropic itself and resolves the alias on its side; it may not send
 | `model` | One of the candidates: a model alias or id the harness can start the subagent on. |
 | `reason` | One short sentence the harness may show, or `null`. |
 | `probabilities` | The decision model's probability for each candidate, or `null` when it reports none. |
+| `decision_id` | The gateway's record of this recommendation, or `null` where the record could not be kept. The record holds the subagent type and the model names, never the task. |
 
 **Errors.** No [subagent router](routing.md#subagent-routers) stored, or every
 stored one switched off, is a `400`. The decision model's refusal of the request (400, 422, or 501) is a

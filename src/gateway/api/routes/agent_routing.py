@@ -13,14 +13,18 @@ in usage like a ``POST /api/v1/decisions`` call: priced from this deployment's
 own rows, or held and charged at the price the recommender quotes. Nothing
 else is dispatched here, which is why any active API key may ask rather than
 only an operator. See ``docs/claude-code.md``.
+
+Each answer is also recorded as a subagent decision, whose id the answer carries.
 """
 
+import uuid
 from collections.abc import Mapping
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from gateway.api.deps import AgentModelRecommenderPortDep, get_config, verify_api_key_or_master_key
+from gateway.api.deps.routing import SubagentDecisionServiceDep
 from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import (
     ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
@@ -108,6 +112,7 @@ async def recommend_model_for_agent(
     config: Annotated[GatewayConfig, Depends(get_config)],
     recommender: AgentModelRecommenderPortDep,
     scaffold: Annotated[DecisionScaffold, Depends(get_decision_scaffold)],
+    decisions: SubagentDecisionServiceDep,
 ) -> AgentModelRecommendation:
     """Recommend the model a subagent about to start should run on.
 
@@ -120,7 +125,8 @@ async def recommend_model_for_agent(
     among the request's own `candidates` for pi; a bootstrap may bind a
     recommender of its own, which the caller never configures. Where
     the recommender reports them, the answer also carries a one-line reason
-    and its probability for each candidate.
+    and its probability for each candidate. `decision_id` names the record of
+    this answer, and is absent where the record could not be kept.
 
     Authentication modes:
     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -156,8 +162,19 @@ async def recommend_model_for_agent(
         call=_RecommenderCall(recommender, spawn, candidates),
     )
     recommendation = settled.result
+    api_key, _ = auth_result
+    decision_id = await decisions.record(
+        decision_id=uuid.UUID(settled.request_id),
+        workspace_id=settled.workspace_id,
+        user_id=settled.user_id,
+        api_key_id=api_key.id if api_key else None,
+        spawn=spawn,
+        recommended_model=recommendation.model,
+        router_cost=settled.cost,
+    )
     return AgentModelRecommendation(
         model=recommendation.model,
         reason=recommendation.reason,
         probabilities=dict(recommendation.probabilities) if recommendation.probabilities is not None else None,
+        decision_id=decision_id,
     )

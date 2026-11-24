@@ -131,6 +131,7 @@ from gateway.api.deps.ports import (
     get_telemetry_storage_port,
     model_provider_port_on,
 )
+from gateway.api.deps.routing import SubagentDecisionServiceDep, get_subagent_decision_service
 from gateway.api.deps.tools import (
     CodeExecutionEnvironmentServiceDep,
     DirectToolAvailabilityDep,
@@ -1246,6 +1247,7 @@ __all__ = [
     "SelectorReindexDep",
     "ServiceKey",
     "SignupInvitePortDep",
+    "SubagentDecisionServiceDep",
     "TRACE_CONTENT_HEADER_INVALID_DETAIL",
     "TelemetryStoragePortDep",
     "ToolPorts",
@@ -1334,6 +1336,7 @@ __all__ = [
     "get_selector_reindex",
     "get_session_identity",
     "get_signup_invite_port",
+    "get_subagent_decision_service",
     "get_telemetry_storage_port",
     "get_tool_ports",
     "get_trace_service",
