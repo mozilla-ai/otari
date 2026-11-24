@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 _EU = frozenset("AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split())
 _TTL = 300.0
 _LIMIT = 10000
+_COOLDOWN = 15.0
+_MAX_COOLDOWN = 600.0
+_REFUSAL_TTL = 300.0
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
 _ACCOUNT_FIELDS = frozenset(
     {
@@ -92,6 +95,12 @@ class _Health:
     active: int = 0
     latency: dict[str, tuple[float, float]] = field(default_factory=dict)
     cooldown: float = 0
+    failures: int = 0
+
+
+def _backoff(failures: int) -> float:
+    """Cooldown after ``failures`` consecutive failures: 15 seconds, doubling up to 10 minutes."""
+    return min(_COOLDOWN * float(2 ** (failures - 1)), _MAX_COOLDOWN)
 
 
 @dataclass
@@ -101,11 +110,17 @@ class AutomaticSelection:
     router: AutomaticRouter
     affinity: str | None
     mode: str
+    scope: str = ""
     observations: list[AutomaticObservation] = field(default_factory=list)
 
     def forget(self, attempt: Attempt) -> None:
         """Invalidate only a binding to the refused candidate, not a newer one."""
         self.forget_key(self.router.candidate_key(attempt))
+
+    def refuse(self, attempt: Attempt) -> None:
+        """Rank an offering that refused this caller after the others until the refusal expires."""
+        self.forget(attempt)
+        self.router.remember_refusal(self.scope, f"{attempt.instance}:{attempt.model}")
 
     def forget_key(self, key: str) -> None:
         """Remove the session binding only if it still points to this credential fingerprint."""
@@ -125,7 +140,8 @@ class AutomaticSelection:
         health = self.router._health(key)
         if health is not None:
             health.active += 1
-        observation = AutomaticObservation(self, key, selector, health, self.router.clock())
+        account = self.router.account_key(attempt)
+        observation = AutomaticObservation(self, key, account, selector, health, self.router.clock())
         self.observations.append(observation)
         return observation
 
@@ -136,6 +152,7 @@ class AutomaticObservation:
 
     selection: AutomaticSelection
     key: str
+    account: str
     selector: str
     health: _Health | None
     started: float
@@ -147,8 +164,12 @@ class AutomaticObservation:
         if self.first_at is None:
             self.first_at = self.selection.router.clock()
 
-    def finish(self, *, success: bool = False, unhealthy: bool = False) -> None:
-        """Release load once, then update health and session affinity for the reported outcome."""
+    def finish(self, *, success: bool = False, unhealthy: bool = False, account: bool = False) -> None:
+        """Release load once, then update health and session affinity for the reported outcome.
+
+        ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
+        which cools every model served on it rather than this one alone.
+        """
         if self.finished:
             return
         self.finished = True
@@ -157,7 +178,8 @@ class AutomaticObservation:
         if self.health is not None:
             self.health.active = max(0, self.health.active - 1)
             if unhealthy:
-                self.health.cooldown = now + 15
+                self.health.failures += 1
+                self.health.cooldown = now + _backoff(self.health.failures)
             if success:
                 # Streaming measures first output; non-streaming measures completion.
                 elapsed = max(0.001, (self.first_at if self.first_at is not None else now) - self.started)
@@ -165,6 +187,11 @@ class AutomaticObservation:
                 value = 0.8 * old[0] + 0.2 * elapsed if old and now - old[1] < _TTL else elapsed
                 self.health.latency[self.selection.mode] = (value, now)
                 self.health.cooldown = 0
+                self.health.failures = 0
+        if account:
+            router.cool_account(self.account, now)
+        elif success:
+            router.accounts.pop(self.account, None)
         if unhealthy:
             self.selection.forget_key(self.key)
         if success and self.selection.affinity:
@@ -187,6 +214,9 @@ class AutomaticRouter:
         self._salt = secrets.token_bytes(32)
         self.health: OrderedDict[str, _Health] = OrderedDict()
         self.affinities: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        # Credential-wide cooldowns as (until, consecutive failures), and per-caller refusals as expiry times.
+        self.accounts: OrderedDict[str, tuple[float, int]] = OrderedDict()
+        self.refusals: OrderedDict[str, float] = OrderedDict()
 
     def _digest(self, value: object) -> str:
         """Create a private process-local fingerprint without retaining its input."""
@@ -200,6 +230,26 @@ class AutomaticRouter:
         return self._digest(
             (attempt.instance, attempt.provider.value, attempt.model, _credential_fields(attempt.kwargs))
         )
+
+    def account_key(self, attempt: Attempt) -> str:
+        """Identify the credential an attempt is sent on, whatever model it names."""
+        return self._digest((attempt.instance, attempt.provider.value, _credential_fields(attempt.kwargs)))
+
+    def cool_account(self, key: str, now: float) -> None:
+        """Cool every model on a failing credential, backing off further while it keeps failing."""
+        previous = self.accounts.pop(key, None)
+        failures = previous[1] + 1 if previous else 1
+        self.accounts[key] = (now + _backoff(failures), failures)
+        while len(self.accounts) > _LIMIT:
+            self.accounts.popitem(last=False)
+
+    def remember_refusal(self, scope: str, selector: str) -> None:
+        """Record that ``selector`` refused callers in ``scope``, such as hosted access their tenant lacks."""
+        key = self._digest((scope, selector))
+        self.refusals.pop(key, None)
+        self.refusals[key] = self.clock() + _REFUSAL_TTL
+        while len(self.refusals) > _LIMIT:
+            self.refusals.popitem(last=False)
 
     def _health(self, key: str) -> _Health | None:
         """Get tracked health, evicting an idle entry when full; never evict active calls."""
@@ -247,6 +297,17 @@ class AutomaticRouter:
 
         now = self.clock()
         keys = {f"{a.instance}:{a.model}": self.candidate_key(a) for a in plan.attempts}
+        cooling: set[str] = set()
+        for attempt in plan.attempts:
+            selector = f"{attempt.instance}:{attempt.model}"
+            health = self.health.get(keys[selector])
+            account = self.accounts.get(self.account_key(attempt))
+            if (
+                (health and health.cooldown > now)
+                or (account and account[0] > now)
+                or self.refusals.get(self._digest((scope, selector)), 0) > now
+            ):
+                cooling.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None
         previous = self.affinities.get(affinity) if affinity else None
         sticky = previous[0] if previous and now - previous[1] < settings.session_ttl_seconds else None
@@ -259,12 +320,11 @@ class AutomaticRouter:
         neutral = median(latencies.values()) if latencies else 1.0
 
         def group(attempt: Attempt) -> tuple[bool, bool, bool, int]:
-            """Partition candidates by missing price, cooldown, ownership and region mismatch."""
+            """Partition candidates by missing price, cooldown or refusal, ownership and region mismatch."""
             selector = f"{attempt.instance}:{attempt.model}"
             hint = settings.offerings.get(selector, settings.offerings.get(attempt.instance, AutomaticOffering()))
-            health = self.health.get(keys[selector])
             locality = 0 if region is None or hint.region == region else 1
-            return costs.get(selector) is None, bool(health and health.cooldown > now), selector not in own, locality
+            return costs.get(selector) is None, selector in cooling, selector not in own, locality
 
         floors: dict[tuple[bool, bool, bool, int], Decimal] = {}
         for attempt in plan.attempts:
@@ -314,7 +374,7 @@ class AutomaticRouter:
         return replace(
             plan,
             attempts=attempts,
-            automatic=AutomaticSelection(self, affinity, mode),
+            automatic=AutomaticSelection(self, affinity, mode, scope),
             dropped=[
                 *plan.dropped,
                 *(
