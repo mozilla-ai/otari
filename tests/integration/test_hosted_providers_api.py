@@ -22,6 +22,7 @@ from gateway.core.config import API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.model_discovery_service import ProviderDiscovery
+from gateway.services.providers import HostedRegionIndex
 from gateway.services.secret_box import generate_secret_key
 
 PATH = f"{API_ROOT}/hosted-providers"
@@ -362,6 +363,31 @@ def test_a_provider_keeps_its_zero_data_retention_declaration(
     assert patch({"zero_data_retention": False}) is False
     [listed] = client.get(PATH, headers=master_key_header).json()["data"]
     assert listed["zero_data_retention"] is False
+
+
+def test_a_provider_keeps_changes_and_clears_its_routing_locality(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _create(client, master_key_header)["routing_locality"] is None
+    client.delete(f"{PATH}/openai", headers=master_key_header)
+    assert _create(client, master_key_header, routing_locality="cloud")["routing_locality"] == "cloud"
+    assert HostedRegionIndex.routing_locality_of("openai") == "cloud"
+
+    def patch(body: dict[str, Any]) -> Any:
+        response = client.patch(f"{PATH}/openai", json=body, headers=master_key_header)
+        assert response.status_code == 200, response.text
+        return response.json()["routing_locality"]
+
+    assert patch({"enabled": False}) == "cloud"
+    assert patch({"routing_locality": "private"}) == "private"
+    assert HostedRegionIndex.routing_locality_of("openai") == "private"
+    assert patch({"routing_locality": None}) is None
+    assert HostedRegionIndex.routing_locality_of("openai") is None
+    [listed] = client.get(PATH, headers=master_key_header).json()["data"]
+    assert listed["routing_locality"] is None
+
+    refused = client.patch(f"{PATH}/openai", json={"routing_locality": "orbit"}, headers=master_key_header)
+    assert refused.status_code == 422
 
 
 def test_a_provider_keeps_its_policy_links(client: TestClient, master_key_header: dict[str, str]) -> None:

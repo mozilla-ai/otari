@@ -344,6 +344,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
+    HostedLocalityRefusedError,
     HostedRegionIndex,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
@@ -1534,6 +1535,7 @@ def _hosted_candidate(
                 organization_id=ctx.organization_id,
                 workspace_id=ctx.workspace_id,
                 country_gate=ctx.country_gate,
+                allowed_localities=attempt.allowed_localities,
             )
         except HostedAccessDeniedError as exc:
             selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
@@ -1665,6 +1667,9 @@ async def _serve_from_hosted_credential(
             # actually serves it.
             provider=resolved.instance,
             model=resolved.model,
+            # A one-attempt plan never reaches the walk, so its policy's
+            # eligibility is held to here, against the region the port picks.
+            allowed_localities=ctx.plan.attempts[0].allowed_localities if ctx.plan is not None else None,
         )
         country_gate = ctx.country_gate
         if country_gate is not None and credential is not None:
@@ -3124,13 +3129,18 @@ async def resolve_request_context(
             # The rung ``_serve_from_hosted_credential`` adds at dispatch, which a routed chain does not take.
             if gate_instance is None or (plan is not None and len(plan.attempts) > 1):
                 return None
-            hosted = await hosted_credential_for(
-                model_provider,
-                organization_id=organization_id,
-                workspace_id=workspace_id,
-                provider=gate_instance,
-                model=gate_model,
-            )
+            try:
+                hosted = await hosted_credential_for(
+                    model_provider,
+                    organization_id=organization_id,
+                    workspace_id=workspace_id,
+                    provider=gate_instance,
+                    model=gate_model,
+                    allowed_localities=plan.attempts[0].allowed_localities if plan is not None else None,
+                )
+            except HostedLocalityRefusedError:
+                # No upload on a credential the policy's eligibility excludes; dispatch refuses the request.
+                return None
             if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.

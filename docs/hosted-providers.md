@@ -97,6 +97,21 @@ locations it accepts (**Allowed data locations** on its Providers tab, or
   the workspace's model lists.
 - Leaving the list unset accepts every location.
 
+### Routing locality
+
+A hosted provider can declare where its upstream runs inference
+(`routing_locality`): `local`, `private` or `cloud`. A routing policy with
+`eligibility` serves a hosted target only when the provider declares one of the
+policy's `allowed_localities`. A provider that declares nothing never serves
+such a policy, and every other request is unaffected. See
+[Route by deployment locality and capability](routing.md#route-by-deployment-locality-and-capability).
+
+The declaration is the provider's: every [region](#regions) inherits it, so a
+region on another endpoint must run where the provider says. Otari cannot verify
+it. The request is checked again when the credential is resolved, so a region
+or an [overlay's adapter](#deployment-paid-credentials) answering with an
+undeclared or excluded locality is skipped like any refused candidate.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -510,6 +525,7 @@ hosted_providers:
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
 | `data_location` | Where the provider keeps request data: a two-letter country code, `EU` or `GLOBAL`. See [Data location](#data-location). |
 | `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
+| `routing_locality` | Where the provider runs inference, for routing policies with `eligibility`: `local`, `private` or `cloud`. Unset declares nothing. See [Routing locality](#routing-locality). |
 | `terms_url`, `privacy_url` | The provider's terms of service and privacy policy, shown on the public Providers pages. See [Terms and privacy links](#terms-and-privacy-links). |
 
 `api_key` may be left out for:
@@ -645,13 +661,16 @@ each provider's settings and models are on a page of its own.
 - **Zero data retention**, in both dialogs, sets `zero_data_retention`. The
   same box is on each key's dialog on the organization's Providers page. See
   [Zero data retention](#zero-data-retention).
+- **Routing locality**, in both dialogs, sets `routing_locality`. See
+  [Routing locality](#routing-locality).
 - Below the header, the provider's settings: **API key**, **Endpoint**,
   **Serves** (every organization, or the one it is kept to, which is set
   through `/api/v1/hosted-providers`), **Requests from** (two-letter codes, typed
   in the dialogs or loaded from a JSON file, a list or one under
   `supported_countries`; blank serves every country, see
   [Supported countries](configuration.md#supported-countries)), **Data hosted
-  in** (see [Data location](#data-location)), **Zero data retention** and
+  in** (see [Data location](#data-location)), **Zero data retention**,
+  **Routing locality** (see [Routing locality](#routing-locality)) and
   **Models not on its list**.
 - **Add region** opens a dialog for what a region changes: its name and id, its
   endpoint, where it keeps data, the provider's key or one of its own, and

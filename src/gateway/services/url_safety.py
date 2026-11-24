@@ -314,6 +314,11 @@ def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str 
     return None
 
 
+async def public_addresses_of(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """The publicly routable addresses ``host`` resolves to now; empty when none, or when it does not resolve."""
+    return [addr for addr in await _resolve_all_async(host) if _blocked_reason(addr) is None]
+
+
 def _allow_web_search_private_hosts() -> bool:
     return otari_env("WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
 

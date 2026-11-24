@@ -11,8 +11,9 @@ implementation's own needs no entry: any-llm already reads it.
 Only the names live here, never a credential: the credential is resolved per
 request through ``ModelProviderPort``, as for any hosted provider. Beside them,
 the names declared zero data retention, which a workspace requiring it is held
-to at dispatch; a change to that declaration reaches every worker on the next
-refresh.
+to at dispatch, and each provider's declared routing locality, which a routing
+policy with ``eligibility`` reads; a change to either declaration reaches every
+worker on the next refresh.
 """
 
 import asyncio
@@ -34,6 +35,9 @@ _zero_retention: frozenset[str] = frozenset()
 # declared location of each region it may serve from (None where undeclared);
 # for a name pinning one region (``tokenhub@sg``), that region's alone.
 _locations: dict[str, tuple[str | None, ...]] = {}
+# Each hosted provider's own name -> where the operator declares its inference
+# runs (``local``, ``private``, ``cloud``), for those that declared it.
+_localities: dict[str, str] = {}
 # Each region's name (``tokenhub@sg``) -> the hosted provider it is a region of.
 _region_parents: dict[str, str] = {}
 # Every hosted provider's own name, a region's never.
@@ -101,19 +105,33 @@ def hosted_provider_named(name: str) -> bool:
     return name in _providers
 
 
-class HostedRegionIndex:
-    """The region lookups the composition root registers where a name is priced, re-keyed or recorded."""
-
-    parent_of = staticmethod(hosted_region_parent)
-    data_location_of = staticmethod(hosted_data_location)
-
-
 def hosted_zero_data_retention(name: str) -> bool:
     """Whether the hosted provider ``name`` is declared zero data retention; a region shares its provider's."""
     if name in _zero_retention:
         return True
     parent = hosted_region_parent(name)
     return parent is not None and parent in _zero_retention
+
+
+def hosted_routing_locality(name: str) -> str | None:
+    """Where the operator declares the hosted provider ``name`` runs its inference, or None when undeclared.
+
+    A region (``tokenhub@sg``) answers its provider's declaration: a region has
+    no locality of its own. None too for a name this worker holds no hosted
+    provider for.
+    """
+    if (locality := _localities.get(name)) is not None:
+        return locality
+    parent = hosted_region_parent(name)
+    return _localities.get(parent) if parent is not None else None
+
+
+class HostedRegionIndex:
+    """The region lookups the composition root registers where a name is priced, re-keyed, recorded or routed."""
+
+    parent_of = staticmethod(hosted_region_parent)
+    data_location_of = staticmethod(hosted_data_location)
+    routing_locality_of = staticmethod(hosted_routing_locality)
 
 
 def hosted_data_locations(name: str) -> tuple[str | None, ...]:
@@ -162,7 +180,7 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     saw, so it is replayed over the snapshot rather than lost.
     """
     global _names, _recent_retention, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
-    global _refresh_count, _published_refresh  # noqa: PLW0603
+    global _refresh_count, _published_refresh, _localities  # noqa: PLW0603
 
     _refresh_count += 1
     number = _refresh_count
@@ -175,6 +193,7 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     names.update({row.name: row.provider for row in rows})
     declared = {name for name, entry in entries.items() if entry.zero_data_retention}
     locations: dict[str, tuple[str | None, ...]] = {name: (entry.data_location,) for name, entry in entries.items()}
+    localities = {name: entry.routing_locality for name, entry in entries.items() if entry.routing_locality is not None}
     parents: dict[str, str] = {}
     providers = frozenset(entries) | frozenset(row.name for row in rows)
     for row in rows:
@@ -182,6 +201,11 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             declared.add(row.name)
         else:
             declared.discard(row.name)
+        # A row wins over an entry of the same name, an undeclared row included.
+        if row.routing_locality is not None:
+            localities[row.name] = row.routing_locality
+        else:
+            localities.pop(row.name, None)
         own = regions.get(row.id, [])
         # A region a provider of its whole name shadows does not serve, so it is not where data may go.
         locations[row.name] = (
@@ -215,6 +239,7 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     retention = _replay(_recent_retention, read_from, declared)
     _names, _recent_writes, _recent_retention, _zero_retention = fresh, newer, retention, frozenset(declared)
     _locations, _region_parents, _providers, _published_refresh = locations, parents, providers, number
+    _localities = localities
 
 
 def _replay(journal: dict[str, tuple[int, bool]], read_from: int, members: set[str]) -> dict[str, tuple[int, bool]]:
@@ -231,10 +256,10 @@ def _replay(journal: dict[str, tuple[int, bool]], read_from: int, members: set[s
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
     global _names, _recent_retention, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
-    global _published_refresh  # noqa: PLW0603
+    global _published_refresh, _localities  # noqa: PLW0603
 
     _names, _recent_writes, _recent_retention, _zero_retention, _locations = {}, {}, {}, frozenset(), {}
-    _region_parents, _providers, _published_refresh = {}, frozenset(), 0
+    _region_parents, _providers, _published_refresh, _localities = {}, frozenset(), 0, {}
 
 
 async def _refresh_on_a_session_of_its_own(config: GatewayConfig) -> None:

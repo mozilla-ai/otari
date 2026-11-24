@@ -33,6 +33,7 @@ import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
 import { RegionFormDialog } from "./RegionFormDialog"
 import { RegionsCard } from "./RegionsCard"
+import { routingLocalityLabel } from "./RoutingLocalityField"
 import { formatCountries } from "./supportedCountries"
 
 // One hosted provider on a page of its own: how it is reached and who it
@@ -101,6 +102,13 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
     <>
       <Setting label="Zero data retention">
         {provider.zero_data_retention ? "Declared" : "Not declared"}
+      </Setting>
+      <Setting label="Routing locality">
+        {provider.routing_locality ? (
+          routingLocalityLabel(provider.routing_locality)
+        ) : (
+          <span className="text-muted">Not declared</span>
+        )}
       </Setting>
       <Setting label="Models not on its list">
         {provider.serves_unlisted_models ? "Served" : "Refused"}

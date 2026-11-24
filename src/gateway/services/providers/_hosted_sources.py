@@ -108,6 +108,11 @@ class HostedSource:
         """Where the upstream keeps request data, as the operator declares it, or None."""
         return self.row.data_location if self.row is not None else self._entry.data_location
 
+    @property
+    def routing_locality(self) -> str | None:
+        """Where the operator declares the upstream's inference runs (``local``, ``private``, ``cloud``), or None."""
+        return self.row.routing_locality if self.row is not None else self._entry.routing_locality
+
     def region(self, slug: str) -> HostedProviderRegion | None:
         """The region of that slug, or None."""
         return next((region for region in self.regions if region.slug == slug), None)
@@ -159,6 +164,7 @@ class HostedSource:
             implementation=entry.provider,
             supported_countries=entry.supported_countries,
             data_location=entry.data_location,
+            routing_locality=entry.routing_locality,
         )
 
     def withheld_from(self, organization_id: uuid.UUID | None) -> bool:

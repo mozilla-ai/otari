@@ -295,6 +295,7 @@ class HostedProviderService:
                     supported_countries=request.supported_countries,
                     data_location=request.data_location,
                     zero_data_retention=request.zero_data_retention,
+                    routing_locality=request.routing_locality,
                     terms_url=request.terms_url,
                     privacy_url=request.privacy_url,
                 )
@@ -396,6 +397,8 @@ class HostedProviderService:
                 row.supported_countries = request.supported_countries
             if "data_location" in request.model_fields_set:
                 row.data_location = request.data_location
+            if "routing_locality" in request.model_fields_set:
+                row.routing_locality = request.routing_locality
             if "terms_url" in request.model_fields_set:
                 row.terms_url = request.terms_url
             if "privacy_url" in request.model_fields_set:
@@ -407,7 +410,7 @@ class HostedProviderService:
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
-        if "data_location" in request.model_fields_set:
+        if request.model_fields_set & {"data_location", "routing_locality"}:
             await refresh_hosted_name_index(self.uow, self.config)
         # The cached listing was made on what this request may just have changed.
         get_model_cache().clear(row.name)
@@ -1264,6 +1267,7 @@ class HostedProviderService:
             supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
             data_location=entry.data_location,
             zero_data_retention=entry.zero_data_retention,
+            routing_locality=entry.routing_locality,
             terms_url=entry.terms_url,
             privacy_url=entry.privacy_url,
         )

@@ -115,6 +115,49 @@ describe("HostedProviderPage", () => {
     })
   })
 
+  it("shows the routing locality and lets an edit change and clear it", async () => {
+    const requests = mockApi({
+      providers: [hostedProvider({ routing_locality: "cloud" })],
+    })
+    const user = userEvent.setup()
+    await renderProviderPage("openai")
+
+    expect(await screen.findByText("Routing locality")).toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    let dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: /Routing locality/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: /^Private/ }))
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      routing_locality: "private",
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: /Routing locality/ }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: /^Not declared/ }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(2),
+    )
+    expect(hostedRequests(requests, "PATCH")[1].body).toEqual({
+      api_base: "",
+      routing_locality: null,
+    })
+  })
+
   it("changes and clears the countries from the edit dialog", async () => {
     const requests = mockApi({
       providers: [hostedProvider({ supported_countries: ["US"] })],

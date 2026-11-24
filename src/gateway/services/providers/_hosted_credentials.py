@@ -56,6 +56,10 @@ class ResolvedHostedProvider:
     """The slug of the region it serves from, or None for a provider with no regions."""
     data_location: str | None = None
     """Where the upstream keeps request data (a country code, ``EU`` or ``GLOBAL``), or None when undeclared."""
+    routing_locality: str | None = None
+    """Where the operator declares the inference runs (``local``, ``private``, ``cloud``), or None when undeclared.
+
+    The provider's declaration: every region inherits it."""
 
 
 def last4(api_key: str) -> str | None:
@@ -222,6 +226,7 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
         implementation=row.provider,
         supported_countries=tuple(row.supported_countries) if row.supported_countries is not None else None,
         data_location=row.data_location,
+        routing_locality=row.routing_locality,
     )
 
 
@@ -282,6 +287,8 @@ def region_credential_of(
         region=region.slug,
         # A region's own declaration, never the provider's: it is copied when the region is created.
         data_location=region.data_location,
+        # The provider's: a region has no locality of its own.
+        routing_locality=provider.routing_locality,
     )
 
 

@@ -105,4 +105,5 @@ def _credential(resolved: ResolvedHostedProvider, provider: str) -> HostedCreden
         implementation=resolved.implementation,
         supported_countries=resolved.supported_countries,
         data_location=resolved.data_location,
+        routing_locality=resolved.routing_locality,
     )

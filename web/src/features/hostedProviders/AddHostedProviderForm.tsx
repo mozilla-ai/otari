@@ -34,6 +34,10 @@ import { useProviderDetail } from "@/shared/api/providers"
 import { DataLocationField } from "./DataLocationField"
 import { PolicyUrlFields } from "./PolicyUrlFields"
 import { policyUrlError, policyUrlValue } from "./policyUrls"
+import {
+  RoutingLocalityField,
+  type RoutingLocalityValue,
+} from "./RoutingLocalityField"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { parseCountries } from "./supportedCountries"
@@ -62,6 +66,7 @@ interface ProviderDraft {
   supportedCountries: string
   dataLocation: string
   zeroDataRetention: boolean
+  routingLocality: RoutingLocalityValue
   termsUrl: string
   privacyUrl: string
 }
@@ -77,6 +82,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   supportedCountries: "",
   dataLocation: "",
   zeroDataRetention: false,
+  routingLocality: "",
   termsUrl: "",
   privacyUrl: "",
 }
@@ -158,6 +164,9 @@ export function AddHostedProviderForm({
           ? {}
           : { supported_countries: countries.value }),
         ...(draft.dataLocation ? { data_location: draft.dataLocation } : {}),
+        ...(draft.routingLocality
+          ? { routing_locality: draft.routingLocality }
+          : {}),
         // Left out when blank, which the API stores as no link.
         ...(policyUrlValue(draft.termsUrl) === null
           ? {}
@@ -264,6 +273,10 @@ export function AddHostedProviderForm({
       <DataLocationField
         value={draft.dataLocation}
         onChange={(dataLocation) => setDraft({ ...draft, dataLocation })}
+      />
+      <RoutingLocalityField
+        value={draft.routingLocality}
+        onChange={(routingLocality) => setDraft({ ...draft, routingLocality })}
       />
       <SupportedCountriesField
         value={draft.supportedCountries}

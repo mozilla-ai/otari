@@ -12,12 +12,13 @@ from gateway.services.providers import _hosted_name_index as index
 
 
 class _Row:
-    def __init__(self, name: str, provider: str) -> None:
+    def __init__(self, name: str, provider: str, routing_locality: str | None = None) -> None:
         self.id = uuid.uuid4()
         self.name = name
         self.provider = provider
         self.zero_data_retention = False
         self.data_location = None
+        self.routing_locality = routing_locality
 
 
 class _Uow:
@@ -171,3 +172,54 @@ async def test_a_refresh_that_finishes_after_a_later_one_does_not_publish_its_ol
     await first
 
     assert index.hosted_implementation("openai-eu") == "openai"
+
+
+class _Region:
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        self.enabled = True
+        self.data_location = None
+
+
+@pytest.mark.asyncio
+async def test_a_routing_locality_is_read_from_the_rows_and_inherited_by_regions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [_Row("tokenhub", "openai", routing_locality="private"), _Row("openai", "openai")]
+    monkeypatch.setattr(index, "HostedProviderRepository", _repository_reading(rows, lambda: None))
+
+    class _Regions:
+        def __init__(self, _uow: object) -> None:
+            pass
+
+        async def list_for_providers(self, _ids: object) -> dict[uuid.UUID, list[_Region]]:
+            return {rows[0].id: [_Region("sg")]}
+
+    monkeypatch.setattr(index, "HostedProviderRegionRepository", _Regions)
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert index.hosted_routing_locality("tokenhub") == "private"
+    assert index.hosted_routing_locality("tokenhub@sg") == "private"
+    assert index.hosted_routing_locality("openai") is None
+    assert index.hosted_routing_locality("unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_a_row_without_a_locality_wins_over_a_declared_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = GatewayConfig.model_validate(
+        {
+            "hosted_providers": {
+                "openai": {"api_key": "sk-entry", "routing_locality": "cloud"},
+                "edge": {"provider": "openai", "api_base": "https://edge.example/v1", "routing_locality": "local"},
+            }
+        }
+    )
+    monkeypatch.setattr(
+        index, "HostedProviderRepository", _repository_reading([_Row("openai", "openai")], lambda: None)
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), config)  # type: ignore[arg-type]
+
+    assert index.hosted_routing_locality("openai") is None
+    assert index.hosted_routing_locality("edge") == "local"

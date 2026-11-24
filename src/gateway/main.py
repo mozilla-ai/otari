@@ -186,6 +186,7 @@ from gateway.services.providers import (
 )
 from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.routing import (
+    RoutingService,
     load_agent_recommenders_at_startup,
     reset_agent_recommenders,
     run_agent_recommender_refresher,
@@ -527,14 +528,26 @@ async def _import_configured_providers(config: GatewayConfig) -> None:
     name serves it from then on with every control the Hosted providers page
     has, every model it lists switched on. An entry a hosted provider cannot
     hold keeps serving from config.yml, and the start says why.
+
+    An entry declaring ``routing_locality`` is never offered for the copy, not
+    even when an earlier start copied it before the declaration was added: a
+    routing policy's ``eligibility`` reads the locality from that entry, and
+    dropping it would leave every such policy with nothing it may serve.
     """
     if not config.providers or not config.import_configured_providers:
         return
+    pinned = sorted(name for name, entry in config.providers.items() if "routing_locality" in entry)
+    for name in pinned:
+        logger.info(
+            "providers.%s keeps serving from config.yml because it declares routing_locality.",
+            name,
+        )
+    offered = {name: entry for name, entry in config.providers.items() if name not in pinned}
+    if not offered:
+        return
     try:
         async with create_unit_of_work() as uow:
-            imports = await build_hosted_provider_service(uow, config=config).import_configured_providers(
-                dict(config.providers)
-            )
+            imports = await build_hosted_provider_service(uow, config=config).import_configured_providers(offered)
     except Exception as exc:
         logger.error(
             "Could not copy the config.yml providers onto hosted providers: %s; they keep serving from config.yml.",
@@ -1301,6 +1314,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # Work of its own. It builds each stored definition into a vendor
         # client here so the first request to need one does not wait for a
         # vendor handshake.
+        await RoutingService.warn_about_public_endpoints_declared_private(config)
         await load_guardrail_runner_at_startup()
         await load_provider_endpoints_at_startup()
         await load_served_models_at_startup()

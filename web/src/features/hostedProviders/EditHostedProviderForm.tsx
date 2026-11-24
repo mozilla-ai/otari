@@ -32,6 +32,11 @@ import { DataLocationField } from "./DataLocationField"
 import { movesToAnotherOrigin } from "./endpointOrigin"
 import { PolicyUrlFields } from "./PolicyUrlFields"
 import { policyUrlError, policyUrlValue } from "./policyUrls"
+import {
+  RoutingLocalityField,
+  type RoutingLocalityValue,
+  routingLocalityValue,
+} from "./RoutingLocalityField"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { formatCountries, parseCountries } from "./supportedCountries"
@@ -57,6 +62,7 @@ interface EditDraft {
   supportedCountries: string
   dataLocation: string
   zeroDataRetention: boolean
+  routingLocality: RoutingLocalityValue
   termsUrl: string
   privacyUrl: string
 }
@@ -76,6 +82,7 @@ function draftFrom(provider: HostedProvider): EditDraft {
     supportedCountries: formatCountries(provider.supported_countries),
     dataLocation: provider.data_location ?? "",
     zeroDataRetention: provider.zero_data_retention,
+    routingLocality: routingLocalityValue(provider.routing_locality),
     termsUrl: provider.terms_url ?? "",
     privacyUrl: provider.privacy_url ?? "",
   }
@@ -177,6 +184,10 @@ export function EditHostedProviderForm({
           ...(draft.dataLocation === opened.dataLocation
             ? {}
             : { data_location: draft.dataLocation || null }),
+          // Sent only when changed; cleared is null, undeclared.
+          ...(draft.routingLocality === opened.routingLocality
+            ? {}
+            : { routing_locality: draft.routingLocality || null }),
           // Sent only when changed; blank clears the link.
           ...(policyUrlValue(draft.termsUrl) === (provider.terms_url ?? null)
             ? {}
@@ -247,6 +258,10 @@ export function EditHostedProviderForm({
       <DataLocationField
         value={draft.dataLocation}
         onChange={(dataLocation) => setDraft({ ...draft, dataLocation })}
+      />
+      <RoutingLocalityField
+        value={draft.routingLocality}
+        onChange={(routingLocality) => setDraft({ ...draft, routingLocality })}
       />
       <SupportedCountriesField
         value={draft.supportedCountries}

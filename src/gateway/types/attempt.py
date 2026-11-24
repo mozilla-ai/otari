@@ -63,6 +63,11 @@ class Attempt:
     """Served on a credential the deployment owns (``ModelProviderPort``), and
     priced at the rate such a request settles at."""
 
+    allowed_localities: frozenset[str] | None = None
+    """The deployment localities a policy's ``eligibility`` admits, or ``None``
+    for no constraint. The compiler checked the target's declared locality; the
+    walker holds a hosted credential, and the region it picks, to it again."""
+
     @property
     def dispatch_model(self) -> str:
         """The selector to hand to any-llm: ``<implementation>:<model>``."""

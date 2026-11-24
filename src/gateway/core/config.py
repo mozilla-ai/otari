@@ -509,12 +509,17 @@ class SandboxEnvironmentConfig(BaseModel):
 
 
 class OperationCapabilities(BaseModel):
-    """Capabilities of a model for one operation on an inference endpoint."""
+    """What a routing policy with ``eligibility`` may send a model for one operation.
+
+    Only a narrowing: an operation with no declaration is served, streaming
+    included, so a declaration is needed only to take one out (``enabled:
+    false``) or to keep streamed requests away (``streaming: false``).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    streaming: bool = False
+    streaming: bool = True
 
 
 class ModelCapabilityConfig(BaseModel):
@@ -539,7 +544,11 @@ class ModelCapabilityConfig(BaseModel):
     )
     operations: dict[InferenceOperation, OperationCapabilities] = Field(
         default_factory=dict,
-        description="Operations verified for this deployment, keyed by operation name.",
+        description=(
+            "Per-operation narrowing for routing policies with eligibility, keyed by operation name. "
+            "An undeclared operation is served. Under an '<instance>:*' key it is the default for "
+            "every model of that instance."
+        ),
     )
 
 

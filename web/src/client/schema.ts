@@ -14959,6 +14959,10 @@ export interface components {
          *     A workspace that lists the locations it accepts is served only from one of them.
          *     ``zero_data_retention`` declares that the upstream keeps no prompt or
          *     completion data; the catalog shows it and nothing enforces it.
+         *     ``routing_locality`` declares where the upstream's inference runs (``local``,
+         *     ``private`` or ``cloud``) for routing policies with ``eligibility``, and
+         *     every region inherits it; null leaves it undeclared, and such a provider
+         *     serves no such policy.
          *     ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
          *     and privacy policy from the public Providers pages: absolute http(s)
          *     addresses with no username or password.
@@ -14991,6 +14995,8 @@ export interface components {
             provider: string;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /** Routing Locality */
+            routing_locality?: ("local" | "private" | "cloud") | null;
             /**
              * Serves Unlisted Models
              * @default false
@@ -15049,7 +15055,9 @@ export interface components {
          *     upstream keeps no prompt or completion data. ``terms_url`` and
          *     ``privacy_url`` are the upstream's policies, null where none is linked.
          *     ``data_location`` is where the upstream keeps request data, null where
-         *     nobody declared it. ``regions`` lists the regions it serves from, in the
+         *     nobody declared it. ``routing_locality`` is where the operator declares the
+         *     upstream's inference runs, for routing policies with ``eligibility``, null
+         *     where nobody declared it. ``regions`` lists the regions it serves from, in the
          *     order they are tried, and is empty for a provider that serves from its own
          *     connection alone. ``models`` counts its offered models, on the list only.
          */
@@ -15091,6 +15099,8 @@ export interface components {
             regions?: components["schemas"]["HostedProviderRegionPublic"][];
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /** Routing Locality */
+            routing_locality?: ("local" | "private" | "cloud") | null;
             /**
              * Serves Unlisted Models
              * @default false
@@ -15328,8 +15338,9 @@ export interface components {
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
          *     restriction, null lifts it, and so does ``supported_countries``, where an
-         *     empty list closes the provider to every country, and ``data_location``. ``terms_url`` and
-         *     ``privacy_url`` omitted are left alone; null or an empty string removes the link.
+         *     empty list closes the provider to every country, and ``data_location`` and
+         *     ``routing_locality``. ``terms_url`` and ``privacy_url`` omitted are left
+         *     alone; null or an empty string removes the link.
          * @example {
          *       "enabled": false
          *     }
@@ -15351,6 +15362,8 @@ export interface components {
             privacy_url?: string | null;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
+            /** Routing Locality */
+            routing_locality?: ("local" | "private" | "cloud") | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
             /** Supported Countries */

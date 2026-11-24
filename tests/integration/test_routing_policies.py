@@ -224,8 +224,16 @@ def eligibility_client(routing_config: GatewayConfig) -> Generator[TestClient]:
             "api_base": base,
             "routing_locality": "local" if instance == "edge" else "cloud",
         }
+        # Operations are served unless declared otherwise, so these narrow both
+        # targets to non-streamed Chat Completions.
         routing_config.model_capabilities[f"{instance}:chat-model"] = ModelCapabilityConfig.model_validate(
-            {"operations": {"chat": {}}}
+            {
+                "operations": {
+                    "chat": {"streaming": False},
+                    "messages": {"enabled": False},
+                    "responses": {"enabled": False},
+                }
+            }
         )
     for name, localities in (("edge-only", ["local"]), ("edge-first", ["local", "cloud"])):
         routing_config.routing.policies[name] = PolicySpec.model_validate(

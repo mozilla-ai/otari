@@ -1,6 +1,8 @@
 """The runtime path: what the deployment advertises, and the credential that serves a candidate."""
 
 import uuid
+from collections.abc import Collection
+from dataclasses import replace
 from typing import Any, Protocol
 
 from any_llm import LLMProvider
@@ -8,7 +10,13 @@ from any_llm import LLMProvider
 from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
-from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
+from gateway.ports.model_provider_port import (
+    NO_ORGANIZATION,
+    HostedAccessDeniedError,
+    HostedCredential,
+    HostedModels,
+    ModelProviderPort,
+)
 from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderVendorRepository
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
@@ -44,6 +52,29 @@ async def hosted_models_for(port: ModelProviderPort, *, organization_id: uuid.UU
     return await port.get_hosted_models(organization_id=organization_to_serve(organization_id))
 
 
+class HostedLocalityRefusedError(HostedAccessDeniedError):
+    """No region of the hosted provider runs where the request's routing policy allows."""
+
+
+def narrow_to_localities(
+    credential: HostedCredential, allowed: Collection[str], workspace_id: uuid.UUID | None, provider: str
+) -> HostedCredential:
+    """``credential`` and its alternates kept to those whose declared routing locality is in ``allowed``.
+
+    An undeclared locality never matches: a routing policy with ``eligibility``
+    is served only where the operator said the inference runs.
+
+    Raises:
+        HostedLocalityRefusedError: no region of the provider declares an allowed locality.
+    """
+    kept = [candidate for candidate in credential.candidates() if candidate.routing_locality in allowed]
+    if not kept:
+        raise HostedLocalityRefusedError(
+            f"No region of hosted provider '{provider}' runs where this routing policy allows", workspace_id
+        )
+    return replace(kept[0], alternates=tuple(kept[1:]))
+
+
 async def hosted_credential_for(
     port: ModelProviderPort,
     *,
@@ -51,15 +82,19 @@ async def hosted_credential_for(
     workspace_id: uuid.UUID | None,
     provider: str,
     model: str | None,
+    allowed_localities: Collection[str] | None = None,
 ) -> HostedCredential | None:
     """The deployment-owned credential the port resolves for a request, a request with no organization included.
 
     The workspace's own rule is applied before the port is asked, because the
     port decides for the organization alone, and its data locations narrow the
-    regions the port answers with afterwards.
+    regions the port answers with afterwards. ``allowed_localities``, given for
+    a routing policy with ``eligibility``, narrows them further to the regions
+    whose provider declares one of those localities; None leaves them as they are.
 
     Raises:
         HostedAccessDeniedError: the workspace or the organization may not use the upstream.
+        HostedLocalityRefusedError: no region runs where ``allowed_localities`` allows.
     """
     # Read before the port is awaited, so the rule and the locations come from one cache snapshot.
     ensure_workspace_may_use_hosted(workspace_id, provider, model)
@@ -70,7 +105,12 @@ async def hosted_credential_for(
         provider=provider,
         model=model,
     )
-    return None if credential is None else narrow_to_workspace_locations(credential, allowed, workspace_id, provider)
+    if credential is None:
+        return None
+    credential = narrow_to_workspace_locations(credential, allowed, workspace_id, provider)
+    if allowed_localities is not None:
+        credential = narrow_to_localities(credential, allowed_localities, workspace_id, provider)
+    return credential
 
 
 class UnknownHostedUpstreamError(ValueError):
@@ -119,6 +159,7 @@ async def serve_on_hosted_provider(
     workspace_id: uuid.UUID | None,
     any_model: bool = False,
     country_gate: CountryGate | None = None,
+    allowed_localities: Collection[str] | None = None,
 ) -> ResolvedProvider | None:
     """``resolved`` served on the deployment's own credential where nothing declared serves it, else ``None``.
 
@@ -128,10 +169,13 @@ async def serve_on_hosted_provider(
     ``any_model`` asks for the provider rather than for ``resolved.model``, for
     a call that names no model (a batch's status, say). ``country_gate`` holds
     the request to the provider's own ``supported_countries``, served by the
-    first region whose countries admit it.
+    first region whose countries admit it. ``allowed_localities`` holds it to
+    the regions whose provider declares one of those routing localities, for a
+    routing policy with ``eligibility``.
 
     Raises:
         HostedAccessDeniedError: the organization may not use the upstream.
+        HostedLocalityRefusedError: no region runs where ``allowed_localities`` allows.
         CountryNotServedError: the provider does not serve the request's country.
         UnknownHostedUpstreamError: the port named an upstream any-llm does not implement.
     """
@@ -143,6 +187,7 @@ async def serve_on_hosted_provider(
         workspace_id=workspace_id,
         provider=resolved.instance,
         model=None if any_model else resolved.model,
+        allowed_localities=allowed_localities,
     )
     if credential is None or not hosted_lookup(resolved.provider).accepts(
         credential.response_provider, resolved.instance

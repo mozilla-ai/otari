@@ -71,6 +71,10 @@ class HostedCredential:
     # Where the upstream keeps request data: an ISO country code, ``EU`` or
     # ``GLOBAL``, or None when nobody declared it.
     data_location: str | None = None
+    # Where the operator declares the inference runs, as a routing policy's
+    # ``eligibility`` reads it: ``local``, ``private`` or ``cloud``, or None when
+    # nobody declared it. An undeclared credential never serves such a policy.
+    routing_locality: str | None = None
     # The same provider's other regions, in the order they are tried when this
     # one does not admit the request (its country, or its workspace's data
     # locations). Each is a whole credential of its own; none carries alternates.

@@ -518,7 +518,7 @@ providers:
 | `api_key` | The provider's credential, normally a `${VAR}` reference. |
 | `api_base` | An endpoint other than the provider's default. |
 | `provider_type` | The implementation of a [named instance](models.md#named-provider-instances). Defaults to the instance name. |
-| `routing_locality` | Optional operator declaration of `local`, `private` or `cloud` for [eligibility policies](routing.md#route-by-deployment-locality-and-capability). Local and private instances require an explicit `api_base`. |
+| `routing_locality` | Optional operator declaration of `local`, `private` or `cloud` for [eligibility policies](routing.md#route-by-deployment-locality-and-capability). Local and private instances require an explicit `api_base`. An instance declaring it stays in config.yml during automatic provider import. |
 | `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
 | `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
 | `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |

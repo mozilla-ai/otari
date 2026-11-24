@@ -13,6 +13,7 @@ from gateway.repositories.routing import RoutingPolicyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.catalog import catalog_models, offering_input_rate
 from gateway.services.model_access import workspace_serves_target
+from gateway.services.routing._locality_check import warn_about_public_endpoints_declared_private
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tools import provider_tools
 from gateway.services.usage_and_telemetry import ServedTraffic, UsageService
@@ -81,6 +82,10 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 
 class RoutingService:
     """What routing gives an organization's callers."""
+
+    # Run once at startup: warns about a ``local`` or ``private`` instance whose
+    # endpoint resolves to a public address. Static, since it needs no request.
+    warn_about_public_endpoints_declared_private = staticmethod(warn_about_public_endpoints_declared_private)
 
     def __init__(
         self,

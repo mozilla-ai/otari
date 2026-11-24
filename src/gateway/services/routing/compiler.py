@@ -16,8 +16,10 @@ What it deliberately does **not** do:
   matters.
 * **No dispatch.** It returns candidates; the walker tries them.
 
-Candidates removed from the plan carry a reason in :attr:`CompiledPlan.dropped`
-for gateway logs and ``explain``.
+Drops are values, not silence. Every candidate removed from the plan is recorded
+in :attr:`CompiledPlan.dropped` with a reason, so the caller can log it, return it
+from ``explain``, and record it on the usage row. A "failover" policy that
+silently compiled down to one attempt is the failure mode this exists to prevent.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from typing import TYPE_CHECKING
 
 from any_llm.exceptions import AnyLLMError
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, OperationCapabilities
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -42,13 +44,14 @@ from gateway.models.routing import (
     WhenClause,
 )
 from gateway.services.model_access import is_model_allowed, organization_key_refusal
+from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
     missing_declared_credential,
     resolve_catalog_fallback,
     resolve_provider_selector,
 )
-from gateway.services.providers import CountryGate, CountryNotServedError, ensure_provider_country
+from gateway.services.providers import CountryGate, CountryNotServedError, HostedRegionIndex, ensure_provider_country
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -140,7 +143,9 @@ class DroppedCandidate:
 
     selector: str
     reason: str
-    """Machine-readable eligibility or plan-limit reason."""
+    """Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``, ``duplicate``, ``over_cap``,
+    and for a policy with ``eligibility``: ``unknown_locality``, ``locality_not_allowed``, ``target_unavailable``,
+    ``streaming_not_supported``, ``capability_not_supported``."""
     detail: str
     """Human-readable, for an operator."""
 
@@ -367,6 +372,10 @@ def compile_policy(
     ):
         dropped = list(dict.fromkeys((*router_ordering.dropped, *dropped)))
 
+    if spec.eligibility is not None:
+        # Before the empty-plan refusal, so a policy nothing can serve says why.
+        _warn_eligibility_drops(policy_name, workspace_id, dropped)
+
     if not attempts:
         raise NoEligibleCandidatesError(policy_name, dropped)
 
@@ -481,6 +490,45 @@ def eligible_router_pool(
     return [selector for selector, _ in candidates], tuple(dropped)
 
 
+def hosted_routing_locality(name: str) -> str | None:
+    """The routing locality the hosted provider (or region) ``name`` declares, or None."""
+    return HostedRegionIndex.routing_locality_of(name)
+
+
+def _target_locality(config: GatewayConfig, resolved: ResolvedProvider) -> tuple[str | None, str]:
+    """The declared locality of the deployment ``resolved`` would dispatch to, and where it was read.
+
+    A ``providers:`` instance declares its own. A candidate nothing declared
+    serves goes to the hosted provider of its name, which declares one on the
+    Hosted providers page; the walker checks it again against the region the
+    hosted rung picks. A credential the deployment did not declare (an
+    organization key, a tenant's own endpoint) has no locality the operator
+    vouched for.
+    """
+    if resolved.instance in config.providers:
+        return config.providers[resolved.instance].get("routing_locality"), "config"
+    if resolved.owned_endpoint is not None:
+        return None, "tenant"
+    if missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is None:
+        return None, "tenant"
+    return hosted_routing_locality(resolved.instance), "hosted"
+
+
+def _declared_operation(
+    config: GatewayConfig, resolved: ResolvedProvider, operation: InferenceOperation
+) -> OperationCapabilities | None:
+    """The model's own declaration for ``operation``, else its provider's ``<instance>:*`` default, else None."""
+    for key in (
+        f"{resolved.instance}:{resolved.model}",
+        f"{resolved.instance}/{resolved.model}",
+        f"{resolved.instance}:*",
+    ):
+        capabilities = config.model_capabilities.get(key)
+        if capabilities is not None and (declared := capabilities.operations.get(operation)) is not None:
+            return declared
+    return None
+
+
 def _eligibility_refusal(
     config: GatewayConfig,
     selector: str,
@@ -488,29 +536,74 @@ def _eligibility_refusal(
     eligibility: PolicyEligibility,
     requirements: RoutingRequirements,
 ) -> DroppedCandidate | None:
-    provider = config.providers.get(resolved.instance, {})
-    locality = provider.get("routing_locality")
+    """Why ``resolved`` may not serve a policy with ``eligibility``, or None when it may.
+
+    Locality is a closed world: an undeclared one excludes the target, because
+    it decides where the request's data goes. Operations are an open world: an
+    undeclared operation is served, streaming included, and a declaration only
+    narrows it (``enabled: false``, ``streaming: false``). Native image and PDF
+    input take the verdict the content normalizer acts on, with provider
+    metadata counted only on the provider's own endpoint.
+    """
+    locality, source = _target_locality(config, resolved)
     if locality is None:
-        return DroppedCandidate(selector, "unknown_locality", "has no configured deployment locality")
+        detail = {
+            "config": "has no routing_locality on its providers: entry",
+            "hosted": "has no routing locality declared on its hosted provider",
+            "tenant": "is served on a credential the deployment did not declare",
+        }[source]
+        return DroppedCandidate(selector, "unknown_locality", detail)
     if locality not in eligibility.allowed_localities:
-        return DroppedCandidate(selector, "locality_not_allowed", "has a deployment locality the policy excludes")
-    if locality != DeploymentLocality.CLOUD and not resolved.kwargs.get("api_base"):
-        return DroppedCandidate(selector, "unknown_locality", "has no explicit upstream endpoint")
-    # A hosted credential can change the deployment behind the selector.
-    if missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is not None:
-        return DroppedCandidate(selector, "target_unavailable", "has no declared credential for this deployment")
-    capabilities = config.model_capabilities.get(f"{resolved.instance}:{resolved.model}")
-    if capabilities is None or (operation := capabilities.operations.get(requirements.operation)) is None:
-        return DroppedCandidate(selector, "operation_not_supported", f"has no declaration for {requirements.operation}")
-    if not operation.enabled:
+        return DroppedCandidate(selector, "locality_not_allowed", f"has deployment locality '{locality}'")
+    if source == "config":
+        if locality != DeploymentLocality.CLOUD and not resolved.kwargs.get("api_base"):
+            return DroppedCandidate(selector, "unknown_locality", "has no explicit upstream endpoint")
+        # Without a credential of its own the hosted rung would serve it, on a
+        # deployment the providers: entry's locality does not describe.
+        if missing_declared_credential(config, resolved.instance, resolved.provider, resolved.kwargs) is not None:
+            return DroppedCandidate(selector, "target_unavailable", "has no declared credential for this deployment")
+    declared = _declared_operation(config, resolved, requirements.operation)
+    if declared is not None and not declared.enabled:
         return DroppedCandidate(selector, "target_unavailable", f"is disabled for {requirements.operation}")
-    if requirements.streaming and not operation.streaming:
-        return DroppedCandidate(selector, "streaming_not_supported", "has no streaming declaration for this operation")
-    supported = {"image": capabilities.supports_image, "pdf": capabilities.supports_pdf}
-    missing = [name for name in eligibility.required_capabilities if not supported[name]]
-    if missing:
-        return DroppedCandidate(selector, "capability_not_supported", f"does not declare native {', '.join(missing)}")
+    if declared is not None and requirements.streaming and not declared.streaming:
+        return DroppedCandidate(
+            selector, "streaming_not_supported", f"declares no streaming for {requirements.operation}"
+        )
+    if eligibility.required_capabilities:
+        native = resolve_capabilities(config, resolved.provider, resolved.model, instance=resolved.instance)
+        # Provider metadata describes the provider's own endpoint. Behind any
+        # other (an OpenAI-compatible server, a proxy) only a declaration counts.
+        trusted = native.source != "provider_metadata" or not resolved.kwargs.get("api_base")
+        supported = {"image": native.image and trusted, "pdf": native.pdf and trusted}
+        missing = [name for name in eligibility.required_capabilities if not supported[name]]
+        if missing:
+            return DroppedCandidate(selector, "capability_not_supported", f"has no native {', '.join(missing)} input")
     return None
+
+
+# (workspace, policy, selector, reason) already warned about by this process.
+_warned_eligibility: set[tuple[uuid.UUID | None, str, str, str]] = set()
+
+
+def _warn_eligibility_drops(policy_name: str, workspace_id: uuid.UUID | None, dropped: list[DroppedCandidate]) -> None:
+    """Warn once per process for each candidate a policy's eligibility keeps out, then log at debug.
+
+    The verdict comes from configuration, so it repeats on every request: a
+    warning each time would bury the logs, and none would hide a policy that
+    can never reach a target its author expected it to.
+    """
+    for item in dropped:
+        key = (workspace_id, policy_name, item.selector, item.reason)
+        if key in _warned_eligibility:
+            continue
+        _warned_eligibility.add(key)
+        logger.warning(
+            "Routing policy '%s' cannot use %s (%s): it %s. Logged once per policy, candidate and reason per process.",
+            policy_name,
+            item.selector,
+            item.reason,
+            item.detail,
+        )
 
 
 def _resolve_candidates(
@@ -588,6 +681,7 @@ def _resolve_candidates(
                     kwargs=resolved.kwargs,
                     display_model=display_model,
                     selection_reason=selection_reason,
+                    allowed_localities=(frozenset(eligibility.allowed_localities) if eligibility is not None else None),
                 ),
             )
         )

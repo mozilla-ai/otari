@@ -229,6 +229,11 @@ class HostedProvider(Base):
     # Where the upstream processes and stores request data, as the operator
     # declares it: an ISO country code, ``EU``, or ``GLOBAL``. None is undeclared.
     data_location: Mapped[str | None] = mapped_column(String(16), default=None)
+    # Where the operator declares the upstream's inference runs: ``local``,
+    # ``private`` or ``cloud``, read by routing policies with ``eligibility``.
+    # Every region inherits it. None is undeclared, and such a provider is never
+    # eligible.
+    routing_locality: Mapped[str | None] = mapped_column(String(16), default=None)
     # The upstream's own policies, linked from the public Providers pages.
     terms_url: Mapped[str | None] = mapped_column(String(1024), default=None)
     privacy_url: Mapped[str | None] = mapped_column(String(1024), default=None)

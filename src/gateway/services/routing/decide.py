@@ -109,8 +109,8 @@ async def decide_ordering(
         # warning there reported a problem that did not exist.
         if owes_missing_backend_warning(workspace_id, policy_name, backend_name):
             logger.warning(
-                "Routing policy '%s' names router backend '%s', which this build does not have. Using "
-                "the policy's default '%s' and its fallbacks. Available backends: %s. Logged once per policy and "
+                "Routing policy '%s' names router backend '%s', which this build does not have, so the "
+                "policy serves '%s' on every request. Available backends: %s. Logged once per policy and "
                 "workspace per process.",
                 policy_name,
                 backend_name,
@@ -154,7 +154,7 @@ async def decide_ordering(
         # that true for every backend and every failure rather than for the ones
         # each backend thought of. Declining serves the default target, not an error.
         logger.warning(
-            "Router '%s' on policy '%s' failed or timed out (%s). Using the policy's default '%s' and its fallbacks.",
+            "Router '%s' on policy '%s' failed or timed out (%s); serving '%s'",
             backend_name,
             policy_name,
             type(exc).__name__,
@@ -222,9 +222,23 @@ def explain_router_ordering(
     survived this caller's allow-list. Deliberately not a sample of the draw, which
     would make the same command print a different plan on every run.
 
-    For an eligibility policy, evaluate a non-streaming chat request and return
-    the drops with the ordering. For other policies, pass the full declared
-    ordering to the compiler so that it can report what it filtered.
+    The *ordering* covers the whole declared pool, unlike the request path, which
+    filters before ranking. Filtering here too would hand the compiler a pool with
+    the forbidden candidates already gone, so they would never appear in
+    :attr:`CompiledPlan.dropped` with their reason, and that list is most of the
+    point of ``explain``: a balanced policy that compiles down to one provider for
+    this caller is exactly what an operator needs to find before an outage does.
+
+    That holds when *nothing* in the pool survives, which is the case the operator
+    most needs to see. The shares are empty, because a split over no candidate is
+    not a split, but the ordering still carries the declared pool so every filtered
+    candidate is named in ``dropped``. Returning nothing here instead would compile
+    the policy down to its ``on_failure`` chain with the whole split silently
+    missing from both lists.
+
+    A policy with ``eligibility`` is the exception: its pool is filtered first, as
+    the request path filters it, for a non-streaming chat request, and the
+    ordering carries what that filter dropped so ``explain`` still names it.
     """
     if not (backend_is_priority(spec.router_backend) or backend_is_weighted(spec.router_backend)):
         return None, []

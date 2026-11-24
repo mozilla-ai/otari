@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationIn
 from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.inference import country_codes, data_location
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.models.routing import DeploymentLocality
 
 DEFAULT_PLATFORM_URL = "https://api.otari.ai"
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -75,6 +76,7 @@ class _HostedProviderEntryShape(BaseModel):
     supported_countries: list[str] | None = None
     data_location: str | None = None
     zero_data_retention: bool = False
+    routing_locality: DeploymentLocality | None = None
     terms_url: str | None = None
     privacy_url: str | None = None
 
@@ -113,6 +115,9 @@ class HostedProviderEntry:
     data_location: str | None = None
     # The operator's declaration that the upstream keeps no prompt or completion data.
     zero_data_retention: bool = False
+    # Where the upstream's inference runs (``local``, ``private`` or ``cloud``), as a routing
+    # policy's ``eligibility`` reads it, or None when undeclared.
+    routing_locality: str | None = None
     # The upstream's own policies, linked from the public Providers pages.
     terms_url: str | None = None
     privacy_url: str | None = None
@@ -170,6 +175,7 @@ def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEn
             supported_countries=tuple(shape.supported_countries) if shape.supported_countries is not None else None,
             data_location=shape.data_location,
             zero_data_retention=shape.zero_data_retention,
+            routing_locality=shape.routing_locality.value if shape.routing_locality is not None else None,
             terms_url=shape.terms_url,
             privacy_url=shape.privacy_url,
         )
@@ -189,7 +195,7 @@ class ProviderSettings(BaseModel):
         description=(
             "Hosted providers declared in configuration, keyed by name, each with the fields the hosted-providers "
             "API takes: 'provider' (the any-llm implementation, defaulting to the name), 'api_key', 'api_base', "
-            "'client_args', 'enabled', 'data_location', "
+            "'client_args', 'enabled', 'data_location', 'routing_locality', "
             "'restricted_to_organization_id', and an optional 'models' list offered when the provider cannot list "
             "its own. Served after every other credential, as a stored hosted provider is, and never written to "
             "the database; a stored hosted provider of the same name wins. Settable as JSON through "

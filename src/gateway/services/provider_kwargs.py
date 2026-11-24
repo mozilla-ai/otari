@@ -887,7 +887,15 @@ class _ConstrainedPolicyNeedsPlan(ValueError):
 def _claimed_target(
     config: GatewayConfig, model_selector: str, user_id: str | None, workspace_id: uuid.UUID | None
 ) -> str | None:
-    """The target an alias or a static routing policy gives a name, or ``None``."""
+    """The target an alias or a static routing policy gives a name, or ``None``.
+
+    A policy with ``eligibility`` is looked up first, ahead of an alias, and
+    refuses: configuration cannot give an alias and a policy one name, but a
+    stored alias and a stored policy in different scopes can, and the
+    completion routes serve the policy. Resolving the alias here would serve its
+    target on every other surface with none of the policy's constraints. An
+    alias still wins over a policy without ``eligibility``, as it always has.
+    """
     spec = resolve_effective_policy(config, model_selector, user_id, workspace_id=workspace_id)
     if spec is not None and spec.eligibility is not None:
         raise _ConstrainedPolicyNeedsPlan("Routing policy requires an operation-aware request plan")
