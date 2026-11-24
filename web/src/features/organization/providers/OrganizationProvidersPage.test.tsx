@@ -176,7 +176,11 @@ describe("OrganizationProvidersPage", () => {
     expect(
       screen.getByText(/can't be decrypted on this deployment/i),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Re-enter the API key/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /re-enter both the API key and the endpoint credential/i,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("counts each key's serving models and flags a key serving none", async () => {

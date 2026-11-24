@@ -778,8 +778,8 @@ export function OrganizationProvidersPage() {
             ? "One provider key can't be decrypted on this deployment, so it serves nothing and its models are absent from the catalog."
             : `${unreadableCount} provider keys can't be decrypted on this deployment, so they serve nothing and their models are absent from the catalog.`}{" "}
           This happens when <code>OTARI_SECRET_KEY</code> changed since they
-          were stored. Re-enter the API key on each to store it under the
-          current one.
+          were stored. One key seals every stored credential, so re-enter both
+          the API key and the endpoint credential on each that carries one.
         </InfoBanner>
       ) : null}
 
