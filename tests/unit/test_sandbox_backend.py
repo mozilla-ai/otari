@@ -28,6 +28,7 @@ from gateway.services.sandbox_backend import (
     SandboxNotReachableError,
     SandboxSessionGoneError,
     SandboxUnavailableError,
+    code_execution_tool_definition,
 )
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
@@ -122,7 +123,7 @@ async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPa
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(6 * 7)"})
 
     assert "stdout:" in result
     assert "42" in result
@@ -156,7 +157,7 @@ async def test_exec_read_timeout_exceeds_execution_budget(monkeypatch: pytest.Mo
 
     timeout_s = 30.0
     async with _sandbox(timeout_s=timeout_s) as backend:
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(1)"})
 
     exec_request = next(r for r in transport.captured if r.url.path == "/sessions/s1/exec")
     granted_budget = json.loads(exec_request.read().decode())["timeout_seconds"]
@@ -189,7 +190,7 @@ async def test_call_tool_surfaces_stderr_and_nonzero_return_code(monkeypatch: py
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(foo)"})
 
     # Non-zero return_code or stderr-only output is marked as [tool error]
     # so the model gets a clear failure signal.
@@ -227,7 +228,7 @@ async def test_stderr_only_treated_as_error(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
     assert result.startswith("[tool error]")
     assert "DeprecationWarning" in result
@@ -332,7 +333,7 @@ async def test_call_tool_emits_span_with_code_attribute(monkeypatch: pytest.Monk
         )
 
         async with _sandbox() as backend:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(6 * 7)"})
     finally:
         otel_trace.set_tracer_provider(original_provider)
         sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
@@ -378,7 +379,7 @@ async def test_call_tool_span_records_error_on_sandbox_unreachable(monkeypatch: 
 
         async with _sandbox() as backend:
             with pytest.raises(SandboxNotReachableError):
-                await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+                await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
     finally:
         otel_trace.set_tracer_provider(original_provider)
         sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
@@ -433,7 +434,7 @@ async def test_call_tool_span_error_status_on_tool_error_result(monkeypatch: pyt
         )
 
         async with _sandbox() as backend:
-            result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
+            result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(foo)"})
     finally:
         otel_trace.set_tracer_provider(original_provider)
         sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
@@ -479,7 +480,7 @@ async def test_unknown_result_block_type_still_renders(monkeypatch: pytest.Monke
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(42)"})
 
     assert result == "stdout:\n42\n"
 
@@ -503,7 +504,7 @@ async def test_unrecognised_fields_are_ignored(monkeypatch: pytest.MonkeyPatch) 
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
     assert result == "stdout:\nok"
 
@@ -528,7 +529,7 @@ async def test_file_refs_are_listed(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "savefig()"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "savefig()"})
 
     assert "files: chart.png\n" in f"{result}\n"
     assert "?" not in result
@@ -565,7 +566,7 @@ async def test_malformed_exec_response_raises(body: dict[str, Any], monkeypatch:
 
     async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError, match="sandbox exec failed"):
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
 
 @pytest.mark.asyncio
@@ -620,7 +621,7 @@ async def test_documented_exec_response_shape_parses(monkeypatch: pytest.MonkeyP
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(3.14)"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(3.14)"})
 
     assert result == "stdout:\n3.14\n\nfiles: chart.png"
 
@@ -653,7 +654,7 @@ async def test_schema_violation_message_omits_the_payload(monkeypatch: pytest.Mo
 
     async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError) as excinfo:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
     rendered = "".join(traceback.format_exception(excinfo.value))
     assert secret not in rendered
@@ -731,7 +732,7 @@ async def test_renderable_fields_absorb_unusable_values(
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
     assert result == expected
 
@@ -790,7 +791,7 @@ async def test_structured_values_in_render_only_fields_keep_the_signal(
     )
 
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
     assert result == expected
 
@@ -868,7 +869,7 @@ async def test_allowed_tools_excluding_code_execution_offers_nothing() -> None:
     assert backend.purpose_hints() == []
 
     with pytest.raises(KeyError):
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "1"})
 
 
 @pytest.mark.asyncio
@@ -923,7 +924,7 @@ async def test_exec_503_preserves_retry_hint(monkeypatch: pytest.MonkeyPatch) ->
     )
     async with _sandbox() as backend:
         with pytest.raises(SandboxUnavailableError) as caught:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(42)"})
     assert caught.value.retry_after == "15"
 
 
@@ -1022,7 +1023,9 @@ async def test_produced_files_are_fetched_stored_and_named_with_file_ids(monkeyp
     )
     files = _FakeFiles([])
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
+        result = await backend.call_tool(
+            CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "plt.savefig('chart.png')"}
+        )
 
     assert files.stored == [("chart.png", b"\x89PNG")]
     assert "chart.png (file_id: file-1)" in result
@@ -1052,7 +1055,7 @@ async def test_unfetchable_output_is_still_named_and_does_not_fail_the_run(monke
     )
     files = _FakeFiles([])
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     assert files.stored == []
     assert "files: out.csv" in result
@@ -1081,7 +1084,7 @@ async def test_no_bridge_leaves_outputs_untouched(monkeypatch: pytest.MonkeyPatc
         monkeypatch,
     )
     async with _sandbox() as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
     assert result == "files: a.txt"
     assert all(r.url.path != "/sessions/s1/files" for r in transport.captured)
 
@@ -1105,8 +1108,8 @@ async def test_executions_are_kept_in_order_and_drained_by_take(monkeypatch: pyt
 
     async with _sandbox() as backend:
         assert backend.container_id.startswith("otari_cntr_")
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2)"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(1)"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(2)"})
         executions = backend.take_executions()
         assert [execution.code for execution in executions] == ["print(1)", "print(2)"]
         assert executions[0].result is not None
@@ -1128,7 +1131,7 @@ async def test_an_exec_that_never_answered_is_kept_without_a_result(monkeypatch:
 
     async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError):
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(1)"})
         executions = backend.take_executions()
 
     assert len(executions) == 1
@@ -1160,7 +1163,7 @@ async def test_an_execution_carries_the_stored_ids_of_the_files_it_produced(monk
         monkeypatch,
     )
     async with _sandbox(files=_FakeFiles([])) as backend:
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "plt.savefig('chart.png')"})
         execution = backend.take_executions()[0]
 
     assert execution.file_ids == {"chart.png": "file-1"}
@@ -1202,7 +1205,7 @@ async def test_an_output_declared_over_the_cap_is_refused_before_it_is_read(monk
     )
     files = _FakeFiles([], max_output_bytes=16)
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     assert files.stored == []
     assert _CountingStream.reads == 0
@@ -1231,7 +1234,7 @@ async def test_an_output_that_grows_past_the_cap_is_abandoned_mid_stream(monkeyp
     )
     files = _FakeFiles([], max_output_bytes=32)
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     assert files.stored == []
     # Read just past the cap and no further: 32 bytes is four chunks, the fifth trips it.
@@ -1303,7 +1306,9 @@ async def test_a_file_the_block_does_not_name_is_found_by_the_workspace_diff(mon
     )
     files = _FakeFiles([_staged()])
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "open('out.txt','w').write('hello')"})
+        result = await backend.call_tool(
+            CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "open('out.txt','w').write('hello')"}
+        )
         execution = backend.take_executions()[0]
 
     # Only the new file was fetched: the unchanged seeded input was not re-read.
@@ -1337,8 +1342,8 @@ async def test_the_diff_moves_forward_so_a_later_call_collects_only_its_own_file
     )
     files = _FakeFiles([])
     async with _sandbox(files=files) as backend:
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "one"})
-        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "two"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "one"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "two"})
         first, second = backend.take_executions()
 
     assert list(first.file_ids) == ["a.txt"]
@@ -1363,7 +1368,7 @@ async def test_a_backend_without_list_files_still_collects_what_the_block_names(
     )
     files = _FakeFiles([])
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     assert files.stored == [("chart.png", b"\x89PNG")]
     assert "chart.png (file_id: file-1)" in result
@@ -1386,7 +1391,7 @@ async def test_a_call_stores_at_most_the_configured_number_of_files(monkeypatch:
     )
     files = _FakeFiles([], max_output_files=2)
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     assert [name for name, _ in files.stored] == ["a.txt", "b.txt"]
     # The third is still named, so the model and the caller know it exists.
@@ -1418,7 +1423,7 @@ async def test_a_call_stores_at_most_the_configured_bytes_across_its_files(monke
     )
     files = _FakeFiles([], max_output_bytes=30)
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     # The first file fits (20 of 30); the second runs past what is left and is
     # abandoned mid-stream, which the store sees as a failed stream to clean up.
@@ -1446,7 +1451,7 @@ async def test_an_output_the_listing_already_says_is_too_big_is_never_fetched(
     )
     files = _FakeFiles([], max_output_bytes=30)
     async with _sandbox(files=files) as backend:
-        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "x"})
 
     # Not fetched at all: an adapter whose provider hands a file over whole would
     # otherwise hold 10kB to discover it may store 30 bytes of it.
@@ -1461,6 +1466,7 @@ class _RecordingPort:
     """A port that records the lease it was asked for and runs nothing."""
 
     label = "recording"
+    languages: tuple[str, ...] = ("python",)
 
     def __init__(self) -> None:
         self.session_ttl_s: float | None = None
@@ -1758,12 +1764,12 @@ async def test_a_call_in_an_environment_is_held_and_recorded_under_its_own_row_f
     backend = _sandbox(tally=tally, image="python-data")
     backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
 
-    async def ran(_code: str) -> Any:
+    async def ran(_code: str, _language: str) -> Any:
         return "ok", ResultBlock(type="code_execution_tool_result", content=CodeExecutionResult(stdout="ok")), {}
 
     backend._exec_tool = ran  # type: ignore[method-assign,assignment]
 
-    await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+    await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(1)"})
 
     rows = ("otari:code_execution:python-data", "otari:code_execution")
     assert [call.rate_keys for call in held] == [rows]
@@ -1791,17 +1797,28 @@ async def test_a_call_the_budget_cannot_hold_never_reaches_the_sandbox() -> None
     backend = _sandbox(tally=tally)
     backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
 
-    async def never(_code: str) -> Any:
+    async def never(_code: str, _language: str) -> Any:
         raise AssertionError("the sandbox ran a call the budget refused")
 
     backend._exec_tool = never  # type: ignore[method-assign,assignment]
 
-    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"}) == TOOL_BUDGET_EXCEEDED_TEXT
+    assert (
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": "python", "code": "print(1)"})
+        == TOOL_BUDGET_EXCEEDED_TEXT
+    )
     assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("arguments", [{"code": ""}, {"code": "  \n\t "}, {}, {"code": None}])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"language": "python", "code": ""},
+        {"language": "python", "code": "  \n\t "},
+        {"language": "python"},
+        {"language": "python", "code": None},
+    ],
+)
 async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict[str, Any]) -> None:
     """An empty program would exit 0 and read as a run that worked (#2954)."""
 
@@ -1814,7 +1831,7 @@ async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict
     backend = _sandbox(tally=tally)
     backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
 
-    async def never(_code: str) -> Any:
+    async def never(_code: str, _language: str) -> Any:
         raise AssertionError("the sandbox ran a call with no code")
 
     backend._exec_tool = never  # type: ignore[method-assign,assignment]
@@ -1826,3 +1843,91 @@ async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict
     assert execution.result is None
     assert execution.invalid_input is True
     assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}
+
+
+# --- the language a call names --------------------------------------------------
+
+
+def test_the_model_is_offered_the_languages_the_port_runs() -> None:
+    class _TwoLanguagePort(_RecordingPort):
+        languages = ("python", "bash")
+
+    [definition] = SandboxBackend(port=_TwoLanguagePort()).openai_tools
+    parameters = definition["function"]["parameters"]
+    assert parameters["properties"]["language"]["enum"] == ["python", "bash"]
+    assert parameters["required"] == ["language", "code"]
+
+
+def test_both_shipped_providers_run_python() -> None:
+    assert ProtocolCodeExecutionAdapter(SANDBOX_URL).languages == ("python",)
+    [definition] = _sandbox().openai_tools
+    assert definition["function"]["parameters"]["properties"]["language"]["enum"] == ["python"]
+
+
+def test_the_model_is_told_to_say_when_code_in_another_language_cannot_run() -> None:
+    # The sentences a model asked to run another language's code needs, so it says
+    # the code cannot run here and does not report a rewrite's output as the program's.
+    [definition] = _sandbox().openai_tools
+    description = definition["function"]["description"]
+    assert "The code must be Python: code written in other languages does not run as is" in description
+    assert "tell the user it cannot be run as is here" in description
+    assert "If you rewrite it in Python and run that instead, say so" in description
+
+
+def test_a_definition_for_no_language_names_none() -> None:
+    """A deployment with no sandbox lists the tool with no language to call it in."""
+    definition = code_execution_tool_definition(())
+    assert "enum" not in definition["function"]["parameters"]["properties"]["language"]
+    assert "must be" not in definition["function"]["description"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arguments", "said"),
+    [
+        ({"code": "print(1)"}, "the call named no language, so nothing was run"),
+        ({"language": "", "code": "print(1)"}, "the call named no language, so nothing was run"),
+        ({"language": None, "code": "print(1)"}, "the call named no language, so nothing was run"),
+        ({"language": "rust", "code": "fn main() {}"}, "rust is not a language this sandbox runs, so nothing was run"),
+        ({"language": "x" * 500, "code": "1"}, f"{'x' * 40}... is not a language this sandbox runs"),
+    ],
+    ids=["missing", "empty", "null", "unrun", "long"],
+)
+async def test_a_call_in_no_language_the_sandbox_runs_is_refused_before_the_sandbox(
+    arguments: dict[str, Any], said: str
+) -> None:
+    class _Admit:
+        async def admit(self, _call: Any) -> bool:
+            raise AssertionError("a call in no language the sandbox runs reached budget admission")
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Admit()
+    backend = _sandbox(tally=tally)
+
+    async def never(_code: str, _language: str) -> Any:
+        raise AssertionError("the sandbox ran a call in no language it runs")
+
+    backend._exec_tool = never  # type: ignore[method-assign,assignment]
+
+    text = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, arguments)
+    assert said in text
+    assert text.endswith("python.")
+    assert is_tool_error(text)
+    [execution] = backend.take_executions()
+    assert (execution.result, execution.invalid_input) == (None, True)
+    assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}
+
+
+@pytest.mark.asyncio
+async def test_a_language_is_matched_whatever_its_case_or_spacing() -> None:
+    backend = _sandbox()
+    ran: list[str] = []
+
+    async def run(_code: str, language: str) -> Any:
+        ran.append(language)
+        return "ok", ResultBlock(type="code_execution_tool_result", content=CodeExecutionResult(stdout="ok")), {}
+
+    backend._exec_tool = run  # type: ignore[method-assign,assignment]
+
+    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": " Python ", "code": "print(1)"}) == "ok"
+    assert ran == ["python"]

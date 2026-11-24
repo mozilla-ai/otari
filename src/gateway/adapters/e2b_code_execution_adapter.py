@@ -49,6 +49,9 @@ _REQUEST_SLACK_S = 30
 _LIST_DEPTH = 5
 _TIMEOUT_EXIT_CODE = 124
 _RETRY_AFTER_S = "5"
+# The languages a session runs, each with the ``language`` passed to ``run_code``.
+# ``None`` runs the sandbox's default context, which is Python.
+_RUN_CODE_LANGUAGE: dict[str, str | None] = {"python": None}
 
 
 class E2BCodeExecutionAdapter(CodeExecutionPort):
@@ -66,6 +69,10 @@ class E2BCodeExecutionAdapter(CodeExecutionPort):
     @property
     def label(self) -> str:
         return "e2b"
+
+    @property
+    def languages(self) -> tuple[str, ...]:
+        return tuple(_RUN_CODE_LANGUAGE)
 
     @asynccontextmanager
     async def open_session(
@@ -169,10 +176,13 @@ class _E2BSession(CodeExecutionSession):
             raise ValueError(msg)
         return candidate
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
         try:
             execution = await self._sandbox.run_code(
-                code, timeout=int(timeout_s), request_timeout=int(timeout_s) + _REQUEST_SLACK_S
+                code,
+                language=_RUN_CODE_LANGUAGE[language],
+                timeout=int(timeout_s),
+                request_timeout=int(timeout_s) + _REQUEST_SLACK_S,
             )
         except self._sdk.TimeoutException:
             return _result_block(
