@@ -15,14 +15,18 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.repositories.usage_and_telemetry import UsageFilters, UsageLogRepository, UsageScope
 
 SUMMARY_PATH = f"{API_ROOT}/usage/summary"
 SERIES_PATH = f"{API_ROOT}/usage/series"
@@ -1354,3 +1358,109 @@ def test_summary_family_without_a_workspace_stays_deployment_wide(
 
     series = client.get(SERIES_PATH, headers=master_key_header, params={**window, "group_by": "model"}).json()
     assert {group["key"] for group in series["groups"]} == {"here", "there"}
+
+
+@pytest.mark.asyncio
+async def test_summary_aggregates_match_the_separate_passes(db_session: Session, async_db: AsyncSession) -> None:
+    """The one-pass summary and one query per dimension return the same totals and rows.
+
+    ``summary_aggregates`` reads every breakdown in one ``GROUPING SETS`` scan on
+    PostgreSQL; ``totals`` and ``groups`` are the per-query path a dialect without
+    it falls back to. This pins that the two agree, so the fast path cannot drift
+    from the contract the slow one defines.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    for index in range(12):
+        _make_log(
+            db_session,
+            user_id=f"agg{index % 3}",
+            timestamp=now,
+            model=f"m{index % 2}",
+            provider="openai",
+            cost=0.01 * (index + 1),
+            total_tokens=index,
+        )
+    db_session.commit()
+
+    workspace_id = seed_workspace_id(db_session)
+    filters = UsageFilters(
+        start_date=now - timedelta(days=1),
+        end_date=now + timedelta(days=1),
+        workspace_id=workspace_id,
+    )
+    scope = UsageScope(workspaces=[workspace_id])
+    # ``api_key`` is left null on every seeded row, so its one group has a null
+    # key: GROUPING() has to tell that real group from a column a set aggregated
+    # away, which is the case a plain null test cannot.
+    dimensions = {"user": 100, "api_key": 100, "model": 100, "provider": 100}
+    uow = UnitOfWork(async_db)
+    repository = UsageLogRepository(uow)
+
+    statements: list[str] = []
+    engine = async_db.get_bind()
+    sync_engine = getattr(engine, "sync_engine", engine)
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
+        async with uow:
+            combined = await repository.summary_aggregates(filters, scope, dimensions=dimensions)
+            separate_totals = await repository.totals(filters, scope)
+            separate = {
+                name: await repository.groups(filters, scope, dimension=name, limit=limit)
+                for name, limit in dimensions.items()
+            }
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
+
+    assert combined.totals == separate_totals
+    assert combined.groups == separate
+    # The fast path is the point: one ``GROUPING SETS`` statement covers every
+    # dimension, where the fallback would issue one per dimension plus the totals.
+    assert sum("GROUPING SETS" in statement for statement in statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_aggregates_honor_independent_caps(db_session: Session, async_db: AsyncSession) -> None:
+    """Each dimension keeps its own top groups, and the cap truncates.
+
+    The uniform-cap case above cannot tell a missing cap from a cap read off the
+    wrong dimension. Here the caps differ and are below the seeded group counts,
+    so the rows kept have to be that dimension's top groups.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    for index in range(12):
+        _make_log(
+            db_session,
+            user_id=f"cap{index % 3}",
+            timestamp=now,
+            model=f"m{index % 2}",
+            provider="openai",
+            cost=0.01 * (index + 1),
+            total_tokens=index,
+        )
+    db_session.commit()
+
+    workspace_id = seed_workspace_id(db_session)
+    filters = UsageFilters(
+        start_date=now - timedelta(days=1),
+        end_date=now + timedelta(days=1),
+        workspace_id=workspace_id,
+    )
+    scope = UsageScope(workspaces=[workspace_id])
+    dimensions = {"user": 2, "model": 1}
+    uow = UnitOfWork(async_db)
+    repository = UsageLogRepository(uow)
+
+    async with uow:
+        combined = await repository.summary_aggregates(filters, scope, dimensions=dimensions)
+        separate = {
+            name: await repository.groups(filters, scope, dimension=name, limit=limit)
+            for name, limit in dimensions.items()
+        }
+
+    assert combined.groups == separate
+    assert len(combined.groups["user"]) == 2
+    assert len(combined.groups["model"]) == 1

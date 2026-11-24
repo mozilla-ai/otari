@@ -538,7 +538,7 @@ Without `OTARI_URL`, a harness's own OpenTelemetry trace export (`OTEL_TRACES_EX
 
 ### `otari hook setup`
 
-Registers the hook in the current Git repository; refuses outside one. When the repository has no guardrail, it offers to write a starter `.otari/guardrails.yml`.
+Registers the hook in the current Git repository; refuses outside one. When the repository has no guardrail, it offers to write a starter `.otari/guardrails.yml`. It refuses to write either file where a symlink, on the file or on a directory above it, leads out of the repository.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -640,6 +640,7 @@ Proposes gates from the repository's AGENTS.md, or CLAUDE.md where that is the o
 | `--model` | `OTARI_GUARDRAILS_GENERATE_MODEL` | the CLI's own default | Model for the one generation call. |
 
 - It names the resolved CLI and asks for confirmation before sending the doc. The generation call times out after 300 seconds.
+- When a symlink takes the default file out of the repository (a directory of rules shared between repositories, say), it first names where the file resolves and asks whether to append there; Enter declines. A `--guardrail-file` is written where it points, without asking.
 - Proposals are shown one at a time, the screen cleared between each, numbered "N of total", with a single-keypress `[y]es/[n]o/[e]dit/[q]uit` prompt. With no controlling terminal (piped stdin, a CI runner) it reads an Enter-terminated line instead.
 - A proposal whose `id` is already declared anywhere in the composed guardrail is skipped without asking, naming the file that has it.
 - Every accepted gate, edited or not, is parsed before it is written, so an unknown field, an invalid glob or a `judge` gate proposed as `required` is refused in the terminal.

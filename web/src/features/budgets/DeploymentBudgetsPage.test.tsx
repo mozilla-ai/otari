@@ -1,21 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { useLocation } from "@tanstack/react-router"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  Budget,
-  BudgetResetLog,
-  OrganizationContext,
-  User,
-} from "@/client"
-import { BudgetsPage } from "@/features/budgets/BudgetsPage"
+import type { Budget, BudgetResetLog, User } from "@/client"
+import { DeploymentBudgetsPage } from "@/features/budgets/DeploymentBudgetsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
-import { withRouter } from "@/tests/router"
 import {
   findRowMenuItem,
   getRowMenuItem,
@@ -81,16 +74,12 @@ function mockApi(
     updateBudget?: () => Response
     failedUserUpdates?: string[]
     updateUser?: (userId: string) => Response | Promise<Response>
-    // Who is asking, which is what decides which of the two pages this route
-    // renders. An operator by default, so every case below describes the
-    // deployment-wide page it always described.
-    context?: OrganizationContext
   } = {},
 ) {
   let list = [...(opts.budgets ?? [])]
   const resetLogs = opts.resetLogs ?? []
   const users = opts.users ?? []
-  const context = opts.context ?? organizationContext()
+  const context = organizationContext()
 
   return vi
     .spyOn(globalThis, "fetch")
@@ -168,7 +157,7 @@ function renderPage(ui: ReactElement) {
   )
 }
 
-describe("BudgetsPage", () => {
+describe("DeploymentBudgetsPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -176,7 +165,7 @@ describe("BudgetsPage", () => {
   it("keeps the page's create action visible while the dialog is open", async () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await screen.findByText("No budgets yet")
     const trigger = screen.getByRole("button", { name: "Create budget" })
@@ -188,7 +177,7 @@ describe("BudgetsPage", () => {
   it("names the object in the title and the budget in the description when editing", async () => {
     mockApi({ budgets: [budget({ name: "team-free-tier" })] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("team-free-tier")).closest("tr")!
     await pressRowAction(user, "Edit…", row)
@@ -207,7 +196,7 @@ describe("BudgetsPage", () => {
 
   it("shows onboarding when there are no budgets", async () => {
     mockApi({ budgets: [] })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     expect(await screen.findByText("No budgets yet")).toBeInTheDocument()
     expect(
@@ -233,7 +222,7 @@ describe("BudgetsPage", () => {
       budgets: [budget({ budget_id: "11111111-2222-3333-4444-555555555555" })],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await user.click(
@@ -249,7 +238,7 @@ describe("BudgetsPage", () => {
     mockApi({
       budgets: [budget({ max_budget: 100, budget_duration_sec: 604_800 })],
     })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).getByText("$100.00")).toBeInTheDocument()
@@ -262,7 +251,7 @@ describe("BudgetsPage", () => {
         budget({ max_budget: null, budget_duration_sec: null, user_count: 0 }),
       ],
     })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     // One vocabulary across both budget pages, where this table used to say
@@ -285,7 +274,7 @@ describe("BudgetsPage", () => {
         }),
       ],
     })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).getByText("1,000,000 tokens")).toBeInTheDocument()
@@ -296,7 +285,7 @@ describe("BudgetsPage", () => {
     mockApi({
       budgets: [budget({ max_budget: 100, user_count: 3, total_spend: 150 })],
     })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     // 3 users × $100 = $300 allocated; $150 spent.
@@ -312,7 +301,7 @@ describe("BudgetsPage", () => {
     // blank is a choice rather than a surprise.
     mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await screen.findByText("No budgets yet")
     await user.click(
@@ -332,7 +321,7 @@ describe("BudgetsPage", () => {
   it("creates a budget, posting the limit and chosen period", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await screen.findByText("No budgets yet")
     await user.click(
@@ -366,7 +355,7 @@ describe("BudgetsPage", () => {
       users: [testUser("alice"), testUser("bob")],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await screen.findByText("No budgets yet")
     await user.click(
@@ -404,7 +393,7 @@ describe("BudgetsPage", () => {
     // last draft, which here is a duplicate budget one press away.
     mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -447,7 +436,7 @@ describe("BudgetsPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create budget" }),
@@ -510,7 +499,7 @@ describe("BudgetsPage", () => {
         jsonResponse({ detail: "A budget named beta already exists" }, 409),
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const rowA = await screen.findByRole("row", { name: /alpha/ })
     await pressRowAction(user, "Edit…", rowA)
@@ -540,7 +529,7 @@ describe("BudgetsPage", () => {
     // heading's own trigger, which outlives the create.
     mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -566,7 +555,7 @@ describe("BudgetsPage", () => {
     // on body and Tab restarts at the top of the document.
     mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const cta = await screen.findByRole("button", {
       name: "Create your first budget",
@@ -591,7 +580,7 @@ describe("BudgetsPage", () => {
         jsonResponse({ detail: "A budget named team-a already exists" }, 409),
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create budget" }),
@@ -624,7 +613,7 @@ describe("BudgetsPage", () => {
       failedUserUpdates: ["alice"],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -675,7 +664,7 @@ describe("BudgetsPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -713,7 +702,7 @@ describe("BudgetsPage", () => {
       updateUser: () => userUpdate,
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -743,7 +732,7 @@ describe("BudgetsPage", () => {
   it("does not submit a non-finite budget limit", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -763,7 +752,7 @@ describe("BudgetsPage", () => {
   it("blocks a custom period below one whole day instead of rounding it to zero", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -788,7 +777,7 @@ describe("BudgetsPage", () => {
   it("rejects a fractional custom period instead of rounding it up", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
@@ -817,7 +806,7 @@ describe("BudgetsPage", () => {
     // paste-into-empty tests miss.
     mockApi({ budgets: [budget({ budget_duration_sec: 1_209_600 })] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "Edit…", row)
@@ -838,7 +827,7 @@ describe("BudgetsPage", () => {
   it("creates an unlimited budget when the limit is left blank", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     await screen.findByText("No budgets yet")
     await user.click(
@@ -866,7 +855,7 @@ describe("BudgetsPage", () => {
       budgets: [budget({ max_budget: 42, budget_duration_sec: 86_400 })],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "Edit…", row)
@@ -882,7 +871,7 @@ describe("BudgetsPage", () => {
       budgets: [budget({ token_limit: 5000, request_limit: 10 })],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "Edit…", row)
@@ -917,7 +906,7 @@ describe("BudgetsPage", () => {
       users: [testUser("alice")],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).getByText("Organization")).toBeInTheDocument()
@@ -933,7 +922,7 @@ describe("BudgetsPage", () => {
   it("keeps the assignment control on the deployment's own budget", async () => {
     mockApi({ budgets: [budget()], users: [testUser("alice")] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).queryByText("Organization")).toBeNull()
@@ -959,7 +948,7 @@ describe("BudgetsPage", () => {
       ],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "History", row)
@@ -988,7 +977,7 @@ describe("BudgetsPage", () => {
       ],
     })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "History", row)
@@ -1001,7 +990,7 @@ describe("BudgetsPage", () => {
   it("deletes a budget after an explicit confirm", async () => {
     const fetchMock = mockApi({ budgets: [budget()] })
     const user = userEvent.setup()
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await pressRowAction(user, "Delete…", row)
@@ -1033,7 +1022,7 @@ describe("BudgetsPage", () => {
         }),
       ],
     })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     const tenantRow = (await screen.findByText("Tenant cap")).closest("tr")!
     expect(await findRowMenuItem(user, "Delete…", tenantRow)).toBeNull()
@@ -1043,82 +1032,15 @@ describe("BudgetsPage", () => {
     expect(screen.queryByRole("checkbox")).toBeNull()
   })
 
-  it("gives an organization admin their own budgets, not the deployment's", async () => {
-    // One route, two pages (otari-ai#1943). Every deployment-wide read this
-    // file's other cases make answers 403 to a tenant, so an admin gets the
-    // organization-scoped page instead of a screen of refusals.
-    const requests = mockApi({
-      budgets: [budget()],
-      // An admin, not the owner the fixture defaults to: the matrix row is
-      // about the admin, and it is the weaker of the two management roles.
-      context: organizationContext({
-        role: "admin",
-        deployment_operator: false,
-      }),
-    })
-    renderPage(<BudgetsPage />)
-
-    expect(
-      await screen.findByRole("grid", { name: "Organization budgets" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("grid", { name: "Organization spend ceilings" }),
-    ).toBeInTheDocument()
-
-    // Withheld at the request, not only in the markup.
-    const read = requests.mock.calls.map(([url]) => String(url))
-    expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
-      false,
-    )
-    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
-  })
-
-  it("keeps the deployment page for an operator", async () => {
-    // The other side of the split, pinned so a future change cannot quietly
-    // take the deployment's budgets away from the caller who owns them.
+  it("names itself for the deployment, not the organization", async () => {
+    // The organization rail's Spend & budgets is the organization's own page
+    // (otari#2099), so this one says which budgets it lists.
     mockApi({ budgets: [budget({ name: "Deployment wide" })] })
-    renderPage(<BudgetsPage />)
+    renderPage(<DeploymentBudgetsPage />)
 
     expect(await screen.findByText("Deployment wide")).toBeInTheDocument()
     expect(
-      screen.queryByRole("grid", { name: "Organization budgets" }),
-    ).toBeNull()
-  })
-
-  it("sends a caller with no organization to the index, not the operator page", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-      String(input).endsWith(`${API_ROOT}/organizations/me`)
-        ? jsonResponse({ detail: "Organization not found" }, 404)
-        : jsonResponse([]),
-    )
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-    render(
-      <DeploymentProvider value={bootstrap()}>
-        <QueryClientProvider client={client}>
-          <BudgetsPage />
-        </QueryClientProvider>
-      </DeploymentProvider>,
-      {
-        wrapper: withRouter({
-          url: "/budgets",
-          routes: [{ path: "/", element: <LocationProbe /> }],
-        }),
-      },
-    )
-
-    expect(await screen.findByTestId("loc")).toHaveTextContent(/^\/$/)
-    expect(
-      vi
-        .mocked(globalThis.fetch)
-        .mock.calls.some(([input]) => String(input).includes("/budgets")),
-    ).toBe(false)
+      screen.getByRole("heading", { name: "Deployment budgets" }),
+    ).toBeInTheDocument()
   })
 })
-
-/** Reports where a navigation landed. */
-function LocationProbe() {
-  return <div data-testid="loc">{useLocation().pathname}</div>
-}

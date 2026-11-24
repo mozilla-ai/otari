@@ -82,17 +82,24 @@ def _override(config: GatewayConfig, model_key: str, organization_id: uuid.UUID 
 
 
 def _entry(
-    config: GatewayConfig, models_dev: ModelsDevCatalog | None, model_key: str, served: ServedFacts | None
+    config: GatewayConfig,
+    models_dev: ModelsDevCatalog | None,
+    model_key: str,
+    served: ServedFacts | None,
+    *,
+    provider_type: str | None = None,
 ) -> ModelCatalogEntry | None:
     """models.dev's entry for a ``provider:model`` key; a bare key names no provider to look it up under.
 
     A model an engine serves is looked up by its Hugging Face id when its
     provider has no entry for it, which a self-hosted provider never does.
+    ``provider_type`` names the provider behind an instance the config does not
+    declare, which is what an organization's key slug is.
     """
     instance, separator, model_id = model_key.partition(":")
     if not separator:
         return None
-    entry = metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
+    entry = metadata_entry(models_dev, provider_type or config.provider_instance_type(instance), model_id)
     if entry is not None or served is None:
         return entry
     for name in dict.fromkeys((model_id, served.root)):
@@ -120,6 +127,8 @@ def model_limits(
     models_dev: ModelsDevCatalog | None,
     model_key: str,
     organization_id: uuid.UUID | None = None,
+    *,
+    provider_type: str | None = None,
 ) -> ModelLimits:
     """The token limits of a ``provider:model`` (or bare) key, as a caller in ``organization_id`` reaches it.
 
@@ -136,7 +145,7 @@ def model_limits(
         return ModelLimits(model_context_window(None, model_key), None)
     override = _override(config, model_key, organization_id) or MetadataOverride()
     served = _served(config, model_key, organization_id)
-    metadata = _entry(config, models_dev, model_key, served)
+    metadata = _entry(config, models_dev, model_key, served, provider_type=provider_type)
     window = override.context_window or (served.context_window if served else None)
     max_output = metadata.max_output_tokens if metadata else None
     if max_output is not None and window is not None:
@@ -177,6 +186,8 @@ def model_capabilities(
     models_dev: ModelsDevCatalog | None,
     model_key: str,
     organization_id: uuid.UUID | None = None,
+    *,
+    provider_type: str | None = None,
 ) -> ModelCapabilities | None:
     """A model's capabilities, or ``None`` when no override, models.dev entry or engine describes it.
 
@@ -197,7 +208,7 @@ def model_capabilities(
     """
     override = _override(config, model_key, organization_id)
     served = _served(config, model_key, organization_id)
-    metadata = _entry(config, models_dev, model_key, served)
+    metadata = _entry(config, models_dev, model_key, served, provider_type=provider_type)
     settings = served if served is not None and served.settings_reported else None
     served_modalities = served.input_modalities if served is not None else None
     served_reasoning = served is not None and served.reasoning
@@ -252,19 +263,22 @@ def apply_model_metadata(
     *,
     with_name: bool = True,
     organization_id: uuid.UUID | None = None,
+    provider_type: str | None = None,
 ) -> None:
     """Fill ``obj``'s token limits and capabilities from ``metadata_selector``, or from its own id.
 
     ``with_name=False`` leaves the display name unset, for an alias whose target's
     name would say what the alias hides. ``organization_id`` is the caller's,
     whose own provider keys describe the models it reaches on them.
+    ``provider_type`` names the provider behind an instance the config does not
+    declare, which is what an organization's key slug is.
     """
     selector = metadata_selector or obj.id
-    limits = model_limits(config, models_dev, selector, organization_id)
+    limits = model_limits(config, models_dev, selector, organization_id, provider_type=provider_type)
     obj.context_window = limits.context_window
     obj.max_output_tokens = limits.max_output_tokens
-    obj.type = model_type(config, models_dev, selector)
-    capabilities = model_capabilities(config, models_dev, selector, organization_id)
+    obj.type = model_type(config, models_dev, selector, provider_type=provider_type)
+    capabilities = model_capabilities(config, models_dev, selector, organization_id, provider_type=provider_type)
     if capabilities is None:
         obj.name = obj.supported_parameters = obj.architecture = None
         return

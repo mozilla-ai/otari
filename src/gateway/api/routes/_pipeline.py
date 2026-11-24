@@ -136,6 +136,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_NOT_CONFIGURED,
     USER_BLOCKED,
+    USER_MISMATCH,
     USER_NOT_FOUND,
     WRONG_MODEL_TYPE,
     ErrorKind,
@@ -2378,7 +2379,9 @@ async def _resolve_keyed_user_id(
             master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
             no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
             no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
-            forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
+            forbidden_user_error=adapter.error(
+                403, user_forbidden_detail, ErrorKind.PERMISSION, headers=error_headers(USER_MISMATCH)
+            ),
             reject_mismatch=config.reject_user_mismatch,
         )
     except HTTPException as exc:
@@ -3410,9 +3413,11 @@ class ToolContext:
         # other attempts spend, where they are dispatched with tools of their own.
         if shared is None:
             caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
+            web_call_cap = WebToolCallCap(effective_web_search_max_calls(config))
+            web_tools = _web_tool_names(self.web_search_tool_entry, self.web_fetch_tool_entry)
             shared = SharedToolUse(
-                use_budget=ToolUseBudget(caps) if caps else None,
-                web_call_cap=WebToolCallCap(effective_web_search_max_calls(config)),
+                use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+                web_call_cap=web_call_cap,
             )
         self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
@@ -3641,6 +3646,24 @@ def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, A
         (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
     )
     return {name: cap for name, cap in caps if cap is not None}
+
+
+def _web_tool_names(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> frozenset[str]:
+    """The built-in web tools a request runs, from the declarations the workspace's policy narrowed."""
+    declared = ((WEB_SEARCH_TOOL_NAME, search_entry), (WEB_FETCH_TOOL_NAME, fetch_entry))
+    return frozenset(name for name, entry in declared if entry is not None)
+
+
+def _request_use_budget(
+    caps: dict[str, int], *, web_tools: frozenset[str], web_call_cap: WebToolCallCap
+) -> ToolUseBudget | None:
+    """The request's budget, where it has something to bound.
+
+    That is a ``max_uses`` cap, or the request's ``web_tools`` under the ``web_call_cap`` they share.
+    """
+    if not caps and not web_tools:
+        return None
+    return ToolUseBudget(caps, call_cap=web_call_cap, call_capped=web_tools)
 
 
 @dataclass(eq=False)
@@ -3939,9 +3962,16 @@ async def prepare_gateway_tools(
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+    web_call_cap = WebToolCallCap(effective_web_search_max_calls(ctx.config))
+    web_tools = frozenset[str]().union(
+        *(
+            _web_tool_names(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+            for answer in admitted.values()
+        )
+    )
     shared = SharedToolUse(
-        use_budget=ToolUseBudget(caps) if caps else None,
-        web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
+        use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+        web_call_cap=web_call_cap,
     )
     shared.tally.spend_gate = ReservationToolGate(ctx)
     shared.round_gate = ReservationRoundGate(ctx)

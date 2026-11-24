@@ -247,6 +247,7 @@ export function EditKeyForm({
           budgets={budgetChoices.budgets}
           isLoading={budgetChoices.isLoading}
           isExempt={excludeFromBudget}
+          isDeploymentWide={isDeploymentWide}
           current={
             ceiling
               ? {

@@ -3,7 +3,6 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
-import { Navigate } from "@tanstack/react-router"
 import {
   type ReactNode,
   type RefObject,
@@ -27,7 +26,6 @@ import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -45,10 +43,6 @@ import {
   useDeleteBudget,
   useUpdateBudget,
 } from "@/shared/api/budgets"
-import {
-  useDeploymentOperator,
-  useOrganizationContext,
-} from "@/shared/api/organizations"
 import { useUpdateUser, useUsers } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -63,7 +57,6 @@ import {
   unnamedBudgetLabel,
 } from "./budgetLabel"
 import { CountLimitFields, countToInput, parseCount } from "./CountLimitFields"
-import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
 
 // ---------- formatting ----------
@@ -558,15 +551,14 @@ function isOrganizationOwned(budget: Budget): boolean {
 }
 
 /**
- * The deployment's own budgets page, which is what an operator sees.
+ * The deployment's own budgets, on the deployment rail at `/admin/budgets`.
  *
- * Deployment-wide end to end: `/budgets`, the gateway's `users` table, and
- * every workspace's member default, all behind `require_deployment_operator`.
- * Unchanged by otari-ai#1943, which added the tenant-scoped page beside it
- * rather than reshaping this one, because the two surfaces answer to different
- * callers and read different rows.
+ * Deployment-wide end to end: `/api/v1/budgets`, the gateway's `users` table,
+ * and every workspace's member default, all behind
+ * `require_deployment_operator`. Separate from Spend & budgets, which is the
+ * organization's own page even for an operator (otari#2099).
  */
-function DeploymentBudgetsPage() {
+export function DeploymentBudgetsPage() {
   const budgets = useBudgets()
   const users = useUsers()
   const workspaces = useWorkspaces()
@@ -860,7 +852,7 @@ function DeploymentBudgetsPage() {
   return (
     <div className="flex flex-col">
       <PageIntro
-        title="Budgets"
+        title="Deployment budgets"
         action={
           <Button
             ref={createButtonRef}
@@ -1219,41 +1211,4 @@ function CreateBudgetDialog({
       onClose={onClose}
     />
   )
-}
-
-/**
- * Spend & budgets, picking the page for whoever is asking.
- *
- * One route with two pages behind it, the way Routing does since otari#867: an
- * operator gets the deployment's budgets, and an organization owner or admin
- * gets their own organization's, which is the surface otari-ai#1943 added. Not
- * two rail rows, because it is one destination in the design and one row in the
- * roles matrix; and not one merged page, because the two read different tables
- * and every deployment-wide read here answers 403 to a tenant.
- *
- * Held until the context lands rather than defaulting to one of them. Guessing
- * would either flash the operator page at an admin and swap it, or fire the
- * deployment-wide reads as an admin and paint their refusals; the shell already
- * waits on this query, so the cost is a spinner that is usually already over.
- */
-export function BudgetsPage() {
-  const organization = useOrganizationContext()
-  const { answer, isSettled } = useDeploymentOperator()
-
-  if (!isSettled) {
-    return <PageLoading label="Loading spend and budgets…" />
-  }
-  // No organization means no budgets of its own and none to operate; the
-  // index is where such a caller is told how to get in.
-  if (answer === "no-organization") {
-    return <Navigate to="/" replace />
-  }
-  // An errored context lands on the operator page, as every operator gate does
-  // (`useDeploymentOperator`): its reads say in their own words when they are
-  // refused, where the reverse would hide the deployment's budgets from the one
-  // caller who owns them.
-  if (answer === "not-operator" && organization.data) {
-    return <OrganizationBudgetsPage organization={organization.data} />
-  }
-  return <DeploymentBudgetsPage />
 }

@@ -828,7 +828,7 @@ def _strategy_for(
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed a tool's native items, has anything
+    Only a request with a budget, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
@@ -875,6 +875,7 @@ async def responses_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -916,6 +917,7 @@ async def responses_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

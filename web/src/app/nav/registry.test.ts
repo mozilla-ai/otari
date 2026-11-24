@@ -110,6 +110,7 @@ describe("nav registry", () => {
       "Accounts",
       "Hosted providers",
       "Subagent router",
+      "Deployment budgets",
       "Web search",
       "Code execution pricing",
       "Health",
@@ -142,11 +143,9 @@ describe("nav registry", () => {
     // sections rather than the rail withholding the destination. Rates live on
     // Providers instead, beside the models they price.
     //
-    // Spend & budgets left it a fourth way, in the same issue: the route now
-    // resolves to *two* pages, the deployment's for an operator and the
-    // organization's own for an owner or admin, so there is no caller the
-    // destination refuses. That is the shape to copy for the rows still on this
-    // list, not a loosened gate.
+    // Spend & budgets is the organization's own page for whoever opens it; the
+    // deployment's budgets are Deployment budgets, a row of their own here
+    // (otari#2099).
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
@@ -154,6 +153,7 @@ describe("nav registry", () => {
       "/admin/accounts",
       "/admin/hosted-providers",
       "/admin/recommender",
+      "/admin/budgets",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -177,6 +177,7 @@ describe("nav registry", () => {
       "/admin/accounts",
       "/admin/hosted-providers",
       "/admin/recommender",
+      "/admin/budgets",
       "/admin/web-search",
       "/admin/code-execution",
       "/health-checks",
@@ -190,6 +191,7 @@ describe("nav registry", () => {
     expect(others).not.toContain("/admin/accounts")
     expect(others).not.toContain("/admin/hosted-providers")
     expect(others).not.toContain("/admin/recommender")
+    expect(others).not.toContain("/admin/budgets")
     expect(others).not.toContain("/admin/web-search")
     expect(others).not.toContain("/admin/code-execution")
     expect(others).not.toContain("/health-checks")
@@ -207,6 +209,7 @@ describe("nav registry", () => {
       ["/admin/accounts", "admin", "unlisted"],
       ["/admin/hosted-providers", "hosted_providers", "unlisted"],
       ["/admin/recommender", "agent_recommenders", "unlisted"],
+      ["/admin/budgets", "budgets", "refused"],
       ["/admin/web-search", "tools", "refused"],
       ["/admin/code-execution", "pricing", "refused"],
       ["/health-checks", "health_checks", "refused"],
@@ -351,8 +354,8 @@ describe("nav registry", () => {
     // Pinned as the whole list, like the operator-only one: a page someone may
     // not open is in none of their navigation and its address goes Home, so a
     // `requires` added or dropped changes who can reach a page at all. The
-    // organization rail is a manager's without saying so; Budgets says more
-    // because it serves the operator too.
+    // organization rail is a manager's without saying so, Spend & budgets
+    // included: the deployment's budgets are a row of their own (otari#2099).
     expect(
       NAV_ITEMS.filter((item) => item.requires).map((item) => [
         item.to,
@@ -361,7 +364,6 @@ describe("nav registry", () => {
     ).toEqual([
       ["/playground", "contributor"],
       ["/tools/guardrails", "manager"],
-      ["/budgets", "manager-or-operator"],
     ])
   })
 
@@ -998,6 +1000,7 @@ const DEPLOYMENT = [
   "/admin/accounts",
   "/admin/hosted-providers",
   "/admin/recommender",
+  "/admin/budgets",
   "/admin/web-search",
   "/admin/code-execution",
   "/health-checks",

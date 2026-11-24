@@ -252,8 +252,6 @@ export function routeAccess(target: Target, caller: Caller): Access {
       return verdict(answer === "operator")
     case "manager":
       return verdict(canManage(context))
-    case "manager-or-operator":
-      return verdict(answer === "operator" || canManage(context))
     case "workspace-manager": {
       // From the address as written: an id keeps its case.
       const role = context?.workspace_memberships?.find(

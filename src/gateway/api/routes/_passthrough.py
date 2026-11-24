@@ -75,6 +75,7 @@ from gateway.core.error_codes import (
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
+    USER_MISMATCH,
     RefusalException,
     body_fields_of,
     error_headers,
@@ -314,6 +315,7 @@ def resolve_passthrough_user_id(
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=USER_MISMATCH_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=reject_mismatch,
     )

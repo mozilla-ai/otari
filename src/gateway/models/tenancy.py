@@ -145,18 +145,30 @@ AVATAR_FACE_COUNT = 203_896
 class SignInMeans(StrEnum):
     """The sign-in credentials an identity carries.
 
-    The members are exclusive and cover every identity. Only ``PASSWORD`` and
-    ``WITHOUT_PASSWORD`` can complete a sign-in, because an address nobody has verified is
-    refused once the password it carries has been proven.
+    The members are exclusive and cover every identity. ``completes_sign_in`` is whether the
+    credentials alone can open a session. A password on an address nobody has verified cannot,
+    because authentication refuses an unverified address once the password it carries has been
+    proven.
+
+    NOTE: ``completes_sign_in`` answers for the credentials only. A caller that admits a sign-in
+    must read ``is_active`` as well.
 
     NOTE: ``WITHOUT_PASSWORD`` is a provider or a passkey. Nothing enforces that, so a flow that
     verifies an address must leave a password, a provider or a passkey behind.
     """
 
-    NONE = "none"
-    PASSWORD = "password"
-    UNVERIFIED_PASSWORD = "unverified_password"
-    WITHOUT_PASSWORD = "without_password"
+    NONE = ("none", False)
+    PASSWORD = ("password", True)
+    UNVERIFIED_PASSWORD = ("unverified_password", False)
+    WITHOUT_PASSWORD = ("without_password", True)
+
+    completes_sign_in: bool
+
+    def __new__(cls, value: str, completes_sign_in: bool) -> "SignInMeans":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.completes_sign_in = completes_sign_in
+        return member
 
 
 class UserBase(SQLModel):
@@ -1213,36 +1225,57 @@ class InvitationUpdate(SQLModel):
 InvitationWayIn = Literal["provider", "password_reset"]
 
 
+class InvitationNextStep(StrEnum):
+    """What an invitee does to get in, as Otari decides it.
+
+    The members are exclusive and cover every pending invitation.
+    ``set_password`` means accepting may choose this address's first password.
+    ``sign_in`` means the address's credentials open a session.
+    ``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.
+    ``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.
+
+    NOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.
+    The other two leave it empty.
+    """
+
+    SET_PASSWORD = ("set_password", False)
+    SIGN_IN = ("sign_in", False)
+    USE_ANOTHER_WAY_IN = ("use_another_way_in", True)
+    VERIFY_EMAIL = ("verify_email", True)
+
+    carries_ways_in: bool
+
+    def __new__(cls, value: str, carries_ways_in: bool) -> "InvitationNextStep":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.carries_ways_in = carries_ways_in
+        return member
+
+
 class InvitationPreviewPublic(SQLModel):
     """What an unauthenticated visitor sees before committing to accept.
 
     Deliberately narrow: the address it was sent to, the organization's name,
-    and the role on offer. The token is the caller's only credential here, not
-    a session, so this carries nothing that identifies who sent it or any
-    other member.
+    the role on offer, and what to do next.
+    The token is the caller's only credential here, not a session, so this
+    carries nothing that identifies who sent it or any other member.
     """
 
     email: str
     organization_name: str
     role: str
     expires_at: datetime
-    needs_password: bool = Field(
+    next_step: InvitationNextStep = Field(
         description=(
-            "Whether accepting should also set the invited address's first password. False when the address "
-            "already has a way in, and also when another organization has it as a member or invitee, since this "
-            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
-            "password whenever this is false."
+            "What the invited address does to get in. Accept refuses a password unless this is 'set_password'."
         )
-    )
-    can_sign_in: bool = Field(
-        description="Whether the invited address can already sign in, with a password or through a provider."
     )
     ways_in: list[InvitationWayIn] = Field(
         description=(
-            "When the address cannot sign in yet and this link will not set its password, what this deployment "
-            "offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and "
-            "'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when "
-            "the deployment offers neither, in which case whoever administers it has to help."
+            "What this deployment offers instead, where next_step names them: 'provider' (sign in with Google "
+            "or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty for the "
+            "other steps, and empty where the deployment offers neither, in which case whoever administers it "
+            "has to help."
         )
     )
 
@@ -1348,9 +1381,9 @@ class AcceptInvitationRequest(SQLModel):
         default=None,
         max_length=_MAX_SUBMITTED_PASSWORD,
         description=(
-            "Sets the invited identity's password in the same step, when the preview reported "
-            "needs_password. Needs no mail: the link is the proof, whether it was emailed or an "
-            "admin handed it over."
+            "Sets the invited identity's password in the same step, where the preview answered "
+            "a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was "
+            "emailed or an admin handed it over."
         ),
     )
     full_name: str | None = Field(
@@ -1359,34 +1392,22 @@ class AcceptInvitationRequest(SQLModel):
     terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
 
 
-class AcceptInvitationResultPublic(SQLModel):
-    """What accepting produces: enough for the accept page to say where the visitor landed.
-
-    No session and no token. When the request carried a password, the identity
-    can sign in straight away; otherwise it stays password-less until claimed by
-    signup or a provider sign-in.
-    """
+class AcceptedMembershipPublic(SQLModel):
+    """The membership an accepted invitation produced."""
 
     organization_name: str
     role: str
-    password_set: bool = Field(default=False, description="Whether this accept set the identity's password.")
-    verification_pending: bool = Field(
-        default=False,
-        description=(
-            "Whether the invited address chose a password through signup and has not verified it yet, "
-            "so it has to open its verification link before it can sign in."
-        ),
-    )
-    can_sign_in: bool = Field(
-        default=True,
-        description=(
-            "Whether the invited address can sign in now, with a password (this accept's included) or through "
-            "a provider. False when it accepted without one and has never signed in."
-        ),
-    )
+
+
+class AcceptInvitationResultPublic(AcceptedMembershipPublic):
+    """What accepting through the link produced, and what it leaves the invitee to do.
+
+    No session and no token: ``next_step`` is the whole of what comes next.
+    """
+
+    next_step: InvitationNextStep = Field(description="What the invited address does now that it has accepted.")
     ways_in: list[InvitationWayIn] = Field(
-        default_factory=list,
-        description="When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+        description="What this deployment offers instead, where next_step names them, as the preview's ways_in says."
     )
 
 
@@ -1846,6 +1867,7 @@ __all__ = [
     "WORKSPACE_MEMBER_STATUSES",
     "AcceptInvitationRequest",
     "AcceptInvitationResultPublic",
+    "AcceptedMembershipPublic",
     "ActiveOrganizationMemberCreateRequest",
     "ActiveOrganizationMemberCreateResultPublic",
     "ActiveOrganizationMemberPublic",
@@ -1858,6 +1880,7 @@ __all__ = [
     "DashboardSession",
     "Invitation",
     "InvitationCreate",
+    "InvitationNextStep",
     "InvitationPreviewPublic",
     "InvitationStatus",
     "InvitationUpdate",
