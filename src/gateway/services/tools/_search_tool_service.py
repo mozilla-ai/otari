@@ -24,7 +24,7 @@ from gateway.exceptions.tools_exceptions import (
     StoredSearchToolNotFoundError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import carries_redaction, restore_redacted_values
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values
 from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolConflict, SearchToolRepository
 from gateway.schemas.tools import (
@@ -50,6 +50,7 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tool_settings_service import WEB_SEARCH_DEFAULT_TOOL, apply_override
 from gateway.services.tools._search_tool_connection import instance_to_test, unsaved_instance_to_test
@@ -139,18 +140,6 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     return True
 
 
-def _readable_options(row: SearchToolCredential) -> dict[str, Any] | None:
-    """The row's stored provider options, or None when no configured key reads them.
-
-    Listing a tool is not running one, so a row whose secret has moved is named
-    rather than failing the listing.
-    """
-    try:
-        return decrypt_mapping(row.encrypted_options)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return None
-
-
 def _encrypted_options(options: dict[str, Any] | None) -> str | None:
     """The ciphertext to store for ``options``, or None to clear them.
 
@@ -203,7 +192,7 @@ class SearchToolService:
                 listed.append(
                     ListedSearchToolSchema.from_model(
                         row,
-                        options=_readable_options(row),
+                        options=readable_mapping(row.encrypted_options),
                         decryptable=_is_decryptable(row),
                         shadows_config=row.name in from_config,
                         price_per_call=per_call,
@@ -342,7 +331,7 @@ class SearchToolService:
             )
         await self._apply_write(f"writing '{name}'")
         return CreatedSearchToolSchema(
-            **row.to_public_dict(_readable_options(row)),
+            **row.to_public_dict(readable_mapping(row.encrypted_options)),
             shadows_config=shadows_config,
             pinned_web_search_default_tool=pinned.name if pinned is not None else None,
             notice=pinned.notice if pinned is not None else None,
@@ -371,7 +360,7 @@ class SearchToolService:
             # Distinguish "field omitted" (keep) from "field set to null" (clear), then
             # validate the instance as it will be after the patch.
             sent = request.model_fields_set
-            stored_options = _readable_options(existing)
+            stored_options = readable_mapping(existing.encrypted_options)
             fetch_tool = request.fetch_tool.strip() if request.fetch_tool is not None else None
             # An explicit null provider is meaningless (the column is non-null), so it
             # keeps the stored provider.
@@ -412,11 +401,7 @@ class SearchToolService:
                 changes["timeout_seconds"] = request.timeout
             if "options" in sent:
                 # A value echoed back as the mask keeps the stored one.
-                if stored_options is None and (
-                    existing.encrypted_options is not None or carries_redaction(request.options)
-                ):
-                    # Either the mask would be stored as the value, or a write
-                    # would drop ciphertext that the right key could still open.
+                if restore_is_unsafe(stored_options, request.options, sealed=existing.encrypted_options is not None):
                     raise SearchToolOptionsUnreadableError
                 stored_options = restore_redacted_values(request.options, stored_options) or None
                 changes["encrypted_options"] = _encrypted_options(stored_options)

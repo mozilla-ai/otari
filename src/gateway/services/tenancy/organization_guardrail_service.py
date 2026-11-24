@@ -88,8 +88,8 @@ from gateway.models.guardrails import (
     distinct_directions,
 )
 from gateway.models.secret_fields import (
-    carries_redaction,
     redact_secret_like_values,
+    restore_is_unsafe,
     restore_redacted_values,
 )
 from gateway.models.tenancy import User
@@ -98,11 +98,11 @@ from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, require_base_url, run_input_guardrails
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
-    SecretDecryptionError,
     decrypt_mapping,
     decrypt_secret,
     encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
@@ -607,18 +607,6 @@ async def _validate_url(url: str, *, has_credential: bool) -> None:
         raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc
 
 
-def _readable_kwargs(guardrail: OrganizationGuardrail) -> dict[str, Any] | None:
-    """The mandate's stored per-check arguments, or None when no configured key reads them.
-
-    Listing a mandate is not running one, so a row whose secret has moved is
-    named rather than failing the listing.
-    """
-    try:
-        return decrypt_mapping(guardrail.encrypted_validate_kwargs)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return None
-
-
 def _encrypted_kwargs(validate_kwargs: dict[str, Any] | None) -> str | None:
     """Encrypt a mandate's per-check arguments for storage. Nothing to store stays None."""
     try:
@@ -714,7 +702,9 @@ class OrganizationGuardrailService:
     async def _public(self, guardrail: OrganizationGuardrail) -> OrganizationGuardrailPublic:
         scoped = await self._scope_ids([guardrail.id])
         return OrganizationGuardrailPublic.from_model(
-            guardrail, validate_kwargs=_readable_kwargs(guardrail), workspace_ids=scoped.get(guardrail.id, [])
+            guardrail,
+            validate_kwargs=readable_mapping(guardrail.encrypted_validate_kwargs),
+            workspace_ids=scoped.get(guardrail.id, []),
         )
 
     async def _require_workspaces_in_organization(
@@ -787,7 +777,9 @@ class OrganizationGuardrailService:
         return OrganizationGuardrailsPublic(
             data=[
                 OrganizationGuardrailPublic.from_model(
-                    row, validate_kwargs=_readable_kwargs(row), workspace_ids=scoped.get(row.id, [])
+                    row,
+                    validate_kwargs=readable_mapping(row.encrypted_validate_kwargs),
+                    workspace_ids=scoped.get(row.id, []),
                 )
                 for row in rows
             ],
@@ -951,12 +943,10 @@ class OrganizationGuardrailService:
             # ``from_model`` masks a credential-shaped entry, so an editor
             # resubmitting the whole set sends ``***`` for the ones it was never
             # shown; those keep their stored value.
-            stored_kwargs = _readable_kwargs(guardrail)
-            if stored_kwargs is None and (
-                guardrail.encrypted_validate_kwargs is not None or carries_redaction(request.validate_kwargs)
+            stored_kwargs = readable_mapping(guardrail.encrypted_validate_kwargs)
+            if restore_is_unsafe(
+                stored_kwargs, request.validate_kwargs, sealed=guardrail.encrypted_validate_kwargs is not None
             ):
-                # Either the mask would be stored as the value, or a write would
-                # drop ciphertext that the right key could still open.
                 raise OrganizationGuardrailKwargsUnreadableError
             restored = restore_redacted_values(request.validate_kwargs, stored_kwargs)
             guardrail.encrypted_validate_kwargs = _encrypted_kwargs(restored)
@@ -1017,7 +1007,7 @@ class OrganizationGuardrailService:
             raise OrganizationGuardrailNoEndpointError()
         profile = guardrail.profile
         credential = decrypt_secret(guardrail.encrypted_credential) if guardrail.encrypted_credential else None
-        stored_kwargs = _readable_kwargs(guardrail)
+        stored_kwargs = readable_mapping(guardrail.encrypted_validate_kwargs)
         validate_kwargs = (
             restore_redacted_values(request.validate_kwargs, stored_kwargs)
             if "validate_kwargs" in request.model_fields_set
