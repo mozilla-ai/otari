@@ -153,6 +153,33 @@ def test_an_endpoint_credential_is_refused_on_a_key_with_no_base_url() -> None:
         store._gate_endpoint_auth(_whole(), api_base=None, stored=None)
 
 
+def test_an_endpoint_credential_is_refused_at_write_on_an_address_that_is_not_https() -> None:
+    """The address passes the public-address gate, which admits both schemes, so this is the only rule that sees it."""
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        store._gate_endpoint_auth(_whole(), api_base="http://proxy.example.com/v1", stored=None)
+
+
+def test_a_stored_credential_on_an_address_that_is_not_https_refuses_the_key() -> None:
+    """Held on the read path too, so a row stored before the rule does not keep sending it in clear."""
+    row = OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="http://proxy.example.com/v1",
+        endpoint_auth_method="static_header",
+        endpoint_auth_header_name="Fastly-Key",
+        encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret"),
+        endpoint_auth_last4="cret",
+        endpoint_auth_expires_at=LATER,
+    )
+
+    with pytest.raises(store.UnservableEndpointError):
+        endpoint_auth_headers(row)
+
+    assert store.key_is_usable(row) is False
+
+
 def test_a_stored_row_reports_the_credential_it_carries() -> None:
     row = OrgProviderKey(
         organization_id=uuid.uuid4(),

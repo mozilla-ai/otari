@@ -209,7 +209,7 @@ def endpoint_auth_headers(key: OrgProviderKey) -> dict[str, str]:
     """
     if (auth := key.endpoint_auth) is None:
         return {}
-    if (reason := auth.refused_reason(has_api_base=bool(key.api_base))) is not None:
+    if (reason := auth.refused_reason(api_base=key.api_base)) is not None:
         raise UnservableEndpointError(reason)
     return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
 
@@ -548,7 +548,7 @@ def _gate_endpoint_auth(auth: EndpointAuth | None, *, api_base: str | None, stor
     if auth is None:
         return
     expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth != stored else None
-    for reason in (auth.refused_reason(has_api_base=bool(api_base)), expiry):
+    for reason in (auth.refused_reason(api_base=api_base), expiry):
         if reason is not None:
             raise OrgProviderKeyEndpointAuthRefusedError(reason)
 

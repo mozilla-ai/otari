@@ -29,6 +29,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
@@ -224,6 +225,56 @@ async def test_moving_the_address_asks_for_an_unreadable_endpoint_credential_aga
     assert row is not None
     assert row.encrypted_endpoint_auth_secret is not None
     assert row.endpoint_auth_header_name == "Fastly-Key"
+
+
+async def test_moving_a_key_to_a_plain_http_address_with_its_credential_resent_is_refused(
+    async_db: AsyncSession,
+) -> None:
+    """The address gate admits http, so this is the only thing between the credential and the clear.
+
+    The credentials are resent because a move refuses without them first, so an
+    address-only move never reaches the rule under test.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_endpoint_auth(service, owner)
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        await service.update_key_for_user(
+            user=owner,
+            key_id=created.id,
+            request=OrgProviderKeyUpdateRequest(
+                api_base="http://proxy/v1",
+                api_key="sk-live-5678",
+                endpoint_auth=EndpointAuthRequest(
+                    method=EndpointAuthMethod.STATIC_HEADER,
+                    header_name="Fastly-Key",
+                    secret="edge-secret-2",
+                    expires_at=datetime.now(UTC) + timedelta(days=30),
+                ),
+            ),
+        )
+
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.api_base == "https://proxy/v1"
+
+
+async def test_a_key_with_no_credential_may_still_use_a_plain_http_address(async_db: AsyncSession) -> None:
+    """The rule is about the credential travelling, so a key carrying none is not held to it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai", name="plain", api_key="sk-live-1234", api_base="http://proxy/v1"
+        ),
+    )
+
+    assert created.api_base == "http://proxy/v1"
+    assert created.endpoint_auth is None
 
 
 async def test_an_unreadable_endpoint_credential_can_be_removed(async_db: AsyncSession) -> None:

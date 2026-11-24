@@ -33,8 +33,8 @@ def _auth(**overrides: object) -> EndpointAuth:
     return EndpointAuth(**_columns(**overrides))  # type: ignore[arg-type]
 
 
-def _refusal(*, has_api_base: bool = True, **overrides: object) -> str | None:
-    return _auth(**overrides).refused_reason(has_api_base=has_api_base)
+def _refusal(*, api_base: str | None = "https://proxy.example.com/v1", **overrides: object) -> str | None:
+    return _auth(**overrides).refused_reason(api_base=api_base)
 
 
 def _expiry_refusal(**overrides: object) -> str | None:
@@ -43,6 +43,22 @@ def _expiry_refusal(**overrides: object) -> str | None:
 
 def test_a_static_header_on_a_tenant_endpoint_is_served() -> None:
     assert _refusal() is None
+
+
+# The credential is added to every request to the address, so an address that
+# is not addressed over TLS puts it on the wire in clear. Held here rather than
+# at the write gate alone, so a row stored before the rule is refused too.
+@pytest.mark.parametrize(
+    "api_base",
+    ["http://proxy.example.com/v1", "HTTP://proxy.example.com/v1", "//proxy.example.com/v1", "proxy.example.com/v1"],
+)
+def test_a_credential_on_an_address_that_is_not_https_is_refused(api_base: str) -> None:
+    assert _refusal(api_base=api_base) is not None
+
+
+@pytest.mark.parametrize("api_base", ["https://proxy.example.com/v1", "HTTPS://proxy.example.com/v1"])
+def test_a_credential_on_an_https_address_is_served(api_base: str) -> None:
+    assert _refusal(api_base=api_base) is None
 
 
 def test_a_row_holding_every_column_carries_the_credential_they_name() -> None:
@@ -61,7 +77,7 @@ def test_a_row_holding_none_of_the_columns_carries_no_credential() -> None:
 
 
 def test_an_endpoint_credential_is_refused_on_the_providers_own_endpoint() -> None:
-    assert _refusal(has_api_base=False) is not None
+    assert _refusal(api_base=None) is not None
 
 
 def test_a_method_this_build_does_not_know_cannot_be_read() -> None:
@@ -89,7 +105,7 @@ def test_an_expiry_that_is_not_in_the_future_is_refused_at_write(expires_at: dat
 def test_an_expiry_that_has_passed_does_not_refuse_a_stored_credential() -> None:
     expired = _auth(expires_at=datetime(2020, 1, 1, tzinfo=UTC))
 
-    assert expired.refused_reason(has_api_base=True) is None
+    assert expired.refused_reason(api_base="https://proxy.example.com/v1") is None
     assert expired.headers(secret="s3cret") == {"Fastly-Key": "s3cret"}
 
 

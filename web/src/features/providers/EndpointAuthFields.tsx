@@ -58,7 +58,7 @@ export function isEndpointAuthComplete(
 
 /** What the header field says, which is where a credential is entered and removed. */
 const HEADER_DESCRIPTION =
-  "Optional. The header a CDN or identity-aware proxy in front of this address expects, sent on every request. Leave blank when the address needs no credential of its own."
+  "Optional. The header a CDN or identity-aware proxy in front of this address expects, sent on every request. The base URL has to be https, since the credential travels with it. Leave blank when the address needs no credential of its own."
 
 const UNREADABLE_DESCRIPTION =
   "This key stores a credential this deployment cannot read, so none of it is shown. Save with this blank to remove it, or enter the header and the value again to replace it."

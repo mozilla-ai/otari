@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 # The namespace Otari's own headers live in, which a tenant may not write into.
 _OTARI_PREFIX = "otari-"
@@ -107,6 +108,16 @@ def refused_header_name_reason(name: str) -> str | None:
     return None
 
 
+def _is_https(api_base: str) -> bool:
+    """Whether ``api_base`` is addressed over TLS.
+
+    Read from the text rather than resolved: the address is held to public
+    addresses by its own gate, and the question here is only which scheme the
+    credential would travel under.
+    """
+    return urlsplit(api_base).scheme.lower() == "https"
+
+
 class UnreadableEndpointAuthError(ValueError):
     """A row holds endpoint credential columns that do not assemble into a credential."""
 
@@ -164,15 +175,22 @@ class EndpointAuth:
             expires_at=expires_at,
         )
 
-    def refused_reason(self, *, has_api_base: bool) -> str | None:
-        """Why this credential cannot be served, or None.
+    def refused_reason(self, *, api_base: str | None) -> str | None:
+        """Why this credential cannot be served to ``api_base``, or None.
+
+        Takes the address rather than whether there is one, because both of the
+        rules about it need the address itself. Every path that would send the
+        credential asks here, so a row stored before a rule existed is held to
+        it rather than grandfathered.
 
         The expiry is deliberately not read here. It is a prediction about the
         answer the proxy gives on every request, so it must never be what
         refuses one.
         """
-        if not has_api_base:
+        if not api_base:
             return "an endpoint credential on a key that dials the provider's own endpoint"
+        if not _is_https(api_base):
+            return "an endpoint credential on an address that is not https, which would send it in clear"
         return refused_header_name_reason(self.header_name)
 
     def refused_expiry_reason(self, *, now: datetime) -> str | None:

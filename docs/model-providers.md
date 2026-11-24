@@ -46,7 +46,7 @@ A model server on a private address is added by the gateway's operator as a [hos
 
 ### Add an endpoint credential
 
-An endpoint of your own often sits behind a CDN or an identity-aware proxy, such as Fastly, Cloudflare Access or Google IAP, that wants a credential of its own before the request reaches your model server. Give the key one as well as its API key. Enter the **Endpoint credential header** the proxy expects, such as `Fastly-Key`, paste the **Endpoint credential** itself, and set the date you expect to rotate it. The field appears once the key has a base URL, since a proxy sits in front of an address you chose.
+An endpoint of your own often sits behind a CDN or an identity-aware proxy, such as Fastly, Cloudflare Access or Google IAP, that wants a credential of its own before the request reaches your model server. Give the key one as well as its API key. Enter the **Endpoint credential header** the proxy expects, such as `Fastly-Key`, paste the **Endpoint credential** itself, and set the date you expect to rotate it. The field appears once the key has a base URL, since a proxy sits in front of an address you chose. That base URL has to be `https`: the credential is sent on every request to it, so a plain `http` address would put it on the wire in clear, and Otari refuses the pair.
 
 Otari sends the header on every request it makes to that base URL, including the model listing. It is stored encrypted, shown only by its last four characters, and never returned to your applications.
 
@@ -143,6 +143,6 @@ Your application sends an API key to Otari. Otari uses a provider key to call th
 * **Workspace controls**. Each workspace decides which organization keys are effective for its workloads.
 * **Role gating**. Only admins and owners can add or remove provider key material, or change which keys a workspace can access.
 * **Runtime resolution**. Otari resolves the right provider key at request time. The workspace's API key never carries the upstream secret.
-* **Endpoint credentials**. A key's [endpoint credential](#add-an-endpoint-credential) is sent only to that key's own base URL, as the one header you named. It cannot name a header that carries a provider credential, that the connection itself reserves, or that belongs to Otari.
+* **Endpoint credentials**. A key's [endpoint credential](#add-an-endpoint-credential) is sent only to that key's own base URL, as the one header you named, and only where that address is `https`. It cannot name a header that carries a provider credential, that the connection itself reserves, or that belongs to Otari.
 
 Removing a provider key from Otari does not revoke it with the upstream provider. After deleting a key from Otari, also revoke it in the provider's dashboard.
