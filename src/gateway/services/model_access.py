@@ -46,7 +46,7 @@ from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository, WorkspaceMcpServerRepository
 from gateway.repositories.users_repository import DEFAULT_USER_ID
 from gateway.services.alias_service import all_alias_names
-from gateway.services.catalog import catalog_models, dated_builds, metadata_entry
+from gateway.services.catalog import catalog_models, dated_builds, metadata_entry, resolve_catalog_offerings
 from gateway.services.mcp_stateless import reads_as_pattern
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.policy_store import resolve_effective_policy
@@ -492,8 +492,40 @@ def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
     return True
 
 
-def _validate_entry(config: GatewayConfig, entry: str) -> str:
-    """Validate + canonicalize one allow-list entry, or raise ``ValueError``."""
+def _catalog_offerings(
+    entry: str, *, workspace_id: uuid.UUID | None, organization_id: uuid.UUID | None
+) -> tuple[str, ...]:
+    """The offerings a catalog ID stands for, or none when ``entry`` is not one.
+
+    ``GET /models`` lists catalog IDs, named for the model's author
+    (``mistralai/mistral-small-3``) rather than for an instance, so as written
+    one matches nothing at dispatch. Only a slash spelling with no wildcard is
+    read as one, and the legacy spelling of an offering the deployment serves
+    (``openai/gpt-4o``) keeps naming that offering alone.
+    """
+    if "*" in entry:
+        return ()
+    slash, colon = entry.find("/"), entry.find(":")
+    if slash == -1 or -1 < colon < slash:
+        return ()
+    offerings = resolve_catalog_offerings(entry, workspace_id=workspace_id, organization_id=organization_id)
+    prefix, _, model = entry.partition("/")
+    return () if f"{prefix}:{model}" in offerings else offerings
+
+
+def _validate_entry(
+    config: GatewayConfig,
+    entry: str,
+    *,
+    workspace_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = None,
+    within: list[str] | None = None,
+) -> list[str]:
+    """Validate + canonicalize one allow-list entry, or raise ``ValueError``.
+
+    A catalog ID expands to those of its offerings an allow-list can name and
+    ``within`` covers; any other entry canonicalizes to itself.
+    """
     entry = entry.strip()
     if not entry:
         raise ValueError("an allowed_models entry cannot be empty")
@@ -509,9 +541,20 @@ def _validate_entry(config: GatewayConfig, entry: str) -> str:
         raise ValueError(f"'{entry}': wildcards are not allowed in the provider part")
     if "*" in model and (model.count("*") > 1 or not model.endswith("*")):
         raise ValueError(f"'{entry}': only a single trailing '*' is allowed (openai:* or openai:gpt-4*)")
+    if offerings := _catalog_offerings(entry, workspace_id=workspace_id, organization_id=organization_id):
+        # No entry can name a hosted provider called otherwise than its
+        # implementation, a hosted region, or a key reached by its slug, so the
+        # model's other offerings stand for those.
+        if storable := [offering for offering in offerings if _known_prefix(config, offering.partition(":")[0])]:
+            # Where the owner covers none, all are kept, so the list is refused as exceeding the owner's.
+            if within is None:
+                return storable
+            return [offering for offering in storable if _covers(within, offering)] or storable
+        if not _known_prefix(config, prefix):
+            raise ValueError(f"'{entry}' is served only through providers an allowed_models entry cannot name")
     canonical = f"{prefix}:{model}"
     if _known_prefix(config, prefix) or canonical in config.legacy_search_tool_keys():
-        return canonical
+        return [canonical]
     if prefix in config.search_tool_providers():
         raise ValueError(
             f"'{entry}' grants no model, and allowed_models grants a search tool only by its exact "
@@ -520,24 +563,35 @@ def _validate_entry(config: GatewayConfig, entry: str) -> str:
     raise ValueError(f"'{entry}': unknown provider or instance '{prefix}'")
 
 
-def validate_allowed_models(config: GatewayConfig, entries: list[str] | None) -> list[str] | None:
+def validate_allowed_models(
+    config: GatewayConfig,
+    entries: list[str] | None,
+    *,
+    workspace_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = None,
+    within: list[str] | None = None,
+) -> list[str] | None:
     """Validate + canonicalize a write. ``None`` and ``[]`` pass through as-is.
 
     Raises ``ValueError`` (surfaced by the caller as a 400) on any bad entry.
-    Duplicates are collapsed while order is preserved.
+    Duplicates are collapsed while order is preserved. A catalog ID is stored as
+    its offerings, read from the view of the organization named directly or
+    through ``workspace_id``, so the result can be longer than ``entries``. A
+    key's write passes its owner's list as ``within``, and a catalog ID then
+    stands for the offerings that list covers, since the key may only narrow it.
     """
     if entries is None:
         return None
     if not isinstance(entries, list):
         raise ValueError("allowed_models must be a list of strings, [] to deny all, or null for unrestricted")
-    canonical: list[str] = []
+    canonical: dict[str, None] = {}
     for entry in entries:
         if not isinstance(entry, str):
             raise ValueError("allowed_models entries must be strings")
-        normalized = _validate_entry(config, entry)
-        if normalized not in canonical:
-            canonical.append(normalized)
-    return canonical
+        canonical |= dict.fromkeys(
+            _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id, within=within)
+        )
+    return list(canonical)
 
 
 def model_not_allowed_detail(model: str) -> str:
