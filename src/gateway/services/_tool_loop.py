@@ -318,15 +318,15 @@ def _pool_tool_names(pool: ToolBackend) -> frozenset[str]:
 
 
 def _spent_tools(budget: ToolUseBudget | None, pool_names: frozenset[str]) -> tuple[frozenset[str], bool]:
-    """The pool's tools whose ``max_uses`` this request has used up, and whether that is all of them.
+    """The pool's tools this request can no longer call, and whether that is all of them.
 
-    A round with every one of them used up and none of the caller's tools has nothing
-    left to call, so it is the last one, with its note and its handling of a call the
-    model makes anyway.
+    A tool is used up as ``ToolUseBudget.used_up`` says. A round with every one of them
+    used up and none of the caller's tools has nothing left to call, so it is the last
+    one, with its note and its handling of a call the model makes anyway.
     """
     if budget is None:
         return frozenset(), False
-    spent = frozenset(name for name in pool_names if budget.exhausted(name))
+    spent = frozenset(name for name in pool_names if budget.used_up(name))
     return spent, bool(spent) and spent == pool_names
 
 
