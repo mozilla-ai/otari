@@ -61,7 +61,9 @@ export function SetupGuide({
   // on the operator page the getting-started panel is the right guide instead.
   const activation = useWorkspaceActivation(workspaceId, canServeRequests)
 
-  if (!workspaceId || !activation.data) {
+  // Checked here too, not only through `enabled`: another reader of the same
+  // query (the update-check prompt) can fill the cache this observer sees.
+  if (!canServeRequests || !workspaceId || !activation.data) {
     return null
   }
 

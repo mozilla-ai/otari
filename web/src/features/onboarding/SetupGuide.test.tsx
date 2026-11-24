@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
+import { useWorkspaceActivation } from "@/shared/api/activation"
 import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
@@ -235,6 +236,34 @@ describe("SetupGuide", () => {
         screen.queryByRole("heading", { name: "Send your first request" }),
       ).not.toBeInTheDocument()
     })
+  })
+
+  it("holds back while nothing can serve the request, even once another observer read the activation", async () => {
+    mockApi()
+    // Another reader of the same query, as the update-check prompt is.
+    function OtherReader() {
+      const activation = useWorkspaceActivation(WORKSPACE)
+      return activation.data ? <p>READ</p> : null
+    }
+    await renderWithRouter(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <DeploymentProvider value={bootstrap()}>
+          <SelectedWorkspaceProvider>
+            <SetupGuide canServeRequests={false} />
+            <OtherReader />
+          </SelectedWorkspaceProvider>
+        </DeploymentProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText("READ")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
   })
 
   it("shows nothing for a workspace that is not being offered the guide", async () => {
