@@ -1237,7 +1237,8 @@ refuse such a value when a tool is saved.
   empty, such as that variable left blank, stops the gateway at start, so leave
   `api_key` out to search keyless. An
   [organization key](#organization-search-keys) on Keenable always carries an API
-  key, so an organization's searches never run on the gateway's address.
+  key, so an organization's searches run on its own account, never on the keyless
+  allowance the gateway's address shares.
   Keenable logs every search, keyed or not, with its query, the caller's IP
   address and the app name each call sends, and its
   [terms](https://keenable.ai/terms) let it use what it receives to improve and
