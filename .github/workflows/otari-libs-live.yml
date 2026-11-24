@@ -193,6 +193,9 @@ jobs:
         SYNTHETIC_API_KEY: ${{ secrets.SYNTHETIC_API_KEY }}
         TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         YDC_API_KEY: ${{ secrets.YDC_API_KEY }}
+        # Optional: without the secret, the Keenable tests search keyless, and skip when the runner's
+        # address has used up Keenable's limit per IP address.
+        KEENABLE_API_KEY: ${{ secrets.KEENABLE_API_KEY }}
         SEARXNG_BASE_URL: http://127.0.0.1:8080
       run: uv run pytest -v -rs any-search/tests/test_live.py
 
