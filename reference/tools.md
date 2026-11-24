@@ -1226,6 +1226,37 @@ refuse such a value when a tool is saved.
   10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
   can cost. A search with no results reported a cost of 0 when the adapter was
   written.
+- **Keenable** (`keenable`) takes an API key but needs none. Without one, a tool
+  searches Keenable's free endpoint, which allows 1,000 searches an hour and 10 a
+  second per IP address, shared with everything else calling from the gateway's
+  address; past that, a search fails with `public_rate_limit_hourly` or
+  `public_rate_limit_per_second` (HTTP 429). Some sites Keenable serves only with
+  a key, which a keyless search restricted to one fails with
+  `public_domain_requires_api_key`. With a key in the tool's `api_key`, such as
+  `${KEENABLE_API_KEY}`, no hourly limit applies; an `api_key` that comes out
+  empty, such as that variable left blank, stops the gateway at start, so leave
+  `api_key` out to search keyless. An
+  [organization key](#organization-search-keys) on Keenable always carries an API
+  key, so an organization's searches run on its own account, never on the keyless
+  allowance the gateway's address shares.
+  Keenable logs every search, keyed or not, with its query, the caller's IP
+  address and the app name each call sends, and its
+  [terms](https://keenable.ai/terms) let it use what it receives to improve and
+  train its products; its zero data retention plan covers keyed calls from an
+  organization that has it, never keyless ones (see its
+  [data privacy](https://docs.keenable.ai/data-privacy) page). Each call names
+  the app `any-search`; set `X-Keenable-Title` in the tool's `options` to name
+  your deployment, which only the tool's configuration or an organization key's
+  options can set. Otari does not read the cost a keyed answer reports, so a
+  search is billed at the tool's own rate (its `price_per_call`, or a `search`
+  price set on the dashboard's Web search page or through the API); a keyless
+  tool can be priced at 0. Keenable's [pricing](https://docs.keenable.ai/pricing),
+  read 2026-11-24: keyless searches are free; with a key, 100,000 a month are
+  free, then $4 per 1,000, in `pro` and `realtime` mode alike. A search returns
+  at most 50 results, and its hits carry a snippet but no page text. Snippets run
+  to a few thousand characters, which Otari cuts before a model or a direct
+  search sees them; `snippet_max_length` in the tool's `options` asks for less. A
+  `time_range` keeps only the pages Keenable knows a publish date for.
 - **Mojeek** (`mojeek`) needs an API key, read from the tool's `api_key`, such as
   `${MOJEEK_API_KEY}`. Mojeek takes the key and the query in the request URL,
   which Otari keeps out of its logs. It reports no cost, so a search is billed at
