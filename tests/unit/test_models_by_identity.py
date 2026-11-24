@@ -212,6 +212,44 @@ def test_an_organization_key_offering_is_listed_under_the_id_the_index_builds(
     assert [row.id for row in listed] == [indexed.id] == ["deepseek/deepseek-v4.1-flash-1017"]
 
 
+def test_an_organization_key_offering_shows_the_metadata_its_slug_hides(config: GatewayConfig, no_index: None) -> None:
+    """The offering is built before the slug map is known, so the folded row reads the model under its provider."""
+    deepseek = ModelsDevModel(
+        id="deepseek-flash", name="DeepSeek V4.1 Flash 1017", context_window=1048576, tool_call=True, reasoning=True
+    )
+    described = ModelsDevModel(
+        id="deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        name="DeepSeek V4.1 Flash 1017",
+        context_window=1000000,
+        max_output_tokens=384000,
+        tool_call=True,
+        reasoning=True,
+    )
+    catalog = ModelsDevCatalog(
+        providers={
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={deepseek.id: deepseek}),
+            "deepinfra": ModelsDevProvider(
+                id="deepinfra", name="DeepInfra", doc=None, models={described.id: described}
+            ),
+        }
+    )
+    # Exactly what the merged catalog builds: each offering's metadata is read
+    # under its own instance name, which for the slug names no models.dev provider.
+    org = _offering("acme-ds:deepseek-flash", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    deployment = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.98)
+    selectors.apply_model_metadata(config, catalog, deployment)
+
+    listed = models_by_identity(config, catalog, [org, deployment], slug_providers={"acme-ds": "deepseek"})
+
+    (row,) = listed
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.3
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.type == "chat"
+    assert row.supported_parameters == ["tools", "tool_choice", "reasoning"]
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [("z-ai/glm-5.3", True), ("my-policy", True), ("fast", False), (_NEBIUS, False)],
