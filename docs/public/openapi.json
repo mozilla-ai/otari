@@ -3223,6 +3223,7 @@
           "request_limit",
           "budget_duration_sec",
           "reset_alignment",
+          "reset_timezone",
           "created_at",
           "updated_at"
         ],
@@ -18890,6 +18891,7 @@
           "request_limit",
           "budget_duration_sec",
           "reset_alignment",
+          "reset_timezone",
           "ceiling_count",
           "created_at",
           "updated_at"
@@ -20708,6 +20710,7 @@
           "reserved_requests",
           "budget_duration_sec",
           "reset_alignment",
+          "reset_timezone",
           "period_start",
           "period_end",
           "created_at",
@@ -25063,6 +25066,7 @@
           "reserved_requests",
           "budget_duration_sec",
           "reset_alignment",
+          "reset_timezone",
           "period_start",
           "period_end",
           "created_at",
@@ -33466,6 +33470,7 @@
           "request_limit",
           "budget_duration_sec",
           "reset_alignment",
+          "reset_timezone",
           "created_at",
           "updated_at"
         ],

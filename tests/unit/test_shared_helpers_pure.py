@@ -229,6 +229,7 @@ def test_budget_response_from_model() -> None:
     budget.max_budget = 100.0
     budget.budget_duration_sec = 86400
     budget.reset_alignment = None
+    budget.reset_timezone = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
 
@@ -258,6 +259,7 @@ def test_budget_response_carries_the_owning_organization() -> None:
     budget.max_budget = 250.0
     budget.budget_duration_sec = None
     budget.reset_alignment = "calendar_month"
+    budget.reset_timezone = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
 
@@ -273,6 +275,7 @@ def test_budget_response_from_model_nullable_fields() -> None:
     budget.max_budget = None
     budget.budget_duration_sec = None
     budget.reset_alignment = None
+    budget.reset_timezone = None
     budget.created_at = datetime(2025, 6, 15, tzinfo=UTC)
     budget.updated_at = datetime(2025, 6, 15, tzinfo=UTC)
 
@@ -320,6 +323,7 @@ def _organization_budget(owner: uuid.UUID | None) -> MagicMock:
     budget.request_limit = None
     budget.budget_duration_sec = None
     budget.reset_alignment = "calendar_month"
+    budget.reset_timezone = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
     return budget

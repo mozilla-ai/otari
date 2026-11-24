@@ -433,6 +433,7 @@ export function scopedBudget(
     reserved_requests: 0,
     budget_duration_sec: null,
     reset_alignment: null,
+    reset_timezone: null,
     period_start: null,
     period_end: null,
     created_at: "2026-01-01T00:00:00+00:00",
@@ -470,6 +471,7 @@ export function organizationSpendCeiling(
     reserved_requests: 0,
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
+    reset_timezone: null,
     period_start: "2026-08-01T00:00:00+00:00",
     period_end: "2026-09-01T00:00:00+00:00",
     manageable: true,
@@ -525,6 +527,7 @@ export function budget(overrides: Partial<Budget> = {}): Budget {
     // The calendar cadence, which lives here rather than on the rows enforcing
     // this budget: a limit and the period it is spent over are one decision.
     reset_alignment: null,
+    reset_timezone: null,
     user_count: 0,
     total_spend: 0,
     total_reserved: 0,
@@ -585,6 +588,7 @@ export function workspaceBudgetDefault(
     // The other arm of the period pair, exclusive with the one above: a default
     // whose budget snaps to a calendar boundary carries this instead.
     reset_alignment: null,
+    reset_timezone: null,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,

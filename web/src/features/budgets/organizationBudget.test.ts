@@ -24,6 +24,7 @@ function budget(
     request_limit: null,
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
+    reset_timezone: null,
     ceiling_count: 0,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",

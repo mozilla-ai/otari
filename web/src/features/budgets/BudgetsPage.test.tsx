@@ -53,6 +53,7 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     token_limit: null,
     request_limit: null,
     reset_alignment: null,
+    reset_timezone: null,
     budget_duration_sec: 86_400,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",

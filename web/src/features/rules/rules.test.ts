@@ -103,6 +103,7 @@ function policy(
       max_budget: 1,
       budget_duration_sec: null,
       reset_alignment: "calendar_month",
+      reset_timezone: null,
       token_limit: null,
       request_limit: null,
       created_at: "2026-11-01T00:00:00Z",

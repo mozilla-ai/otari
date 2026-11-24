@@ -112,7 +112,7 @@ class BudgetResponse(BaseModel):
     tpm_limit: int | None = None
     budget_duration_sec: int | None
     reset_alignment: str | None
-    reset_timezone: str | None = None
+    reset_timezone: str | None
     origin: str | None = Field(
         default=None,
         description=(
@@ -380,7 +380,7 @@ class ScopedBudgetFigures(BaseModel):
     reserved_requests: int
     budget_duration_sec: int | None
     reset_alignment: str | None
-    reset_timezone: str | None = None
+    reset_timezone: str | None
     period_start: str | None
     period_end: str | None
     created_at: str
@@ -497,7 +497,7 @@ class OrganizationBudgetPublic(BaseModel):
     request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
-    reset_timezone: str | None = None
+    reset_timezone: str | None
     ceiling_count: int
     created_at: str
     updated_at: str
@@ -647,7 +647,7 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
-    reset_timezone: str | None = None
+    reset_timezone: str | None
     created_at: str
     updated_at: str
 

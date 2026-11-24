@@ -10867,7 +10867,7 @@ export interface components {
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Reset Timezone */
-            reset_timezone?: string | null;
+            reset_timezone: string | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Token Limit */
@@ -18184,7 +18184,7 @@ export interface components {
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Reset Timezone */
-            reset_timezone?: string | null;
+            reset_timezone: string | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */
@@ -19114,7 +19114,7 @@ export interface components {
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Reset Timezone */
-            reset_timezone?: string | null;
+            reset_timezone: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -21181,7 +21181,7 @@ export interface components {
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Reset Timezone */
-            reset_timezone?: string | null;
+            reset_timezone: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -24688,7 +24688,7 @@ export interface components {
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Reset Timezone */
-            reset_timezone?: string | null;
+            reset_timezone: string | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */

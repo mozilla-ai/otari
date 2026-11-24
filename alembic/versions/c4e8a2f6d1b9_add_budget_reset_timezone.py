@@ -8,7 +8,7 @@ The check constraint goes on inside ``batch_alter_table``, as in
 ``b6e8c2a4d7f1``, because SQLite has no ALTER TABLE ADD CONSTRAINT.
 
 Revision ID: c4e8a2f6d1b9
-Revises: b4d6f8a0c2e5
+Revises: f6b8d0a2c4e7
 Create Date: 2026-11-19
 """
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4e8a2f6d1b9"
-down_revision: str | Sequence[str] | None = "b4d6f8a0c2e5"
+down_revision: str | Sequence[str] | None = "f6b8d0a2c4e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

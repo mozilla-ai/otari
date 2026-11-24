@@ -367,6 +367,7 @@ def test_end_user_budgets_carry_the_limits_end_users_are_held_to(
         "tpm_limit": None,
         "budget_duration_sec": 86400,
         "reset_alignment": None,
+        "reset_timezone": None,
         "is_default": True,
         "end_user_count": 0,
         "blocked_end_user_count": 0,
