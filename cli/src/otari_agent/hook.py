@@ -17,6 +17,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -105,14 +107,32 @@ _PI_EDIT_TOOL_PATH_FIELDS = {"edit": "path", "write": "path"}
 _PI_READ_TOOL_PATH_FIELDS = {"read": "path"}
 
 
-def _hook_pi_expand_home(target: Any, harness: str) -> Any:
-    """pi's tools accept a `~/...` path and expand it themselves; match that so a gate sees the real target."""
-    if harness == "pi" and isinstance(target, str) and (target == "~" or target.startswith("~/")):
+# The Unicode spaces pi rewrites to a plain space in a tool's path (pi-coding-agent's utils/paths.ts).
+_PI_PATH_UNICODE_SPACES = re.compile("[\u00a0\u2000-\u200a\u202f\u205f\u3000]")
+
+
+def _hook_pi_normalize_path(target: Any, harness: str) -> Any:
+    """The path pi's read, edit and write tools actually open, so a gate sees that and not the alias.
+
+    Mirrors pi's own `normalizePath` (pi-coding-agent's utils/paths.ts): Unicode spaces become plain
+    spaces, one leading `@` is stripped (so `@.env` opens `.env`), `~` and `~/...` expand to the home
+    directory, and a `file://` URL becomes its path. `~name` is left alone, as pi leaves it, and an
+    expansion that fails keeps the original so the hook fails open.
+    """
+    if harness != "pi" or not isinstance(target, str):
+        return target
+    path = _PI_PATH_UNICODE_SPACES.sub(" ", target)
+    path = path.removeprefix("@")
+    if path == "~" or path.startswith("~/"):
         try:
-            return str(Path(target).expanduser())
+            return str(Path(path).expanduser())
         except RuntimeError:
             return target
-    return target
+    if path.startswith("file://"):
+        parsed = urllib.parse.urlparse(path)
+        if parsed.netloc in ("", "localhost"):
+            return urllib.request.url2pathname(parsed.path)
+    return path
 
 
 # Codex's own edit tool, sharing Claude Code's apply_patch envelope
@@ -2716,7 +2736,7 @@ def hook(
             paths = list(dict.fromkeys(resolved_paths))
             path_source = "pre_tool_use.edit_target"
         elif path_field:
-            target = _hook_pi_expand_home(tool_input.get(path_field), harness)
+            target = _hook_pi_normalize_path(tool_input.get(path_field), harness)
             if not target:
                 return
             paths = _hook_evidence_paths(target, repo, root)
@@ -2724,7 +2744,7 @@ def hook(
                 return  # Outside the repo under both spellings: nothing a policy can name.
             path_source = "pre_tool_use.edit_target"
         elif read_field:
-            target = _hook_pi_expand_home(tool_input.get(read_field), harness)
+            target = _hook_pi_normalize_path(tool_input.get(read_field), harness)
             if not target:
                 return
             # Collected exactly the way the edit branch above collects its
@@ -3271,9 +3291,10 @@ def _hook_global_registration_without_repo_only() -> Path | None:
 _PI_EXTENSION_PACKAGE = "@mozilla-ai/pi-otari"
 _PI_EXTENSION_SOURCE = f"npm:{_PI_EXTENSION_PACKAGE}"
 # The first pi-otari release whose guardrails enforce correctly: before 0.6.0 the extension never calls
-# `otari hook`, and before 0.7.1 it sends commands that ran before the last edit, which satisfy a
-# `command_if_changed` gate that should have been run again.
-_PI_EXTENSION_MIN_GUARDRAILS_VERSION = (0, 7, 1)
+# `otari hook`; before 0.7.1 it sends commands that ran before the last edit, which satisfy a
+# `command_if_changed` gate that should have been run again; and before 0.7.2 it cuts a Stop check off
+# after 20 seconds, so a slow judge gate fails the whole check open, required gates included.
+_PI_EXTENSION_MIN_GUARDRAILS_VERSION = (0, 7, 2)
 _PI_COMMAND_TIMEOUT_SECONDS = 300
 
 

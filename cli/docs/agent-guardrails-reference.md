@@ -514,11 +514,11 @@ user-wide install counts: a package installed for one project with `pi install -
 does not load where the judge and `otari guardrails generate` run pi. If
 `@mozilla-ai/pi-otari` is not listed there it asks, then runs
 `pi install npm:@mozilla-ai/pi-otari`. If the installed version is older than
-0.7.1 it asks, then runs
+0.7.2 it asks, then runs
 `pi update npm:@mozilla-ai/pi-otari`; a source pinned to an older version is an
 error naming the commands that replace the pin. Before 0.6.0 the extension never
 calls `otari hook`, and before 0.7.1 it sends commands that ran before the
-session's last edit as `bash_commands`. A non-zero exit from pi is an
+session's last edit as `bash_commands`. Before 0.7.2 it stops waiting for a `Stop` check after 20 seconds and allows the action, so a slow judge gate skips the required gates evaluated after it; from 0.7.2 it waits up to 600 seconds, the same as Claude Code. A non-zero exit from pi is an
 error. With no `pi` on `PATH` it prints the install instructions and exits 0.
 Inside a Git repository it also offers the starter `.otari/guardrails.yml`;
 it never writes `.claude` or `.codex` files for pi. `--repo-only` is refused,
@@ -575,7 +575,7 @@ Without `OTARI_URL`, a harness's own OpenTelemetry trace export (`OTEL_TRACES_EX
 
 ### `otari hook setup`
 
-Registers the hook in the current Git repository; refuses outside one. When the repository has no guardrail, it offers to write a starter `.otari/guardrails.yml`. It refuses to write either file where a symlink, on the file or on a directory above it, leads out of the repository.
+With `claude-code` or `codex`, registers the hook in the current Git repository, and refuses outside one. With `pi`, installs or updates the pi-otari extension for your user, which needs no repository, so it also runs outside one. In either case, inside a repository that has no guardrail, it offers to write a starter `.otari/guardrails.yml`. It refuses to write either file where a symlink, on the file or on a directory above it, leads out of the repository.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

@@ -89,7 +89,27 @@ def test_tilde_name_path_is_not_expanded(repo: Path) -> None:
     (repo / "CHANGELOG.md").write_text("", encoding="utf-8")
     result = _invoke(_pre(repo, "edit", {"path": "~nosuchuser-xyz/CHANGELOG.md"}))
     assert result.exit_code == 0, result.output
-    assert hook_cli._hook_pi_expand_home("~nosuchuser-xyz/x", "pi") == "~nosuchuser-xyz/x"
+    assert hook_cli._hook_pi_normalize_path("~nosuchuser-xyz/x", "pi") == "~nosuchuser-xyz/x"
+
+
+@pytest.mark.parametrize("alias", [".env", "@.env", "@./.env", "file://{repo}/.env"])
+def test_pi_path_aliases_reach_the_read_gate(repo: Path, alias: str) -> None:
+    """pi strips a leading `@` and opens a `file://` URL's path, so each of these reads `.env`."""
+    result = _invoke(_pre(repo, "read", {"path": alias.format(repo=repo)}))
+    assert result.exit_code == 2, result.output
+
+
+def test_pi_path_aliases_reach_the_edit_gate(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    monkeypatch.setenv("HOME", str(repo.parent))
+    for alias in ("@CHANGELOG.md", f"@~/{repo.name}/CHANGELOG.md", f"@{repo}/CHANGELOG.md"):
+        result = _invoke(_pre(repo, "write", {"path": alias}))
+        assert result.exit_code == 2, (alias, result.output)
+
+
+def test_pi_normalizes_unicode_spaces_like_pi() -> None:
+    assert hook_cli._hook_pi_normalize_path("my\u00a0notes.md", "pi") == "my notes.md"
+    assert hook_cli._hook_pi_normalize_path("@@x", "pi") == "@x"
+    assert hook_cli._hook_pi_normalize_path("@.env", "claude-code") == "@.env"
 
 
 def test_nested_judge_call_exits_before_evaluating(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -295,7 +315,7 @@ def test_setup_pi_missing_prints_install_instructions(repo: Path, monkeypatch: p
 
 def test_setup_pi_already_installed_runs_no_install(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.1"))
+    calls = _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.2"))
     result = _setup(input="n\n")  # declines the starter guardrail
     assert result.exit_code == 0, result.output
     assert "already installed" in result.output
@@ -333,7 +353,7 @@ def test_setup_pi_install_failure_is_a_click_exception(repo: Path, monkeypatch: 
 
 def test_setup_pi_offers_the_starter_guardrail_in_a_repo(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(repo)
-    _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.1"))
+    _fake_pi(monkeypatch, listing=_user_listing(repo.parent, "0.7.2"))
     (repo / hook_cli.GUARDRAIL_FILE).unlink()
     result = _setup(input="y\n")
     assert result.exit_code == 0, result.output
