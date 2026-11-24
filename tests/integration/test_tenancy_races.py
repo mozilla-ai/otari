@@ -98,7 +98,7 @@ from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
-from gateway.services.tenancy.user_service import set_password
+from gateway.services.tenancy.user_service import AddressAuthority, set_password
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
@@ -289,6 +289,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
             identity,
             new_password="a-real-password",
             sso_enforcement=NO_SSO_ENFORCEMENT,
+            authority=AddressAuthority.OPERATOR,
             email="contested@example.com",
         )
         # `set_password` returns None, so the racer that got through reports a
