@@ -21,7 +21,7 @@ from gateway.services.providers._owned_endpoint_network import OwnedEndpointTran
 from gateway.services.secret_box import encrypt_mapping, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.web_retrieval_network import PinnedTransportError, SystemAddressResolver
-from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY, UnreadableEndpointAuthError
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
 
@@ -239,6 +239,19 @@ def test_a_stored_credential_naming_a_header_a_tenant_may_not_set_refuses_the_ke
     key = _key_with_endpoint_auth(endpoint_auth_header_name=header_name)
 
     with pytest.raises(store.UnservableEndpointError):
+        store._row_to_entry(key)
+    assert store.key_is_usable(key) is False
+
+
+@pytest.mark.parametrize("secret", ["edge\rs3cret", "edge-s3cret\n", " edge-s3cret"])
+def test_a_stored_endpoint_value_a_header_cannot_carry_refuses_the_key(
+    secret: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The transport refuses such a request whole, so the key serves nothing rather than failing on every call."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    key = _key_with_endpoint_auth(encrypted_endpoint_auth_secret=encrypt_secret(secret))
+
+    with pytest.raises(UnreadableEndpointAuthError):
         store._row_to_entry(key)
     assert store.key_is_usable(key) is False
 

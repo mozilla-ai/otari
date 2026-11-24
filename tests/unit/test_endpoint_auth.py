@@ -165,6 +165,13 @@ def test_a_static_header_becomes_the_one_header_it_names() -> None:
     assert _auth().headers(secret="s3cret") == {"Fastly-Key": "s3cret"}
 
 
+@pytest.mark.parametrize("secret", ["", " lead", "edge\rs3cret", "edge-s3cret\n", "trail "])
+def test_a_stored_value_a_header_field_cannot_carry_assembles_into_no_credential(secret: str) -> None:
+    """The boundary refuses such a value, and the row it wrote is read again on every dispatch."""
+    with pytest.raises(UnreadableEndpointAuthError):
+        _auth().headers(secret=secret)
+
+
 @pytest.mark.parametrize(
     ("expires_at", "expected"),
     [

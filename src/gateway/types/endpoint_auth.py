@@ -198,7 +198,15 @@ class EndpointAuth:
         return EndpointAuthState.VALID
 
     def headers(self, *, secret: str) -> dict[str, str]:
-        """The headers this credential adds to every request to its endpoint."""
+        """The headers this credential adds to every request to its endpoint.
+
+        Raises:
+            UnreadableEndpointAuthError: ``secret`` is not a value a header
+                field can carry. The boundary refuses such a value, and this is
+                where a row that holds one anyway stops being a credential.
+        """
+        if (reason := refused_header_value_reason(secret)) is not None:
+            raise UnreadableEndpointAuthError(reason)
         match self.method:
             case EndpointAuthMethod.STATIC_HEADER:
                 return {self.header_name: secret}
