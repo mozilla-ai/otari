@@ -1048,11 +1048,14 @@ describe("SpendAndBudgetsPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Organization budgets" }),
     ).toBeInTheDocument()
+    // Withheld at the request, not only in the markup: none of the three
+    // deployment-wide reads this route used to fire as an operator page.
     const read = requests.mock.calls.map(([url]) => String(url))
     expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
     expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
       false,
     )
+    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
   })
 
   it("sends a caller with no organization to the index", async () => {

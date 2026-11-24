@@ -4,7 +4,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import {
-  useDeploymentOperator,
+  isNoOrganizationError,
   useOrganizationContext,
 } from "@/shared/api/organizations"
 
@@ -59,11 +59,10 @@ export function OrganizationBudgetsPage({
  */
 export function SpendAndBudgetsPage() {
   const organization = useOrganizationContext()
-  const { answer } = useDeploymentOperator()
 
   // No organization means no budgets of its own; the index is where such a
   // caller is told how to get in.
-  if (answer === "no-organization") {
+  if (isNoOrganizationError(organization.error)) {
     return <Navigate to="/" replace />
   }
   if (organization.data) {

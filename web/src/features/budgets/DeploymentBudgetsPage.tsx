@@ -553,8 +553,9 @@ function isOrganizationOwned(budget: Budget): boolean {
 /**
  * The deployment's own budgets, on the deployment rail at `/admin/budgets`.
  *
- * Deployment-wide end to end: `/budgets`, the gateway's `users` table, and
- * every workspace's member default, all behind `require_deployment_operator`.
+ * Deployment-wide end to end: `/api/v1/budgets`, the gateway's `users` table,
+ * and every workspace's member default, all behind
+ * `require_deployment_operator`.
  * A page of its own rather than what Spend & budgets showed an operator, which
  * took an operator who also manages an organization away from that
  * organization's budgets (otari#2099): the organization rail's row is now the

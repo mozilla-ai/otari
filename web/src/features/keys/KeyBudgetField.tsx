@@ -239,7 +239,8 @@ export function useKeyBudgets(isDeploymentWide: boolean, enabled = true) {
         }
       } catch (error) {
         // A budget made for this key alone and left capping nothing would sit
-        // in Spend & budgets, and a retry would make a second one.
+        // in Deployment budgets (a deployment key) or Spend & budgets (an
+        // organization key), and a retry would make a second one.
         if (created) {
           const deleteBudget = isDeploymentWide
             ? deleteDeploymentBudget
