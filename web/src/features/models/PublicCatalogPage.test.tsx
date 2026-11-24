@@ -13,6 +13,7 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
+import { rowMenuTriggers } from "@/tests/rowMenu"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
@@ -215,7 +216,7 @@ describe("PublicCatalogPage", () => {
       within(grid).queryByRole("columnheader", { name: "Price from" }),
     ).toBeNull()
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
+    expect(rowMenuTriggers(grid)).toHaveLength(0)
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
     expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
