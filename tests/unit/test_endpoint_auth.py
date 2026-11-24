@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from gateway.services.model_discovery_service import _ERROR_MAX_CHARS, _SCRUBBABLE_LENGTH, _short_error
 from gateway.types.endpoint_auth import (
     EXPIRY_WARNING_WINDOW,
     EndpointAuth,
@@ -200,3 +201,67 @@ def test_a_stored_value_a_header_field_cannot_carry_assembles_into_no_credential
 )
 def test_the_rotation_window_is_drawn_in_one_place(expires_at: datetime, expected: EndpointAuthState) -> None:
     assert _auth(expires_at=expires_at).state(now=NOW) == expected
+
+
+# An upstream that echoes the request it refused puts the credential in its own
+# error text, and shape-based redaction cannot see a value a tenant chose. The
+# caller knows what it sent, so it is the only reader that can cut it out.
+class _Echoed(Exception):
+    """An upstream error carrying back what it was sent."""
+
+
+def _reported(message: str, *values: str) -> str:
+    return _short_error(_Echoed(message), sent_values=list(values))
+
+
+def test_a_value_this_call_sent_is_cut_out_of_the_error_it_comes_back_in() -> None:
+    reported = _reported(
+        "upstream refused Fastly-Key edge-s3cret-value and api_key sk-live-abcd1234",
+        "sk-live-abcd1234",
+        "edge-s3cret-value",
+    )
+
+    assert "edge-s3cret-value" not in reported
+    assert "sk-live-abcd1234" not in reported
+    assert "upstream refused" in reported
+
+
+def test_one_value_inside_another_is_cut_out_whole() -> None:
+    """Replacing one value at a time changes the text the next has to match, leaving the rest of it behind."""
+    reported = _reported("upstream rejected abcdefgh-PRIVATE-SUFFIX-9f2a", "abcdefgh", "abcdefgh-PRIVATE-SUFFIX-9f2a")
+
+    assert "PRIVATE" not in reported
+    assert "9f2a" not in reported
+
+
+def test_two_values_that_share_characters_leave_neither_behind() -> None:
+    reported = _reported("upstream rejected 12345678abcdefgh", "12345678", "5678abcdefgh")
+
+    assert "abcdefgh" not in reported
+    assert "1234" not in reported
+
+
+def test_a_value_straddling_the_cap_leaves_no_fragment_behind() -> None:
+    """Capping first splits the value, and nothing then matches the half that survives.
+
+    The filler is ordinary prose on purpose: a long run of one character is
+    masked by shape, which shortens the message below the cap and leaves this
+    case unexercised.
+    """
+    secret = "edge-s3cret-value-that-is-long"
+    filler = "the upstream refused this request and said so at length. "
+    reported = _reported(filler * 5 + secret + " was rejected", secret)
+
+    assert len(filler * 5) < _ERROR_MAX_CHARS < len(filler * 5) + len(secret), "the value must straddle the cap"
+    assert secret not in reported
+    for length in range(_SCRUBBABLE_LENGTH, len(secret)):
+        assert secret[:length] not in reported
+
+
+def test_a_value_too_short_to_cut_out_is_left_alone() -> None:
+    """Cutting it would mangle the message, and its last four characters are published anyway."""
+    assert "abc" in _reported("the key abc was refused", "abc")
+
+
+def test_a_call_that_sent_nothing_reports_the_message_as_it_was() -> None:
+    assert _reported("upstream is unreachable") == "upstream is unreachable"

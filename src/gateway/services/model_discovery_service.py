@@ -454,7 +454,63 @@ def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: st
 _ERROR_MAX_CHARS = 300
 
 
-def _short_error(exc: BaseException, provider: str | None = None) -> str:
+# Below this length a value is too short to cut out of a message without
+# mangling it, and its last four characters are published as ``last4`` anyway,
+# so cutting it out protects nothing. It matches the floor a tenant's endpoint
+# credential is held to at the boundary.
+_SCRUBBABLE_LENGTH = 8
+
+_REDACTED = "[redacted]"
+
+
+def _merged_spans(text: str, values: Sequence[str | None]) -> list[tuple[int, int]]:
+    """Where each of ``values`` sits in ``text``, with places that overlap merged into one.
+
+    Merged rather than replaced one value at a time, because replacing one
+    changes the text the next has to match: a value sharing characters with
+    another would leave the rest of that other value behind.
+    """
+    spans: list[tuple[int, int]] = []
+    for value in values:
+        if value is None or len(value) < _SCRUBBABLE_LENGTH:
+            continue
+        start = text.find(value)
+        while start != -1:
+            spans.append((start, start + len(value)))
+            start = text.find(value, start + 1)
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _without_sent_values(text: str, values: Sequence[str | None]) -> str:
+    """``text`` with every credential this call put on the wire cut out of it.
+
+    :func:`redact_upstream_message` masks the credential shapes it knows, and a
+    value a tenant chose has no shape to know, so the only reader that can
+    remove it is the one that knows what it sent.
+    """
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in _merged_spans(text, values):
+        pieces.append(text[cursor:start])
+        pieces.append(_REDACTED)
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def _short_error(exc: BaseException, provider: str | None = None, *, sent_values: Sequence[str | None] = ()) -> str:
+    """One line describing ``exc``, with nothing in it that the call put on the wire.
+
+    ``sent_values`` are the credentials this call sent, which a caller that
+    chose them passes in. An upstream that echoes the request it refused can
+    put one in its own error text.
+    """
     message = str(exc).strip() or exc.__class__.__name__
     # any-llm prefixes a provider error with a "[provider]" tag (e.g.
     # "[anthropic] No anthropic API key provided…"). Every surface that shows this
@@ -465,9 +521,11 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
         # "[anthropic]") strips to "", which would render as a blank error.
         message = message[len(provider) + 2 :].lstrip() or exc.__class__.__name__
     # Before the cap, not after: truncating first can split a secret and leave
-    # the surviving half unmatched by the patterns. An empty result means the
-    # message was rejected whole (a request echo), so fall back to the class
-    # name rather than rendering a blank error, as the tag strip above does.
+    # the surviving half unmatched by the patterns. The same reason puts the
+    # exact-value pass here rather than on the finished string. An empty result
+    # means the message was rejected whole (a request echo), so fall back to the
+    # class name rather than rendering a blank error, as the tag strip above does.
+    message = _without_sent_values(message, sent_values)
     message = redact_upstream_message(message) or exc.__class__.__name__
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"
@@ -627,6 +685,7 @@ async def test_provider_credentials(
     declared: bool,
     timeout: float = _ADHOC_DISCOVERY_TIMEOUT_SECONDS,
     engine_client: httpx.AsyncClient | None = None,
+    sent_values: Sequence[str | None] = (),
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
@@ -693,7 +752,7 @@ async def test_provider_credentials(
         return ProviderDiscovery(
             provider=impl_name,
             models=[],
-            error=_short_error(exc, provider=impl_name),
+            error=_short_error(exc, provider=impl_name, sent_values=sent_values),
             discovery_unsupported=_is_missing_models_endpoint(exc),
             credentials_rejected=_is_credential_rejection(exc),
         )
