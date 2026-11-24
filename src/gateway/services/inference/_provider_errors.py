@@ -20,7 +20,9 @@ from any_llm.types.completion import CompletionParams
 from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
 from fastapi import HTTPException, status
+from mcp.shared.exceptions import MCPError
 
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     PROVIDER_CREDENTIAL_REJECTED,
@@ -577,6 +579,24 @@ class UpstreamFailure:
             return status_code
         mapping = self.mapping
         return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
+
+    @property
+    def is_external(self) -> bool:
+        """Whether something outside the gateway caused this failure.
+
+        The provider failed the call, cut its stream short or refused the
+        request, or an MCP server the request declared answered with an error.
+        Anything else is the gateway's own, including a refusal it raised (a
+        guardrail's among them) and a database failure, which the shape checks
+        would otherwise read as a provider's status and a provider's timeout.
+        """
+        if isinstance(self.exc, HTTPException) or any(
+            isinstance(current, DATABASE_ERRORS) for current in upstream_exception_chain(self.exc)
+        ):
+            return False
+        if _is_upstream_failure(self.exc) or self.mapping is not None:
+            return True
+        return any(isinstance(current, MCPError) for current in upstream_exception_chain(self.exc))
 
     @property
     def logged_message(self) -> str:

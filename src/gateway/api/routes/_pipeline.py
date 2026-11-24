@@ -6419,11 +6419,21 @@ def build_streaming_response(
             attach_settlement=_attach_inline_cost,
             on_first_chunk=_on_first_chunk,
             error_payload=lambda exc: adapter.stream_error_payload(exc, provider),
+            is_external_failure=lambda exc: UpstreamFailure(exc).is_external,
             completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+def _failure_log(failure: UpstreamFailure) -> Callable[..., None]:
+    """The log call for a failed completion: a warning for a fault outside the gateway, an error for Otari's own.
+
+    The deployment answers a provider's outage, quota or refusal with an error
+    response and a usage row, so it is not an error of the deployment's.
+    """
+    return logger.warning if failure.is_external else logger.error
 
 
 async def _prepared(
@@ -6807,7 +6817,7 @@ async def run_single_attempt_stream(
             usage=answered_rounds_usage(adapter, exc),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
+        _failure_log(failure)("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise with_provider_failure(
             adapter.provider_error(exc, _model_as_named(provider, model, display_model)), exc, provider
         ) from exc
@@ -7352,7 +7362,7 @@ async def run_non_stream(
             usage=answered_rounds_usage(adapter, e),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
+        _failure_log(failure)("Provider call failed for %s:%s: %s", provider, model, e)
         raise with_provider_failure(
             adapter.provider_error(e, _model_as_named(provider, model, display_model)), e, provider
         ) from e
