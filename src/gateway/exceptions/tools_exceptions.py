@@ -9,6 +9,7 @@ from gateway.core.error_codes import (
     MCP_OAUTH_ISSUER_CHANGED,
     MCP_SIGN_IN_REQUIRED,
     PRICING_REQUIRED,
+    REQUEST_MCP_SERVERS_DISALLOWED,
     WEB_ACCESS_DISABLED,
 )
 from gateway.exceptions import (
@@ -279,6 +280,12 @@ class McpConnectionUpstreamError(TenancyValidationError):
 
 class McpServerDeclarationError(TenancyValidationError):
     """A request's MCP servers cannot be reached as it declared them."""
+
+
+class RequestMcpServersDisallowedError(McpServerDeclarationError):
+    """A request named an MCP server by URL, in a workspace whose ``request_mcp_servers_allowed`` is off."""
+
+    error_code = REQUEST_MCP_SERVERS_DISALLOWED
 
 
 class McpServerConfigurationError(TenancyError):

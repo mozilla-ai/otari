@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, API_VERSION, GatewayConfig
 from gateway.core.database import release_session
+from gateway.core.error_codes import ERROR_CODE_HEADER, USER_MISMATCH
 from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
 
@@ -719,6 +720,8 @@ def test_files_user_mismatch_rejected_by_default(
     )
     assert resp.status_code == 403
     assert "does not match" in resp.json()["detail"]
+    assert resp.headers[ERROR_CODE_HEADER] == USER_MISMATCH
+    assert resp.json()["code"] == USER_MISMATCH
 
 
 def test_files_user_mismatch_ignored_when_lenient(
