@@ -724,6 +724,35 @@ describe("OrganizationProvidersPage", () => {
       "new-edge-s3cret",
     )
 
+    // Still disabled: this key holds an API key too, and the gateway names
+    // every stored credential a move would carry, not only this one.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
+  // The same rule from the other side: a key with nothing stored under the
+  // endpoint credential still has to resend the API key.
+  it("asks for the API key again when a key with no endpoint credential moves", async () => {
+    mockApi({
+      keys: [orgProviderKey({ api_base: "https://proxy.example.com/v1" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 

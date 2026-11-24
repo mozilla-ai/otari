@@ -219,20 +219,30 @@ function KeyForm({
   // URL takes the credential with it, and that is a change the save must carry.
   const { isDirty: endpointAuthChanged } = useDirtySnapshot(endpointAuth)
 
+  // A move is a new address, as the gateway reads it: clearing the address
+  // takes the credentials with it rather than carrying them anywhere. Named
+  // once because every stored credential the key holds is held to it.
+  const addressMoved =
+    editing !== null &&
+    draft.apiBase.trim() !== "" &&
+    draft.apiBase.trim() !== (editing.api_base ?? "")
+
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "") &&
     !(editing?.slug && draft.apiBase.trim() === "") &&
+    // The gateway refuses to carry any stored credential to an address the
+    // person saving never proved they hold, and it names each one that is
+    // missing. A hidden `client_args` credential is deliberately not checked
+    // here: whether a stored one survives turns on masking rules the gateway
+    // owns, and a copy of those would drift from them, so its refusal is what
+    // reports that case.
+    !(addressMoved && Boolean(editing?.last4) && draft.apiKey === "") &&
     isEndpointAuthComplete(endpointAuth, {
       hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
-      // A move is a new address, as the gateway reads it: clearing the address
-      // takes the credential with it rather than carrying it anywhere.
-      addressMoved:
-        editing !== null &&
-        draft.apiBase.trim() !== "" &&
-        draft.apiBase.trim() !== (editing.api_base ?? ""),
+      addressMoved,
     })
 
   const submit = () => {
