@@ -778,7 +778,9 @@ export function ModelDetailView({
                 : null}
             </p>
           </div>
-          <div className="flex flex-col gap-3 border border-border bg-surface p-3">
+          {/* No card: the table sits on the canvas, bounded by its own rules
+              (design/data.md). A frame here doubled them. */}
+          <div className="flex min-w-0 flex-col gap-4">
             {quantizations.length > 0 || withSpeed ? (
               <div className="otari-toolbar flex flex-wrap items-center gap-2">
                 {quantizations.length > 0 ? (

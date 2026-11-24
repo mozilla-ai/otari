@@ -2585,12 +2585,6 @@ body {
   z-index: 1;
   background-color: var(--color-background);
 }
-/* The offerings table sits on the model page's surface frame rather than on
-   the page ground, so its held lane takes the frame's fill. */
-.otari-offerings-table .table__column:first-child,
-.otari-offerings-table .table__row .table__cell:first-child {
-  background-color: var(--color-surface);
-}
 .otari-models-table[data-scrolled="true"] .table__column:first-child,
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,
 .otari-offerings-table[data-scrolled="true"] .table__column:first-child,
