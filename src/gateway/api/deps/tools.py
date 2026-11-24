@@ -466,7 +466,9 @@ class _DirectToolAccounts:
                 API_KEY_NO_USER_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ),
             forbidden_user_error=DirectToolCallError(
-                USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN, headers=error_headers(USER_MISMATCH)
+                f"{USER_MISMATCH_DETAIL} To bill each end user separately, use a service key.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                headers=error_headers(USER_MISMATCH),
             ),
             reject_mismatch=self._config.reject_user_mismatch,
         )

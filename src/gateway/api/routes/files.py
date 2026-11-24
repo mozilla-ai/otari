@@ -40,7 +40,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key_for_upload,
 )
 from gateway.api.key_scopes import key_scope
-from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._helpers import USER_MISMATCH_END_USER_DETAIL, bounded_body
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import USER_MISMATCH, error_headers
@@ -55,7 +55,7 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
-from gateway.services.api_keys import USER_MISMATCH_DETAIL, names_end_user, resolve_user_id
+from gateway.services.api_keys import names_end_user, resolve_user_id
 from gateway.services.files import (
     FileDialect,
     FileListing,
@@ -179,7 +179,7 @@ def _resolve_user(
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=USER_MISMATCH_DETAIL,
+            detail=USER_MISMATCH_END_USER_DETAIL,
             headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=config.reject_user_mismatch,

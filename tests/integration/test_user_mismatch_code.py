@@ -32,20 +32,25 @@ _JSON_ROUTES: list[tuple[str, dict[str, Any]]] = [
 ]
 
 
-def _assert_user_mismatch(response: Any) -> None:
-    assert response.status_code == 403, response.text
-    assert response.headers[ERROR_CODE_HEADER] == USER_MISMATCH
-    assert response.json()["code"] == USER_MISMATCH
-    # The detail says how to get past the refusal, not only that it happened.
-    assert "service key" in response.text
-    assert "Always accept" in response.text
+# The routes where a service key bills the end user it names, and so the detail suggests one.
+_END_USER_ROUTES = {"chat/completions", "responses", "messages"}
+# The routes whose body takes ``metadata``, and so the detail suggests it for a free-form ID.
+_METADATA_ROUTES = {"chat/completions", "responses"}
 
 
 @pytest.mark.parametrize(("route", "body"), _JSON_ROUTES, ids=[route for route, _ in _JSON_ROUTES])
 def test_a_mismatched_user_is_refused_with_its_code(
     client: TestClient, api_key_header: dict[str, str], route: str, body: dict[str, Any]
 ) -> None:
-    _assert_user_mismatch(client.post(f"{API_ROOT}/{route}", json=body, headers=api_key_header))
+    response = client.post(f"{API_ROOT}/{route}", json=body, headers=api_key_header)
+
+    assert response.status_code == 403, response.text
+    assert response.headers[ERROR_CODE_HEADER] == USER_MISMATCH
+    assert response.json()["code"] == USER_MISMATCH
+    # The detail says how to get past the refusal, and only the ways this route offers.
+    assert "Always accept" in response.text
+    assert ("service key" in response.text) is (route in _END_USER_ROUTES)
+    assert ("metadata instead" in response.text) is (route in _METADATA_ROUTES)
 
 
 def test_messages_names_the_field_it_read(client: TestClient, api_key_header: dict[str, str]) -> None:

@@ -28,7 +28,7 @@ from gateway.api.deps import (
 )
 from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import responses_targets
-from gateway.api.routes._helpers import routing_signal, with_retry_hint
+from gateway.api.routes._helpers import USER_MISMATCH_METADATA_DETAIL, routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -53,7 +53,6 @@ from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
-from gateway.services.api_keys import USER_MISMATCH_DETAIL
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     UpstreamFailure,
@@ -527,7 +526,7 @@ async def create_response(
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-            user_forbidden_detail=USER_MISMATCH_DETAIL,
+            user_forbidden_detail=USER_MISMATCH_METADATA_DETAIL,
             streaming=bool(request_body.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,

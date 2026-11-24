@@ -26,6 +26,7 @@ from gateway.log_config import logger
 from gateway.models.tenancy import Workspace
 from gateway.ports.account_country_port import AccountCountryUnavailableError
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.services.api_keys import USER_MISMATCH_DETAIL
 from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
 from gateway.services.tools import DirectCaller
@@ -43,6 +44,13 @@ if TYPE_CHECKING:
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
+
+# The mismatch refusal of a route where a service key bills each end user it names.
+USER_MISMATCH_END_USER_DETAIL = f"{USER_MISMATCH_DETAIL} To bill each end user separately, use a service key."
+# The same, on a route whose body also takes ``metadata``.
+USER_MISMATCH_METADATA_DETAIL = (
+    f"{USER_MISMATCH_END_USER_DETAIL} To tag a request with a free-form ID, put it in metadata instead."
+)
 
 # How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.
 DIRECT_TOOL_COST_HEADERS: dict[str, Any] = {
