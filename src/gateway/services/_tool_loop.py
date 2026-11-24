@@ -320,13 +320,43 @@ def _pool_tool_names(pool: ToolBackend) -> frozenset[str]:
 def _spent_tools(budget: ToolUseBudget | None, pool_names: frozenset[str]) -> tuple[frozenset[str], bool]:
     """The pool's tools whose ``max_uses`` this request has used up, and whether that is all of them.
 
-    A round with every one of them used up has nothing left to call, so it is the last
-    one, with its note and its handling of a call the model makes anyway.
+    A round with every one of them used up and none of the caller's tools has nothing
+    left to call, so it is the last one, with its note and its handling of a call the
+    model makes anyway.
     """
     if budget is None:
         return frozenset(), False
     spent = frozenset(name for name in pool_names if budget.exhausted(name))
     return spent, bool(spent) and spent == pool_names
+
+
+def _without_withheld(choice: Any, withheld: Callable[[str], bool]) -> Any:
+    """``choice`` without the tools its round withholds; ``None`` drops it.
+
+    A choice naming a withheld tool is released as after its round (see
+    :func:`_released_tool_choice`), so Messages keeps ``disable_parallel_tool_use``.
+    An ``allowed_tools`` choice loses the withheld entries of its list, and is dropped
+    once none is left, since a provider refuses a list naming an undeclared tool.
+    """
+    name = _tool_name(choice)
+    if name is not None:
+        return _released_tool_choice(choice) if withheld(name) else choice
+    if not isinstance(choice, dict) or choice.get("type") != "allowed_tools":
+        return choice
+    # Chat Completions nests the list; Responses has it at the top level.
+    nested = choice.get("allowed_tools")
+    holder = nested if isinstance(nested, dict) else choice
+    entries = holder.get("tools")
+    if not isinstance(entries, list):
+        return choice
+    kept = [entry for entry in entries if (entry_name := _tool_name(entry)) is None or not withheld(entry_name)]
+    if not kept:
+        return None
+    if len(kept) == len(entries):
+        return choice
+    if isinstance(nested, dict):
+        return {**choice, "allowed_tools": {**nested, "tools": kept}}
+    return {**choice, "tools": kept}
 
 
 def _released_tool_choice(choice: Any) -> Any:
@@ -356,6 +386,16 @@ def _released_tool_choice(choice: Any) -> Any:
 # What the last round tells the model. Withholding the tools is not enough on its own:
 # Gemini 2.5, denied the call it wants mid-task, ends with no answer at all.
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
+
+
+def spent_tools_note(spent: frozenset[str]) -> str:
+    """What a round tells the model of the tools it no longer offers because their ``max_uses`` is used up.
+
+    Withholding a tool says nothing on its own, and a model denied a call it wants
+    mid-task can end with no answer (see :data:`FINAL_ROUND_NOTE`).
+    """
+    names = ", ".join(sorted(spent))
+    return f"These tools have reached their limit for this request and are no longer available: {names}."
 
 
 # What one inline image or audio clip counts toward a round's size: about the
@@ -434,7 +474,7 @@ def _round_request(
 ) -> dict[str, Any]:
     """What one round sends: its tool arguments and its transcript."""
     kwargs = _round_kwargs(base, merged_tools, user_tools, pool, first=first, final=final, spent=spent)
-    kwargs[transcript_key] = _round_transcript(transcript, final=final)
+    kwargs[transcript_key] = _round_transcript(transcript, final=final, spent=spent)
     return kwargs
 
 
@@ -457,8 +497,9 @@ def _round_kwargs(
     the loop anyway. Every provider the loop serves accepts a transcript holding
     calls of a tool the round no longer declares.
 
-    A gateway tool in ``spent`` has used up its ``max_uses``: the round leaves it out
-    and drops a ``tool_choice`` that names it, since a call of it could only be refused.
+    A gateway tool in ``spent`` has used up its ``max_uses``, so the round leaves it
+    out too, since a call of it could only be refused. A ``tool_choice`` loses every
+    tool the round withholds (see :func:`_without_withheld`).
     """
     if final:
         tools = user_tools
@@ -474,9 +515,15 @@ def _round_kwargs(
             kwargs.pop("tool_choice")
         else:
             kwargs["tool_choice"] = released
-    choice_name = _tool_name(kwargs.get("tool_choice"))
-    withheld = choice_name is not None and (choice_name in spent or (final and pool.owns_tool(choice_name)))
-    if not tools or withheld:
+    if "tool_choice" in kwargs:
+        choice = _without_withheld(
+            kwargs["tool_choice"], lambda name: name in spent or (final and pool.owns_tool(name))
+        )
+        if choice is None:
+            kwargs.pop("tool_choice")
+        else:
+            kwargs["tool_choice"] = choice
+    if not tools:
         kwargs.pop("tool_choice", None)
     if not tools:
         # OpenAI refuses parallel_tool_calls on a request that declares no tools.
@@ -484,15 +531,19 @@ def _round_kwargs(
     return kwargs
 
 
-def _round_transcript(transcript: list[Any], *, final: bool) -> list[Any]:
-    """The transcript one round sends: the last one's ends with :data:`FINAL_ROUND_NOTE`.
+def _round_transcript(transcript: list[Any], *, final: bool, spent: frozenset[str] = frozenset()) -> list[Any]:
+    """The transcript one round sends, ending with a note on the tools the round withholds.
 
-    A plain user message reads the same in all three formats. The note goes to the
-    provider only, never into the transcript the loop keeps.
+    The last round's note is :data:`FINAL_ROUND_NOTE`; an earlier round that withholds
+    ``spent`` tools names them (:func:`spent_tools_note`). A plain user message reads
+    the same in all three formats. The note goes to the provider only, never into the
+    transcript the loop keeps.
     """
-    if not final:
-        return transcript
-    return [*transcript, {"role": "user", "content": FINAL_ROUND_NOTE}]
+    if final:
+        return [*transcript, {"role": "user", "content": FINAL_ROUND_NOTE}]
+    if spent:
+        return [*transcript, {"role": "user", "content": spent_tools_note(spent)}]
+    return transcript
 
 
 def _stream_scope(stream: AsyncIterator[Any]) -> AbstractAsyncContextManager[Any]:
@@ -567,7 +618,7 @@ async def run_tool_loop(
 
     for iteration in range(1, max_iterations + 1):
         spent, all_spent = _spent_tools(use_budget, pool_names)
-        final = iteration == max_iterations or all_spent
+        final = iteration == max_iterations or (all_spent and not user_tools)
         kwargs = _round_request(
             strategy.transcript_key,
             base,
@@ -700,7 +751,7 @@ async def run_tool_loop_stream(
 
     for iteration in range(1, max_iterations + 1):
         spent, all_spent = _spent_tools(use_budget, pool_names)
-        final = iteration == max_iterations or all_spent
+        final = iteration == max_iterations or (all_spent and not user_tools)
         kwargs = _round_request(
             strategy.transcript_key,
             base,

@@ -37,7 +37,9 @@ from gateway.services._tool_loop import (
     INVALID_ARGUMENTS_ERROR,
     _released_tool_choice,
     _request_chars,
+    _without_withheld,
     parse_tool_arguments,
+    spent_tools_note,
 )
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
@@ -464,6 +466,40 @@ async def test_a_search_past_max_uses_is_no_longer_offered_while_other_tools_are
     assert [_offers(kwargs, "web_search") for kwargs in sent] == [True, False, False]
     assert all(_offers(kwargs, "fetch_url") and _offers(kwargs, "lookup") for kwargs in sent)
     assert all(kwargs["messages"][-1].get("content") != FINAL_ROUND_NOTE for kwargs in sent), "no round is the last"
+    note = {"role": "user", "content": spent_tools_note(frozenset({"web_search"}))}
+    assert [kwargs["messages"][-1] == note for kwargs in sent] == [False, True, True]
+
+
+@pytest.mark.asyncio
+async def test_a_round_after_every_gateway_tool_used_up_its_cap_keeps_the_callers_tools_going(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the caller's own tools on offer, the round after the cap is not the last: only the search is gone."""
+    sent: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[_search_call("c1", "q")]),
+            _completion(finish="tool_calls", tool_calls=[("c2", "lookup", "{}")]),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    caller_tool = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "tools": [caller_tool]},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=10,
+        use_budget=_use_budget(1),
+    )
+
+    assert [_offers(kwargs, "web_search") for kwargs in sent] == [True, False]
+    assert _offers(sent[1], "lookup")
+    assert sent[1]["messages"][-1] == {"role": "user", "content": spent_tools_note(frozenset({"web_search"}))}
+    assert [call.function.name for call in result.choices[0].message.tool_calls or []] == ["lookup"]
 
 
 @pytest.mark.asyncio
@@ -557,6 +593,51 @@ async def test_a_tool_choice_naming_a_used_up_search_is_dropped(monkeypatch: pyt
     assert not _offers(kwargs, "web_search")
     assert _offers(kwargs, "fetch_url")
     assert "tool_choice" not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected"),
+    [
+        (
+            {
+                "type": "allowed_tools",
+                "allowed_tools": {
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "function": {"name": "web_search"}},
+                        {"type": "function", "function": {"name": "fetch_url"}},
+                    ],
+                },
+            },
+            {
+                "type": "allowed_tools",
+                "allowed_tools": {
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "function": {"name": "fetch_url"}},
+                    ],
+                },
+            },
+        ),
+        (
+            {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "web_search"}]},
+            None,
+        ),
+        (
+            {"type": "tool", "name": "web_search", "disable_parallel_tool_use": True},
+            {"type": "auto", "disable_parallel_tool_use": True},
+        ),
+        ({"type": "function", "function": {"name": "web_search"}}, None),
+        (
+            {"type": "function", "function": {"name": "fetch_url"}},
+            {"type": "function", "function": {"name": "fetch_url"}},
+        ),
+        ("required", "required"),
+    ],
+    ids=["chat-allowed-tools", "responses-allowed-tools", "messages-named", "chat-named", "other-tool", "required"],
+)
+def test_a_tool_choice_loses_the_tools_its_round_withholds(choice: Any, expected: Any) -> None:
+    assert _without_withheld(choice, lambda name: name == "web_search") == expected
 
 
 @pytest.mark.asyncio

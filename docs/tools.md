@@ -146,12 +146,12 @@ shape, including `otari_web_search`. A failed search does not count against it.
 `max_uses: 0` refuses every search: the search is never offered. A negative or
 non-integer value (including `1.5` and `5.0`) is rejected with a 400.
 
-Once the cap is used up, later rounds no longer offer the search, and a
-`tool_choice` that names it is dropped, so the model answers from the results it
-has. When every one of Otari's tools in the request has used up its cap, the next
-round is the last one, as described in [Combining tools](#combining-tools): it
-tells the model to answer, and a search the model asks for anyway is left out of
-the answer.
+Once the cap is used up, later rounds no longer offer the search: a
+`tool_choice` loses it, and the model is told the search has reached its limit for
+the request. Other tools stay on offer. When none is left, neither one of Otari's
+nor one of your own, the next round is the last one, as described in [Combining
+tools](#combining-tools): it tells the model to answer, and a search the model asks
+for anyway is left out of the answer.
 
 A search the model asks for past the cap within one round (three at once with two
 left, say) is refused, and the model is told so. An Anthropic-native declaration
@@ -425,8 +425,9 @@ an answer rather than a failed request ([MCP](mcp.md) says the same of its loop)
 A round the request's budget cannot hold ends the loop the same way, earlier
 ([Budget enforcement](budget-enforcement.md#holds-and-settlement)), and so does
 the round after every one of Otari's tools in the request has used up its
-`max_uses`. In each case, a call of one of Otari's tools in that round is not
-run: the round ends as the answer ([MCP](mcp.md) says how).
+`max_uses` when the request has no tools of its own. In each case, if the model
+calls only Otari's tools in that round, Otari does not run them: the round ends as
+the answer ([MCP](mcp.md) says how).
 
 A `tool_choice` that forces a tool (`required`, or one tool by name, such as
 `code_execution` for Otari's sandbox) applies to the first round only. Once that
