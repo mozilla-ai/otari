@@ -383,8 +383,9 @@ class UsageTotals(BaseModel):
     # ``completion_tokens`` residual would drift, even negative, whenever a
     # row's meter and column disagree).
     billed_output_tokens: int = 0
-    # The part of ``cost`` served on credentials the deployment pays for (hosted
-    # providers). The rest ran on the organization's own keys and endpoints.
+    # The ``cost`` of rows whose model call ran on a credential the deployment pays
+    # for (a hosted provider), tool charges included. A tool line records its own
+    # payer in ``pricing_breakdown``, which this total does not split out.
     deployment_paid_cost: float = 0.0
 
 
