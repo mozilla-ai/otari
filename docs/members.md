@@ -91,8 +91,9 @@ limits under [Mail](configuration.md#invitations).
 - If the address signed up with a password and has not verified itself yet, the
   link cannot set a password either. The person accepts, then opens the
   verification link emailed at signup. Whoever signed up may not be the invitee,
-  so the page names whatever else the deployment offers as well, and names those
-  alone where no email can go out.
+  so the page names whatever else the deployment offers as well. Where the
+  deployment cannot deliver email, that verification link reached nobody, so
+  the page names only the other ways in.
 - An invitee does not need the link. Signing up, or signing in with Google or
   GitHub, with the invited address completes the account, and pending invitations
   are listed under **Invitations** in the dashboard to accept or decline. Someone
