@@ -1764,9 +1764,10 @@ Nothing reaches a recipient on that transport, so anything whose outcome depends
 on somebody receiving the message behaves as it does with no mail at all. An
 invitation hands its accept link back, a password link is shown instead of
 emailed, and health check alerts tell nobody. Signup, a verification resend and
-a password reset are still accepted, because their message is written to the log
-for an operator to pass on, and the page that follows says to ask for the link
-rather than to watch an inbox.
+a password reset need `public_base_url` as well, and are refused without it. With
+it set they are accepted, because their message is written to the log for an
+operator to pass on, and the page that follows says to ask for the link rather
+than to watch an inbox.
 
 ### Invitations
 
