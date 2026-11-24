@@ -26,7 +26,10 @@ from gateway.services.model_discovery_service import (
     _is_credential_rejection,
     _short_error,
 )
-from gateway.services.providers._org_provider_model_service import OrgProviderModelService
+from gateway.services.providers._org_provider_model_service import (
+    OrgProviderModelService,
+    _without_values_this_call_sent,
+)
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.tenancy.org_provider_key_service import endpoint_auth_headers
@@ -336,6 +339,29 @@ def test_a_stored_value_that_will_not_decrypt_yields_no_headers(monkeypatch: pyt
 
     with pytest.raises(SecretDecryptionError):
         endpoint_auth_headers(row)
+
+
+# An upstream that echoes the request puts the credential in its own error
+# text, and shape-based redaction cannot see a value a tenant chose. The caller
+# knows what it sent, so it is the only reader that can cut it out.
+def test_a_value_this_call_sent_is_cut_out_of_the_error_it_comes_back_in() -> None:
+    echoed = "upstream said: Fastly-Key: edge-s3cret rejected, api_key sk-live-abcd rejected"
+
+    scrubbed = _without_values_this_call_sent(echoed, ["sk-live-abcd", "edge-s3cret"])
+
+    assert scrubbed is not None
+    assert "edge-s3cret" not in scrubbed
+    assert "sk-live-abcd" not in scrubbed
+    assert "upstream said" in scrubbed
+
+
+def test_a_value_too_short_to_cut_out_is_left_alone() -> None:
+    """Cutting it would mangle the message, and its last four characters are published anyway."""
+    assert _without_values_this_call_sent("the key abc was refused", ["abc"]) == "the key abc was refused"
+
+
+def test_no_error_stays_no_error() -> None:
+    assert _without_values_this_call_sent(None, ["edge-s3cret"]) is None
 
 
 def _rejected(status_code: int) -> ProviderDiscovery:

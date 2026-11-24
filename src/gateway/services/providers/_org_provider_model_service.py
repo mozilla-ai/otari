@@ -135,6 +135,29 @@ _ENDPOINT_CREDENTIAL_REJECTED = (
 # What an admin needs when a stored endpoint credential cannot be sent as it
 # stands. Dialing without it would ask the address a different question from the
 # one every dispatch asks, so the credential is reported instead of a model list.
+# Below this length a value is too short to cut out of a message without
+# mangling it, and its last four characters are published as ``last4`` anyway,
+# so cutting it out protects nothing. It matches the floor the endpoint
+# credential is held to at the boundary.
+_SCRUBBABLE_LENGTH = 8
+
+
+def _without_values_this_call_sent(error: str | None, values: Sequence[str | None]) -> str | None:
+    """``error`` with any credential this call put on the wire cut out of it.
+
+    An upstream that echoes the request can put a credential in its own error
+    text. ``redact_upstream_message`` masks the credential shapes it knows, and
+    a value a tenant chose has no shape to know, so the only reader that can
+    remove it is the one that knows what it sent.
+    """
+    if error is None:
+        return None
+    for value in values:
+        if value is not None and len(value) >= _SCRUBBABLE_LENGTH:
+            error = error.replace(value, "[redacted]")
+    return error
+
+
 _ENDPOINT_CREDENTIAL_UNSERVABLE = (
     "The stored endpoint credential cannot be sent as it stands, so this key serves nothing. "
     "Replace it, or clear the base URL to remove it."
@@ -978,6 +1001,14 @@ class OrgProviderModelService:
                 engine_client=engine_client,
             ),
             key,
+        )
+        # Last, so it covers whatever error survives the naming above.
+        discovery = replace(
+            discovery,
+            error=_without_values_this_call_sent(
+                discovery.error,
+                [api_key if isinstance(api_key, str) else None, *endpoint_headers.values()],
+            ),
         )
         if discovery.error is None:
             await record_served_models(
