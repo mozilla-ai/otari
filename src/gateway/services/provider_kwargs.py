@@ -737,13 +737,20 @@ class ProviderAccounts:
         """The account ``credential`` reaches.
 
         The instance is left out of the digest, because renaming one does not
-        move its account.
+        move its account. A header carried on every request is in it, because a
+        proxy in front of one address can reach a different account for each
+        credential it accepts.
         """
-        canonical = json.dumps(
-            {"provider": provider.value, "api_base": credential.api_base, "api_key": credential.api_key},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        fields: dict[str, Any] = {
+            "provider": provider.value,
+            "api_base": credential.api_base,
+            "api_key": credential.api_key,
+        }
+        # Added only where there are headers, so an account named before this
+        # field was read keeps its name, and the copies recorded under it.
+        if headers := credential.request_headers:
+            fields["request_headers"] = headers
+        canonical = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return ProviderAccount(
             provider=provider,
             instance=instance,
