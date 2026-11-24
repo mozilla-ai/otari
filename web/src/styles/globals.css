@@ -2508,7 +2508,7 @@ body {
    table's width, the column order is wrong and the order is the fix, so the pin
    doubles as a detector. */
 .otari-breakdown .table__column:first-child,
-.otari-breakdown .table__row .table__cell:first-child {
+.otari-breakdown .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2570,8 +2570,8 @@ body {
   }
 }
 /* The identity lane holds while the rest scrolls, as everywhere else. No
-   `.table__row` in the cell selector: with it this rule outweighs the row's
-   hover fill, and a hovered row lit everywhere but its pinned lane. */
+   `.table__row` in the cell selector: at the hover fill's specificity this
+   later rule would win and keep the pinned lane unlit on a hovered row. */
 .otari-models-table .table__column:first-child,
 .otari-models-table .table__cell:first-child,
 .otari-offerings-table .table__column:first-child,
@@ -2882,7 +2882,7 @@ body {
 }
 /* The identity pins so the lanes scroll under it. */
 .otari-budgets-table .table__column:first-child,
-.otari-budgets-table .table__row .table__cell:first-child {
+.otari-budgets-table .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;

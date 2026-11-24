@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
-import { FiCheck, FiDollarSign, FiEdit2, FiMinus } from "react-icons/fi"
+import { FiCheck, FiEdit2, FiMinus, FiTag } from "react-icons/fi"
 
 import type { CatalogOffering } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
@@ -65,9 +65,9 @@ import { providerModelId } from "./modelKey"
 // drawer beside the table with the request to send; ahead of a session, where
 // there is no key to send it with, it starts an account instead.
 //
-// Read-only for everyone (otari-ai#2095, #2096): a rate is edited on Model
-// pricing, which the operator's link here points at, so the page that compares
-// prices never becomes the page that changes them.
+// Read-only for everyone (otari-ai#2095, #2096): a rate is edited on
+// Providers, which an offering's Set your rate… opens, so the page that
+// compares prices never becomes the page that changes them.
 
 function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -474,7 +474,7 @@ function offeringColumns({
             ) : null}
             {own && canOverride ? (
               <RowAction
-                icon={FiDollarSign}
+                icon={FiTag}
                 label="Set your rate…"
                 ariaLabel={`Set your rate for ${name}`}
                 onPress={() => onSetRate(row)}
@@ -779,7 +779,7 @@ export function ModelDetailView({
             </p>
           </div>
           {/* No card: the table sits on the canvas, bounded by its own rules
-              (design/data.md). A frame here doubled them. */}
+              (design/data.md). */}
           <div className="flex min-w-0 flex-col gap-4">
             {quantizations.length > 0 || withSpeed ? (
               <div className="otari-toolbar flex flex-wrap items-center gap-2">
@@ -821,7 +821,7 @@ export function ModelDetailView({
                   withSource: !publicView,
                   onEditDetails: setEditing,
                   onSetRate: (offering) =>
-                    navigate({
+                    void navigate({
                       to: "/organization/provider-keys",
                       search: { override: offering.selector },
                     }),

@@ -799,6 +799,7 @@ describe("ModelDetailPage", () => {
   })
 
   it("offers a deployment operator no rate action on a deployment-supplied offering", async () => {
+    const user = userEvent.setup()
     // Operating the deployment stopped being a pricing authority here when the
     // deployment price editor went away: rates are set per model on Providers,
     // which answers to the organization role, and a model the deployment
@@ -815,6 +816,7 @@ describe("ModelDetailPage", () => {
     expect(
       screen.queryByRole("button", { name: /set price|edit price/i }),
     ).toBeNull()
+    expect(await findRowMenuItem(user, /^Set your rate/)).toBeNull()
   })
 
   it("gives a deployment operator its organization's own rate action", async () => {
@@ -826,7 +828,7 @@ describe("ModelDetailPage", () => {
     GLM_DETAIL.offerings[0] = offering({ credential: "organization" })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
-    await pressRowAction(user, /^Set your rate for /)
+    await pressRowAction(user, "Set your rate for Nebius zai-org/GLM-5.3")
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "/organization/provider-keys?override=nebius%3Azai-org%2FGLM-5.3",
     )
@@ -847,7 +849,7 @@ describe("ModelDetailPage", () => {
 
     await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
-    await pressRowAction(user, /^Set your rate for /)
+    await pressRowAction(user, "Set your rate for Nebius zai-org/GLM-5.3")
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "/organization/provider-keys?override=nebius%3Azai-org%2FGLM-5.3",
     )
