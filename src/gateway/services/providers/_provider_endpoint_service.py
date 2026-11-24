@@ -39,8 +39,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.providers import ProviderEndpoint
-from gateway.models.secret_fields import carries_redaction, restore_redacted_values
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values
 from gateway.repositories.providers import EndpointNameConflict, ProviderEndpointRepository
 from gateway.schemas.providers import (
     ProviderEndpointCreateRequest,
@@ -54,10 +53,9 @@ from gateway.services.providers._owned_endpoint_network import (
 )
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
-    SecretDecryptionError,
-    decrypt_mapping,
     encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 
 # Implementations that take nothing but a base URL and a key. A provider that
@@ -113,7 +111,10 @@ class ProviderEndpointService:
                 workspace_id=workspace_id, user_id=user_id, skip=skip, limit=limit
             )
         return ProviderEndpointsPublic(
-            data=[ProviderEndpointPublic.from_row(row, default_params=_readable_default_params(row)) for row in rows],
+            data=[
+                ProviderEndpointPublic.from_row(row, default_params=readable_mapping(row.encrypted_default_params))
+                for row in rows
+            ],
             count=count,
         )
 
@@ -123,7 +124,7 @@ class ProviderEndpointService:
             row = await self.endpoints.get(endpoint_id)
         if row is None:
             raise ProviderEndpointNotFoundError(endpoint_id)
-        return ProviderEndpointPublic.from_row(row, default_params=_readable_default_params(row))
+        return ProviderEndpointPublic.from_row(row, default_params=readable_mapping(row.encrypted_default_params))
 
     async def create_endpoint(self, request: ProviderEndpointCreateRequest) -> ProviderEndpointPublic:
         """Create an endpoint for a workspace, or for one user in it."""
@@ -176,15 +177,13 @@ class ProviderEndpointService:
         if fields.get("api_base") is not None:
             await _check_api_base(fields["api_base"])
             changes["api_base"] = fields["api_base"]
-        default_params = _readable_default_params(row)
+        default_params = readable_mapping(row.encrypted_default_params)
         if "default_params" in fields:
             # The read masks credential-shaped entries, so an editor resubmitting
             # what it was shown keeps the stored values.
-            if default_params is None and (
-                row.encrypted_default_params is not None or carries_redaction(fields["default_params"])
+            if restore_is_unsafe(
+                default_params, fields["default_params"], sealed=row.encrypted_default_params is not None
             ):
-                # Either the mask would be stored as the value, or a write would
-                # drop ciphertext that the right key could still open.
                 raise ProviderEndpointInvalidError(
                     "A masked default field keeps the stored value, and there is none that can be read back. "
                     "Enter the default fields in full."
@@ -278,19 +277,6 @@ def _validated_default_params(default_params: dict[str, Any] | None) -> dict[str
     if forbidden:
         raise ProviderEndpointInvalidError(f"These fields cannot be endpoint defaults: {', '.join(forbidden)}")
     return default_params
-
-
-def _readable_default_params(row: ProviderEndpoint) -> dict[str, Any] | None:
-    """The endpoint's stored default request fields, or None when no configured key reads them.
-
-    Reporting on an endpoint is not dispatching to one: a listing names a row
-    whose secret has moved rather than failing, so a decryption that cannot be
-    done reads as no default fields at all.
-    """
-    try:
-        return decrypt_mapping(row.encrypted_default_params)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return None
 
 
 def _encrypt_default_params(default_params: dict[str, Any] | None) -> str | None:

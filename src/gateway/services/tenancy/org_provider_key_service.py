@@ -74,7 +74,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import carries_redaction, restore_redacted_values, stored_secrets_survive
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
@@ -102,6 +102,7 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -150,19 +151,6 @@ def client_args_of(key: OrgProviderKey) -> dict[str, Any] | None:
     a key rather than serving one decides what an unreadable row means.
     """
     return decrypt_mapping(key.encrypted_client_args)
-
-
-def _readable_client_args(key: OrgProviderKey) -> dict[str, Any] | None:
-    """The key's stored client extras, or None when no configured key reads them.
-
-    Reporting on a key is not serving one: a listing names a row whose secret
-    has moved rather than failing, so a decryption that cannot be done reads as
-    no extras at all.
-    """
-    try:
-        return client_args_of(key)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
-        return None
 
 
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
@@ -586,7 +574,7 @@ class OrgProviderKeyService:
         return [
             OrgProviderKeyPublic.from_row(
                 row,
-                client_args=_readable_client_args(row),
+                client_args=readable_mapping(row.encrypted_client_args),
                 usable=key_is_usable(row),
                 offered_count=counts.get(row.id, (0, 0))[0],
                 serving_count=counts.get(row.id, (0, 0))[1],
@@ -723,7 +711,9 @@ class OrgProviderKeyService:
             await _gate_api_base(key.provider, update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
                 stored_args_follow = stored_secrets_survive(
-                    _readable_client_args(key), update_data.get("client_args"), sent="client_args" in update_data
+                    readable_mapping(key.encrypted_client_args),
+                    update_data.get("client_args"),
+                    sent="client_args" in update_data,
                 )
                 if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
                     raise OrgProviderKeyCredentialRequiredError
@@ -731,12 +721,10 @@ class OrgProviderKeyService:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was
             # never shown; those keep their stored value.
-            stored_client_args = _readable_client_args(key)
-            if stored_client_args is None and (
-                key.encrypted_client_args is not None or carries_redaction(update_data["client_args"])
+            stored_client_args = readable_mapping(key.encrypted_client_args)
+            if restore_is_unsafe(
+                stored_client_args, update_data["client_args"], sealed=key.encrypted_client_args is not None
             ):
-                # Either the mask would be stored as the value, or a write would
-                # drop ciphertext that the right key could still open.
                 raise OrgProviderKeyClientArgsUnreadableError
             client_args = restore_redacted_values(update_data.pop("client_args"), stored_client_args)
             _check_client_args(key.provider, client_args)
