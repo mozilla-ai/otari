@@ -733,6 +733,77 @@ describe("OrganizationProvidersPage", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 
+  // Without this the dialog offers the save, the gateway refuses it, and the
+  // person has retyped every credential on the key to reach that refusal.
+  it("says on the address field that a credential cannot travel without TLS", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "http://proxy.example.com/v1",
+    )
+
+    expect(
+      screen.getByText(
+        "Must be HTTPS, since the endpoint credential travels with it.",
+      ),
+    ).toBeInTheDocument()
+
+    // Retyping every credential does not rescue it, which is what made the
+    // refusal arrive last rather than first.
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "new-edge-s3cret",
+    )
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  // The caption said to leave it blank to keep the key, in the one state where
+  // a blank is refused.
+  it("asks for the API key again on the field when the address moves", async () => {
+    mockApi({
+      keys: [orgProviderKey({ api_base: "https://proxy.example.com/v1" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    expect(screen.getByLabelText(/API key/)).not.toBeRequired()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByLabelText(/API key/)).toBeRequired()
+    expect(
+      screen.getByText(/Enter it again: it goes to the new address/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Leave blank to keep the current key/),
+    ).not.toBeInTheDocument()
+  })
+
   // The same rule from the other side: a key with nothing stored under the
   // endpoint credential still has to resend the API key.
   it("asks for the API key again when a key with no endpoint credential moves", async () => {

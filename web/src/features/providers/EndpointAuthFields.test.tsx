@@ -8,6 +8,7 @@ import {
   EMPTY_ENDPOINT_AUTH,
   type EndpointAuthDraft,
   EndpointAuthFields,
+  endpointAuthAddressError,
   endpointAuthDraftFrom,
   endpointAuthSecretError,
   isEndpointAuthComplete,
@@ -70,6 +71,55 @@ describe("endpointAuthDraftFrom", () => {
     // The input reads local time, so the calendar day follows the host. Read
     // back as local, it is still the instant the gateway reported.
     expect(new Date(seeded).toISOString()).toBe("2027-03-01T09:15:00.000Z")
+  })
+})
+
+describe("endpointAuthAddressError", () => {
+  const named: EndpointAuthDraft = {
+    headerName: "Fastly-Key",
+    secret: "edge-s3cret",
+    expiresAt: "2027-03-01T00:00",
+  }
+
+  it("finds nothing wrong with an address while no header is named", () => {
+    expect(
+      endpointAuthAddressError(
+        "http://edge.example.com/v1",
+        EMPTY_ENDPOINT_AUTH,
+      ),
+    ).toBeUndefined()
+  })
+
+  it("accepts an HTTPS address", () => {
+    expect(
+      endpointAuthAddressError("https://edge.example.com/v1", named),
+    ).toBeUndefined()
+  })
+
+  it("accepts an address whose scheme is spelled in capitals", () => {
+    expect(
+      endpointAuthAddressError("HTTPS://edge.example.com/v1", named),
+    ).toBeUndefined()
+  })
+
+  // The refusal the gateway answers with, said before the save is offered.
+  it.each([
+    "http://edge.example.com/v1",
+    "HTTP://edge.example.com/v1",
+    "//edge.example.com/v1",
+    "edge.example.com/v1",
+  ])("refuses %s, which would send the credential in clear", (apiBase) => {
+    expect(endpointAuthAddressError(apiBase, named)).toBe(
+      "Must be HTTPS, since the endpoint credential travels with it.",
+    )
+  })
+
+  // The other half of the gateway's rule: a credential needs an address of its
+  // own, so clearing the address is refused while a header is named.
+  it("refuses a credential with no address behind it", () => {
+    expect(endpointAuthAddressError("   ", named)).toBe(
+      "An endpoint credential needs an address of its own. Enter one, or clear the credential header below.",
+    )
   })
 })
 

@@ -72,6 +72,27 @@ export function endpointAuthSecretError(
 }
 
 /**
+ * Why this address cannot carry the drafted endpoint credential, or undefined.
+ *
+ * The client half of the gateway's own rule, not a second authority: it says on
+ * the field what is wrong, rather than leaving a save to reach the refusal.
+ */
+export function endpointAuthAddressError(
+  apiBase: string,
+  draft: EndpointAuthDraft,
+): string | undefined {
+  if (draft.headerName.trim() === "") return undefined
+  const address = apiBase.trim()
+  if (address === "") {
+    return "An endpoint credential needs an address of its own. Enter one, or clear the credential header below."
+  }
+  if (!/^https:\/\//i.test(address)) {
+    return "Must be HTTPS, since the endpoint credential travels with it."
+  }
+  return undefined
+}
+
+/**
  * Whether this draft can be saved, given what the key already holds.
  *
  * A stored value stands in for a retyped one, except where the key is moving to

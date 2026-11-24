@@ -38,6 +38,7 @@ import {
   EMPTY_ENDPOINT_AUTH,
   type EndpointAuthDraft,
   EndpointAuthFields,
+  endpointAuthAddressError,
   endpointAuthDraftFrom,
   endpointAuthExpiresAt,
   isEndpointAuthComplete,
@@ -227,7 +228,14 @@ function KeyForm({
     draft.apiBase.trim() !== "" &&
     draft.apiBase.trim() !== (editing.api_base ?? "")
 
+  // The gateway refuses a credential the key cannot carry to this address, so
+  // the field that has to change is where it is said.
+  const addressError = endpointAuthAddressError(draft.apiBase, endpointAuth)
+  // A stored API key does not travel to an address nobody proved they hold.
+  const apiKeyNeededAgain = addressMoved && Boolean(editing?.last4)
+
   const canSubmit =
+    addressError === undefined &&
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
@@ -367,10 +375,18 @@ function KeyForm({
         label={spec?.apiKeyLabel ?? "API key"}
         value={draft.apiKey}
         onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+        isRequired={apiKeyNeededAgain}
+        placeholder={
+          editing?.last4 && !apiKeyNeededAgain
+            ? `Keep ••••${editing.last4}`
+            : undefined
+        }
         description={[
-          editing
-            ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-            : "Encrypted at rest and never shown again; only the last 4 characters come back.",
+          apiKeyNeededAgain
+            ? "Enter it again: it goes to the new address."
+            : editing
+              ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
+              : "Encrypted at rest and never shown again; only the last 4 characters come back.",
           spec?.apiKeyHelpText,
         ]
           .filter(Boolean)
@@ -388,9 +404,11 @@ function KeyForm({
           placeholder="https://api.example.com/v1"
           description={
             editing
-              ? "A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
+              ? "A new URL needs every credential on this key entered again, because they will be sent there."
               : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
           }
+          isInvalid={addressError !== undefined}
+          errorMessage={addressError}
         />
       )}
 
