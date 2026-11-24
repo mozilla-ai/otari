@@ -182,9 +182,9 @@ describe("AcceptInvitationPage", () => {
     expect(currentRoute()).toBe("/")
   })
 
-  it("tells an unverified signup to verify, and whoever did not sign up what else works", async () => {
-    // The invitee may not be whoever signed up on the address, so the one
-    // route the verification link opens is not the only one to name.
+  it("names the provider where this deployment cannot mail a link", async () => {
+    // ways_in carries password_reset only where links can be mailed, so a
+    // provider on its own means the signup's verification email went nowhere.
     mockApi({
       verificationPending: true,
       canSignIn: false,
@@ -196,9 +196,10 @@ describe("AcceptInvitationPage", () => {
 
     expect(
       await screen.findByText(
-        /open the verification link emailed at signup\. If you did not sign up, sign in with Google\./,
+        /Accept the invitation, then sign in with Google\./,
       ),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/verification link emailed at signup/)).toBeNull()
   })
 
   it("names no verification link where this deployment delivers nothing", async () => {

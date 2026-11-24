@@ -28,9 +28,17 @@ describe("waysInSentence", () => {
 })
 
 describe("verificationPendingSentence", () => {
-  it("names the verification link and what else works", () => {
+  it("names the verification link where links can be mailed", () => {
+    expect(
+      verificationPendingSentence(["provider", "password_reset"], ["google"]),
+    ).toBe(
+      'open the verification link emailed at signup. If you did not sign up, sign in with Google, or choose a password with "Forgot your password?".',
+    )
+  })
+
+  it("names the provider alone where links cannot be mailed", () => {
     expect(verificationPendingSentence(["provider"], ["google"])).toBe(
-      "open the verification link emailed at signup. If you did not sign up, sign in with Google.",
+      "sign in with Google.",
     )
   })
 
