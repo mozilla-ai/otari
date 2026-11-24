@@ -512,6 +512,10 @@ def _short_error(exc: BaseException, provider: str | None = None, *, sent_values
     put one in its own error text.
     """
     message = str(exc).strip() or exc.__class__.__name__
+    # First, because every step below rewrites the text and a value only matches
+    # the text it was sent in: the tag strip removes a prefix a value may itself
+    # begin with, and the cap can cut one in half.
+    message = _without_sent_values(message, sent_values)
     # any-llm prefixes a provider error with a "[provider]" tag (e.g.
     # "[anthropic] No anthropic API key provided…"). Every surface that shows this
     # is already provider-specific, so the tag is redundant noise; drop it when it
@@ -521,11 +525,9 @@ def _short_error(exc: BaseException, provider: str | None = None, *, sent_values
         # "[anthropic]") strips to "", which would render as a blank error.
         message = message[len(provider) + 2 :].lstrip() or exc.__class__.__name__
     # Before the cap, not after: truncating first can split a secret and leave
-    # the surviving half unmatched by the patterns. The same reason puts the
-    # exact-value pass here rather than on the finished string. An empty result
-    # means the message was rejected whole (a request echo), so fall back to the
-    # class name rather than rendering a blank error, as the tag strip above does.
-    message = _without_sent_values(message, sent_values)
+    # the surviving half unmatched by the patterns. An empty result means the
+    # message was rejected whole (a request echo), so fall back to the class
+    # name rather than rendering a blank error, as the tag strip above does.
     message = redact_upstream_message(message) or exc.__class__.__name__
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"

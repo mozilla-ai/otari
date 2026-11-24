@@ -258,6 +258,14 @@ def test_a_value_straddling_the_cap_leaves_no_fragment_behind() -> None:
         assert secret[:length] not in reported
 
 
+def test_a_value_beginning_with_the_providers_own_tag_is_cut_out() -> None:
+    """The tag strip removes a prefix the value itself begins with, and nothing then matches the rest of it."""
+    secret = "[openai]summer breeze"
+    reported = _short_error(_Echoed(secret), provider="openai", sent_values=[secret])
+
+    assert "summer breeze" not in reported
+
+
 def test_a_value_too_short_to_cut_out_is_left_alone() -> None:
     """Cutting it would mangle the message, and its last four characters are published anyway."""
     assert "abc" in _reported("the key abc was refused", "abc")
