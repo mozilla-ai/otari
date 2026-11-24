@@ -24970,6 +24970,212 @@
         "title": "SandboxProvider",
         "type": "string"
       },
+      "SavingsAmounts": {
+        "description": "What a group of subagent decisions comes to, in USD.\n\nThe two costs sum only the decisions whose outcome is priced on both\nsides, which `measured` and `estimated` count. `router_cost` sums every\ndecision in the group, so `net_saved` can be negative.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved"
+        ],
+        "title": "SavingsAmounts",
+        "type": "object"
+      },
+      "SavingsByAgentType": {
+        "description": "One subagent type.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "agent_type": {
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "agent_type"
+        ],
+        "title": "SavingsByAgentType",
+        "type": "object"
+      },
+      "SavingsBySwap": {
+        "description": "Reported outcomes with one baseline model and one model run on.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "baseline_model": {
+            "description": "The priced model the baseline was read as, or the harness's name for it where it was read as none.",
+            "title": "Baseline Model",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "ran_on": {
+            "description": "The model the subagent ran on, as the harness named it.",
+            "title": "Ran On",
+            "type": "string"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "baseline_model",
+          "ran_on"
+        ],
+        "title": "SavingsBySwap",
+        "type": "object"
+      },
       "ScopedBudgetResponse": {
         "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
         "properties": {
@@ -27048,6 +27254,211 @@
           "usage"
         ],
         "title": "SubagentOutcomeReport",
+        "type": "object"
+      },
+      "SubagentSavingsPoint": {
+        "description": "One time bucket, by when the recommendation was made.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "bucket_start": {
+            "description": "Canonical ISO-8601 UTC.",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "bucket_start"
+        ],
+        "title": "SubagentSavingsPoint",
+        "type": "object"
+      },
+      "SubagentSavingsPublic": {
+        "description": "What the subagent router saved in a window, within the caller's scope.",
+        "properties": {
+          "by_agent_type": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsByAgentType"
+            },
+            "title": "By Agent Type",
+            "type": "array"
+          },
+          "by_swap": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsBySwap"
+            },
+            "title": "By Swap",
+            "type": "array"
+          },
+          "estimated": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is the harness's own count."
+          },
+          "measured": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is metered."
+          },
+          "recommender_available": {
+            "description": "Whether anything answers a recommendation on this deployment.",
+            "title": "Recommender Available",
+            "type": "boolean"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SubagentSavingsPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SubagentSavingsTotals"
+          }
+        },
+        "required": [
+          "recommender_available",
+          "totals",
+          "measured",
+          "estimated",
+          "series",
+          "by_agent_type",
+          "by_swap"
+        ],
+        "title": "SubagentSavingsPublic",
+        "type": "object"
+      },
+      "SubagentSavingsTotals": {
+        "description": "The whole window.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "no_outcome": {
+            "description": "Decisions with no consumption reported. Their router cost still counts.",
+            "title": "No Outcome",
+            "type": "integer"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "router_unanswered": {
+            "description": "Recommendation requests the router failed to answer.",
+            "title": "Router Unanswered",
+            "type": "integer"
+          },
+          "unpriced": {
+            "description": "Reported outcomes left out of the costs because a side has no price.",
+            "title": "Unpriced",
+            "type": "integer"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "no_outcome",
+          "unpriced",
+          "router_unanswered"
+        ],
+        "title": "SubagentSavingsTotals",
         "type": "object"
       },
       "SubagentUsageLine": {
@@ -50808,6 +51219,143 @@
         "summary": "Test Organization Sso",
         "tags": [
           "organization-sso"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/subagent-savings": {
+      "get": {
+        "description": "What the subagent router saved, within what the caller's membership lets them see.\n\nEach recommendation records the model the subagent would have started on\nwithout it: the model the caller asked for, else the parent's. When the\nharness reports what the subagent consumed, those tokens are priced at the\nmodels it ran on and at that baseline. The saving is the difference, less\nwhat the recommendations themselves cost, so it can be negative.\n\nThe costs count only the outcomes priced on both sides. `router_cost`\ncounts every recommendation in the window, also one whose subagent was\nnever reported or could not be priced. The figures are estimates unless\ncounted under `measured`. With no dates, the last 30 days.",
+        "operationId": "organization-usage-read_subagent_savings",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "The grain of `series`.",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "The grain of `series`.",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubagentSavingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Read Subagent Savings",
+        "tags": [
+          "organization-usage"
         ]
       }
     },

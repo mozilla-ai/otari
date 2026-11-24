@@ -5184,6 +5184,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/subagent-savings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Subagent Savings
+         * @description What the subagent router saved, within what the caller's membership lets them see.
+         *
+         *     Each recommendation records the model the subagent would have started on
+         *     without it: the model the caller asked for, else the parent's. When the
+         *     harness reports what the subagent consumed, those tokens are priced at the
+         *     models it ran on and at that baseline. The saving is the difference, less
+         *     what the recommendations themselves cost, so it can be negative.
+         *
+         *     The costs count only the outcomes priced on both sides. `router_cost`
+         *     counts every recommendation in the window, also one whose subagent was
+         *     never reported or could not be priced. The figures are estimates unless
+         *     counted under `measured`. With no dates, the last 30 days.
+         */
+        get: operations["organization-usage-read_subagent_savings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/switch": {
         parameters: {
             query?: never;
@@ -21273,6 +21304,175 @@ export interface components {
          */
         SandboxProvider: "protocol" | "e2b";
         /**
+         * SavingsAmounts
+         * @description What a group of subagent decisions comes to, in USD.
+         *
+         *     The two costs sum only the decisions whose outcome is priced on both
+         *     sides, which `measured` and `estimated` count. `router_cost` sums every
+         *     decision in the group, so `net_saved` can be negative.
+         */
+        SavingsAmounts: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsByAgentType
+         * @description One subagent type.
+         */
+        SavingsByAgentType: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /** Agent Type */
+            agent_type: string;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsBySwap
+         * @description Reported outcomes with one baseline model and one model run on.
+         */
+        SavingsBySwap: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Baseline Model
+             * @description The priced model the baseline was read as, or the harness's name for it where it was read as none.
+             */
+            baseline_model: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Ran On
+             * @description The model the subagent ran on, as the harness named it.
+             */
+            ran_on: string;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
          *
@@ -22304,6 +22504,156 @@ export interface components {
              * @description One line per model the subagent ran on.
              */
             usage: components["schemas"]["SubagentUsageLine"][];
+        };
+        /**
+         * SubagentSavingsPoint
+         * @description One time bucket, by when the recommendation was made.
+         */
+        SubagentSavingsPoint: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Bucket Start
+             * @description Canonical ISO-8601 UTC.
+             */
+            bucket_start: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SubagentSavingsPublic
+         * @description What the subagent router saved in a window, within the caller's scope.
+         */
+        SubagentSavingsPublic: {
+            /**
+             * By Agent Type
+             * @description Largest saving first, at most 20.
+             */
+            by_agent_type: components["schemas"]["SavingsByAgentType"][];
+            /**
+             * By Swap
+             * @description Largest saving first, at most 20.
+             */
+            by_swap: components["schemas"]["SavingsBySwap"][];
+            /** @description The decisions whose outcome is the harness's own count. */
+            estimated: components["schemas"]["SavingsAmounts"];
+            /** @description The decisions whose outcome is metered. */
+            measured: components["schemas"]["SavingsAmounts"];
+            /**
+             * Recommender Available
+             * @description Whether anything answers a recommendation on this deployment.
+             */
+            recommender_available: boolean;
+            /** Series */
+            series: components["schemas"]["SubagentSavingsPoint"][];
+            totals: components["schemas"]["SubagentSavingsTotals"];
+        };
+        /**
+         * SubagentSavingsTotals
+         * @description The whole window.
+         */
+        SubagentSavingsTotals: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * No Outcome
+             * @description Decisions with no consumption reported. Their router cost still counts.
+             */
+            no_outcome: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * Router Unanswered
+             * @description Recommendation requests the router failed to answer.
+             */
+            router_unanswered: number;
+            /**
+             * Unpriced
+             * @description Reported outcomes left out of the costs because a side has no price.
+             */
+            unpriced: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
         };
         /**
          * SubagentUsageLine
@@ -33954,6 +34304,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationSsoPublic"];
+                };
+            };
+        };
+    };
+    "organization-usage-read_subagent_savings": {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description The grain of `series`. */
+                bucket?: "hour" | "day";
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentSavingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

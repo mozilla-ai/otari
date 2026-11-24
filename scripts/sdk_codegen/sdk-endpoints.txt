@@ -175,6 +175,7 @@ GET /api/v1/routing/recommenders                    # dashboard-only
 POST /api/v1/routing/recommenders                   # dashboard-only
 PATCH /api/v1/routing/recommenders/{recommender_id}  # dashboard-only
 DELETE /api/v1/routing/recommenders/{recommender_id} # dashboard-only
+GET /api/v1/organizations/me/subagent-savings       # dashboard-only
 # Provider credentials (runtime provider management)
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
