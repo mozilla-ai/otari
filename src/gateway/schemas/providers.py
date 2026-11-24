@@ -287,6 +287,21 @@ class OrgProviderKeyPublic(SQLModel):
         )
 
 
+class OrgProviderKeysReencryptPublic(SQLModel):
+    """What re-encrypting the stored organization provider credentials did.
+
+    Each count is keys, not values, because a key holding one value no
+    configured secret reads has to be re-entered whole: it serves nothing until
+    it is. ``unreadable`` counts those, left exactly as they were;
+    ``skipped`` those edited while the rotation ran, already written under the
+    primary secret.
+    """
+
+    reencrypted: int
+    unreadable: int
+    skipped: int
+
+
 class OrgProviderKeysPublic(SQLModel):
     data: list[OrgProviderKeyPublic]
     count: int
@@ -1564,6 +1579,7 @@ __all__ = [
     "OrgProviderKeyPublic",
     "OrgProviderKeyUpdateRequest",
     "OrgProviderKeysPublic",
+    "OrgProviderKeysReencryptPublic",
     "OrgProviderModelsRefreshPublic",
     "ProviderEndpointCreateRequest",
     "ProviderEndpointPublic",

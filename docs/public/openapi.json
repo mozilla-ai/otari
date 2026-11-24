@@ -18456,6 +18456,30 @@
         "title": "OrgProviderKeysPublic",
         "type": "object"
       },
+      "OrgProviderKeysReencryptPublic": {
+        "description": "What re-encrypting the stored organization provider credentials did.\n\nEach count is keys, not values, because a key holding one value no\nconfigured secret reads has to be re-entered whole: it serves nothing until\nit is. ``unreadable`` counts those, left exactly as they were;\n``skipped`` those edited while the rotation ran, already written under the\nprimary secret.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "OrgProviderKeysReencryptPublic",
+        "type": "object"
+      },
       "OrgProviderModelsRefreshPublic": {
         "description": "What a refresh did: what it newly offered, what it repriced, and the list's new size.\n\nFailure is a field rather than a status, for the reason\n``OrgProviderAvailableModelsPublic`` gives: the list is still standing, and\nthe panel renders the reason beside it.",
         "properties": {
@@ -45749,6 +45773,36 @@
         "summary": "Exchange Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/v1/organization-provider-keys/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nThe tenant half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
+        "operationId": "provider-keys-reencrypt_org_provider_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeysReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Org Provider Keys",
+        "tags": [
+          "provider-keys"
         ]
       }
     },

@@ -3526,6 +3526,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organization-provider-keys/reencrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reencrypt Org Provider Keys
+         * @description Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
+         *
+         *     The tenant half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
+         *     alongside ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
+         *     encrypted values: the provider API key, the stored client arguments and the
+         *     endpoint credential. A key holding one no configured secret reads is left
+         *     as it is and counted, to be re-entered.
+         */
+        post: operations["provider-keys-reencrypt_org_provider_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -18030,6 +18057,24 @@ export interface components {
             data: components["schemas"]["OrgProviderKeyPublic"][];
         };
         /**
+         * OrgProviderKeysReencryptPublic
+         * @description What re-encrypting the stored organization provider credentials did.
+         *
+         *     Each count is keys, not values, because a key holding one value no
+         *     configured secret reads has to be re-entered whole: it serves nothing until
+         *     it is. ``unreadable`` counts those, left exactly as they were;
+         *     ``skipped`` those edited while the rotation ran, already written under the
+         *     primary secret.
+         */
+        OrgProviderKeysReencryptPublic: {
+            /** Reencrypted */
+            reencrypted: number;
+            /** Skipped */
+            skipped: number;
+            /** Unreadable */
+            unreadable: number;
+        };
+        /**
          * OrgProviderModelsRefreshPublic
          * @description What a refresh did: what it newly offered, what it repriced, and the list's new size.
          *
@@ -30988,6 +31033,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+        };
+    };
+    "provider-keys-reencrypt_org_provider_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeysReencryptPublic"];
                 };
             };
         };

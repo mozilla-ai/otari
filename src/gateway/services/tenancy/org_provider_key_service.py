@@ -80,6 +80,7 @@ from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
     Candidate,
+    KeyCiphertexts,
     OrgProviderKeyRepository,
     WorkspaceProviderKeyOverrideRepository,
     WorkspaceProviderModelRestrictionRepository,
@@ -91,6 +92,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyCreateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
+    OrgProviderKeysReencryptPublic,
     OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverridePublic,
     WorkspaceProviderKeyOverrideRequest,
@@ -105,6 +107,7 @@ from gateway.services.secret_box import (
     encrypt_mapping,
     encrypt_secret,
     readable_mapping,
+    reencrypted,
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -664,6 +667,41 @@ class OrgProviderKeyService:
     ) -> None:
         """Stage clearing these organizations' provider keys and client arguments, for the caller's transaction."""
         await self.keys.forget_secrets(organization_ids, workspace_ids)
+
+    async def reencrypt(self) -> OrgProviderKeysReencryptPublic:
+        """Encrypt every stored credential again under the primary ``OTARI_SECRET_KEY``.
+
+        Covers all three of a key's encrypted values: the provider API key, the
+        stored client arguments and the endpoint credential. A key holding one
+        no configured secret reads is left as it is in full, because a key with
+        one unreadable value serves nothing until it is re-entered whole, and
+        writing the readable part would report the key as rotated. One edited
+        while this ran is skipped, because its writer already encrypted it
+        under the primary secret.
+
+        Deployment-wide rather than scoped to one organization: the secret
+        seals every tenant's rows, so rotating it is the operator's step and
+        there is no organization that owns it.
+
+        Raises:
+            SecretBoxUnavailableTenancyError: No usable ``OTARI_SECRET_KEY``.
+        """
+        rotated = unreadable = skipped = 0
+        for key in await self.keys.list_encrypted():
+            expected = KeyCiphertexts.of(key)
+            try:
+                replacement = expected.mapped(reencrypted)
+            except SecretDecryptionError:
+                unreadable += 1
+                continue
+            except SecretBoxUnavailableError:
+                raise SecretBoxUnavailableTenancyError("organization provider credentials") from None
+            if await self.keys.swap_ciphertexts(key.id, expected=expected, replacement=replacement):
+                rotated += 1
+            else:
+                skipped += 1
+        await self.db.commit()
+        return OrgProviderKeysReencryptPublic(reencrypted=rotated, unreadable=unreadable, skipped=skipped)
 
     async def list_keys_for_user(
         self,

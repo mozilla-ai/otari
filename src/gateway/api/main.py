@@ -230,6 +230,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     workspace_web_search.router,
     web_search_keys.org_router,
     web_search_keys.workspace_router,
+    org_provider_keys.operator_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
     model_overrides.org_router,

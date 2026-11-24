@@ -11,9 +11,11 @@ one workspace at a time.
 """
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
-from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -33,6 +35,42 @@ from gateway.types.endpoint_auth import EndpointAuth, endpoint_auth_columns
 # One (key, override) pair per candidate; the override is None when the
 # workspace has never departed from inheriting this key.
 Candidate = tuple[OrgProviderKey, WorkspaceProviderKeyOverride | None]
+
+
+@dataclass(frozen=True)
+class KeyCiphertexts:
+    """Every encrypted value one organization provider key holds.
+
+    Named as a unit because re-sealing a key under a new secret reads and
+    writes all of them in one conditional write. A value left out of that unit
+    is a credential a rotation silently leaves behind, and the only place that
+    knows which values there are is here, beside the columns.
+    """
+
+    api_key: str | None
+    client_args: str | None
+    endpoint_auth_secret: str | None
+
+    @classmethod
+    def of(cls, key: OrgProviderKey) -> "KeyCiphertexts":
+        """What this key currently holds."""
+        return cls(
+            api_key=key.encrypted_api_key,
+            client_args=key.encrypted_client_args,
+            endpoint_auth_secret=key.encrypted_endpoint_auth_secret,
+        )
+
+    def mapped(self, seal: Callable[[str | None], str | None]) -> "KeyCiphertexts":
+        """Every value put through ``seal``, which answers None for None."""
+        return KeyCiphertexts(
+            api_key=seal(self.api_key),
+            client_args=seal(self.client_args),
+            endpoint_auth_secret=seal(self.endpoint_auth_secret),
+        )
+
+    def any_held(self) -> bool:
+        """Whether the key holds anything encrypted at all."""
+        return any(value is not None for value in (self.api_key, self.client_args, self.endpoint_auth_secret))
 
 
 def resolve_active_key(candidates: Sequence[Candidate]) -> OrgProviderKey | None:
@@ -64,6 +102,15 @@ def resolve_active_key(candidates: Sequence[Candidate]) -> OrgProviderKey | None
             return key
 
     return enabled[0][0] if enabled else None
+
+
+def _unchanged(column: Any, value: str | None) -> ColumnElement[bool]:
+    """That ``column`` still holds ``value``, an absent value included.
+
+    ``column`` is a SQLModel column expression, which is untyped at this edge.
+    """
+    expression: ColumnElement[bool] = column.is_(None) if value is None else column == value
+    return expression
 
 
 def _same_prefix(provider: str, slug: str | None) -> ColumnElement[bool]:
@@ -198,6 +245,49 @@ class OrgProviderKeyRepository(
             )
         )
         return list(result.scalars().all())
+
+    async def list_encrypted(self) -> Sequence[OrgProviderKey]:
+        """Every key holding an encrypted value, for a secret rotation.
+
+        Archived keys included: one can be restored, and a credential left
+        unreadable under the retired secret would come back dead.
+        """
+        result = await self.db.execute(
+            select(OrgProviderKey).where(
+                col(OrgProviderKey.encrypted_api_key).is_not(None)
+                | col(OrgProviderKey.encrypted_client_args).is_not(None)
+                | col(OrgProviderKey.encrypted_endpoint_auth_secret).is_not(None)
+            )
+        )
+        return list(result.scalars().all())
+
+    async def swap_ciphertexts(
+        self, key_id: uuid.UUID, *, expected: KeyCiphertexts, replacement: KeyCiphertexts
+    ) -> bool:
+        """Replace a key's encrypted values if it still holds ``expected``.
+
+        A conditional UPDATE, so an edit committed while a rotation ran is not
+        overwritten. Returns whether the row was written.
+        """
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                update(OrgProviderKey)
+                .where(
+                    col(OrgProviderKey.id) == key_id,
+                    _unchanged(col(OrgProviderKey.encrypted_api_key), expected.api_key),
+                    _unchanged(col(OrgProviderKey.encrypted_client_args), expected.client_args),
+                    _unchanged(col(OrgProviderKey.encrypted_endpoint_auth_secret), expected.endpoint_auth_secret),
+                )
+                .values(
+                    encrypted_api_key=replacement.api_key,
+                    encrypted_client_args=replacement.client_args,
+                    encrypted_endpoint_auth_secret=replacement.endpoint_auth_secret,
+                )
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return result.rowcount == 1
 
     async def list_for_organization(
         self,
