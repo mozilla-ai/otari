@@ -522,6 +522,12 @@ def test_a_keenable_tool_needs_no_key(client: TestClient, master_key_header: dic
     assert resp.json()["last4"] is None
 
 
+def test_an_empty_key_on_a_keenable_tool_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = _create(client, master_key_header, name="keenable", provider="keenable", api_base=None, api_key=" ")
+    assert resp.status_code == 422
+    assert "leave api_key out" in resp.json()["detail"]
+
+
 def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     searxng = _catalog(catalog_client, headers=master_key_header)["searxng"]
     assert searxng["requires_api_key"] is False

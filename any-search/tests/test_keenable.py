@@ -109,6 +109,14 @@ async def test_the_title_option_names_the_app(api_key: str | None) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("title", "sent"), [("  ", DEFAULT_TITLE), (" Acme gateway ", "Acme gateway")])
+async def test_the_title_is_stripped_and_a_blank_one_is_the_default(title: str, sent: str) -> None:
+    options: dict[str, Any] = {TITLE_HEADER: title}
+    _, request = await _search(api_key=None, **options)
+    assert request.headers[TITLE_HEADER] == sent
+
+
+@pytest.mark.asyncio
 async def test_api_base_replaces_the_endpoint_keyed_and_keyless() -> None:
     _, keyed = await _search(api_base="https://proxy.example/keenable/")
     _, keyless = await _search(api_key="", api_base="https://proxy.example/keenable/")

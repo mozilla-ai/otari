@@ -9,8 +9,9 @@ JSON body.
 
 Every call carries the ``X-Keenable-Title`` header, which the keyless endpoint
 requires and Keenable logs with each query to tell apps apart. It is
-``any-search`` unless the ``X-Keenable-Title`` option names the app. Only the
-operator sets that option, since its value can name the deployment.
+``any-search`` unless the ``X-Keenable-Title`` option names the app, with its
+surrounding spaces stripped. Only the operator sets that option, since its value
+can name the deployment.
 
 ``max_results`` becomes ``max_results``, 10 when unset, at most 50.
 ``time_range`` becomes ``published_after`` as a span back from now, ``1d``,
@@ -27,7 +28,9 @@ absent when Keenable knows none.
 
 Any status from 400 raises ``ProviderError``, tagged with Keenable's ``code``,
 such as ``invalid_api_key``, ``missing_app_title``, ``invalid_parameter``,
-``insufficient_credits`` or ``public_rate_limit_hourly``. A body without one is
+``insufficient_credits``, ``public_rate_limit_hourly``, or
+``public_domain_requires_api_key`` for a site Keenable serves only with a key.
+A body without one is
 ``rate_limited`` for a 429 and ``http_error`` for any other status. The rest of
 the body can quote the request and is not read.
 
@@ -175,7 +178,8 @@ class KeenableProvider(AnySearch):
                 type="string",
                 description=(
                     "Search the index as it stood at a date, a timestamp, or a span back from now. Needs Keenable's "
-                    "Time Machine on the account, else a 403."
+                    "Time Machine on the account, else a 403. time_range and the spans in the other date options "
+                    "still count back from now."
                 ),
             ),
             OptionSpec(
@@ -209,7 +213,7 @@ class KeenableProvider(AnySearch):
         payload.update({name: options[name] for name in _BODY_OPTIONS if options.get(name) is not None})
         if time_range is not None:
             payload["published_after"] = _PUBLISHED_AFTER[time_range]
-        headers = {TITLE_HEADER: str(options.get(TITLE_HEADER) or DEFAULT_TITLE)}
+        headers = {TITLE_HEADER: str(options.get(TITLE_HEADER) or "").strip() or DEFAULT_TITLE}
         path = "/v1/search"
         if self._api_key:
             headers["X-API-Key"] = self._api_key

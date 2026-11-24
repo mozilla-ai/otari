@@ -1230,8 +1230,12 @@ refuse such a value when a tool is saved.
   searches Keenable's free endpoint, which allows 1,000 searches an hour and 10 a
   second per IP address, shared with everything else calling from the gateway's
   address; past that, a search fails with `public_rate_limit_hourly` or
-  `public_rate_limit_per_second` (HTTP 429). With a key in the tool's `api_key`,
-  such as `${KEENABLE_API_KEY}`, no hourly limit applies. An
+  `public_rate_limit_per_second` (HTTP 429). Some sites Keenable serves only with
+  a key, which a keyless search restricted to one fails with
+  `public_domain_requires_api_key`. With a key in the tool's `api_key`, such as
+  `${KEENABLE_API_KEY}`, no hourly limit applies; an `api_key` that comes out
+  empty, such as that variable left blank, stops the gateway at start, so leave
+  `api_key` out to search keyless. An
   [organization key](#organization-search-keys) on Keenable always carries an API
   key, so an organization's searches never run on the gateway's address.
   Keenable logs every search, keyed or not, with its query, the caller's IP
