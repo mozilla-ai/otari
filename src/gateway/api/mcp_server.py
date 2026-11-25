@@ -33,8 +33,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from gateway.api.deps import build_personal_access_token_service, oauth_app_issuer
-from gateway.auth.models import PERSONAL_ACCESS_TOKEN_PREFIX
+from gateway.api.deps import build_personal_access_token_service, oauth_app_issuer, reading_through_mcp
+from gateway.auth.models import MCP_ACCESS_TOKEN_PREFIX, PERSONAL_ACCESS_TOKEN_PREFIX
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.version import __version__
@@ -70,10 +70,10 @@ Limit = Annotated[int, Field(ge=1, le=200, description="Rows to return.")]
 
 
 class _AccessTokenVerifier:
-    """Admits a bearer that is a live personal access token, as the account it speaks for."""
+    """Admits a bearer that is a live personal access token or MCP client access token, as its account."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        if not token.startswith(PERSONAL_ACCESS_TOKEN_PREFIX):
+        if not token.startswith((PERSONAL_ACCESS_TOKEN_PREFIX, MCP_ACCESS_TOKEN_PREFIX)):
             return None
         async with create_unit_of_work() as uow:
             owner = await build_personal_access_token_service(uow).authenticate(token)
@@ -126,13 +126,14 @@ def build_mcp_server(app: ASGIApp) -> MCPServer[Any]:
             raise ToolError("Not authenticated")
         # ASGITransport awaits the app directly, so httpx's own timeout never fires here.
         try:
-            async with (
-                asyncio.timeout(_LOOPBACK_TIMEOUT_SECONDS),
-                httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=_LOOPBACK_BASE_URL) as client,
-            ):
-                response = await client.get(
-                    f"{API_ROOT}{path}", params=params, headers={"Authorization": f"Bearer {access.token}"}
-                )
+            with reading_through_mcp():
+                async with (
+                    asyncio.timeout(_LOOPBACK_TIMEOUT_SECONDS),
+                    httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=_LOOPBACK_BASE_URL) as client,
+                ):
+                    response = await client.get(
+                        f"{API_ROOT}{path}", params=params, headers={"Authorization": f"Bearer {access.token}"}
+                    )
         except TimeoutError:
             raise ToolError(f"Otari did not answer within {_LOOPBACK_TIMEOUT_SECONDS} seconds") from None
         if response.is_error:
@@ -335,7 +336,7 @@ def mount_mcp_server(app: FastAPI, config: GatewayConfig) -> McpEndpoint:
                 "registration_endpoint": f"{oauth}/register",
                 "revocation_endpoint": f"{oauth}/revoke",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
                 "code_challenge_methods_supported": ["S256"],
                 "token_endpoint_auth_methods_supported": ["none"],
                 "revocation_endpoint_auth_methods_supported": ["none"],

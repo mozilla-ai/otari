@@ -444,8 +444,9 @@ export interface paths {
          * Create Access Token
          * @description Mint an access token that reads what the caller can see on the dashboard, as them.
          *
-         *     It authenticates `GET` requests to the management API and the MCP server at `/mcp`, and
-         *     is refused on every write. The token is in this response only.
+         *     It reads the organization the caller is acting in now, even after the dashboard switches
+         *     to another. It authenticates `GET` requests to the management API and the MCP server at
+         *     `/mcp`, is refused on every write, and lives a year at most. The token is in this response only.
          */
         post: operations["auth-create_access_token"];
         delete?: never;
@@ -3542,8 +3543,9 @@ export interface paths {
          * Exchange
          * @description Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.
          *
-         *     A registered or open app is given an API key. A client that registered itself is given the
-         *     person's read-only access token, with ``expires_in`` where it expires.
+         *     A registered or open app is given an API key. A client that registered itself is given a
+         *     read-only access token good for an hour through the MCP server, and a refresh token that
+         *     renews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.
          */
         post: operations["oauth-apps-exchange"];
         delete?: never;
@@ -9594,11 +9596,11 @@ export interface components {
         AccessTokenCreate: {
             /**
              * Expiration
-             * @description How long the token lives from now: 1-hour up to 1-year, or never.
+             * @description How long the token lives from now, at most a year.
              * @default 90-days
              * @enum {string}
              */
-            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year" | "never";
+            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year";
             /**
              * Name
              * @description What the token is for.
@@ -9614,7 +9616,7 @@ export interface components {
             created_at: string;
             /**
              * Expires At
-             * @description Null when it does not expire.
+             * @description When it ends. For an MCP client's sign-in, when renewing its access token stops working.
              */
             expires_at: string | null;
             /**
@@ -9629,6 +9631,11 @@ export interface components {
             last_used_at: string | null;
             /** Name */
             name: string;
+            /**
+             * Organization Id
+             * @description The organization it reads, whichever one the dashboard has switched to since.
+             */
+            organization_id: string | null;
             /**
              * Token
              * @description The token itself. Shown once: only its hash is stored.
@@ -9649,7 +9656,7 @@ export interface components {
             created_at: string;
             /**
              * Expires At
-             * @description Null when it does not expire.
+             * @description When it ends. For an MCP client's sign-in, when renewing its access token stops working.
              */
             expires_at: string | null;
             /**
@@ -9664,6 +9671,11 @@ export interface components {
             last_used_at: string | null;
             /** Name */
             name: string;
+            /**
+             * Organization Id
+             * @description The organization it reads, whichever one the dashboard has switched to since.
+             */
+            organization_id: string | null;
             /**
              * Token Suffix
              * @description The token's last characters, to tell it apart from the account's others.
@@ -10603,6 +10615,11 @@ export interface components {
              * @description The key's spending limit in USD over its whole life. Null sets none.
              */
             limit?: number | string | null;
+            /**
+             * Organization Id
+             * @description The organization an access token reads: the one the consent screen showed. Required when the app is given an access token, and refused unless the person is acting in it.
+             */
+            organization_id?: string | null;
             /** Redirect Uri */
             redirect_uri: string;
             /**
@@ -10673,21 +10690,26 @@ export interface components {
         /**
          * AppTokenRequest
          * @description Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.
+         *
+         *     An authorization code is redeemed with its callback and verifier; a refresh token, which
+         *     only a client that registered itself holds, on its own.
          */
         AppTokenRequest: {
             /** Client Id */
             client_id: string;
             /** Code */
-            code: string;
+            code?: string | null;
             /** Code Verifier */
-            code_verifier: string;
+            code_verifier?: string | null;
             /**
              * Grant Type
-             * @constant
+             * @enum {string}
              */
-            grant_type: "authorization_code";
+            grant_type: "authorization_code" | "refresh_token";
             /** Redirect Uri */
-            redirect_uri: string;
+            redirect_uri?: string | null;
+            /** Refresh Token */
+            refresh_token?: string | null;
         };
         /**
          * AppTokenResponse
@@ -10706,6 +10728,11 @@ export interface components {
              * @description The absolute URL of the page where the person sees this key, and revokes it.
              */
             manage_url: string;
+            /**
+             * Refresh Token
+             * @description Renews an MCP client's access token at this endpoint, and is replaced on each use. Using one a second time ends the sign-in.
+             */
+            refresh_token?: string | null;
             /**
              * Scope
              * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it. Absent for an access token.

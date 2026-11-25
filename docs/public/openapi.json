@@ -137,7 +137,7 @@
         "properties": {
           "expiration": {
             "default": "90-days",
-            "description": "How long the token lives from now: 1-hour up to 1-year, or never.",
+            "description": "How long the token lives from now, at most a year.",
             "enum": [
               "1-hour",
               "1-day",
@@ -145,8 +145,7 @@
               "30-days",
               "90-days",
               "180-days",
-              "1-year",
-              "never"
+              "1-year"
             ],
             "title": "Expiration",
             "type": "string"
@@ -182,7 +181,7 @@
                 "type": "null"
               }
             ],
-            "description": "Null when it does not expire.",
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
             "title": "Expires At"
           },
           "id": {
@@ -207,6 +206,19 @@
             "title": "Name",
             "type": "string"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
           "token": {
             "description": "The token itself. Shown once: only its hash is stored.",
             "title": "Token",
@@ -225,6 +237,7 @@
           "created_at",
           "last_used_at",
           "expires_at",
+          "organization_id",
           "token"
         ],
         "title": "AccessTokenCreated",
@@ -247,7 +260,7 @@
                 "type": "null"
               }
             ],
-            "description": "Null when it does not expire.",
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
             "title": "Expires At"
           },
           "id": {
@@ -272,6 +285,19 @@
             "title": "Name",
             "type": "string"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
           "token_suffix": {
             "description": "The token's last characters, to tell it apart from the account's others.",
             "title": "Token Suffix",
@@ -284,7 +310,8 @@
           "token_suffix",
           "created_at",
           "last_used_at",
-          "expires_at"
+          "expires_at",
+          "organization_id"
         ],
         "title": "AccessTokenPublic",
         "type": "object"
@@ -2329,6 +2356,19 @@
             "description": "The key's spending limit in USD over its whole life. Null sets none.",
             "title": "Limit"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization an access token reads: the one the consent screen showed. Required when the app is given an access token, and refused unless the person is acting in it.",
+            "title": "Organization Id"
+          },
           "redirect_uri": {
             "maxLength": 2048,
             "title": "Redirect Uri",
@@ -2476,7 +2516,7 @@
         "type": "object"
       },
       "AppTokenRequest": {
-        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.\n\nAn authorization code is redeemed with its callback and verifier; a refresh token, which\nonly a client that registered itself holds, on its own.",
         "properties": {
           "client_id": {
             "maxLength": 128,
@@ -2485,33 +2525,67 @@
             "type": "string"
           },
           "code": {
-            "maxLength": 128,
-            "minLength": 43,
-            "title": "Code",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 43,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           },
           "code_verifier": {
-            "pattern": "^[A-Za-z0-9._~-]{43,128}$",
-            "title": "Code Verifier",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Verifier"
           },
           "grant_type": {
-            "const": "authorization_code",
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ],
             "title": "Grant Type",
             "type": "string"
           },
           "redirect_uri": {
-            "maxLength": 2048,
-            "title": "Redirect Uri",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
           }
         },
         "required": [
           "grant_type",
-          "client_id",
-          "redirect_uri",
-          "code",
-          "code_verifier"
+          "client_id"
         ],
         "title": "AppTokenRequest",
         "type": "object"
@@ -2539,6 +2613,18 @@
             "description": "The absolute URL of the page where the person sees this key, and revokes it.",
             "title": "Manage Url",
             "type": "string"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Renews an MCP client's access token at this endpoint, and is replaced on each use. Using one a second time ends the sign-in.",
+            "title": "Refresh Token"
           },
           "scope": {
             "anyOf": [
@@ -36756,7 +36842,7 @@
         ]
       },
       "post": {
-        "description": "Mint an access token that reads what the caller can see on the dashboard, as them.\n\nIt authenticates `GET` requests to the management API and the MCP server at `/mcp`, and\nis refused on every write. The token is in this response only.",
+        "description": "Mint an access token that reads what the caller can see on the dashboard, as them.\n\nIt reads the organization the caller is acting in now, even after the dashboard switches\nto another. It authenticates `GET` requests to the management API and the MCP server at\n`/mcp`, is refused on every write, and lives a year at most. The token is in this response only.",
         "operationId": "auth-create_access_token",
         "requestBody": {
           "content": {
@@ -46553,7 +46639,7 @@
     },
     "/api/v1/oauth/apps/token": {
       "post": {
-        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.\n\nA registered or open app is given an API key. A client that registered itself is given the\nperson's read-only access token, with ``expires_in`` where it expires.",
+        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.\n\nA registered or open app is given an API key. A client that registered itself is given a\nread-only access token good for an hour through the MCP server, and a refresh token that\nrenews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.",
         "operationId": "oauth-apps-exchange",
         "requestBody": {
           "content": {

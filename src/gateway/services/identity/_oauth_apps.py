@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from apron_auth.pkce import generate_code_challenge
 
-from gateway.auth.models import PERSONAL_ACCESS_TOKEN_PREFIX
+from gateway.auth.models import MCP_ACCESS_TOKEN_PREFIX, MCP_REFRESH_TOKEN_PREFIX, PERSONAL_ACCESS_TOKEN_PREFIX
 from gateway.core.oauth_apps import APP_KEY_LIFETIMES, open_app_site, redirect_matches
 from gateway.core.settings.identity import OAuthAppConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -40,6 +40,9 @@ from gateway.types.key_scope import KeyScopeSet
 _DYNAMIC_CLIENT_PREFIX = "mcp-"
 # How long a registration nobody approves is kept.
 _UNAUTHORIZED_CLIENT_LIFETIME = timedelta(days=1)
+# How long an MCP client's sign-in may be approved for, renewals included. A self-registered client
+# is unverified, so a link that asks for longer, or for no end, is not what the person gets.
+_MCP_SIGN_IN_LIFETIMES = frozenset({"1-day", "7-days", "30-days", "90-days"})
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,7 @@ class IssuedCredential:
     scopes: KeyScopeSet
     expires_in: int | None
     manage_path: str
+    refresh_token: str | None = None
 
 
 def _code_hash(code: str) -> str:
@@ -172,18 +176,25 @@ class OAuthAppService:
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent, for the scopes the screen showed that the registration still names.
 
-        An app that redeems to an access token is approved for the person themselves, so no
-        workspace is named and no scope narrows it.
+        An app that redeems to an access token is approved for the person themselves, in the
+        organization the screen showed, so no workspace is named and no scope narrows it.
 
         Raises:
-            OAuthAppGrantError: the registration and the screen share no scope, or a key's
-                approval names no workspace.
+            OAuthAppGrantError: the registration and the screen share no scope, a key's approval
+                names no workspace, or an access token's names another organization than the
+                person's or a lifetime an MCP sign-in may not have.
         """
         app = await self.resolve_app(request.client_id, request.redirect_uri)
         now = self.clock()
         lifetime = APP_KEY_LIFETIMES[request.expiration]
         code = secrets.token_urlsafe(32)
         if app.credential == APP_CREDENTIAL_ACCESS_TOKEN:
+            if request.expiration not in _MCP_SIGN_IN_LIFETIMES:
+                raise OAuthAppGrantError("invalid_request", "An MCP client is approved for at most 90 days")
+            if request.organization_id is None or request.organization_id != user.active_organization_id:
+                raise OAuthAppGrantError(
+                    "invalid_request", "Your organization changed while you were approving the client"
+                )
             async with self.uow:
                 await self.organizations.lock_identity(user.id)
                 await self.clients.mark_authorized(request.client_id, now)
@@ -198,6 +209,7 @@ class OAuthAppService:
                     expires_at=now + timedelta(minutes=2),
                     key_lifetime_sec=None if lifetime is None else int(lifetime.total_seconds()),
                     credential=APP_CREDENTIAL_ACCESS_TOKEN,
+                    organization_id=request.organization_id,
                 )
                 await self.grants.prune_expired(now)
             return self._redirect(request, code)
@@ -242,10 +254,16 @@ class OAuthAppService:
     async def exchange(self, request: AppTokenRequest) -> IssuedCredential:
         """Consume the approval and mint its credential atomically, under current membership and restrictions.
 
+        A refresh token instead renews an MCP client's sign-in.
+
         Returns:
             The credential, with the scopes a key holds, which the token response names because they
             can be fewer than the app's registration.
         """
+        if request.refresh_token is not None:
+            return await self._renew(request.client_id, request.refresh_token)
+        if request.redirect_uri is None or request.code is None or request.code_verifier is None:
+            raise OAuthAppGrantError("invalid_request", "Missing authorization code parameters")
         try:
             app = await self.resolve_app(request.client_id, request.redirect_uri)
         except OAuthAppGrantError:
@@ -257,7 +275,9 @@ class OAuthAppService:
             logger.warning("OAuth app exchange refused: reason=unknown_client")
             raise OAuthAppGrantError("invalid_client", "Unknown app") from None
         try:
-            return await self._exchange(request, app)
+            return await self._exchange(
+                request, app, code=request.code, redirect_uri=request.redirect_uri, code_verifier=request.code_verifier
+            )
         except (
             OAuthAppGrantError,
             NotAuthorizedError,
@@ -269,14 +289,32 @@ class OAuthAppService:
             logger.warning("OAuth app exchange refused: client_id=%s reason=%s", request.client_id, str(exc))
             raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant") from None
 
-    async def _exchange(self, request: AppTokenRequest, app: _App) -> IssuedCredential:
+    async def _renew(self, client_id: str, refresh_token: str) -> IssuedCredential:
+        signed_in = None
+        if self.dynamic_clients and client_id.startswith(_DYNAMIC_CLIENT_PREFIX):
+            signed_in = await self.access_tokens.renew(client_id, refresh_token)
+        if signed_in is None:
+            # The client_id is whatever an unauthenticated caller sent, so it never reaches the log.
+            logger.warning("OAuth app refresh refused")
+            raise OAuthAppGrantError("invalid_grant", "Invalid or expired refresh token")
+        return IssuedCredential(
+            token=signed_in.access_token,
+            scopes=KeyScopeSet(frozenset()),
+            expires_in=signed_in.expires_in,
+            manage_path="/account",
+            refresh_token=signed_in.refresh_token,
+        )
+
+    async def _exchange(
+        self, request: AppTokenRequest, app: _App, *, code: str, redirect_uri: str, code_verifier: str
+    ) -> IssuedCredential:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
-                code_hash=_code_hash(request.code),
+                code_hash=_code_hash(code),
                 client_id=request.client_id,
-                redirect_uri=request.redirect_uri,
-                challenge=generate_code_challenge(request.code_verifier),
+                redirect_uri=redirect_uri,
+                challenge=generate_code_challenge(code_verifier),
                 now=now,
             )
             # Null on a row built in memory, which an API key grant always was before access tokens.
@@ -285,19 +323,26 @@ class OAuthAppService:
                 raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
             lifetime = None if grant.key_lifetime_sec is None else timedelta(seconds=grant.key_lifetime_sec)
             if credential == APP_CREDENTIAL_ACCESS_TOKEN:
+                if lifetime is None or grant.organization_id is None:
+                    raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant")
                 await self.organizations.lock_identity(grant.user_id)
                 if not await self.grants.consume(grant.code_hash, now):
                     raise OAuthAppGrantError("invalid_grant", "Authorization grant was already consumed")
-                token = await self.access_tokens.create_for_account(
-                    grant.user_id, name=f"{app.name} (MCP)", lifetime=lifetime
+                signed_in = await self.access_tokens.sign_in_client(
+                    grant.user_id,
+                    organization_id=grant.organization_id,
+                    client_id=request.client_id,
+                    name=f"{app.name} (MCP)",
+                    lifetime=lifetime,
                 )
-                if token is None:
+                if signed_in is None:
                     raise AppKeyOwnerInactiveError
                 return IssuedCredential(
-                    token=token,
+                    token=signed_in.access_token,
                     scopes=KeyScopeSet(frozenset()),
-                    expires_in=None if lifetime is None else int(lifetime.total_seconds()),
+                    expires_in=signed_in.expires_in,
                     manage_path="/account",
+                    refresh_token=signed_in.refresh_token,
                 )
             held = grant.scopes
             if not held or grant.workspace_id is None:
@@ -328,8 +373,8 @@ class OAuthAppService:
             return IssuedCredential(token=key, scopes=held, expires_in=None, manage_path="/keys")
 
     async def revoke(self, token: str) -> None:
-        """Revoke only the presented API key or access token; an unknown token is a successful no-op."""
-        if token.startswith(PERSONAL_ACCESS_TOKEN_PREFIX):
+        """Revoke only the presented API key, access token or sign-in; an unknown token is a successful no-op."""
+        if token.startswith((PERSONAL_ACCESS_TOKEN_PREFIX, MCP_ACCESS_TOKEN_PREFIX, MCP_REFRESH_TOKEN_PREFIX)):
             await self.access_tokens.revoke_presented(token)
         else:
             await self.keys.revoke_key_by_token(token)

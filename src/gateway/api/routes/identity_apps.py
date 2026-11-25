@@ -159,14 +159,16 @@ async def app_workspaces(
 async def exchange(body: Annotated[AppTokenRequest, Form()], service: OAuthAppServiceDep) -> JSONResponse:
     """Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.
 
-    A registered or open app is given an API key. A client that registered itself is given the
-    person's read-only access token, with ``expires_in`` where it expires.
+    A registered or open app is given an API key. A client that registered itself is given a
+    read-only access token good for an hour through the MCP server, and a refresh token that
+    renews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.
     """
     issued = await service.exchange(body)
     token = AppTokenResponse(
         access_token=issued.token,
         scope=" ".join(scope.value for scope in issued.scopes) or None,
         expires_in=issued.expires_in,
+        refresh_token=issued.refresh_token,
         manage_url=service.manage_url(issued.manage_path),
     )
     return JSONResponse(token.model_dump(exclude_none=True), headers=_NO_STORE)

@@ -62,19 +62,22 @@ unless your users are expected to connect apps you have not reviewed.
 
 ## MCP clients register themselves
 
-An MCP client such as Claude Code or Cursor connects to Otari's
+An MCP client such as Claude Code connects to Otari's
 [MCP server](read-otari-from-your-agent.md) without any registration here. It
 finds Otari's sign-in from the server's 401 (RFC 9728 and RFC 8414) and
 registers itself at `POST /api/v1/oauth/apps/register` (RFC 7591) with a name
 and its callbacks, which must be HTTPS or loopback HTTP.
 
-What such a client is approved for is never an API key. It receives the
-approving person's [access token](read-otari-from-your-agent.md#create-an-access-token),
-which reads what they can see on the dashboard and changes nothing, so the
-consent screen asks only how long it lasts, names the client as unverified, and
-shows no workspace or spending limit. The token appears on the person's
-**Account** page as `<client name> (MCP)`. A registration nobody approves
-within a day is removed.
+What such a client is approved for is never an API key. It signs in as the
+approving person, read-only, in the organization the consent screen names, so
+the screen asks only how long the sign-in lasts (1 to 90 days, whatever the link
+suggests), names the client as unverified, and shows no workspace or spending
+limit. The token endpoint answers with an access token that lasts an hour and
+works only at `/mcp`, and a refresh token. The client renews with
+`grant_type=refresh_token`, which replaces both; a refresh token used twice ends
+the sign-in. `POST /api/v1/oauth/apps/revoke` ends it from either token. The
+sign-in appears on the person's **Account** page as `<client name> (MCP)`. A
+registration nobody approves within a day is removed.
 
 Registration is open whenever the MCP server is, which `mcp_server_enabled`
 switches. Behind a proxy that rewrites the host, set `public_base_url`: the

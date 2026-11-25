@@ -33,7 +33,6 @@ const EXPIRATIONS: readonly { value: Expiration; label: string }[] = [
   { value: "90-days", label: "90 days" },
   { value: "180-days", label: "180 days" },
   { value: "1-year", label: "1 year" },
-  { value: "never", label: "Never" },
 ]
 
 function TokenRow({
@@ -194,8 +193,9 @@ export function AccessTokensCard() {
         </div>
 
         <p className="max-w-3xl text-sm text-muted">
-          Let an agent or a script read what you can see here, through the MCP
-          server or the API. A token never changes anything.
+          Let an agent or a script read what you can see in this organization,
+          through the MCP server or the API, even after you switch to another. A
+          token never changes anything.
         </p>
 
         <ErrorBanner error={tokens.error} />

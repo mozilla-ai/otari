@@ -9,6 +9,10 @@ API_KEY_PREFIX = "tk-"
 # generated master key's (``otari-mk-``), so authentication can tell a token
 # apart before looking anything up.
 PERSONAL_ACCESS_TOKEN_PREFIX = "otari-pat-"
+# An MCP client's sign-in: a short-lived access token, good only through ``/mcp``,
+# and the refresh token that renews it.
+MCP_ACCESS_TOKEN_PREFIX = "otari-mcp-at-"
+MCP_REFRESH_TOKEN_PREFIX = "otari-mcp-rt-"
 
 # Minimum length of a minted key; ``token_urlsafe(48)`` yields 64 characters.
 MIN_API_KEY_LENGTH = 50

@@ -33,13 +33,17 @@ async def create_access_token(
 ) -> AccessTokenCreated:
     """Mint an access token that reads what the caller can see on the dashboard, as them.
 
-    It authenticates `GET` requests to the management API and the MCP server at `/mcp`, and
-    is refused on every write. The token is in this response only.
+    It reads the organization the caller is acting in now, even after the dashboard switches
+    to another. It authenticates `GET` requests to the management API and the MCP server at
+    `/mcp`, is refused on every write, and lives a year at most. The token is in this response only.
     """
     if is_personal_access_token_request(request):
         # Unreachable while tokens are read-only, and kept so a token never mints its successor.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access tokens are read-only")
-    row, token = await service.create(identity, name=body.name, lifetime=APP_KEY_LIFETIMES[body.expiration])
+    lifetime = APP_KEY_LIFETIMES[body.expiration]
+    if lifetime is None:  # pragma: no cover - the schema offers no expiry without an end
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose when the token expires")
+    row, token = await service.create(identity, name=body.name, lifetime=lifetime)
     return AccessTokenCreated(**AccessTokenPublic.of(row).model_dump(), token=token)
 
 

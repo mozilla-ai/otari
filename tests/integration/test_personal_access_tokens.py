@@ -1,6 +1,7 @@
 """Personal access tokens read the management API as their owner, never write, and back the MCP server."""
 
 import json
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -9,9 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.identity import PersonalAccessToken
+from gateway.models.tenancy import User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
 from .conftest import MODEL_NAME
@@ -140,6 +143,56 @@ def test_deactivating_the_owner_ends_their_tokens(client: TestClient, world: _Wo
     )
     assert deactivated.status_code == 200, deactivated.text
     assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(token)).status_code == 401
+
+
+def test_a_token_always_ends(client: TestClient, world: _World) -> None:
+    refused = client.post(
+        _TOKENS, json={"name": "forever", "expiration": "never"}, headers=_session(world, "alpha_member")
+    )
+    assert refused.status_code == 422
+
+
+def test_a_token_reads_the_organization_it_was_made_in(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    created = _mint(client, world, "alpha_member")
+    assert created["organization_id"] == str(world.alpha)
+    with db_session_factory() as db:
+        db.execute(
+            update(User).where(col(User.id) == world.users["alpha_member"]).values(active_organization_id=world.beta)
+        )
+        db.commit()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=_bearer(created["token"]))
+    assert context.status_code == 200, context.text
+    assert context.json()["organization"]["id"] == str(world.alpha)
+    with db_session_factory() as db:
+        active = db.get(User, world.users["alpha_member"])
+        assert active is not None and active.active_organization_id == world.beta
+
+
+def test_an_ended_token_makes_room_for_a_new_one(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    ended = _mint(client, world, "alpha_member", expiration="1-hour")
+    with db_session_factory() as db:
+        db.execute(
+            update(PersonalAccessToken)
+            .where(PersonalAccessToken.token_hash != "")
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        db.commit()
+    fresh = _mint(client, world, "alpha_member")
+    listed = client.get(_TOKENS, headers=_session(world, "alpha_member")).json()["data"]
+    assert [row["id"] for row in listed] == [fresh["id"]]
+    assert ended["id"] != fresh["id"]
+
+
+def test_a_token_cannot_make_a_provider_call_through_a_read(client: TestClient, world: _World) -> None:
+    token = _mint(client, world, "alpha_owner")["token"]
+    path = f"{API_ROOT}/organizations/me/provider-keys/{uuid.uuid4()}/available-models"
+    response = client.get(path, headers=_bearer(token))
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access tokens cannot use this endpoint"
 
 
 def test_a_password_change_ends_the_tokens_minted_before_it(client: TestClient, world: _World) -> None:

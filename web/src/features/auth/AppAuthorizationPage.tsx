@@ -16,6 +16,10 @@ import {
   useOAuthApp,
   useOAuthAppWorkspaces,
 } from "@/shared/api/oauthApps"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { LoginPageShell } from "./LoginPageShell"
 
 const EXPIRATIONS: { value: AppApproval["expiration"]; label: string }[] = [
@@ -28,6 +32,12 @@ const EXPIRATIONS: { value: AppApproval["expiration"]; label: string }[] = [
   { value: "180-days", label: "In 180 days" },
   { value: "1-year", label: "In 1 year" },
 ]
+
+// An MCP client registered itself, so nobody vouches for it: its sign-in always
+// ends, within 90 days, and an expiry its link suggests is not taken.
+const SIGN_IN_EXPIRATIONS = EXPIRATIONS.filter((choice) =>
+  ["1-day", "7-days", "30-days", "90-days"].includes(choice.value),
+)
 
 /** A positive amount under a million dollars, in whole cents, as the server accepts. */
 function isLimit(value: string) {
@@ -53,6 +63,8 @@ export function AppAuthorizationPage() {
   const [chosenExpiration, setExpiration] = useState(() =>
     expirationFrom(params.get("expiration")),
   )
+  const [signInExpiration, setSignInExpiration] =
+    useState<AppApproval["expiration"]>("30-days")
   const limitInvalid = limit !== "" && !isLimit(limit)
   const app = useOAuthApp(
     params.get("client_id") ?? "",
@@ -61,7 +73,12 @@ export function AppAuthorizationPage() {
   // A self-registered client, such as an MCP client, is given the person's own
   // read-only access token: no workspace to bill and no limit to set.
   const isAccessToken = app.data?.credential === "access_token"
-  const expiration = chosenExpiration ?? (isAccessToken ? "30-days" : "never")
+  const expiration = isAccessToken
+    ? signInExpiration
+    : (chosenExpiration ?? "never")
+  const context = useOrganizationContext(isAccessToken)
+  const organization = context.data?.organization
+  const { isOperator } = useDeploymentOperator(isAccessToken)
   const workspaces = useOAuthAppWorkspaces(
     search,
     Boolean(app.data) && !app.error && !isAccessToken,
@@ -88,13 +105,18 @@ export function AppAuthorizationPage() {
     !choices.some((choice) => choice.id === selectedWorkspace.id)
       ? [...choices, selectedWorkspace]
       : choices
-  const failure = app.error ?? workspaces.error ?? approval.error
+  const failure =
+    app.error ??
+    workspaces.error ??
+    (isAccessToken ? context.error : null) ??
+    approval.error
   const loading =
     (app.isPending && !app.data) ||
     (Boolean(app.data) &&
       !isAccessToken &&
       workspaces.isPending &&
-      !workspaces.data)
+      !workspaces.data) ||
+    (isAccessToken && context.isPending)
   const deny = () => {
     if (!app.data || app.error) return
     const url = new URL(app.data.redirect_uri)
@@ -154,6 +176,9 @@ export function AppAuthorizationPage() {
                   This app will read what you can see in Otari, as you: usage,
                   requests, budgets and keys. It cannot change anything or call
                   models.
+                  {isOperator
+                    ? " Because you operate this deployment, that includes its settings and every key, member and trace."
+                    : null}
                 </p>
               </div>
             ) : (
@@ -206,7 +231,30 @@ export function AppAuthorizationPage() {
               </>
             )}
           </div>
-          {isAccessToken ? null : soleWorkspace && selectedWorkspace ? (
+          {isAccessToken ? (
+            organization ? (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-overline">Organization</h2>
+                <div className="flex items-center gap-3 border border-border-strong bg-background p-3">
+                  <FiGrid
+                    className="size-4 shrink-0 text-muted"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 break-words text-emphasis">
+                    {organization.name}
+                  </span>
+                  <FiCheck
+                    className="size-4 shrink-0 text-success"
+                    aria-hidden="true"
+                  />
+                </div>
+              </div>
+            ) : (
+              <p role="status" className="text-body text-muted">
+                You aren’t in an organization to connect.
+              </p>
+            )
+          ) : soleWorkspace && selectedWorkspace ? (
             <div className="flex flex-col gap-2">
               <h2 className="text-overline">Workspace</h2>
               <div className="flex items-center gap-3 border border-border-strong bg-background p-3">
@@ -261,13 +309,28 @@ export function AppAuthorizationPage() {
                 errorMessage="Enter an amount above 0 and under 1,000,000, in dollars and cents."
               />
             )}
-            <Select
-              label={isAccessToken ? "Access expires" : "Key expires"}
-              value={expiration}
-              onChange={(value) => setExpiration(expirationFrom(value))}
-              options={EXPIRATIONS}
-              isDisabled={approval.isPending}
-            />
+            {isAccessToken ? (
+              <Select
+                label="Access expires"
+                value={signInExpiration}
+                onChange={(value) =>
+                  setSignInExpiration(
+                    SIGN_IN_EXPIRATIONS.find((choice) => choice.value === value)
+                      ?.value ?? "30-days",
+                  )
+                }
+                options={SIGN_IN_EXPIRATIONS}
+                isDisabled={approval.isPending}
+              />
+            ) : (
+              <Select
+                label="Key expires"
+                value={expiration}
+                onChange={(value) => setExpiration(expirationFrom(value))}
+                options={EXPIRATIONS}
+                isDisabled={approval.isPending}
+              />
+            )}
           </div>
           <div className="flex flex-col gap-2 pt-1">
             <Button
@@ -276,14 +339,19 @@ export function AppAuthorizationPage() {
               isPending={approval.isPending}
               isDisabled={
                 (!isAccessToken && !selectedWorkspace) ||
+                (isAccessToken && !organization) ||
                 limitInvalid ||
                 Boolean(workspaces.error) ||
                 workspaces.isFetching ||
                 approval.isPending
               }
               onPress={() => {
-                if (isAccessToken) {
-                  approval.mutate({ limit: "", expiration })
+                if (isAccessToken && organization) {
+                  approval.mutate({
+                    organizationId: organization.id,
+                    limit: "",
+                    expiration,
+                  })
                 } else if (selectedWorkspace) {
                   approval.mutate({
                     workspaceId: selectedWorkspace.id,

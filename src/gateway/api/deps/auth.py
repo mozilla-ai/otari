@@ -3,6 +3,9 @@
 import secrets
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -16,7 +19,7 @@ from gateway.api.deps._base import (
 )
 from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
-from gateway.auth.models import PERSONAL_ACCESS_TOKEN_PREFIX, hash_key
+from gateway.auth.models import MCP_ACCESS_TOKEN_PREFIX, PERSONAL_ACCESS_TOKEN_PREFIX, hash_key
 from gateway.core.config import (
     API_KEY_HEADER,
     X_API_KEY_HEADER,
@@ -399,10 +402,22 @@ def cookie_may_authenticate(request: Request, config: GatewayConfig) -> bool:
 
 # Methods a personal access token may authenticate: it reads as its owner and never writes.
 _READ_METHODS = frozenset({"GET", "HEAD"})
+# Set while an MCP tool reads the management API, the one place an MCP client's access token is good.
+_through_mcp: ContextVar[bool] = ContextVar("through_mcp", default=False)
 
 
-def _presented_personal_access_token(request: Request) -> str | None:
-    """The personal access token a request carries in a header credential, if that is what it carries.
+@contextmanager
+def reading_through_mcp() -> Iterator[None]:
+    """Admit an MCP client's access token on the requests an MCP tool makes inside this block."""
+    reset = _through_mcp.set(True)
+    try:
+        yield
+    finally:
+        _through_mcp.reset(reset)
+
+
+def _presented_access_token(request: Request) -> str | None:
+    """The access token a request carries in a header credential, if that is what it carries.
 
     A peek that never refuses, so a request carrying any other credential, well-formed or not,
     reaches the check that owns it exactly as before.
@@ -415,7 +430,7 @@ def _presented_personal_access_token(request: Request) -> str | None:
         token = authorization.removeprefix("Bearer ").strip()
     else:
         return None
-    return token if token.startswith(PERSONAL_ACCESS_TOKEN_PREFIX) else None
+    return token if token.startswith((PERSONAL_ACCESS_TOKEN_PREFIX, MCP_ACCESS_TOKEN_PREFIX)) else None
 
 
 def build_personal_access_token_service(uow: UnitOfWork) -> PersonalAccessTokenService:
@@ -428,8 +443,19 @@ def is_personal_access_token_request(request: Request) -> bool:
     return bool(getattr(request.state, "personal_access_token", False))
 
 
+def refuse_access_tokens(request: Request) -> None:
+    """Refuse an access token on a read that does more than read, such as one that dials a provider."""
+    if _presented_access_token(request) is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access tokens cannot use this endpoint")
+
+
 async def _resolve_personal_access_token(request: Request, uow: UnitOfWork, token: str) -> TenancyUser:
-    """The identity a personal access token speaks for, on a read; refused otherwise."""
+    """The identity an access token speaks for, in its organization, on a read; refused otherwise."""
+    if token.startswith(MCP_ACCESS_TOKEN_PREFIX) and not _through_mcp.get():
+        record_auth_failure("mcp_access_token_outside_mcp")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="This access token works only through the MCP server"
+        )
     try:
         identity = await build_personal_access_token_service(uow).authenticate(token)
     except DATABASE_ERRORS as exc:
@@ -466,10 +492,11 @@ async def get_session_identity(
     Sec-Fetch-Site check is belt-and-braces for clients that send the header.
 
     A personal access token in a header credential authenticates the same way, as
-    the person who holds it, but only for a read: it is how an agent reads what its
-    owner sees on the dashboard without holding their session.
+    the person who holds it in the organization it was made for, but only for a read:
+    it is how an agent reads what its owner sees on the dashboard without holding
+    their session. An MCP client's access token does too, only through ``/mcp``.
     """
-    pat = _presented_personal_access_token(request)
+    pat = _presented_access_token(request)
     if pat is not None:
         return await _resolve_personal_access_token(request, uow, pat)
     if _header_credentials_present(request):

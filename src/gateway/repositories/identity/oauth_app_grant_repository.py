@@ -31,6 +31,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
         spend_limit: Decimal | None = None,
         key_lifetime_sec: int | None = None,
         credential: str = APP_CREDENTIAL_API_KEY,
+        organization_id: uuid.UUID | None = None,
     ) -> None:
         """Stage an approval without minting or retaining a credential."""
         self.db.add(
@@ -46,6 +47,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
                 spend_limit=spend_limit,
                 key_lifetime_sec=key_lifetime_sec,
                 credential=credential,
+                organization_id=organization_id,
             )
         )
         await self.db.flush()

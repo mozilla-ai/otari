@@ -438,6 +438,11 @@ class AppAuthorizationRequest(BaseModel):
     workspace_id: uuid.UUID | None = Field(
         default=None, description="The workspace the key bills. Required unless the app is given an access token."
     )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="The organization an access token reads: the one the consent screen showed. Required when "
+        "the app is given an access token, and refused unless the person is acting in it.",
+    )
     scopes: list[KeyScope] = Field(
         description="The scopes the consent screen showed. The key holds these and what the registration "
         "still names, so one added since the screen was drawn is left out and one removed since takes effect."

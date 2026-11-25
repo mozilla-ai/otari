@@ -43,6 +43,12 @@ function renderPage(
     if (appError) throw appError
     if (path.startsWith("/oauth/apps/workspaces"))
       return { data: [...workspaces], count: workspaces.length }
+    if (path === "/organizations/me")
+      return {
+        organization: { id: "org-one", name: "Acme" },
+        role: "member",
+        deployment_operator: false,
+      }
     if (path === "/oauth/apps/authorize")
       return {
         redirect_uri:
@@ -498,6 +504,8 @@ it("gives a self-registered client a read-only token with no workspace or limit"
       .mocked(apiFetch)
       .mock.calls.some(([path]) => path.startsWith("/oauth/apps/workspaces")),
   ).toBe(false)
+  expect(await screen.findByText("Acme")).toBeVisible()
+  expect(screen.queryByText(/Because you operate/)).not.toBeInTheDocument()
 
   await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
   await waitFor(() =>
@@ -510,27 +518,28 @@ it("gives a self-registered client a read-only token with no workspace or limit"
     ...Object.fromEntries(request),
     scopes: [],
     expiration: "30-days",
+    organization_id: "org-one",
   })
 })
 
-it("keeps the expiry a self-registered client suggests", async () => {
+it("ignores an expiry a self-registered client's link suggests", async () => {
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
       ...realLocation,
-      ...routeLocation(`/oauth/authorize?${request}&expiration=7-days`),
+      ...routeLocation(`/oauth/authorize?${request}&expiration=never`),
       assign,
     },
   })
   renderPage(undefined, undefined, MCP_CLIENT)
-  await screen.findByRole("heading", { name: "Connect to Claude Code" })
+  await screen.findByText("Acme")
   await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
   await waitFor(() => expect(assign).toHaveBeenCalled())
   const call = vi
     .mocked(apiFetch)
     .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
   expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
-    expiration: "7-days",
+    expiration: "30-days",
   })
   expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty("workspace_id")
 })

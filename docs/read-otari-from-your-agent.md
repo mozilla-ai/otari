@@ -2,13 +2,14 @@
 
 Otari serves an MCP server at `/mcp`. An agent connected to it reads what you
 see on the dashboard (spend, usage, requests, budgets, keys and workspaces)
-without anyone opening the dashboard. It reads as you, with your role, and it
-never changes anything.
+without anyone opening the dashboard. It reads as you, with your role, in one
+organization, and it never changes anything.
 
 The agent reads with an access token: a credential of your own, separate from
 the API keys that call models. A client that supports MCP sign-in gets one by
 asking you to approve it in the browser; any other client is given one you
-create.
+create. Either way it reads the organization you were in when you approved or
+created it, even after you switch the dashboard to another.
 
 ## Connect with sign-in
 
@@ -19,10 +20,14 @@ claude mcp add --transport http otari https://otari.example.com/mcp
 ```
 
 Then run `/mcp` in Claude Code, select `otari` and choose to authenticate. A
-browser opens on Otari: sign in if you are not, pick how long the access lasts
-and approve. Otari marks the client as unverified, because it registered itself.
-The token it is given appears under **Access tokens** on your **Account** page
-as `Claude Code (MCP)`, where you can delete it.
+browser opens on Otari: sign in if you are not, check the organization it
+names, pick how long the access lasts (up to 90 days) and approve. Otari marks
+the client as unverified, because it registered itself.
+
+The client is given an access token that lasts an hour and works only through
+`/mcp`, and a refresh token it uses to get the next one until the time you
+picked runs out. The sign-in appears under **Access tokens** on your **Account**
+page as `Claude Code (MCP)`, where deleting it signs the client out.
 
 Other clients that support MCP sign-in work the same way: add the server URL
 and approve in the browser when asked.
@@ -34,10 +39,12 @@ For a client without MCP sign-in, or a script:
 1. Open **Account** from the menu under your name.
 2. Under **Access tokens**, click **Create token**.
 3. Name it after where it will live, such as `CI report`, and pick when it
-   expires.
+   expires, up to a year.
 4. Copy the token. It starts with `otari-pat-` and is shown only once.
 
-You can hold up to 50 tokens. Delete one on the same page to revoke it at once.
+The token reads the organization you are in when you create it. You can hold up
+to 50 tokens and sign-ins at once; ended ones do not count. Delete one on the
+same page to revoke it at once.
 
 ## Connect with a token
 
@@ -77,14 +84,15 @@ Then ask it something like "what did we spend on each model last week?".
 | `list_api_keys` | The API keys you can see, never the keys themselves |
 | `api_get` | Any other `GET` endpoint of the [management API](api-reference.md) |
 
-Each tool answers what the matching page answers you: an organization owner
-sees the whole organization, a member sees the workspaces they belong to. The
-agent acts in your active organization, the one the dashboard's switcher
-shows.
+Each tool answers what the matching page answers you in the token's
+organization: an owner sees the whole organization, a member sees the
+workspaces they belong to. If you operate the deployment, that includes its
+settings and every key, member and trace. A few reads that do more than read,
+such as asking a provider which models it serves, refuse access tokens.
 
 ## Use a token without MCP
 
-An access token authenticates any `GET` request to the management API, so a
+A token you created authenticates any `GET` request to the management API, so a
 script can read the same data:
 
 ```bash
@@ -93,12 +101,13 @@ curl https://otari.example.com/api/v1/organizations/me/usage/summary \
 ```
 
 A token is refused on every other method with `403`, and it is not an API key:
-it cannot call models or tools.
+it cannot call models or tools. The access token an MCP client signs in with is
+refused here with `401`, since it works only through `/mcp`.
 
 ## When a token stops working
 
-A token stops at once when you delete it or when it expires. Every token you
-hold also ends whenever Otari ends your dashboard sessions:
+A token stops at once when you delete it or when it expires. Every token and
+sign-in you hold also ends whenever Otari ends your dashboard sessions:
 
 - you change or reset your password;
 - you prove your email address by signing in with a provider, after a password
@@ -108,7 +117,9 @@ hold also ends whenever Otari ends your dashboard sessions:
 - the master key is rotated.
 
 Reactivating an account does not bring its tokens back. Signing out of the
-dashboard leaves tokens working.
+dashboard leaves tokens working. An MCP client's sign-in also ends when the
+client revokes it, or when one of its refresh tokens is used a second time,
+which only a copy someone else kept would do.
 
 ## Turn the server off
 

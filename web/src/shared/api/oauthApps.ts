@@ -38,6 +38,8 @@ export function useOAuthAppWorkspaces(search: string, enabled: boolean) {
 export interface AppApproval {
   /** Absent for an app given an access token, which bills no workspace. */
   workspaceId?: string
+  /** The organization an access token reads; absent for an app given a key. */
+  organizationId?: string
   /** Blank sets no spending limit. */
   limit: string
   expiration: NonNullable<AppAuthorizationRequest["expiration"]>
@@ -49,7 +51,12 @@ export function useAuthorizeOAuthApp(
   scopes: readonly KeyScope[],
 ) {
   return useMutation({
-    mutationFn: ({ workspaceId, limit, expiration }: AppApproval) =>
+    mutationFn: ({
+      workspaceId,
+      organizationId,
+      limit,
+      expiration,
+    }: AppApproval) =>
       apiFetch<AppAuthorizationResponse>("/oauth/apps/authorize", {
         method: "POST",
         body: JSON.stringify({
@@ -60,6 +67,7 @@ export function useAuthorizeOAuthApp(
           code_challenge: params.get("code_challenge"),
           code_challenge_method: params.get("code_challenge_method"),
           ...(workspaceId ? { workspace_id: workspaceId } : {}),
+          ...(organizationId ? { organization_id: organizationId } : {}),
           scopes,
           ...(limit ? { limit } : {}),
           expiration,

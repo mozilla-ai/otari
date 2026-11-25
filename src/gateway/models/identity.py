@@ -279,6 +279,10 @@ class OAuthAppGrant(Base):
     )
     # What the approval redeems to: an API key, or an access token for an MCP client.
     credential: Mapped[str] = mapped_column(String(16), default=APP_CREDENTIAL_API_KEY, server_default="api_key")
+    # The organization an access token reads, picked on the consent screen. Null for an API key.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), default=None
+    )
     # The scopes the app's registration held when the person approved it. No
     # default, so a grant cannot be written without them and redeem to a key
     # that reaches nothing.
@@ -291,11 +295,13 @@ class OAuthAppGrant(Base):
 
 
 class PersonalAccessToken(Base):
-    """A person's own credential for reading the management API as them, from an agent or a script.
+    """A person's own credential for reading one organization as them, from an agent or a script.
 
-    It authenticates what a dashboard session does, for safe methods only, so it never writes.
-    Only the token's SHA-256 hash is stored. CASCADE on the identity, so deleting an account
-    takes its tokens with it.
+    It authenticates what a dashboard session does, for safe methods only, so it never writes,
+    and in the organization it was created for whatever the dashboard has switched to since.
+    A row is either a token the person created, or an MCP client's sign-in: a short-lived
+    access token, accepted only through ``/mcp``, renewed by a refresh token that rotates on
+    each use. Only SHA-256 hashes are stored. CASCADE on the identity and the organization.
     """
 
     __tablename__ = "personal_access_token"
@@ -307,8 +313,19 @@ class PersonalAccessToken(Base):
     token_suffix: Mapped[str] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
-    # Null is no expiry.
+    # When the token, or an MCP client's sign-in with every renewal, ends.
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+    )
+    # The MCP client a sign-in belongs to; null for a token the person created.
+    client_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    # A sign-in's current access token ends here, well before ``expires_at``.
+    access_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, default=None)
+    # The refresh token just rotated out. Presented again, it ends the sign-in, since only a
+    # copy someone else kept would still be in use.
+    previous_refresh_token_hash: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
 
 
 class OAuthDynamicClient(Base):
