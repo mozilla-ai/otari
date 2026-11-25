@@ -3233,6 +3233,74 @@ def _ambiguous_model_names(
     ]
 
 
+# The two columns that say an identity's address is usable and that somebody proved its
+# holder. Domain auto-join and the add-or-invite refusals read the second to grant access
+# across organizations, so what may write either is a rule rather than a preference.
+# Each entry names the modules that may assign the column. The list only shrinks: a module
+# that stops writing one fails the check until its entry goes, which is how a consolidation
+# is proved rather than asserted.
+COLUMN_WRITER_BASELINE: dict[str, tuple[str, ...]] = {
+    "email_proven_at": (
+        "gateway/core/address_proof.py",
+        "gateway/services/tenancy/user_service.py",
+    ),
+    "email_verified_at": (
+        "gateway/core/address_proof.py",
+        "gateway/services/tenancy/user_service.py",
+    ),
+}
+
+
+def _assigned_column_names(node: ast.AST) -> Iterator[str]:
+    """Yield the column each assignment target in this node names, by attribute or by string key.
+
+    Both forms reach the database: an attribute store sets it on a model, and a subscript
+    store with a string key carries it into a statement's values. A rule that reads only one
+    of them misses the other, which is how a column with a single writer grows a second.
+    """
+    targets: list[ast.expr] = []
+    if isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+        targets = [node.target]
+    for target in targets:
+        if isinstance(target, ast.Attribute):
+            yield target.attr
+        elif isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant):
+            if isinstance(target.slice.value, str):
+                yield target.slice.value
+
+
+def check_column_writers(src_root: Path) -> list[str]:
+    """Check that only the listed modules assign each address-proof column.
+
+    An assignment is an attribute store or a subscript store with a string key, so a module
+    cannot route a write through a free-form mapping to avoid the rule. Reading a column,
+    naming it in a docstring and comparing against it are not writes.
+    """
+    violations: list[str] = []
+    seen: dict[str, set[str]] = {column: set() for column in COLUMN_WRITER_BASELINE}
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for node in ast.walk(tree):
+            for column in _assigned_column_names(node):
+                if column not in COLUMN_WRITER_BASELINE:
+                    continue
+                seen[column].add(relative_path)
+                if relative_path not in COLUMN_WRITER_BASELINE[column]:
+                    line = getattr(node, "lineno", 0)
+                    violations.append(
+                        f"{relative_path}:{line} assigns {column}; "
+                        f"only {', '.join(COLUMN_WRITER_BASELINE[column])} may, so that what an address "
+                        f"proves is decided in one place"
+                    )
+    for column, writers in COLUMN_WRITER_BASELINE.items():
+        violations.extend(
+            f"{stale} no longer assigns {column}; remove it from COLUMN_WRITER_BASELINE"
+            for stale in sorted(set(writers) - seen[column])
+        )
+    return violations
+
+
 def check_model_access(src_root: Path) -> list[str]:
     """Check that only an ORM model's repository and the modules on its baseline use it.
 
@@ -3351,6 +3419,7 @@ def main() -> int:
     non_domain_import_violations = check_non_domain_service_imports(SRC_ROOT, domains) if domains else []
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
+    column_writer_violations = check_column_writers(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
     composition_root_violations = check_composition_root_behavior(SRC_ROOT)
     composition_root_size_violations = check_composition_root_size(SRC_ROOT)
@@ -3452,6 +3521,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal composition root behavior violations: {len(composition_root_violations)}")
 
+    if column_writer_violations:
+        print("\n❌ Address column writer violations:\n")
+        for violation in column_writer_violations:
+            print(f"  {violation}")
+        print(f"\nTotal address column writer violations: {len(column_writer_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -3472,6 +3547,7 @@ def main() -> int:
         or service_package_import_violations
         or service_root_export_violations
         or model_access_violations
+        or column_writer_violations
         or import_cycle_violations
         or composition_root_violations
         or composition_root_size_violations

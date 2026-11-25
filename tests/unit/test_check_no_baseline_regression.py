@@ -42,6 +42,7 @@ def test_the_real_check_measured_against_itself_is_clean() -> None:
 def test_every_baseline_the_real_check_names_is_read() -> None:
     found = check.baselines(_architecture_check()).rooms
     assert sorted(name for name in found if name.endswith(check.BASELINE_SUFFIX)) == [
+        "COLUMN_WRITER_BASELINE",
         "COMPOSITION_ROOT_BEHAVIOR_BASELINE",
         "COMPOSITION_ROOT_SIZE_BASELINE",
         "DOMAIN_NAME_BASELINE",
