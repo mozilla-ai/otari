@@ -194,6 +194,15 @@ class DeploymentBootstrap(BaseModel):
             "with whichever typed credential is current, the way a passkey does."
         )
     )
+    organization_oidc_enabled: bool = Field(
+        description=(
+            "Whether this deployment offers organizations their own OIDC sign-in connection (the "
+            "organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen "
+            "renders no option to continue through an organization's provider. Additive to "
+            "sign_in_methods rather than part of it, the way oauth_providers is: whether a given "
+            "address resolves to a connection is answered per address, not published here."
+        ),
+    )
     public_catalog: bool = Field(
         default=False,
         description=(
@@ -265,6 +274,9 @@ async def get_bootstrap(
         passkeys_enabled=config.passkeys_enabled,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
+        # From the features the app resolved, not from the setting, so this reports what is
+        # mounted rather than what was asked for.
+        organization_oidc_enabled=any(feature.name == "organization_sso" for feature in enabled_features),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         platform_connect=any(feature.name == "platform_connect" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,

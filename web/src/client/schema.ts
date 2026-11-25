@@ -13149,6 +13149,11 @@ export interface components {
              */
             open_signup: boolean;
             /**
+             * Organization Oidc Enabled
+             * @description Whether this deployment offers organizations their own OIDC sign-in connection (the organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen renders no option to continue through an organization's provider. Additive to sign_in_methods rather than part of it, the way oauth_providers is: whether a given address resolves to a connection is answered per address, not published here.
+             */
+            organization_oidc_enabled: boolean;
+            /**
              * Passkeys Enabled
              * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
              */

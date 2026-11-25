@@ -26,6 +26,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "models",
       "organization_guardrails",
       "organization_providers",
+      "organization_sso",
       "organization_usage",
       "organizations",
       "playground",
@@ -65,6 +66,11 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // needs a registered passkey; see docs/access-control.md.
     passkeys_enabled: true,
     passkeys_ready: false,
+    // organization_oidc_enabled keeps its default here, so an organization may configure its
+    // own OIDC connection and the sign-in screen offers a company row. Off,
+    // the two SSO route groups are not mounted and organization_sso leaves the
+    // surface list above; see docs/configuration.md.
+    organization_oidc_enabled: true,
     oauth_providers: [],
     feedback_enabled: true,
     // platform_url keeps its default here, so Connect otari.ai is offered;

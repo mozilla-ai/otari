@@ -32,6 +32,7 @@ function Mounted({
   maintenanceMode = false,
   oauthProviders = [],
   openSignup = false,
+  organizationOidcEnabled = true,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
@@ -39,6 +40,7 @@ function Mounted({
   maintenanceMode?: boolean
   oauthProviders?: string[]
   openSignup?: boolean
+  organizationOidcEnabled?: boolean
 }) {
   return (
     <AppProviders>
@@ -49,6 +51,7 @@ function Mounted({
           maintenance_mode: maintenanceMode,
           oauth_providers: oauthProviders,
           open_signup: openSignup,
+          organization_oidc_enabled: organizationOidcEnabled,
         })}
       >
         {children}
@@ -1823,5 +1826,31 @@ describe("Login, provider first", () => {
     expect(pressed).not.toBeDisabled()
     expect(pressed).toHaveClass("pointer-events-none")
     expect(pressed.parentElement).toHaveAttribute("aria-busy", "true")
+  })
+  it("offers the company row where the deployment serves organization SSO", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).toBeInTheDocument()
+  })
+
+  it("draws no company row where the deployment has organization SSO off", () => {
+    // The routes behind the row are not mounted there, so pressing it could
+    // only produce a 404. The sign-in screen renders before any surface gate,
+    // which is why it reads `organization_oidc_enabled` rather than the surface list.
+    render(
+      <Mounted signInMethods={["password"]} organizationOidcEnabled={false}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).not.toBeInTheDocument()
   })
 })

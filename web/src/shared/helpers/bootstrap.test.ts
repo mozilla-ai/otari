@@ -67,6 +67,18 @@ describe("normalizeBootstrap", () => {
     expect(completed.privacy_url).toBeNull()
   })
 
+  it("reads an absent switch over an existing feature as on", () => {
+    // The two flags that default the other way, because a gateway old enough to
+    // omit either had no way to turn the feature off. Reading absence as off
+    // would withdraw a page and a sign-in option from a deployment serving both.
+    const completed = normalizeBootstrap(
+      omitting("passkeys_enabled", "organization_oidc_enabled"),
+    )
+
+    expect(completed.passkeys_enabled).toBe(true)
+    expect(completed.organization_oidc_enabled).toBe(true)
+  })
+
   it("keeps a false flag rather than treating it as absent", () => {
     // A published `false` and a published empty list are answers, not absences,
     // and neither may be overwritten by the default that stands in for one.
