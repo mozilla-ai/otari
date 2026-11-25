@@ -119,9 +119,11 @@ class Mailer:
     def require_ready(self) -> None:
         """Raise :class:`MailNotConfiguredError` unless a linked message can be sent.
 
-        For the surfaces with no fallback. A surface that can degrade (an
-        invitation) must not call this: refusing there would take away a flow
-        that works perfectly well without mail.
+        Satisfied wherever :attr:`readiness` is above ``none``, so a deployment
+        that sends without delivering passes this. For the surfaces with no
+        fallback. A surface that can degrade (an invitation) must not call this:
+        refusing there would take away a flow that works perfectly well without
+        mail.
         """
         if not self.can_send_links:
             raise MailNotConfiguredError(self.missing_settings)
