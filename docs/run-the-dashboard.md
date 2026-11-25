@@ -17,9 +17,11 @@ gateway does not answer (it is down, restarting, or too slow to answer within 8
 seconds), the dashboard does not guess what it is connected to. It says the
 gateway is unreachable, keeps trying in the background with a growing wait of up
 to 30 seconds, tries again at once when the browser comes back online or the tab
-is shown again, and offers a **Retry** button. It opens as soon as an attempt
-answers, with no reload. A refusal such as a 404 is not retried on its own; use
-**Retry** once the address is fixed.
+is shown again, and offers a **Retry now** button. It opens as soon as an
+attempt answers, with no reload. A refusal such as a 404 is not retried on its
+own; use **Retry** once the address is fixed. A 401, a 403, or a redirect from
+something in front of the gateway, such as a proxy's sign-in, is not retried
+either: the dashboard asks for a **Reload**, which opens that sign-in.
 
 ## Sign-in and secrets
 
