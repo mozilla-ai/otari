@@ -683,7 +683,8 @@ export function TeamHome({
             !spend.totals
               ? unreadLine
               : cacheTotals.input > 0
-                ? `${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
+                ? // The split took the request count off the Spent tile.
+                  `${paidSplitLine(spend.totals) ? `${formatNumber(spend.totals.request_count)} requests · ` : ""}${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
                 : `${formatNumber(spend.totals.request_count)} requests`
           }
           graphic={

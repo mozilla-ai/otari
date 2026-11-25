@@ -535,7 +535,8 @@ export function MemberHome({
             !spend.totals
               ? unreadLine
               : cacheTotals.input > 0
-                ? `${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
+                ? // The split took the request count off the Spent tile.
+                  `${paidSplitLine(spend.totals) ? `${formatNumber(requestCount)} requests · ` : ""}${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
                 : requestCount > 0
                   ? `${formatNumber(requestCount)} requests`
                   : "No requests yet"
