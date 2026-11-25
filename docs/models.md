@@ -232,6 +232,12 @@ All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
+From the same models.dev entry, each model also carries `description`,
+`release_date` (`YYYY-MM-DD`) and `knowledge_cutoff`, the training data cutoff
+as models.dev writes it (`2025-05`). A model whose provider's listing gives no
+creation time takes its release date as `created`, at midnight UTC, rather
+than 0. An alias reports none of the three, and keeps a `created` of 0.
+
 ### Overriding a model's details
 
 Where a provider's server and models.dev say nothing about a model, or say it

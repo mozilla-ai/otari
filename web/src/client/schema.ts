@@ -17416,8 +17416,12 @@ export interface components {
              * @default false
              */
             deployment_managed: boolean;
+            /** Description */
+            description?: string | null;
             /** Id */
             id: string;
+            /** Knowledge Cutoff */
+            knowledge_cutoff?: string | null;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /** Name */
@@ -17435,6 +17439,8 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            /** Release Date */
+            release_date?: string | null;
             /** Supported Parameters */
             supported_parameters?: string[] | null;
             /** Type */

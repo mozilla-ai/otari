@@ -21,6 +21,9 @@ MODELS_DEV = parse_catalog(
             "models": {
                 "gpt-4o": {
                     "name": "GPT-4o",
+                    "description": "OpenAI's flagship multimodal model",
+                    "knowledge": "2023-09",
+                    "release_date": "2024-05-13",
                     "tool_call": True,
                     "structured_output": True,
                     "modalities": {"input": ["text", "image"], "output": ["text"]},
@@ -105,6 +108,9 @@ def test_capabilities_map_models_dev_flags_to_openrouter_fields() -> None:
         supported_parameters=["tools", "tool_choice", "response_format"],
         input_modalities=["text", "image"],
         output_modalities=["text"],
+        description="OpenAI's flagship multimodal model",
+        release_date="2024-05-13",
+        knowledge_cutoff="2023-09",
     )
 
 
@@ -162,15 +168,35 @@ def test_apply_model_metadata_fills_capabilities() -> None:
     assert model.name == "GPT-4o"
     assert model.supported_parameters == ["tools", "tool_choice", "response_format"]
     assert model.architecture == ModelArchitecture(input_modalities=["text", "image"], output_modalities=["text"])
+    assert model.description == "OpenAI's flagship multimodal model"
+    assert (model.release_date, model.knowledge_cutoff) == ("2024-05-13", "2023-09")
+
+
+def test_a_model_with_no_creation_time_takes_its_release_date() -> None:
+    """A listing that gives no timestamp leaves 0, which reads as 1970 to a client sorting by ``created``."""
+    model = ModelObject(id="openai:gpt-4o", created=0, owned_by="openai")
+
+    apply_model_metadata(_config(), MODELS_DEV, model)
+
+    assert model.created == 1715558400
+
+
+def test_a_providers_own_creation_time_is_kept() -> None:
+    model = ModelObject(id="openai:gpt-4o", created=1715000000, owned_by="openai")
+
+    apply_model_metadata(_config(), MODELS_DEV, model)
+
+    assert model.created == 1715000000
 
 
 def test_an_alias_takes_its_targets_capabilities_but_not_its_name() -> None:
-    """The target's display name would say what the alias hides."""
+    """The target's display name, description and dates would say what the alias hides."""
     alias = ModelObject(id="house-4o", created=0, owned_by="otari")
 
     apply_model_metadata(_config(), MODELS_DEV, alias, metadata_selector="openai:gpt-4o", with_name=False)
 
     assert alias.name is None
+    assert (alias.description, alias.release_date, alias.knowledge_cutoff, alias.created) == (None, None, None, 0)
     assert alias.supported_parameters == ["tools", "tool_choice", "response_format"]
 
 

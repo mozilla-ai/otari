@@ -183,6 +183,11 @@ class ModelObject(BaseModel):
     # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
     # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
     type: ModelType | None = None
+    # models.dev's description, release date (``YYYY-MM-DD``) and training cutoff, the fields the catalog's
+    # model page shows. ``None`` where models.dev has no entry, and for an alias, whose target they would name.
+    description: str | None = None
+    release_date: str | None = None
+    knowledge_cutoff: str | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
