@@ -86,8 +86,9 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
     def __init__(self, db: UnitOfWork) -> None:
         super().__init__(db, WorkspaceProviderPolicy)
 
-    async def get_for(self, workspace_id: uuid.UUID) -> WorkspaceProviderPolicy | None:
-        return await self.db.get(WorkspaceProviderPolicy, workspace_id)
+    async def get_for(self, workspace_id: uuid.UUID, *, lock: bool = False) -> WorkspaceProviderPolicy | None:
+        """The workspace's row, locked until the transaction ends when ``lock`` is set."""
+        return await self.db.get(WorkspaceProviderPolicy, workspace_id, with_for_update=lock, populate_existing=lock)
 
     async def requirements(self) -> tuple[frozenset[uuid.UUID], dict[uuid.UUID, frozenset[str]]]:
         """For the dispatch-path cache, in one read: the workspaces requiring zero data retention, and the

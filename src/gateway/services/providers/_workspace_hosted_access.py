@@ -373,8 +373,9 @@ class WorkspaceHostedAccessService:
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
-            before = await self.policies.get_for(workspace.id)
-            # Read out before the put, which mutates the same row in place.
+            # Locked, so no other writer commits between this read and the put. Read
+            # out before the put, which mutates the same row in place.
+            before = await self.policies.get_for(workspace.id, lock=True)
             was_zero_retention = before is not None and before.require_zero_data_retention
             was_locations = before.allowed_data_locations if before is not None else None
             policy = await self.policies.put(
