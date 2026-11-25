@@ -73,6 +73,18 @@ describe("DeploymentGate", () => {
     )
   })
 
+  it("points an auth refusal at what sits in front of the gateway", async () => {
+    await mountGate(async () => {
+      throw new ApiError(401, "Unauthorized")
+    })
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Unauthorized")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /Sign in to whatever protects this address/,
+    )
+    expect(screen.getByRole("status")).not.toHaveTextContent(/is running/)
+  })
+
   it("says no gateway was asked when the deployment could not be chosen", async () => {
     const load = vi.fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
     loader = createBootLoader({

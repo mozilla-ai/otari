@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import type {
   BlockedEmailCreated,
   BlockedEmails,
@@ -139,7 +139,22 @@ export function useGatewayUnreachable(): boolean {
     refetchOnWindowFocus: true,
     staleTime: 0,
   })
-  return isDown(liveness)
+  const down = isDown(liveness)
+  // Back up: re-run what failed to reach it, so a page's own error clears with
+  // the banner instead of waiting for focus or navigation.
+  const wasDown = useRef(false)
+  useEffect(() => {
+    if (wasDown.current && !down) {
+      void queryClient.refetchQueries({
+        predicate: (query) =>
+          query.queryKey[0] !== GATEWAY_LIVENESS &&
+          query.state.status === "error" &&
+          isUnreachable(query.state.error),
+      })
+    }
+    wasDown.current = down
+  }, [down, queryClient])
+  return down
 }
 
 function isDown(state: {

@@ -119,9 +119,9 @@ describe("ConnectionStatus", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("clears itself once the gateway responds again, without the failed query refetching", async () => {
-    // The failed query stays in the cache in its error state, as one on a page
-    // the operator has left does; recovery is the probe's to report.
+  it("clears itself once the gateway responds again, and re-runs what failed", async () => {
+    // Recovery is the probe's to report; the query that failed to reach the
+    // gateway then runs again, so its page's own error clears too.
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       let online = false
@@ -142,7 +142,9 @@ describe("ConnectionStatus", () => {
       await waitFor(() =>
         expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
       )
-      expect(client.getQueryState(["probe"])?.status).toBe("error")
+      await waitFor(() =>
+        expect(client.getQueryState(["probe"])?.status).toBe("success"),
+      )
     } finally {
       vi.useRealTimers()
     }

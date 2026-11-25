@@ -26,6 +26,7 @@ function bannerFor(error: unknown, stage: "prepare" | "load"): unknown {
 }
 
 function captionFor(state: {
+  error: unknown
   stage: "prepare" | "load"
   isAttempting: boolean
   willRetry: boolean
@@ -38,6 +39,14 @@ function captionFor(state: {
   }
   if (state.stage === "prepare") {
     return "Retry once the deployment this dashboard reaches is available."
+  }
+  // The bootstrap takes no credential, so a 401 or 403 comes from something in
+  // front of the gateway, which is running.
+  if (
+    state.error instanceof ApiError &&
+    (state.error.status === 401 || state.error.status === 403)
+  ) {
+    return "Something in front of the gateway refused the request. Sign in to whatever protects this address, then retry."
   }
   return "The gateway refused the request. Check that it is running and that this address serves its dashboard, then retry."
 }
