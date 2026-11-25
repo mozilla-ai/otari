@@ -77,6 +77,15 @@ from gateway.api.deps.identity import (
     get_oidc_connection_service,
     require_deployment_operator_or_absent,
 )
+from gateway.api.deps.invitations import (
+    InvitationAcceptanceDep,
+    InvitationLinkDep,
+    InvitationsDep,
+    build_invitation_link,
+    get_invitation_acceptance,
+    get_invitation_link,
+    get_invitations,
+)
 from gateway.api.deps.organizations import (
     InvitationClaimSettingsDep,
     InvitationMailLimitDep,
@@ -99,6 +108,7 @@ from gateway.api.deps.organizations import (
     get_workspace_access,
     get_workspace_activation_service,
     get_workspace_service,
+    invitation_policy_of,
 )
 from gateway.api.deps.ports import (
     AgentModelRecommenderPortDep,
@@ -1204,8 +1214,11 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "InvitationAcceptanceDep",
     "InvitationClaimSettingsDep",
+    "InvitationLinkDep",
     "InvitationMailLimitDep",
+    "InvitationsDep",
     "MaintenanceModeDep",
     "McpCatalogServiceDep",
     "McpServerRequestServiceDep",
@@ -1270,6 +1283,7 @@ __all__ = [
     "build_health_check_service",
     "build_invitation_cleanup",
     "build_invitation_delivery",
+    "build_invitation_link",
     "build_mcp_catalog_service",
     "build_search_tool_refresh",
     "build_search_tool_service",
@@ -1304,10 +1318,14 @@ __all__ = [
     "get_growth_signal_port",
     "get_identity_provider_port",
     "get_identity_service",
+    "get_invitation_acceptance",
     "get_invitation_claim_settings",
+    "get_invitation_link",
     "get_invitation_mail_limit",
+    "get_invitations",
     "get_log_writer",
     "get_membership_listener",
+    "invitation_policy_of",
     "get_membership_organization_service",
     "get_model_provider_port",
     "get_oauth_app_service",
