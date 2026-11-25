@@ -4,8 +4,14 @@ The fixture exists so a test that merely needs a member does not drive the
 endpoint to get one. That is only safe while the two agree, because a fixture
 free to invent a state the application never produces would let every test
 built on it assert against one.
+
+Compared here: every column that says what the address proved, whether the
+account can sign in, which organization it belongs to, what it may do there,
+and whether it can own a key. Ids and timestamps differ by construction and
+are not compared.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -17,6 +23,7 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import OrganizationMember
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.users import User as AttributionUser
 
 from .conftest import SeededMember
 
@@ -45,7 +52,7 @@ def added(client: TestClient, master_key_header: dict[str, str]) -> dict[str, An
 
 
 def test_a_seeded_identity_matches_one_the_endpoint_adds(
-    seed_member: Any, added: dict[str, Any], db_session: Session
+    seed_member: Callable[..., SeededMember], added: dict[str, Any], db_session: Session
 ) -> None:
     """Every column that says what the address proved, and whether it can sign in."""
     seed_member(email=SEEDED)
@@ -57,7 +64,9 @@ def test_a_seeded_identity_matches_one_the_endpoint_adds(
     assert (seeded.full_name, seeded.is_superuser) == (endpoint.full_name, endpoint.is_superuser)
 
 
-def test_a_seeded_identity_proves_nothing_about_the_address(seed_member: Any, db_session: Session) -> None:
+def test_a_seeded_identity_proves_nothing_about_the_address(
+    seed_member: Callable[..., SeededMember], db_session: Session
+) -> None:
     """Stated outright, so the pair above cannot pass by both sides drifting together."""
     seed_member(email=SEEDED)
 
@@ -69,8 +78,34 @@ def test_a_seeded_identity_proves_nothing_about_the_address(seed_member: Any, db
     assert seeded.hashed_password is None
 
 
+def test_a_seeded_identity_can_own_a_key(seed_member: Callable[..., SeededMember], db_session: Session) -> None:
+    """Keys, budgets and usage hang off a request-plane row that nothing joins to the identity.
+
+    Without it the member is listed but cannot be given a key, which is a state
+    the endpoint never leaves a member in.
+    """
+    seeded = seed_member(email=SEEDED)
+
+    owner = db_session.get(AttributionUser, str(seeded.user_id))
+    assert owner is not None
+    assert owner.alias == SEEDED
+    assert owner.deleted_at is None
+
+
+def test_a_seeded_identity_lands_in_the_same_organization(
+    seed_member: Callable[..., SeededMember], added: dict[str, Any], db_session: Session
+) -> None:
+    """The two organization columns an identity carries, which decide what it sees on sign-in."""
+    seed_member(email=SEEDED)
+
+    seeded, endpoint = _identity(db_session, SEEDED), _identity(db_session, ADDED)
+
+    assert seeded.active_organization_id == endpoint.active_organization_id
+    assert seeded.default_organization_id == endpoint.default_organization_id
+
+
 def test_a_seeded_membership_matches_one_the_endpoint_adds(
-    seed_member: Any, added: dict[str, Any], db_session: Session
+    seed_member: Callable[..., SeededMember], added: dict[str, Any], db_session: Session
 ) -> None:
     """The organization a member lands in, the role they hold, and whether they are active."""
     seeded_member: SeededMember = seed_member(email=SEEDED)
@@ -85,7 +120,9 @@ def test_a_seeded_membership_matches_one_the_endpoint_adds(
     )
 
 
-def test_the_ids_it_returns_are_the_rows_it_wrote(seed_member: Any, db_session: Session) -> None:
+def test_the_ids_it_returns_are_the_rows_it_wrote(
+    seed_member: Callable[..., SeededMember], db_session: Session
+) -> None:
     """Callers read members back by these, so a wrong one fails somewhere else entirely."""
     seeded_member: SeededMember = seed_member(email=SEEDED, role="admin")
 
@@ -95,3 +132,15 @@ def test_the_ids_it_returns_are_the_rows_it_wrote(seed_member: Any, db_session: 
     assert seeded_member.user_id == identity.id
     assert seeded_member.organization_member_id == membership.id
     assert membership.role == "admin"
+
+
+def test_seeding_one_address_twice_says_so(seed_member: Callable[..., SeededMember]) -> None:
+    """A duplicate seed otherwise fails on the unique index, which leaves the session unusable.
+
+    Every later read in that test then reports the broken session rather than
+    the duplicate, so the test that caused it is not the one that reports it.
+    """
+    seed_member(email=SEEDED)
+
+    with pytest.raises(AssertionError, match="already has an identity"):
+        seed_member(email=SEEDED)

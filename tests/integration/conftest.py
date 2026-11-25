@@ -21,10 +21,11 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, MetaData, create_engine, text
+from sqlalchemy import Engine, MetaData, create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlmodel import col
 from testcontainers.postgres import PostgresContainer
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -44,8 +45,9 @@ from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
-from gateway.models.tenancy import OrganizationMember
+from gateway.models.tenancy import OrganizationMember, OrganizationMemberRole
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.users import User as AttributionUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
@@ -726,7 +728,7 @@ def live_server(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> Gene
 
 @dataclass(frozen=True)
 class SeededMember:
-    """A member seeded straight into the database, with the ids its callers read back."""
+    """The identity and membership rows one seeded member is made of."""
 
     user_id: uuid.UUID
     organization_member_id: uuid.UUID
@@ -736,24 +738,40 @@ class SeededMember:
 def seed_member(
     db_session: Session, client: TestClient, master_key_header: dict[str, str]
 ) -> Callable[..., SeededMember]:
-    """Put a member at an address into the caller's active organization, without a route.
+    """Put a member at an address into the operator's organization, writing the rows directly.
 
-    For a test that needs a member to exist before the behavior it covers runs.
-    A test of adding a member exercises the endpoint instead.
+    Yields a function taking the address and the role, for a test that needs a
+    member to exist before the behavior it covers runs.
+
+    The organization is resolved once, here, rather than per call: the request
+    that resolves it also provisions the tenancy root on a deployment that has
+    none, and a dashboard session set later in the test would otherwise answer
+    for its own organization instead of the operator's.
+
+    NOTE: Rows are written on ``db_session`` and committed, so a caller holding
+    an open write on the organization row elsewhere will block against itself.
 
     NOTE: The seeded identity holds the address and nothing else: no password,
-    ``email_verified_at`` unset and ``email_proven_at`` unset. That is deliberate
-    rather than incomplete. An address is recorded as proved only where whoever
-    controls it took part, and nobody did here.
-    """
+    ``email_verified_at`` unset and ``email_proven_at`` unset. An address is
+    recorded as proved only where whoever controls it took part, and nobody did
+    here.
 
-    def _seed(*, email: str, role: str = "member") -> SeededMember:
-        active = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
-        assert active.status_code == 200, active.text
-        organization_id = uuid.UUID(active.json()["organization"]["id"])
+    NOTE: Each call mints an identity, so an address must be seeded once per
+    test. Seeding one twice is a mistake rather than a case to handle.
+    """
+    active = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
+    assert active.status_code == 200, active.text
+    organization_id = uuid.UUID(active.json()["organization"]["id"])
+
+    def _seed(*, email: str, role: OrganizationMemberRole = "member") -> SeededMember:
+        address = email.strip().lower()
+        # Matched the way the application matches an address, because the unique
+        # index is case-sensitive and an exact match would miss a row it holds.
+        held = db_session.scalars(select(TenancyUser).where(func.lower(col(TenancyUser.email)) == address)).first()
+        assert held is None, f"{address} already has an identity, so seeding it again would conflict"
 
         user = TenancyUser(
-            email=email.strip().lower(),
+            email=address,
             full_name=None,
             active_organization_id=organization_id,
             default_organization_id=organization_id,
@@ -762,6 +780,9 @@ def seed_member(
         db_session.flush()
         membership = OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active")
         db_session.add(membership)
+        # Keys, budgets and usage hang off this row rather than off the identity,
+        # and nothing joins the two, so a member without one cannot own a key.
+        db_session.add(AttributionUser(user_id=str(user.id), alias=address))
         db_session.commit()
         return SeededMember(user_id=user.id, organization_member_id=membership.id)
 
