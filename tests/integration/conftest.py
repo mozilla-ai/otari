@@ -803,6 +803,11 @@ def signed_in_member(
     NOTE: The client keeps the cookie for the rest of the test, so a later
     request made without clearing it speaks for this member and not the
     operator, whatever credential it carries.
+
+    NOTE: The address is verified, unlike the one :func:`seed_member` leaves.
+    Signing in refuses an unverified address, and every path that mints a
+    session stamps it, so a member holding one has always verified. It stays
+    unproved, which is the state a claim through a shared link leaves.
     """
 
     def _signed_in(*, email: str, role: OrganizationMemberRole = "member") -> TenancyUser:
@@ -811,6 +816,7 @@ def signed_in_member(
         assert identity is not None
         token = f"session-{uuid.uuid4().hex}"
         now = datetime.now(UTC)
+        identity.email_verified_at = now
         db_session.add(
             DashboardSession(
                 token_hash=hash_session_token(token),

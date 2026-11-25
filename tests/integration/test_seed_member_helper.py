@@ -149,3 +149,19 @@ def test_seeding_one_address_twice_says_so(seed_member: Callable[..., SeededMemb
 
     with pytest.raises(AssertionError, match="already has an identity"):
         seed_member(email=SEEDED)
+
+
+def test_a_signed_in_member_has_verified_the_address(
+    signed_in_member: Callable[..., TenancyUser], db_session: Session
+) -> None:
+    """Signing in refuses an unverified address, so a member holding a session has verified.
+
+    Unproved all the same: verifying says the address became usable, not that
+    whoever controls it took part.
+    """
+    signed_in_member(email=SEEDED)
+
+    identity = _identity(db_session, SEEDED)
+
+    assert identity.email_verified_at is not None
+    assert identity.email_proven_at is None
