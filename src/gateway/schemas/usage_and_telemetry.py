@@ -261,6 +261,9 @@ class UsageEntry(BaseModel):
     # are excluded from `error_count` and from `request_count`, since the request
     # they belong to is counted once by the attempt that served it.
     policy_name: str | None = None
+    # The model name the caller sent, before an alias or a policy resolved it into
+    # `model`; null on rows written before it was recorded.
+    requested_model: str | None = None
     selection_reason: str | None = None
     attempt_position: int | None = None
     attempt_count: int | None = None
@@ -314,6 +317,7 @@ class UsageEntry(BaseModel):
                 None if log.stream_cut_by else output_tokens_per_second(log.completion_tokens, log.latency_ms)
             ),
             policy_name=log.policy_name,
+            requested_model=log.requested_model,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
