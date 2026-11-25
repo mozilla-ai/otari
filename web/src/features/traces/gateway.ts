@@ -176,7 +176,12 @@ export function laterCalls(
   return {
     answer: later.find((other) => other.outcome === "ok"),
     next: later[0],
-    last: later.length === 1 && later[0].outcome === "error",
+    // A recovered next call is not the request's end, even when the call routing
+    // moved on to is missing from the trace.
+    last:
+      later.length === 1 &&
+      later[0].outcome === "error" &&
+      !later[0].recovered,
   }
 }
 

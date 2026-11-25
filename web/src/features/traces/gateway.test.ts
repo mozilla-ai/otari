@@ -317,6 +317,17 @@ describe("gatewayEvents, a fallback read from what followed it", () => {
     )
   })
 
+  it("says no candidate answered only when the next call ended the request", () => {
+    const [first] = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      failed("b", 2, "status_429", "gpt-oss-120b"),
+    ])
+
+    expect(first.detail).toBe(
+      "Failed with HTTP 400. Routing tried gpt-oss-120b, which failed with HTTP 429.",
+    )
+  })
+
   it("does not join calls that carry no request id", () => {
     const spans = [
       failed("a", 1, "status_400", "gpt-5"),
