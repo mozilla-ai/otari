@@ -580,12 +580,12 @@ With `claude-code` or `codex`, registers the hook in the current Git repository,
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`; `pi` installs the pi-otari extension (see [Registering it for pi](#registering-it-for-pi)). |
-| `--repo-only` / `--no-repo-only` | keep the existing registration's choice, else off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. `--no-repo-only` removes the flag. Refused with `--harness pi`. |
+| `--repo-only` / `--no-repo-only` | keep the existing `PreToolUse` registration's choice, else off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. `--no-repo-only` removes the flag. Refused with `--harness pi`. |
 
 Re-running `setup`:
 
 - rewrites the registered command in place, matching an existing entry by the executable's name and `hook` alone (an entry naming otari on `PATH` and one naming an install path are the same registration);
-- keeps `--repo-only` when the existing registration has it and neither flag is passed, and says so; pass `--no-repo-only` to remove it;
+- keeps `--repo-only` when the existing `PreToolUse` registration has it and neither flag is passed, and says so; pass `--no-repo-only` to remove it;
 - drops any other flag added to the settings file by hand;
 - moves otari's command to an entry of its own where an entry holds it beside another hook's, leaving that entry's matcher alone;
 - rewrites every entry in the event that runs otari hook, not only the first.
