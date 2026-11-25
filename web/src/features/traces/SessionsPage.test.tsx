@@ -661,7 +661,7 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", {
-        name: /gpt-5 failed, a later attempt answered/,
+        name: /^Fallback\s?gpt-5 failed\s?Failed with error\. Routing tried the next candidate\./,
       }),
     )
 
@@ -669,7 +669,7 @@ describe("SessionsPage", () => {
       await within(peek).findByRole("button", { name: "Attributes" }),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByText("error, recovered by a fallback"),
+      within(peek).getByText("error, routing tried the next candidate"),
     ).toBeInTheDocument()
   })
 
