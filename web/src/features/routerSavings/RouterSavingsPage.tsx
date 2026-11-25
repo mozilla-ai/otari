@@ -6,6 +6,7 @@ import { ChartLegend, TrendChart } from "@/design-system/metrics/charts"
 import { KpiCell } from "@/design-system/metrics/KpiCell"
 import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { Segmented } from "@/design-system/navigation/Segmented"
+import { useViewWorkspace } from "@/features/observe/viewWorkspace"
 import { useCurrentOwner } from "@/features/organization/attribution"
 import {
   AgentTypeBreakdown,
@@ -37,10 +38,7 @@ import {
   formatSpend,
 } from "@/shared/helpers/format"
 import { useUrlState } from "@/shared/helpers/urlState"
-import {
-  useNarrowingWorkspace,
-  useSelectedWorkspace,
-} from "@/shared/hooks/SelectedWorkspace"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const WHO = [
   { value: "", label: "Everyone" },
@@ -65,7 +63,7 @@ const CHART_SERIES = [
  * What the subagent router saved: the tokens routed subagents consumed, priced
  * at the models they ran on and at the models they would have started on, less
  * what the recommendations cost. The server decides whose decisions the caller
- * reads, within the selected workspace; "Just me" narrows them to the caller's
+ * reads, within the view's workspace; "Just me" narrows them to the caller's
  * own. A view of Sessions, so the title above it is the layout's.
  */
 export function RouterSavingsPage() {
@@ -73,7 +71,7 @@ export function RouterSavingsPage() {
   const [now, refreshClock] = usePageClock()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const owner = useCurrentOwner()
-  const workspaceId = useNarrowingWorkspace()
+  const workspaceId = useViewWorkspace()
   const { isUnknown: isWorkspaceUnknown } = useSelectedWorkspace()
 
   const period = periodFromUrl(get("period"))
