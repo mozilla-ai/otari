@@ -22,7 +22,8 @@ picked beside the window when there is more than one:
 - **Failures**: the share of requests that failed.
 - Billed tokens, and how much of the input was read from cache.
 - **People active**: how many members spent anything in the window, and how
-  many sessions ran. **See the sessions** opens them.
+  many sessions ran. **See the sessions** opens them, on the workspace Home
+  shows or on all of them.
 
 **Where it went** then breaks the window's spend down by **People**,
 **API keys**, **Models**, **Providers** or **Workspaces** (offered when there is
@@ -64,6 +65,11 @@ which stay in place when you switch between them and are kept in the URL.
 only, so it stays behind when you switch to Sessions. On Requests, dragging
 across the chart narrows the range. Both views show everyone's requests in the workspace; pick
 yourself under **User** to see only yours.
+
+The views follow the workspace selected in the dashboard. A link from Home opens
+them on the workspace Home showed instead, or on all workspaces, and a
+**Workspace** control beside the title says which and changes it. Picking a
+workspace in the dashboard's switcher goes back to following it.
 
 The **Router savings** tab beside them has its own period control and none of
 these filters; it is covered under
