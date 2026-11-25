@@ -6,7 +6,8 @@ import {
 import { act, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ConnectionStatus } from "@/app/ConnectionStatus"
+import { announce } from "@/app/announce"
+import { ConnectionStatus, RECONNECTED_MS } from "@/app/ConnectionStatus"
 import { apiFetch } from "@/shared/api/client"
 
 // Drives one management request so the query cache carries a real success/error,
@@ -53,17 +54,43 @@ function isLiveness(input: RequestInfo | URL): boolean {
   return String(input).endsWith("/health/liveness")
 }
 
-describe("ConnectionStatus", () => {
-  afterEach(() => vi.restoreAllMocks())
+vi.mock("@/app/announce", () => ({ announce: vi.fn() }))
 
-  it("alerts when the gateway is unreachable", async () => {
+const DOWN = /Can’t reach the gateway\./
+const band = () => document.querySelector("[data-connection-band]")
+const findDown = () => screen.findByText(DOWN)
+const getDown = () => screen.getByText(DOWN)
+const queryDown = () => screen.queryByText(DOWN)
+
+describe("ConnectionStatus", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(announce).mockClear()
+  })
+
+  it("shows a band when the gateway is unreachable", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
       new TypeError("Failed to fetch"),
     )
     renderWithProbe()
 
-    const alert = await screen.findByRole("alert")
-    expect(alert).toHaveTextContent(/Can’t reach the gateway/)
+    await findDown()
+    expect(band()).toHaveTextContent(
+      /^Can’t reach the gateway\. Showing what loaded before \d\d:\d\d\. Changes won’t save until it answers\.Retrying$/,
+    )
+    // A band in the flow, not a toast floated over the page, and no live
+    // region of its own: its sentence is announced once.
+    expect(band()).toHaveClass("sticky", "top-0")
+    expect(band()).not.toHaveClass("fixed")
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(vi.mocked(announce).mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^Can’t reach the gateway\. Showing what loaded before \d\d:\d\d\. Changes won’t save until it answers\.$/,
+        ),
+      ],
+    ])
     // One failed request is only the suspicion; the alarm follows the probe and
     // its retries failing too. The failed request itself is not sent again: it
     // may be a heavy read, and the probe is what rechecks.
@@ -76,19 +103,19 @@ describe("ConnectionStatus", () => {
     ).toHaveLength(1)
   })
 
-  it("keeps the alert through a cache write while the gateway is unreachable", async () => {
+  it("keeps the band through a cache write while the gateway is unreachable", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
       new TypeError("Failed to fetch"),
     )
     const { client } = renderWithProbe()
-    await screen.findByRole("alert")
+    await findDown()
 
     // `setQueryData` reaches no gateway, so it is not an answer from one.
     await act(async () => {
       client.setQueryData(["optimistic"], { ok: true })
     })
 
-    expect(screen.getByRole("alert")).toBeInTheDocument()
+    expect(getDown()).toBeInTheDocument()
   })
 
   it("stays quiet when one request drops but the gateway answers", async () => {
@@ -116,7 +143,7 @@ describe("ConnectionStatus", () => {
     await waitFor(() => expect(livenessAnswered).toBe(true))
     // Let the probe's answer settle into the cache before reading the DOM.
     await act(async () => {})
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(queryDown()).not.toBeInTheDocument()
   })
 
   it("clears itself once the gateway responds again, and re-runs what failed", async () => {
@@ -131,7 +158,7 @@ describe("ConnectionStatus", () => {
       })
       const { client } = renderWithProbe()
 
-      await screen.findByRole("alert")
+      await findDown()
 
       online = true
       // Past the probe's recheck interval (`GATEWAY_LIVENESS_RECHECK_MS`).
@@ -139,18 +166,29 @@ describe("ConnectionStatus", () => {
         await vi.advanceTimersByTimeAsync(5_000)
       })
 
-      await waitFor(() =>
-        expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
-      )
+      await waitFor(() => expect(queryDown()).not.toBeInTheDocument())
+      // It says so for a moment while what failed refetches, then goes.
+      expect(band()).toHaveTextContent("Reconnected. Refreshing this page.")
       await waitFor(() =>
         expect(client.getQueryState(["probe"])?.status).toBe("success"),
       )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECTED_MS - 100)
+      })
+      expect(band()).toHaveTextContent("Reconnected.")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(band()).toBeNull()
+      expect(vi.mocked(announce).mock.calls.at(-1)).toEqual([
+        "Reconnected. Refreshing this page.",
+      ])
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it("holds the alert through each recheck while the gateway stays down", async () => {
+  it("holds the band through each recheck while the gateway stays down", async () => {
     // The probe has never held data, so a recheck puts it back in `pending` for
     // the length of its retries. A real delay keeps that window open long enough
     // to see.
@@ -165,19 +203,19 @@ describe("ConnectionStatus", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_500)
       })
-      expect(screen.getByRole("alert")).toBeInTheDocument()
+      expect(getDown()).toBeInTheDocument()
       for (let elapsed = 0; elapsed < 12_000; elapsed += 250) {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(250)
         })
-        expect(screen.getByRole("alert")).toBeInTheDocument()
+        expect(getDown()).toBeInTheDocument()
       }
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it("alerts within seconds when the gateway hangs rather than refusing", async () => {
+  it("shows the band within seconds when the gateway hangs rather than refusing", async () => {
     // A stalled gateway times requests out instead of failing them, so the
     // alarm waits on the probe's own deadline, not `apiFetch`'s 30s.
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -206,7 +244,27 @@ describe("ConnectionStatus", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000 + 3 * 5_000 + 500)
       })
-      expect(screen.getByRole("alert")).toBeInTheDocument()
+      expect(getDown()).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("holds the time it went down while later requests keep failing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 25, 14, 2, 0))
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(
+        new TypeError("Failed to fetch"),
+      )
+      renderWithProbe()
+      await findDown()
+      expect(band()).toHaveTextContent("before 14:02.")
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3 * 60_000)
+      })
+      expect(band()).toHaveTextContent("before 14:02.")
     } finally {
       vi.useRealTimers()
     }
@@ -220,9 +278,7 @@ describe("ConnectionStatus", () => {
     renderWithProbe()
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
-    await waitFor(() =>
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
-    )
+    await waitFor(() => expect(queryDown()).not.toBeInTheDocument())
     expect(
       vi.mocked(globalThis.fetch).mock.calls.some(([url]) => isLiveness(url)),
     ).toBe(false)

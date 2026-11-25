@@ -853,7 +853,6 @@ function AppShellChrome() {
           you; the pages in front of one have no actor to name. */}
       <TelemetryIdentity />
       <AutoUpdate />
-      <ConnectionStatus />
       <PricingWarning />
       <ShellBanner />
       <UnpricedUsageWarning />
@@ -1363,6 +1362,9 @@ function AppShellChrome() {
                 : undefined
             }
           >
+            {/* First in `main`, which is what scrolls, so the band can pin
+                itself to the top of the pane while the page moves under it. */}
+            <ConnectionStatus />
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
               {access === "blocked" ? (
                 <Navigate to="/" replace />
