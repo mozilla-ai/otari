@@ -177,6 +177,12 @@ async def exchange(body: Annotated[AppTokenRequest, Form()], service: OAuthAppSe
     status_code=status.HTTP_201_CREATED,
     response_model=ClientRegistrationResponse,
     responses={status.HTTP_400_BAD_REQUEST: {"model": OAuthErrorResponse}},
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": ClientRegistrationRequest.model_json_schema()}},
+        }
+    },
 )
 async def register_client(request: Request, service: OAuthAppServiceDep) -> JSONResponse:
     """Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.

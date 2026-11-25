@@ -10,7 +10,9 @@ A call without a live token is answered 401 naming this server's protected-resou
 itself and have its person sign in rather than be handed a token.
 """
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -31,8 +33,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from gateway.api.deps.auth import build_personal_access_token_service
-from gateway.api.deps.identity import oauth_app_issuer
+from gateway.api.deps import build_personal_access_token_service, oauth_app_issuer
 from gateway.auth.models import PERSONAL_ACCESS_TOKEN_PREFIX
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import create_unit_of_work
@@ -46,6 +47,7 @@ _AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server"
 _MAX_RESULT_CHARS = 100_000
 # The loopback request's origin. Only the in-process transport ever sees it.
 _LOOPBACK_BASE_URL = "http://otari.internal"
+_LOOPBACK_TIMEOUT_SECONDS = 60
 
 _INSTRUCTIONS = """\
 Read-only access to an Otari AI gateway, as the person whose access token you hold: their \
@@ -105,23 +107,34 @@ def _refusal(response: httpx.Response) -> str:
 
 def build_mcp_server(app: ASGIApp) -> MCPServer[Any]:
     """The MCP server, whose tools read through ``app`` with the caller's own token."""
+    # MCPServer calls logging.basicConfig with a Rich handler on the root logger, which would print every
+    # library's INFO lines beside Otari's own logging, so the root logger is put back as it was.
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
     server: MCPServer[Any] = MCPServer(
         name="otari",
         title="Otari",
         instructions=_INSTRUCTIONS,
         version=__version__,
     )
+    root.handlers[:] = handlers
+    root.setLevel(level)
 
     async def get(path: str, params: dict[str, Any] | None = None) -> str:
         access = get_access_token()
         if access is None:
             raise ToolError("Not authenticated")
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url=_LOOPBACK_BASE_URL, timeout=60
-        ) as client:
-            response = await client.get(
-                f"{API_ROOT}{path}", params=params, headers={"Authorization": f"Bearer {access.token}"}
-            )
+        # ASGITransport awaits the app directly, so httpx's own timeout never fires here.
+        try:
+            async with (
+                asyncio.timeout(_LOOPBACK_TIMEOUT_SECONDS),
+                httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=_LOOPBACK_BASE_URL) as client,
+            ):
+                response = await client.get(
+                    f"{API_ROOT}{path}", params=params, headers={"Authorization": f"Bearer {access.token}"}
+                )
+        except TimeoutError:
+            raise ToolError(f"Otari did not answer within {_LOOPBACK_TIMEOUT_SECONDS} seconds") from None
         if response.is_error:
             raise ToolError(_refusal(response))
         return _render(response)

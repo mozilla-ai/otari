@@ -771,7 +771,7 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
 
 
 def check_mcp_server(base_url: str, admin: dict[str, str]) -> None:
-    """Mint an access token and read the organization's usage through ``/mcp`` with it."""
+    """Mint an access token, read the organization's usage through ``/mcp`` with it, and delete it."""
     status, created = _request(
         "POST", f"{base_url}{API_ROOT}/auth/access-tokens", headers=admin, payload={"name": "smoke"}
     )
@@ -788,10 +788,19 @@ def check_mcp_server(base_url: str, admin: dict[str, str]) -> None:
         headers=headers,
         payload={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": call},
     )
-    _expect(status, 200, "POST /mcp tools/call", answer)
-    result = answer.get("result") if isinstance(answer, dict) else None
-    if not isinstance(result, dict) or result.get("isError") or "totals" not in str(result.get("content")):
-        raise SmokeFailure(f"The MCP server did not answer get_usage_summary: {answer!r}")
+    revoke_url = f"{base_url}{API_ROOT}/auth/access-tokens/{created['id']}"
+    try:
+        _expect(status, 200, "POST /mcp tools/call", answer)
+        try:
+            result = answer["result"]
+            totals = json.loads(result["content"][0]["text"])["totals"]
+        except (TypeError, LookupError, ValueError):
+            raise SmokeFailure(f"The MCP server did not answer get_usage_summary: {answer!r}") from None
+        if result.get("isError") or not totals.get("total_tokens"):
+            raise SmokeFailure(f"get_usage_summary through /mcp shows none of the completion's usage: {answer!r}")
+    finally:
+        status, revoked = _request("DELETE", revoke_url, headers=admin)
+        _expect(status, 204, f"DELETE {API_ROOT}/auth/access-tokens/{{id}}", revoked)
     log("An access token reads usage through the MCP server")
 
 

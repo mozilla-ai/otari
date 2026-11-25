@@ -121,9 +121,13 @@ describe("AccessTokensCard", () => {
   })
 
   it("deletes a token after confirming", async () => {
+    let deleted = false
     const fetchMock = mockApi({
-      [LIST]: () => jsonResponse({ data: [TOKEN] }),
-      [DELETE]: () => new Response(null, { status: 204 }),
+      [LIST]: () => jsonResponse({ data: deleted ? [] : [TOKEN] }),
+      [DELETE]: () => {
+        deleted = true
+        return new Response(null, { status: 204 })
+      },
     })
     const user = userEvent.setup()
     renderCard()
@@ -145,5 +149,11 @@ describe("AccessTokensCard", () => {
         ),
       ).toBe(true),
     )
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    )
+    expect(
+      await screen.findByText("You have no access tokens."),
+    ).toBeInTheDocument()
   })
 })

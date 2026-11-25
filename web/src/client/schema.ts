@@ -31604,7 +31604,19 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Client Name
+                     * @description The name the consent screen shows, marked unverified.
+                     */
+                    client_name?: string | null;
+                    /** Redirect Uris */
+                    redirect_uris: string[];
+                };
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {

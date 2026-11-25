@@ -50,9 +50,7 @@ function TokenRow({
       <div className="min-w-0">
         <p className="truncate text-body">
           {token.name}{" "}
-          <span className="font-mono text-xs text-muted">
-            …{token.token_suffix}
-          </span>
+          <span className="font-mono text-caption">…{token.token_suffix}</span>
         </p>
         <p className="text-caption">
           Created {formatDate(token.created_at)}
@@ -184,6 +182,7 @@ export function AccessTokensCard() {
           <Button
             ref={createButton}
             variant="ghost"
+            className="shrink-0"
             onPress={() => {
               create.reset()
               setIsCreating(true)

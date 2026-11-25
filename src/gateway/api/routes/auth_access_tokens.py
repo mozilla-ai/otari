@@ -2,10 +2,14 @@
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from gateway.api.deps import CurrentIdentity, PersonalAccessTokenServiceDep
-from gateway.api.deps.auth import is_personal_access_token_request
+from gateway.api.deps import (
+    CurrentIdentity,
+    PersonalAccessTokenServiceDep,
+    is_personal_access_token_request,
+    verify_master_key,
+)
 from gateway.core.oauth_apps import APP_KEY_LIFETIMES
 from gateway.schemas.identity.access_tokens import (
     AccessTokenCreate,
@@ -14,7 +18,7 @@ from gateway.schemas.identity.access_tokens import (
     AccessTokensPublic,
 )
 
-router = APIRouter(prefix="/auth/access-tokens", tags=["auth"])
+router = APIRouter(prefix="/auth/access-tokens", tags=["auth"], dependencies=[Depends(verify_master_key)])
 
 
 @router.get("")

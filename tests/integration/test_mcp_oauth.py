@@ -142,6 +142,14 @@ def test_a_registered_client_is_given_the_persons_access_token(client: TestClien
     assert replayed.json()["error"] == "invalid_grant"
 
 
+def test_the_revocation_endpoint_ends_an_access_token(client: TestClient, world: _World) -> None:
+    client_id = _register(client).json()["client_id"]
+    token = _redeem(client, client_id, _code(_approve(client, world, client_id))).json()["access_token"]
+    revoked = client.post(f"{API_ROOT}/oauth/apps/revoke", data={"token": token, "client_id": client_id})
+    assert revoked.status_code == 200, revoked.text
+    assert client.get(f"{API_ROOT}/organizations/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
 def test_a_registered_client_is_never_given_an_api_key(client: TestClient, world: _World) -> None:
     client_id = _register(client).json()["client_id"]
     approved = _approve(

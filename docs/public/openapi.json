@@ -46432,6 +46432,45 @@
       "post": {
         "description": "Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.\n\nWhat it is approved for redeems only to the approving person's read-only access token, and\nthe consent screen names it as unverified. Served where the MCP server is on.",
         "operationId": "oauth-apps-register_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "RFC 7591 client metadata. Only what Otari uses is read; anything else is ignored.",
+                "properties": {
+                  "client_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name the consent screen shows, marked unverified.",
+                    "title": "Client Name"
+                  },
+                  "redirect_uris": {
+                    "items": {
+                      "maxLength": 2048,
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "title": "Redirect Uris",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "redirect_uris"
+                ],
+                "title": "ClientRegistrationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "content": {

@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 from apron_auth.pkce import generate_code_challenge
 
+from gateway.auth.models import PERSONAL_ACCESS_TOKEN_PREFIX
 from gateway.core.oauth_apps import APP_KEY_LIFETIMES, open_app_site, redirect_matches
 from gateway.core.settings.identity import OAuthAppConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -327,5 +328,8 @@ class OAuthAppService:
             return IssuedCredential(token=key, scopes=held, expires_in=None, manage_path="/keys")
 
     async def revoke(self, token: str) -> None:
-        """Revoke only the presented API key; an unknown token is a successful no-op."""
-        await self.keys.revoke_key_by_token(token)
+        """Revoke only the presented API key or access token; an unknown token is a successful no-op."""
+        if token.startswith(PERSONAL_ACCESS_TOKEN_PREFIX):
+            await self.access_tokens.revoke_presented(token)
+        else:
+            await self.keys.revoke_key_by_token(token)

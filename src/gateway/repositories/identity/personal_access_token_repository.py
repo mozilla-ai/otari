@@ -74,6 +74,10 @@ class PersonalAccessTokenRepository(BaseRepository[PersonalAccessToken, Never, N
         """Stage the removal of every token on the deployment."""
         await self.db.execute(delete(PersonalAccessToken))
 
+    async def delete_by_hash(self, token_hash: str) -> None:
+        """Stage the removal of the token stored under this hash, if any."""
+        await self.db.execute(delete(PersonalAccessToken).where(col(PersonalAccessToken.token_hash) == token_hash))
+
     async def find_by_hash(self, token_hash: str) -> PersonalAccessToken | None:
         """The token stored under this hash."""
         result = await self.db.execute(

@@ -48,6 +48,8 @@ class PersonalAccessTokenService:
         token = PERSONAL_ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
         now = self.clock()
         async with self.uow:
+            # Locked so two concurrent creates cannot both count one below the limit.
+            await self.users.get_locked(user.id)
             if len(await self.tokens.list_for_user(user.id)) >= MAX_PERSONAL_ACCESS_TOKENS:
                 raise PersonalAccessTokenLimitReachedError(MAX_PERSONAL_ACCESS_TOKENS)
             row = await self.tokens.add(
@@ -67,7 +69,7 @@ class PersonalAccessTokenService:
             PersonalAccessTokenLimitReachedError: the account already holds the most it may.
         """
         async with self.uow:
-            owner = await self.users.get(user_id)
+            owner = await self.users.get_locked(user_id)
             if owner is None or not owner.is_active:
                 return None
             _row, token = await self.create(owner, name=name[:MAX_ACCESS_TOKEN_NAME_LENGTH], lifetime=lifetime)
@@ -87,6 +89,11 @@ class PersonalAccessTokenService:
         async with self.uow:
             if not await self.tokens.delete_for_user(user.id, token_id):
                 raise PersonalAccessTokenNotFoundError(token_id)
+
+    async def revoke_presented(self, token: str) -> None:
+        """Delete the token presented, whoever holds it; an unknown token is a no-op."""
+        async with self.uow:
+            await self.tokens.delete_by_hash(_hash(token))
 
     async def authenticate(self, token: str) -> User | None:
         """The account a stored, unexpired token speaks for, or None.
