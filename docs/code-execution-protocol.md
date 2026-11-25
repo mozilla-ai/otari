@@ -203,6 +203,9 @@ A client is not required to expose every kind. Otari currently drives only
 `code_execution`, and advertises exactly that one tool to the model; a backend
 MUST still accept the kind it is asked for and MUST refuse an unknown one.
 
+The `code` Otari sends in a `code_execution` call is Python source, which is
+what the reference backend's interpreter runs.
+
 ## Result blocks
 
 An `Execute` response carries the outcome in a **result block**, under a

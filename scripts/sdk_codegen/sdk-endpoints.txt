@@ -569,6 +569,10 @@ POST /api/v1/organizations/me/provider-keys/{key_id}/archive                  # 
 POST /api/v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
 DELETE /api/v1/organizations/me/provider-keys/{key_id}/default                # dashboard-only
+# Re-sealing every tenant's stored credentials after OTARI_SECRET_KEY changes.
+# Deployment-wide rather than tenant-scoped, and run by hand from the rotation
+# procedure, like the hosted-provider and search-tool halves of it.
+POST /api/v1/organization-provider-keys/reencrypt                             # operator surface
 # The models offered on one of those keys, their rates and their serving
 # switches (otari#643 follow-up). Same surface, same reason: an SDK caller sends
 # a model and a key, and which of an organization's adopted models are served

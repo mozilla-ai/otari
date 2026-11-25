@@ -1544,6 +1544,8 @@ def _hosted_candidate(
                 country_gate=ctx.country_gate,
             )
         except HostedAccessDeniedError as exc:
+            if ctx.plan is not None and ctx.plan.automatic is not None:
+                ctx.plan.automatic.refuse(attempt)
             selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=model_not_allowed_detail(selector))
@@ -1567,6 +1569,8 @@ def _hosted_candidate(
         hosted = replace(
             attempt, instance=served.instance, provider=served.provider, kwargs=served.kwargs, deployment_paid=True
         )
+        if ctx.plan is not None and ctx.plan.automatic is not None:
+            ctx.plan.automatic.dispatched_as(attempt, hosted)
         await _grow_reservation(
             ctx,
             hosted.instance,
@@ -2723,6 +2727,7 @@ async def resolve_request_context(
             region=preferred_region(config.automatic_routing, raw_request.headers),
             mode=f"{adapter.endpoint}:{'stream' if streaming else 'completion'}",
             own=organization_offerings(workspace_id=workspace_id, organization_id=organization_id),
+            tenant=str(workspace_id),
         )
         if plan.automatic is not None:
             on_request_finished(raw_request, plan.automatic.close)
@@ -5146,6 +5151,7 @@ async def record_usage(
     deployment_paid_cost = (
         None if model_cost is None and tool_cost is None else (model_cost or Decimal(0)) + (tool_cost or Decimal(0))
     )
+    usage_log.deployment_paid_cost = deployment_paid_cost
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced
@@ -6307,7 +6313,9 @@ def build_streaming_response(
     async def _on_error(exc: BaseException) -> None:
         report_refusal(exc)
         if automatic_observation is not None:
-            automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
+            automatic_observation.finish(
+                unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+            )
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(
@@ -6544,7 +6552,7 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
         isinstance(exc, IncompleteStreamError)
         or is_provider_credential_rejection(exc)
         or kind in {"timeout", "conn_err"}
-        or code == 429
+        or code in (402, 429)
         or (code is not None and code >= 500)
     )
 
@@ -6800,7 +6808,9 @@ async def run_single_attempt_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
 
             absorbed_rows: list[asyncio.Task[None]] = []
@@ -7236,7 +7246,9 @@ async def run_non_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
                 if observation is not None:
                     observation.finish(success=True)

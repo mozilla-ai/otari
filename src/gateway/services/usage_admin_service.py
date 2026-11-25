@@ -90,6 +90,9 @@ class UsageSelection(BaseModel):
     # selection is hard-scoped to imported rows; it is still forwarded so the
     # "every scoping filter must be repeatable" invariant holds without exception.
     tool: str | None = None
+    # Matches nothing when true, since imported rows are never deployment-paid, and is
+    # forwarded for the same reason ``tool`` is.
+    deployment_paid: bool | None = None
     # Workspace scoping. On this body for the same reason every other scoping
     # filter is: an operator who filtered the table to one workspace and then
     # chose "all N matching" must not delete another workspace's rows.
@@ -209,6 +212,8 @@ def _selection_conditions(
             if selection.tool == "any"
             else namespace[selection.tool]["billed"].as_integer().is_not(None)
         )
+    if selection.deployment_paid is not None:
+        conditions.append(UsageLog.deployment_paid.is_(selection.deployment_paid))
     return conditions
 
 

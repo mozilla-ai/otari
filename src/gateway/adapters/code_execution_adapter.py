@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 # (``bash_code_execution``, ``text_editor_code_execution``); nothing above this
 # port asks for them, so no adapter has to serve them.
 CODE_EXECUTION_TOOL = "code_execution"
+# The languages a backend on this contract runs, each with the tool kind that
+# runs it. The contract's ``code_execution`` kind runs source in a persistent
+# interpreter without naming its language; the reference backend's is Python,
+# and Otari takes every backend's to be.
+_TOOL_KIND_BY_LANGUAGE: dict[str, str] = {"python": CODE_EXECUTION_TOOL}
 # Extra wall-clock the HTTP call gets over the exec budget, so the backend
 # always answers before the client read timeout fires.
 _EXEC_TIMEOUT_BUFFER_S = 10.0
@@ -75,6 +80,10 @@ class ProtocolCodeExecutionAdapter(CodeExecutionPort):
         # have none. The same redaction is what every message below names the
         # backend by, since the pipeline logs these exceptions.
         return self._safe_url
+
+    @property
+    def languages(self) -> tuple[str, ...]:
+        return tuple(_TOOL_KIND_BY_LANGUAGE)
 
     @cached_property
     def _safe_url(self) -> str:
@@ -209,9 +218,9 @@ class _ProtocolSession(CodeExecutionSession):
     def _base(self) -> str:
         return f"{self._sandbox_url}/sessions/{self._session_id}"
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
         payload = {
-            "tool": CODE_EXECUTION_TOOL,
+            "tool": _TOOL_KIND_BY_LANGUAGE[language],
             "input": {"code": code},
             "timeout_seconds": int(timeout_s),
         }

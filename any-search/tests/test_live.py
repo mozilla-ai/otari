@@ -2,7 +2,8 @@
 
     ANY_SEARCH_LIVE=1 uv run pytest any-search/tests/test_live.py
 
-A provider whose key is not in the environment is skipped too. CI runs them
+A provider is skipped too when a key or an address it needs is not in the
+environment; one whose key is optional, as Keenable's, searches without it. CI runs them
 weekly, on demand, and on a pull request that changes either library
 (``.github/workflows/otari-libs-live.yml``), so a change on a provider's side
 shows up without anyone following its changelog. They check the data as well
@@ -17,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from any_search import AnySearch
+from any_search import AnySearch, ProviderError, SearchResult
 
 live = pytest.mark.skipif(os.environ.get("ANY_SEARCH_LIVE") != "1", reason="set ANY_SEARCH_LIVE=1 to run")
 
@@ -40,6 +41,9 @@ class Expected:
     options: dict[str, Any] = field(default_factory=dict)
     # The seconds to wait before each call, for a plan that limits its rate.
     wait: float = 0.0
+    # The tags of a 429 the provider counts per IP address, which other callers from the runner's address
+    # share: a test that meets one is skipped.
+    shared_limits: tuple[str, ...] = ()
 
 
 EXPECTED: dict[str, Expected] = {
@@ -49,6 +53,11 @@ EXPECTED: dict[str, Expected] = {
     # DeepSeek returns page text only on request, so the snippet is what a hit says by default.
     "deepseek": Expected(dated={}, snippets=True),
     "exa": Expected(dated={"category": "news"}),
+    # Keenable returns a snippet and no page text, and dates the hits it knows a publish date for. Without
+    # KEENABLE_API_KEY it searches keyless, within a limit per IP address.
+    "keenable": Expected(
+        dated={}, snippets=True, shared_limits=("public_rate_limit_hourly", "public_rate_limit_per_second")
+    ),
     # Mojeek returns no page text, so the snippet is all a hit says; it dates hits by default (date=1).
     "mojeek": Expected(dated={}, snippets=True),
     # Perplexity returns page text and no snippet, and dates the hits it knows a day for.
@@ -70,9 +79,26 @@ EXPECTED: dict[str, Expected] = {
 
 def _require_key(provider: str) -> None:
     metadata = AnySearch.get_provider_metadata(provider)
-    for variable in (metadata.env_key, metadata.env_api_base if metadata.requires_api_base else None):
+    required = (
+        metadata.env_key if metadata.requires_api_key else None,
+        metadata.env_api_base if metadata.requires_api_base else None,
+    )
+    for variable in required:
         if variable and not os.environ.get(variable):
             pytest.skip(f"{variable} is not set")
+
+
+async def _live_search(provider: str, query: str, **kwargs: Any) -> SearchResult:
+    """One live search, after the provider's wait, with the options every live search sends."""
+    expected = EXPECTED[provider]
+    await asyncio.sleep(expected.wait)
+    try:
+        async with AnySearch.create(provider) as engine:
+            return await engine.search(query, **expected.options, **kwargs)
+    except ProviderError as exc:
+        if exc.status == 429 and exc.tag in expected.shared_limits:
+            pytest.skip(f"{provider} answered {exc.tag}, a limit every caller from this address shares")
+        raise
 
 
 def test_every_production_provider_says_what_it_must_return() -> None:
@@ -84,9 +110,7 @@ def test_every_production_provider_says_what_it_must_return() -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_search_returns_hits(provider: str) -> None:
     _require_key(provider)
-    await asyncio.sleep(EXPECTED[provider].wait)
-    async with AnySearch.create(provider) as engine:
-        result = await engine.search("latest stable python release", max_results=3, **EXPECTED[provider].options)
+    result = await _live_search(provider, "latest stable python release", max_results=3)
     assert result.error is None
     assert 1 <= len(result.hits) <= 3
     assert all(hit.url.startswith(("http://", "https://")) for hit in result.hits)
@@ -102,9 +126,7 @@ async def test_a_live_search_returns_hits(provider: str) -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_search_takes_a_time_range(provider: str) -> None:
     _require_key(provider)
-    await asyncio.sleep(EXPECTED[provider].wait)
-    async with AnySearch.create(provider) as engine:
-        result = await engine.search("python release", max_results=2, time_range="year", **EXPECTED[provider].options)
+    result = await _live_search(provider, "python release", max_results=2, time_range="year")
     assert result.error is None
 
 
@@ -116,9 +138,7 @@ async def test_a_live_search_dates_its_hits(provider: str) -> None:
     if dated is None:
         pytest.skip(f"{provider} dates no hits")
     _require_key(provider)
-    await asyncio.sleep(EXPECTED[provider].wait)
-    async with AnySearch.create(provider) as engine:
-        # A query for news itself, so dated hits come back whatever the week's news is.
-        result = await engine.search("latest technology news", max_results=10, **EXPECTED[provider].options, **dated)
+    # A query for news itself, so dated hits come back whatever the week's news is.
+    result = await _live_search(provider, "latest technology news", max_results=10, **dated)
     assert result.error is None
     assert any(hit.published is not None for hit in result.hits)

@@ -145,6 +145,12 @@ class UsageLog(Base):
     # is, where looking up the tools' prices failed, and on every row written
     # before the column existed.
     tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The part of ``cost`` the deployment's account ran, which is what it charges the
+    # organization for: the model's cost where ``deployment_paid``, plus each
+    # gateway-run tool call it ran whoever paid for the model call. Null where
+    # neither part has a cost, on rows written by a path that does not split it, and
+    # on every row written before the column existed.
+    deployment_paid_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",

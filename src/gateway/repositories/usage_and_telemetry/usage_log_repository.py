@@ -194,6 +194,7 @@ class UsageFilters:
     priced: bool | None = None
     tool: str | None = None
     counts_toward_budget: bool | None = None
+    deployment_paid: bool | None = None
     request_group_id: list[str] | None = None
     workspace_id: uuid.UUID | None = None
 
@@ -322,7 +323,14 @@ def usage_conditions(filters: UsageFilters, scope: UsageScope) -> list[ColumnEle
         conditions.append(_tool_used_expr(filters.tool))
     if filters.counts_toward_budget is not None:
         conditions.append(UsageLog.counts_toward_budget.is_(filters.counts_toward_budget))
+    if filters.deployment_paid is not None:
+        conditions.append(UsageLog.deployment_paid.is_(filters.deployment_paid))
     return conditions
+
+
+def _deployment_paid_cost_expr() -> Any:
+    """A row's deployment-paid cost: the recorded split, else its whole cost where its model call was."""
+    return func.coalesce(UsageLog.deployment_paid_cost, case((UsageLog.deployment_paid, UsageLog.cost), else_=None))
 
 
 def _tag_expr(key: str) -> Any:
@@ -488,6 +496,7 @@ def _totals_aggregates(status_filter: str | None) -> list[Any]:
         _billed_input_sum().label("billed_input_tokens"),
         _billed_output_sum().label("billed_output_tokens"),
         func.coalesce(func.sum(UsageLog.reasoning_tokens), 0).label("reasoning_tokens"),
+        func.coalesce(func.sum(_deployment_paid_cost_expr()), 0.0).label("deployment_paid_cost"),
     ]
 
 
@@ -509,6 +518,7 @@ def _totals_from_mapping(row: RowMapping) -> UsageTotals:
         billed_input_tokens=int(row["billed_input_tokens"]),
         billed_output_tokens=int(row["billed_output_tokens"]),
         reasoning_tokens=int(row["reasoning_tokens"]),
+        deployment_paid_cost=float(row["deployment_paid_cost"]),
     )
 
 

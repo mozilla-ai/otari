@@ -17,6 +17,7 @@ platform's own mypy config needs.
 from gateway.repositories.tenancy.invitation_repository import InvitationRepository
 from gateway.repositories.tenancy.org_provider_key_repository import (
     Candidate,
+    KeyCiphertexts,
     OrgProviderKeyRepository,
     WorkspaceProviderKeyOverrideRepository,
     WorkspaceProviderModelRestrictionRepository,
@@ -38,6 +39,7 @@ from gateway.repositories.tenancy.workspace_repository import (
 __all__ = [
     "Candidate",
     "InvitationRepository",
+    "KeyCiphertexts",
     "OrgProviderKeyRepository",
     "OrganizationDomainRepository",
     "OrganizationGuardrailDefinitionRepository",
