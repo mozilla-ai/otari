@@ -127,7 +127,7 @@ export function AccessListControl({
       <ControlField label={title} description={description} />
       {/* No track: a tab row is bare, and the selected segment's own fill is
           what marks it. A track plus a fill was two ways of saying one thing. */}
-      <TabRow>
+      <TabRow wraps>
         {modeButton("inherit", copy.inherit)}
         {modeButton("only", copy.only)}
         {modeButton("block", copy.block)}

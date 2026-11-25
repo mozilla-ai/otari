@@ -6,6 +6,12 @@ or admin configures the connection from the organization's Single sign-on
 settings page, which also shows the preflight report and the enforcement
 controls this page documents.
 
+## Whether the deployment offers it
+
+Organization SSO is a deployment feature, and `organization_oidc_enabled` decides whether Otari serves it. It is on by default. Turned off, Otari serves neither the Single sign-on page nor any of its routes, so an organization can neither configure a connection nor sign in through one it configured earlier, and a member whose only credential is such a connection cannot sign in at all. Stored connections are kept, and they work again when the setting is back on. The setting is read at startup, so a change takes effect on restart.
+
+Requiring sign-in through a connection is a separate, per-organization setting that this switch does not change.
+
 ## What admits a sign-in
 
 A domain's DNS proof is what admits a person through a connection, never the

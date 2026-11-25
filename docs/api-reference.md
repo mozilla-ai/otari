@@ -166,8 +166,8 @@ refusals as well, and records it on the request's usage rows, so
 finds the request's cost by it.
 
 The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
-`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
-request and how long it took; see
+`Otari-Deployment-Paid`, `Otari-Response-Duration-Ms` and `Server-Timing` headers
+say what served the request, who paid for it and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -388,8 +388,8 @@ GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
 often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
-user: any other value is refused with
-`403 'user' field does not match the authenticated API key's user`. A key's
+user: any other value is refused with `403` and code `user_mismatch`, whose detail
+begins `'user' field does not match the authenticated API key's user`. A key's
 `reject_user_mismatch` (see [Mismatched `user` fields](api-keys.md#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
@@ -1157,7 +1157,8 @@ Anthropic itself and resolves the alias on its side; it may not send
 {
   "model": "haiku",
   "reason": "haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 },
+  "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11"
 }
 ```
 
@@ -1166,12 +1167,50 @@ Anthropic itself and resolves the alias on its side; it may not send
 | `model` | One of the candidates: a model alias or id the harness can start the subagent on. |
 | `reason` | One short sentence the harness may show, or `null`. |
 | `probabilities` | The decision model's probability for each candidate, or `null` when it reports none. |
+| `decision_id` | The gateway's record of this recommendation, or `null` where the record could not be kept. The record holds the subagent type and the model names, never the task. |
 
 **Errors.** No [subagent router](routing.md#subagent-routers) stored, or every
 stored one switched off, is a `400`. The decision model's refusal of the request (400, 422, or 501) is a
 `400`, its rate limit a `429`, its refusal of the gateway's credential (401 or
 403) a `424` with `provider_credential_rejected`, and any other failure, or an
 answer that names no candidate, a `502`.
+
+### Report what the subagent consumed
+
+`PUT /api/v1/routing/decisions/{decision_id}/outcome` tells Otari what the
+subagent a recommendation started has consumed, with a key holding the
+`agents` scope. Send it when the subagent finishes, or more than once as it
+runs: each report holds running totals and replaces the one before it.
+
+```bash
+curl -X PUT "$OTARI_URL/api/v1/routing/decisions/$DECISION_ID/outcome" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usage": [
+      {
+        "model": "claude-haiku-5-5",
+        "input_tokens": 1200,
+        "output_tokens": 800,
+        "cache_read_tokens": 42000,
+        "cache_write_tokens": 9000
+      }
+    ]
+  }'
+```
+
+| Field | Meaning |
+|---|---|
+| `usage` | One to 16 lines, one per model the subagent ran on. |
+| `usage[].model` | The model, as the harness names it. |
+| `usage[].input_tokens` | Input tokens that were neither read from nor written to a cache. |
+| `usage[].output_tokens` | Output tokens. |
+| `usage[].cache_read_tokens`, `usage[].cache_write_tokens` | Cache tokens, counted beside `input_tokens`. Zero when left out. |
+
+The answer is a `204` with no body. Nothing is charged and no usage row is
+written. An id that is not a decision of the caller's own is a `404`: an API
+key reaches the decisions made for its user in its workspace, and the master
+key reaches any.
 
 ## Provider error details
 
@@ -1269,7 +1308,9 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](end-users.md#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
+| `user_mismatch` | 403 | A key's request named another user than the key's own in `user` (`metadata.user_id` on Messages), and the key's [mismatched `user` field](api-keys.md#mismatched-user-fields) choice rejects that. Set the key's `reject_user_mismatch` to `false` to accept the value and bill the key's own user. On chat completions, Responses, Messages, file uploads and direct tool calls, a [service key](end-users.md) bills each end user it names instead, and chat completions and Responses take a free-form ID in `metadata`. The message names the ways the route offers | |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch. The message says where an owner or admin of the workspace allows it: Tools > Web search in the dashboard | |
+| `request_mcp_servers_disallowed` | 400 | The request named an MCP server by URL (`mcp_servers`, or a provider MCP tool), and the workspace's `request_mcp_servers_allowed` is off. Register the server and name it in `mcp_server_ids`, or have a workspace admin turn the switch on; see [Servers named in a request](mcp.md#servers-named-in-a-request) | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |

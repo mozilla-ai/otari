@@ -110,7 +110,6 @@ from gateway.services.providers._hosted_credentials import (
     normalize_provider,
     origin_of,
     public_api_base,
-    reencrypted,
     unmask_api_base,
 )
 from gateway.services.providers._hosted_name_index import (
@@ -125,7 +124,7 @@ from gateway.services.providers._hosted_runtime import HostedProviderRuntime, Ho
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
+from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, reencrypted
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 from gateway.types.model_type import ModelType, OfferedModelType
 

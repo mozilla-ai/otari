@@ -57,7 +57,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
 from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
-from gateway.services.tenancy.user_service import set_password, update_password
+from gateway.services.tenancy.user_service import AddressAuthority, set_password, update_password
 
 # Auth is declared on the router rather than left to arrive through
 # ``CurrentIdentity``, matching `organizations.py`: the credential check is then
@@ -231,11 +231,17 @@ async def set_dashboard_password(
             keep_session_token_hash=keep_session,
         )
     else:
+        # An account with no address is not evidence of deployment authority: an account
+        # provisioned by an organization's own connection holds none either. So the
+        # authority is derived from what the caller actually proved rather than from the
+        # state of the account, and a session records an address nobody has proved.
+        holds_deployment_authority = by_master_key or (claims_the_deployment and not was_already_claimed)
         await set_password(
             db,
             identity,
             new_password=body.new_password,
             sso_enforcement=connections,
+            authority=AddressAuthority.OPERATOR if holds_deployment_authority else AddressAuthority.SESSION,
             email=body.email,
             keep_session_token_hash=keep_session,
         )

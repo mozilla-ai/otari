@@ -38,7 +38,7 @@ resolves community defaults, both of which can take the whole discovery timeout.
 
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -102,8 +102,13 @@ from gateway.services.secret_box import (
     decrypt_mapping,
     decrypt_secret,
 )
-from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
+from gateway.services.tenancy.org_provider_key_service import (
+    OrgProviderKeyService,
+    UnservableEndpointError,
+    endpoint_auth_headers,
+)
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.endpoint_auth import UnreadableEndpointAuthError
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
@@ -117,6 +122,22 @@ PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 # row is intact; the configured OTARI_SECRET_KEY just cannot read it any more.
 _UNDECRYPTABLE = (
     "The stored key cannot be decrypted. Was OTARI_SECRET_KEY rotated? Re-enter the credential, then try again."
+)
+
+# What an admin needs when an address refuses a key that carries two
+# credentials. Neither the endpoint nor a proxy in front of it says which one it
+# refused, so naming one would send the admin to rotate the wrong credential.
+_ENDPOINT_CREDENTIAL_REJECTED = (
+    "The endpoint or its proxy rejected a credential. This key sends an API key and an endpoint credential, "
+    "so check both."
+)
+
+# What an admin needs when a stored endpoint credential cannot be sent as it
+# stands. Dialing without it would ask the address a different question from the
+# one every dispatch asks, so the credential is reported instead of a model list.
+_ENDPOINT_CREDENTIAL_UNSERVABLE = (
+    "The stored endpoint credential cannot be sent as it stands, so this key serves nothing. "
+    "Replace it, or clear the base URL to remove it."
 )
 
 _RATE_FIELDS = (
@@ -894,6 +915,30 @@ class OrgProviderModelService:
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
+    @staticmethod
+    def _carries_endpoint_auth(key: OrgProviderKey) -> bool:
+        """Whether this key sends a second credential on every request, readable or not.
+
+        A credential this build cannot read sends no header, so an address that
+        refuses the request is still refusing the endpoint credential.
+        """
+        try:
+            return key.endpoint_auth is not None
+        except UnreadableEndpointAuthError:
+            return True
+
+    @classmethod
+    def _named_refusal(cls, discovery: ProviderDiscovery, key: OrgProviderKey) -> ProviderDiscovery:
+        """The discovery an admin can act on, where a refusal could have named either credential.
+
+        A key that carries an endpoint credential sends two credentials on one
+        request, and a refusal of either arrives the same way. Passing the
+        address's own wording on would read as a verdict on the API key alone.
+        """
+        if discovery.credentials_rejected and cls._carries_endpoint_auth(key):
+            return replace(discovery, error=_ENDPOINT_CREDENTIAL_REJECTED)
+        return discovery
+
     async def _dial(self, key: OrgProviderKey, credential: _DialCredential, *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key, and keep what its engine says.
 
@@ -905,6 +950,12 @@ class OrgProviderModelService:
         api_key = credential.api_key
         client_args: dict[str, object] = tenant_client_args(key.provider, credential.client_args)
         engine_client = None
+        try:
+            endpoint_headers = endpoint_auth_headers(key)
+        except (SecretBoxUnavailableError, SecretDecryptionError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_UNDECRYPTABLE)
+        except (UnreadableEndpointAuthError, UnservableEndpointError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_ENDPOINT_CREDENTIAL_UNSERVABLE)
         if key.api_base:
             # The organization chose this address, so it is held to public
             # addresses and dialed through the pinned client, as dispatch is.
@@ -913,15 +964,23 @@ class OrgProviderModelService:
                 return ProviderDiscovery(provider=key.provider, models=[], error=refusal)
             client_args["http_client"] = owned_endpoint_sdk_client(LLMProvider(key.provider))
             engine_client = owned_endpoint_http_client()
-        discovery = await test_provider_credentials(
-            key.provider,
-            api_key=api_key if isinstance(api_key, str) else None,
-            api_base=key.api_base,
-            client_args=client_args or None,
-            # An organization's key never borrows the deployment's own credentials.
-            declared=False,
-            timeout=timeout,
-            engine_client=engine_client,
+            if endpoint_headers:
+                client_args["default_headers"] = endpoint_headers
+        discovery = self._named_refusal(
+            await test_provider_credentials(
+                key.provider,
+                api_key=api_key if isinstance(api_key, str) else None,
+                api_base=key.api_base,
+                client_args=client_args or None,
+                # An organization's key never borrows the deployment's own credentials.
+                declared=False,
+                timeout=timeout,
+                engine_client=engine_client,
+                # What this call puts on the wire, so an upstream echoing its
+                # own refusal cannot send a credential back in the error text.
+                sent_values=[api_key if isinstance(api_key, str) else None, *endpoint_headers.values()],
+            ),
+            key,
         )
         if discovery.error is None:
             await record_served_models(

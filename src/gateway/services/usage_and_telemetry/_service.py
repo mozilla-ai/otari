@@ -198,10 +198,18 @@ class UsageService:
         # an empty selection, and it never contributes a dimension of its own.
         requested = _ALL_SUMMARY_DIMENSIONS if dimensions is None else {d for d in dimensions if d != "none"}
         async with self._uow:
-            totals = await self._usage_logs.totals(filters, scope)
+            # The totals and every requested breakdown come back from one read, so
+            # a summary that names several dimensions scans the window once rather
+            # than once per dimension (see UsageLogRepository.summary_aggregates).
+            aggregates = await self._usage_logs.summary_aggregates(
+                filters,
+                scope,
+                dimensions={name: cap for name, cap in _SUMMARY_DIMENSIONS.items() if name in requested},
+            )
+            totals = aggregates.totals
             breakdowns = {
-                name: await self._breakdown(filters, scope, totals, dimension=name, limit=cap)
-                for name, cap in _SUMMARY_DIMENSIONS.items()
+                name: await self._labeled(aggregates.groups.get(name, []), totals, dimension=name)
+                for name in _SUMMARY_DIMENSIONS
                 if name in requested
             }
             # The failure taxonomy is a GROUP BY pass like the others, so it answers to the
@@ -285,6 +293,16 @@ class UsageService:
     async def _breakdown(
         self, filters: UsageFilters, scope: UsageScope, totals: UsageTotals, *, dimension: str, limit: int
     ) -> list[UsageGroupRow]:
+        """One dimension's top groups, read on its own and labeled.
+
+        Used where the caller needs a single dimension rather than a whole
+        summary (:meth:`grouped_series`); the summary itself reads every
+        dimension it needs in one pass and labels those rows with :meth:`_labeled`.
+        """
+        rows = await self._usage_logs.groups(filters, scope, dimension=dimension, limit=limit)
+        return await self._labeled(rows, totals, dimension=dimension)
+
+    async def _labeled(self, rows: list[UsageGroupRow], totals: UsageTotals, *, dimension: str) -> list[UsageGroupRow]:
         """One dimension's top groups, labeled where the key is an opaque id, with the remainder folded.
 
         The user and key dimensions are labeled because their keys are ids:
@@ -293,7 +311,6 @@ class UsageService:
         its other spellings (:func:`grouped_models`); a source or endpoint
         already reads as its own name.
         """
-        rows = await self._usage_logs.groups(filters, scope, dimension=dimension, limit=limit)
         if dimension == "model":
             return _with_fold(grouped_models(rows), totals)
         keys = {row.key for row in rows if row.key is not None}

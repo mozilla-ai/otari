@@ -93,6 +93,36 @@ export const TwoTabs: Story = {
   },
 }
 
+/**
+ * `wraps` for the few answers to one question, where an answer scrolled past
+ * the edge reads as no answer. Narrowed here so the third answer wraps.
+ */
+export const Wrapping: Story = {
+  render: () => {
+    const [active, setActive] = useState("inherit")
+    const answers = [
+      ["inherit", "Same as the workspace"],
+      ["only", "Only these models"],
+      ["block", "Block all"],
+    ]
+    return (
+      <div className="w-72">
+        <TabRow wraps>
+          {answers.map(([id, label]) => (
+            <Tab
+              key={id}
+              isActive={active === id}
+              onPress={() => setActive(id)}
+            >
+              {label}
+            </Tab>
+          ))}
+        </TabRow>
+      </div>
+    )
+  },
+}
+
 /** The active item on the dark artboard, where the accent is its own value. */
 export const Dark: Story = {
   render: () => (

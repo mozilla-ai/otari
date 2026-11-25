@@ -127,7 +127,9 @@ async def test_hosted_provider(
 async def reencrypt_hosted_providers(service: HostedProviderServiceDep) -> HostedProvidersReencryptPublic:
     """Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
 
-    Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
+    Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+    ``POST /api/v1/search-tools/reencrypt`` and
+    ``POST /api/v1/organization-provider-keys/reencrypt``.
     A provider no configured key reads is left as it is, to be re-entered.
     """
     return await service.reencrypt()

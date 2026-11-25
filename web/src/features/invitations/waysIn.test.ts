@@ -28,7 +28,7 @@ describe("waysInSentence", () => {
 })
 
 describe("verificationPendingSentence", () => {
-  it("names the verification link where links can be mailed", () => {
+  it("names the verification link and whatever else is offered", () => {
     expect(
       verificationPendingSentence(["provider", "password_reset"], ["google"]),
     ).toBe(
@@ -36,15 +36,11 @@ describe("verificationPendingSentence", () => {
     )
   })
 
-  it("names the provider alone where links cannot be mailed", () => {
-    expect(verificationPendingSentence(["provider"], ["google"])).toBe(
-      "sign in with Google.",
-    )
-  })
-
-  it("names no link where the deployment delivers nothing", () => {
-    expect(verificationPendingSentence([], [])).toBe(
-      "ask whoever administers this gateway how to sign in.",
+  // `verify_email` is answered only where a link reaches the mailbox, so a
+  // reset is always among the ways in by the time this is rendered.
+  it("names the reset alone where the deployment has no provider", () => {
+    expect(verificationPendingSentence(["password_reset"], [])).toBe(
+      'open the verification link emailed at signup. If you did not sign up, choose a password with "Forgot your password?".',
     )
   })
 })

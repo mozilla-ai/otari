@@ -135,6 +135,12 @@ export function useRemoveCountryDatabase() {
   })
 }
 
+/**
+ * The deployment's outgoing-mail configuration, for the Settings page.
+ *
+ * Reports why mail is or is not available, which is worth a request only on the
+ * page that shows it.
+ */
 export function useMailSettings() {
   return useQuery({
     queryKey: [MAIL_SETTINGS],

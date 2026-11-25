@@ -61,3 +61,14 @@ class IdentitySettings(BaseModel):
             "an organization administrator types the issuer in rather than the operator choosing it."
         ),
     )
+
+    organization_oidc_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Offer organizations their own OIDC sign-in connection: the Single sign-on page, and sign-in "
+            "through a connection an organization saved. Off removes the page and those routes, so no "
+            "organization can configure a connection or sign in through one. A member whose only credential "
+            "is such a connection then cannot sign in at all. Stored connections are kept and work again "
+            "when it is back on. Requires restart. Also settable via OTARI_ORGANIZATION_OIDC_ENABLED."
+        ),
+    )

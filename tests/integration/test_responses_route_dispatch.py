@@ -32,7 +32,14 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    DEPLOYMENT_PAID_HEADER,
+    FALLBACK_HEADER,
+    GatewayConfig,
+)
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 
@@ -365,7 +372,12 @@ def test_mcp_servers_dispatches_through_responses_tool_loop(
     seen: dict[str, Any] = {}
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> Response:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
@@ -413,7 +425,12 @@ def test_code_execution_dispatches_through_sandbox_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> Response:
         pool_seen.append(pool)
         return _response()
@@ -460,7 +477,12 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> Response:
         pool_seen.append(pool)
         return _response()
@@ -675,7 +697,12 @@ def test_max_tool_iterations_exceeded_returns_422(
     from gateway.services.mcp_loop_responses import MaxToolIterationsExceeded
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> Response:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
@@ -882,7 +909,12 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -934,7 +966,12 @@ def test_stream_mcp_pool_close_failure_does_not_cut_off_the_stream(
     api_key_header: dict[str, str],
 ) -> None:
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         yield _stream_completed_event()
 
@@ -971,7 +1008,12 @@ def test_stream_sandbox_close_failure_does_not_cut_off_the_stream(
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         yield _stream_completed_event()
 
@@ -1012,7 +1054,12 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         pool_seen.append(pool)
         yield _stream_completed_event()
@@ -1328,6 +1375,7 @@ def test_native_refusal_of_the_model_is_served_as_chat_on_the_same_attempt(
     assert resp.status_code == 200, resp.text
     assert resp.headers[ATTEMPT_COUNT_HEADER] == "1"
     assert resp.headers[FALLBACK_HEADER] == "false"
+    assert resp.headers[DEPLOYMENT_PAID_HEADER] == "false"
     assert resp.headers["Otari-Provider"] == "openai"
     assert "OK 42" in resp.text
 

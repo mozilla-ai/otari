@@ -114,7 +114,7 @@ test("a tap on a wrapped terms link opens it rather than ticking the box", async
       response,
       json: {
         ...(await response.json()),
-        mail_ready: true,
+        mail: "delivers",
         open_signup: true,
         terms_url: "https://example.com/terms",
         privacy_url: "https://example.com/privacy",

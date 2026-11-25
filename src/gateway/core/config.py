@@ -86,12 +86,14 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # Response headers describing how a completion was served: the
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
-# than the plan's first served it, and how long the gateway took to answer. See
+# than the plan's first served it, whether the deployment paid for the provider
+# call, and how long the gateway took to answer. See
 # docs/routing.md#what-is-billed-and-what-the-caller-sees.
 PROVIDER_HEADER = "Otari-Provider"
 MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
+DEPLOYMENT_PAID_HEADER = "Otari-Deployment-Paid"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # The same duration split into the gateway's own time and the provider's (W3C Server Timing).
 SERVER_TIMING_HEADER = "Server-Timing"

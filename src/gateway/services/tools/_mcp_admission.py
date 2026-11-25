@@ -9,7 +9,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from gateway.exceptions.tools_exceptions import McpServerConfigurationError, McpServerDeclarationError
+from gateway.exceptions.tools_exceptions import (
+    McpServerConfigurationError,
+    McpServerDeclarationError,
+    RequestMcpServersDisallowedError,
+)
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
@@ -29,7 +33,8 @@ MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
 MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL = "Configured MCP servers do not have unique names"
 INLINE_MCP_SERVER_REFUSED_DETAIL = (
     "This workspace does not let a request name MCP servers by URL. Use a stored server through mcp_server_ids, "
-    "or ask a workspace admin to allow request MCP servers."
+    "or ask a workspace admin to turn on Allow servers outside this list under MCP servers "
+    "(request_mcp_servers_allowed)."
 )
 MCP_TOOL_SHADOWS_BUILTIN_DETAIL_TEMPLATE = (
     "An MCP server exposes a tool named {name!r}, which this request also declares as a gateway tool. "
@@ -185,13 +190,14 @@ async def admit_mcp_servers(
     renewed, does not fail the request: it comes back in ``sign_in``.
 
     Raises:
+        RequestMcpServersDisallowedError: the request names servers of its own where its workspace turned them off.
         McpServerDeclarationError: the request's own servers cannot be reached as declared.
         McpServerConfigurationError: the stored servers cannot be used.
         WorkspaceMcpServerNotFoundError: an ID names no server this workspace holds, or none the caller may reach.
     """
     mcp_servers = inline_servers
     if (mcp_servers or provider_mcp) and not access.may_declare_servers:
-        raise McpServerDeclarationError(INLINE_MCP_SERVER_REFUSED_DETAIL)
+        raise RequestMcpServersDisallowedError(INLINE_MCP_SERVER_REFUSED_DETAIL)
     for inline in mcp_servers or []:
         inline.caller_tool_patterns = None
         inline.caller_access_source = None

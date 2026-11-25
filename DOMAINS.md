@@ -179,7 +179,9 @@ worker for the quote), at the token rates stored with it; with none switched
 on, nothing answers. An overlay may bind a recommender of its own, or
 wrap the core one, so the composition root binds the implementation and no
 caller chooses between them. The adapter quotes the price where it owns one;
-the decisions scaffold meters the call.
+the decisions scaffold meters the call. Each answered recommendation is
+kept in the `subagent_decisions` table, with the model the subagent would have
+started on, never the task.
 
 ### files
 

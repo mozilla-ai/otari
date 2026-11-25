@@ -528,7 +528,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
-    "gateway/api/routes/organization_usage.py",
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
@@ -1346,7 +1345,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 67,
+    "tenancy": 66,
 }
 
 
@@ -1430,7 +1429,7 @@ COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
 # back three hundred lines of what a split had moved out. A fall must be recorded
 # here, so the room made cannot be spent again. The count says nothing about where
 # a builder belongs, which is a judgment no check can make.
-COMPOSITION_ROOT_SIZE_BASELINE = 89
+COMPOSITION_ROOT_SIZE_BASELINE = 87
 
 
 def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
@@ -2773,6 +2772,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),
     },
+    "gateway.models.routing.SubagentDecision": {
+        "repository": "gateway/repositories/routing/subagent_decision_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.RoutingPolicy": {
         "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (
@@ -2842,7 +2845,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
             "gateway/api/routes/organization_routing.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
             "gateway/repositories/budgets/workspace_budget_default_repository.py",
             "gateway/repositories/overview/overview_repository.py",

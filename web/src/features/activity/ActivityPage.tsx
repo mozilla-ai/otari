@@ -28,6 +28,7 @@ import {
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
 import { useObserveScope } from "@/features/observe/useObserveScope"
+import { useViewWorkspace } from "@/features/observe/viewWorkspace"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useSetPricing } from "@/shared/api/pricing"
@@ -250,12 +251,11 @@ function ActivityPageContent({
         ? false
         : undefined
 
-  const { selected: workspace } = useSelectedWorkspace()
+  const workspaceId = useViewWorkspace() || undefined
   const filters: UsageFilters = useMemo(
     () => ({
-      // From the sidebar's switcher, not from a control on this page: it scopes
-      // the whole shell, and the operator's own filters sit below it.
-      workspace_id: workspace?.workspace_id,
+      // The shell's workspace, or the one a link into Sessions named.
+      workspace_id: workspaceId,
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
@@ -271,7 +271,7 @@ function ActivityPageContent({
       priced,
     }),
     [
-      workspace,
+      workspaceId,
       win,
       toolFilter,
       statusFilter,
@@ -336,7 +336,7 @@ function ActivityPageContent({
   // and provider pickers are the Overview's, which fetches their options.
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
-      workspace_id: workspace?.workspace_id,
+      workspace_id: workspaceId,
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
@@ -346,7 +346,7 @@ function ActivityPageContent({
       provider: providerFilter || undefined,
     }),
     [
-      workspace?.workspace_id,
+      workspaceId,
       win,
       statusFilter,
       modelFilters,
@@ -398,7 +398,7 @@ function ActivityPageContent({
     : (extentPreset?.bucket ?? "day")
   const contextFilters: UsageFilters = useMemo(
     () => ({
-      workspace_id: workspace?.workspace_id,
+      workspace_id: workspaceId,
       start_date: winOutsideExtent ? win.start : extentWin.start,
       end_date: winOutsideExtent ? win.end : undefined,
       status: statusFilter || undefined,
@@ -414,7 +414,7 @@ function ActivityPageContent({
       priced,
     }),
     [
-      workspace?.workspace_id,
+      workspaceId,
       winOutsideExtent,
       toolFilter,
       win,

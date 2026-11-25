@@ -298,6 +298,9 @@ def test_the_synthesized_instance_is_in_neither_map() -> None:
         ({"searxng": {}}, None),
         # A keyless provider any-search serves needs no key; the metadata says so.
         ({"test": {"provider": "fake"}}, None),
+        # A provider whose key is optional runs without one.
+        ({"keenable": {}}, None),
+        ({"keenable": {"api_key": "keen_k"}}, None),
         # A fetch-only name is not a search provider.
         ({"builtin": {}}, "is not a supported search provider"),
         ({"exa": {"api_key": "k", "options": "nope"}}, "options must be a mapping"),

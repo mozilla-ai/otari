@@ -51,6 +51,7 @@ from gateway.core.config import (
     API_ROOT,
     CONVERSATION_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     PRICING_SOURCE_HEADER,
     TAGS_HEADER,
     USAGE_UNIT_HEADER,
@@ -762,11 +763,12 @@ _CORS_ALLOW_HEADERS = (
     "Otari-Region",
     *_SDK_CORS_HEADERS,
 )
-# A speech response carries its cost on headers, which a browser on
-# another origin reads only when they are exposed.
+# A speech response carries its cost on headers, and a completion says who paid
+# for it, which a browser on another origin reads only when they are exposed.
 _CORS_EXPOSE_HEADERS = (
     BILLING_URL_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     ERROR_CODE_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
@@ -1248,9 +1250,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # holds one pooled connection at a time.
             await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
-                stored_tools_loaded = await build_search_tool_service(
-                    uow, search_tool_session, config=config
-                ).load_at_startup()
+                search_tools = build_search_tool_service(uow, search_tool_session, config=config)
+                # A failed start, as a misconfigured entry fails the config load: on a blank
+                # key, a tool whose key is optional searches with no key at all.
+                search_tools.refuse_blank_api_keys()
+                stored_tools_loaded = await search_tools.load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a

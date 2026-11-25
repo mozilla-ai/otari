@@ -318,7 +318,10 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         return bool(result.rowcount)
 
     async def reload(self, identity: User) -> User:
-        """Read the identity's columns again, for a caller whose conditional write bypassed the session."""
+        """Read the identity's columns again, for a caller whose conditional write bypassed the session.
+
+        NOTE: ``identity`` is refreshed in place and returned, so a caller holding it reads the new columns.
+        """
         await self.db.refresh(identity)
         return identity
 

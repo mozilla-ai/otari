@@ -263,6 +263,49 @@ def test_a_model_that_keeps_searching_past_max_uses_answers_one_round_later(
     assert not choice["message"].get("tool_calls")
 
 
+def test_a_model_that_keeps_searching_past_web_search_max_calls_answers_one_round_later(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deployment's shared call limit withholds the search as ``max_uses`` does.
+
+    With ``web_search_max_calls: 1`` and no ``max_uses``, the round after the one
+    search no longer offers it, and is the last since no other tool is left.
+    """
+    serve_search_on_fake(extract=False)
+    monkeypatch.setattr(cast(Any, client.app).state.config, "web_search_max_calls", 1)
+    captured: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.append(kwargs)
+        return _completion(tool_call=True)
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
+        admitted_search_spy() as search,
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+                "max_tool_iterations": 10,
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    assert search.await_count == 1, "the call limit did not stop the second search"
+    assert [_offers_search(kwargs) for kwargs in captured] == [True, False]
+    assert captured[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    [choice] = response.json()["choices"]
+    assert choice["finish_reason"] == "stop"
+    assert not choice["message"].get("tool_calls")
+
+
 def test_max_uses_zero_offers_no_search_rather_than_uncapping_it(
     client: TestClient,
     api_key_header: dict[str, str],

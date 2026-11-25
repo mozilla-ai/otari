@@ -11,6 +11,7 @@ sees through ``quoted`` is the one that was asked.
 
 import itertools
 import sys
+import uuid
 from collections.abc import Generator, Iterator
 from decimal import Decimal
 from pathlib import Path
@@ -131,7 +132,9 @@ def test_the_wrapper_relabels_the_stored_routers_quote_and_keeps_its_price(
         response = client.post(RECOMMEND, json=SPAWN, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"model": "haiku", "reason": "Otari chose haiku", "probabilities": None}
+    answer = response.json()
+    assert uuid.UUID(answer.pop("decision_id"))
+    assert answer == {"model": "haiku", "reason": "Otari chose haiku", "probabilities": None}
     # The stored router's hold: 65,536 input tokens at $20 per million.
     assert probe.QUOTED == [("openrouter", "stored-decider", Decimal("1.310720"))]
 

@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  AcceptedMembership,
   AcceptInvitationRequest,
   AcceptInvitationResult,
   BulkInviteOrganizationMembersRequest,
@@ -545,7 +546,7 @@ export function useAcceptPendingMembership() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (organizationMemberId: string) =>
-      apiFetch<AcceptInvitationResult>(
+      apiFetch<AcceptedMembership>(
         `/organizations/me/pending-memberships/${encodeURIComponent(
           organizationMemberId,
         )}/accept`,

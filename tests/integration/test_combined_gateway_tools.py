@@ -85,7 +85,7 @@ _CODE = {"type": "otari_code_execution"}
 _ARGUMENTS: dict[str, dict[str, object]] = {
     "web_search": {"query": "python"},
     "web_fetch": {"url": "https://example.com/"},
-    "code_execution": {"code": "print(6 * 7)"},
+    "code_execution": {"language": "python", "code": "print(6 * 7)"},
     _MCP_TOOL: {"q": "docs"},
 }
 
@@ -103,7 +103,7 @@ class _Session:
     def discard(self) -> None:
         return None
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
         self._port.executed.append(code)
         self._files = [SandboxFileEntry(path="chart.png", size_bytes=3, modified_at=1.0)]
         return ResultBlock.model_validate(
@@ -125,6 +125,7 @@ class _Session:
 
 class _Port:
     label = "fake-sandbox"
+    languages = ("python",)
 
     def __init__(self) -> None:
         self.opened = 0
