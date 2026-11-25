@@ -71,8 +71,8 @@ export function KeyScopeFields({
   )
 
   return (
-    <fieldset className="flex flex-col gap-3 border border-control-border p-3">
-      <legend className="px-1 text-emphasis">Access</legend>
+    <fieldset className="flex flex-col gap-3">
+      <legend className="mb-1 text-body">Access</legend>
       <p className="text-caption">
         What this key may call. Grant only what it needs.
       </p>
@@ -89,6 +89,7 @@ export function KeyScopeFields({
           </span>
         }
         isDefaultExpanded={advancedHeld > 0}
+        isFlush
       >
         {grid(advanced)}
       </Disclosure>

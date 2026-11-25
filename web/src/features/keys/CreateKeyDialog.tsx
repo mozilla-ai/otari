@@ -396,7 +396,6 @@ export function CreateKeyDialog({
                 inputMode="decimal"
                 placeholder="No limit"
                 isInvalid={!isLimitValid}
-                errorMessage="Enter a number above zero, like 12.50, or leave it empty."
                 shouldReserveMessage={false}
               />
             </div>
@@ -412,13 +411,20 @@ export function CreateKeyDialog({
               />
             </div>
           </div>
-          <p
-            className={`text-sm ${isLimitValid ? "text-muted" : "text-danger"}`}
-          >
-            {isLimitValid
-              ? "Optional. Past it, requests on this key are refused until the limit resets. An hourly limit stops an agent caught in a loop. Its owner’s limit applies as well."
-              : null}
-          </p>
+          {/* The error is said across the row rather than under the 160px
+              field, where it wrapped to three lines and pushed the period
+              picker out of line with the input. */}
+          {isLimitValid ? (
+            <p className="text-sm text-muted">
+              Optional. Past it, requests on this key are refused until the
+              limit resets. An hourly limit stops an agent caught in a loop. Its
+              owner’s limit applies as well.
+            </p>
+          ) : (
+            <p role="alert" className="text-sm text-danger">
+              Enter a number above zero, like 12.50, or leave it empty.
+            </p>
+          )}
         </div>
       ) : keyBudgets.canCap ? null : (
         // Production takes a key's limit from owners and admins only, so the
@@ -444,7 +450,7 @@ export function CreateKeyDialog({
           )
         }
       />
-      <Disclosure heading="More options">
+      <Disclosure heading="More options" isFlush>
         <div className="flex flex-col gap-5">
           <KeyScopeFields
             value={keyScopes}
