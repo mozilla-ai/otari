@@ -189,3 +189,19 @@ def test_an_undescribed_model_reports_unknown_capabilities() -> None:
     apply_model_metadata(_config(), MODELS_DEV, model)
 
     assert (model.name, model.supported_parameters, model.architecture) == (None, None, None)
+
+
+def test_an_undescribed_model_clears_what_an_earlier_pass_filled() -> None:
+    """A model reread under a provider models.dev does not know keeps nothing the earlier read gave it."""
+    model = ModelObject(
+        id="nebius:made-up-model-xyz",
+        created=0,
+        owned_by="nebius",
+        description="stale",
+        release_date="2024-05-13",
+        knowledge_cutoff="2023-09",
+    )
+
+    apply_model_metadata(_config(), MODELS_DEV, model)
+
+    assert (model.description, model.release_date, model.knowledge_cutoff) == (None, None, None)

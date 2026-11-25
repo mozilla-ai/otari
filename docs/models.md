@@ -233,10 +233,13 @@ which means unknown rather than unsupported. An alias reports its target's capab
 no `name`.
 
 From the same models.dev entry, each model also carries `description`,
-`release_date` (`YYYY-MM-DD`) and `knowledge_cutoff`, the training data cutoff
-as models.dev writes it (`2025-05`). An alias reports none of the three.
-`created` stays the provider's own timestamp, 0 where its listing gives none,
-so sort by `release_date` to order models by when they came out.
+`release_date` and `knowledge_cutoff`, the training data cutoff. Both dates are
+as models.dev writes them, `YYYY-MM-DD` or, where it knows only the month,
+`YYYY-MM`. A model several providers serve takes the earliest release date any
+of them gives, and the description and cutoff of the provider tried first,
+else of any other, as its page in the catalog does. An alias reports none of
+the three. `created` stays the provider's own timestamp, 0 where its listing
+gives none, so sort by `release_date` to order models by when they came out.
 
 ### Overriding a model's details
 

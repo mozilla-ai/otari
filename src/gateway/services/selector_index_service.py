@@ -177,11 +177,13 @@ def models_by_identity(
         resolved = (slug_providers or {}).get(first.id.partition(":")[0])
         if resolved is not None:
             apply_model_metadata(config, catalog, first, organization_id=organization_id, provider_type=resolved)
+        others = [offerings[selector] for selector in sorted(members - {ranked[0]})]
         rows[identity.id] = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
-                **_limits_from_others(first, [offerings[selector] for selector in sorted(members - {ranked[0]})]),
+                **_limits_from_others(first, others),
+                **_facts_from_others(first, others),
             }
         )
     return [rows[model_id] for model_id in sorted(rows)]
@@ -207,6 +209,25 @@ def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[s
     output = filled.get("max_output_tokens")
     if window is not None and output is not None and output > window:
         filled["max_output_tokens"] = window
+    return filled
+
+
+def _facts_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, str]:
+    """The row's release date, description and cutoff, derived across offerings as the catalog's model page does.
+
+    The release date is the earliest any offering gives, so it does not move
+    when routing reorders them. The description and cutoff are ``first``'s,
+    whose name the row shows, else the first another offering gives.
+    """
+    filled: dict[str, str] = {}
+    dates = [obj.release_date for obj in (first, *others) if obj.release_date]
+    if dates:
+        filled["release_date"] = min(dates)
+    for field in ("description", "knowledge_cutoff"):
+        if getattr(first, field) is None:
+            value = next((getattr(obj, field) for obj in others if getattr(obj, field)), None)
+            if value is not None:
+                filled[field] = value
     return filled
 
 
