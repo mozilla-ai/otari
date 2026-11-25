@@ -414,7 +414,7 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
 async def _warn_about_unreclaimed_files(
     config: GatewayConfig, storage: FileStoragePort | None, provider_files: ProviderFilePort | None
 ) -> None:
-    """Say at boot when expired or deleted files are waiting and the sweep is set not to run.
+    """Say at boot when expired or deleted files, or stale provider copy rows, are waiting and the sweep is off.
 
     A deployment without a store skips this, since the store's own warning
     already says nothing can reclaim them.
@@ -431,8 +431,8 @@ async def _warn_about_unreclaimed_files(
         return
     if waiting:
         logger.warning(
-            "Expired or deleted files are waiting to be reclaimed, but files_sweep_interval_sec is 0, so nothing "
-            "will reclaim their bytes and rows. Set it above 0, or remove them yourself."
+            "Expired or deleted files, or stale provider copy rows, are waiting to be reclaimed, but "
+            "files_sweep_interval_sec is 0, so nothing will reclaim them. Set it above 0, or remove them yourself."
         )
 
 
