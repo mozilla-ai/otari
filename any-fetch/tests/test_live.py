@@ -45,6 +45,8 @@ EXPECTED: dict[str, Expected] = {
     # DeepSeek fails the call with a 404 for any page it cannot turn into markdown.
     "deepseek": Expected(titles=True, missing_page="fails"),
     "exa": Expected(titles=True, missing_page="in_body_error"),
+    # Firecrawl returns the site's error page, with the site's status in metadata.statusCode.
+    "firecrawl": Expected(titles=True, missing_page="site_page"),
     "tabstack": Expected(titles=True, missing_page="site_page"),
     "youdotcom": Expected(titles=True, missing_page="site_page"),
 }

@@ -549,3 +549,60 @@ The first provider whose key is optional: with one it calls `/v1/search`, withou
 - Fixture recipes, all keyless but the error: `normal` with `--max-results 3` and
   `snippet_max_length=180`, since snippets run to thousands of characters; `empty` with `site`
   set to a domain that does not exist; `error` with a made-up key, a 401 `invalid_api_key`.
+
+### 2026-11-25, Firecrawl (both libraries)
+
+The first fetch provider that reports where it found the page, and the first to mark options
+operator only for what they cost.
+
+- A fetch provider can say where a redirect led: Firecrawl's `metadata.url` is the page's URL after
+  redirects (`http://python.org/downloads` came back as `https://www.python.org/downloads/`), so
+  `reports_final_url` is true. The adapter then requires that field rather than falling back to
+  the URL asked for, since a fallback would hide a redirect from the host that checks it.
+- Check the billing page before marking a cost tier. Firecrawl's `proxy: enhanced` was once billed
+  above `basic`; its billing page, read 2026-11-25, bills both alike, and its documentation marks
+  `proxy` deprecated, so the option is left out. Firecrawl has no string option whose values carry
+  their own price, so neither adapter has a cost tier.
+- A charge per page can hang on an option no `enum` describes. Firecrawl parses a PDF at 1 credit
+  per page by default, and `parsers`, an array, is how to cap it (`[{"type": "pdf", "maxPages":
+  20}]`). It is `operator_only`, so a request cannot lift an operator's cap. Its default stays the
+  SDK's, since the cheaper `parsers: []` returns a PDF as base64 with no text.
+- An SDK can tag every call with its own name: firecrawl-py sends `origin: python-sdk@<version>`.
+  The adapter sends the library's name (`any-search`, `any-fetch`), as Keenable's header does.
+  Firecrawl's `integration` field, which the SDK sends only when passed, takes a fixed list of
+  names, so it is not sent.
+- Capture what an SDK puts on the wire, not what its request model declares. firecrawl-py 4.57.0's
+  models carry `limit: 5` and `timeout: 300000`, but `search("q")` sends only the query and
+  `origin`, so Firecrawl applies its own defaults (10 results, 60 seconds). The adapter sends
+  `limit` only for `max_results` and cuts the hits to 10 otherwise.
+- An option that holds other options can carry a charge per page: `scrapeOptions` scrapes every
+  result at 1 credit each, plus whatever its own options cost, so it is `operator_only` too. Its
+  `formats` always include `markdown`, and missing or empty `formats` become `["markdown"]`, since
+  Firecrawl scrapes nothing without one.
+- A flag the envelope trusts is required: an answer without `success` raises
+  `unexpected_response` rather than passing as a success.
+- An error inside a 200 can cover some failures only. Firecrawl answers a host that does not
+  resolve with a 200, `success: false` and `code` `SCRAPE_DNS_RESOLUTION_ERROR`, but a page it
+  cannot read (a zero-byte file, HTML with an empty body or a title only, a private address) with a
+  500 `SCRAPE_ALL_ENGINES_FAILED`. Its `code` values, as seen live, are short and fixed, so they are tags;
+  its `error` sentences quote the host, a signup link or the request, so they are not read. A 401,
+  402 and 429 carry no code and are tagged by status.
+- A page with no text is usually a failure: only a site's error status with an empty body came back
+  as an empty page, with the site's status in `metadata.statusCode`. A missing page comes back as
+  the site's 404 page (`missing_page="site_page"`).
+- A field can be a string or a list: Firecrawl documents `metadata.title` as either, so the adapter
+  takes the first title of a list.
+- A source option can move every result out of the field the envelope reads: Firecrawl's
+  `sources: ["news"]` answers in `data.news` with no `data.web`, and `alexandria` answers with data
+  tools in `data.tools`. `sources` is left out, so a search always reads web results.
+- Highlights, Firecrawl's default, make `description` a set of passages of up to a few thousand
+  characters; `highlights: false` returns the site's own description. A `tbs` Firecrawl does not
+  take (`qdr:zz`) is answered as if none was set.
+- A call without a key can be refused by where it comes from: Firecrawl answered a keyless call from
+  the recording machine with a 403 saying the address looked like a proxy, so `requires_api_key`
+  stays true.
+- Fixture recipes: search `normal` with `--max-results 2 -o highlights=false`, which keeps it small;
+  `empty` with `includeDomains` naming a domain that does not exist; `error` with a made-up `fc-`
+  key, a 401. Fetch `normal` with `https://example.com/`; `empty` with
+  `https://httpbin.org/status/500`; `in_body_error` with a host that does not resolve; `error` with
+  a made-up key.

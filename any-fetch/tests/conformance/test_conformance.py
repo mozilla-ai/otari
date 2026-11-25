@@ -69,6 +69,12 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario(handler=_replay("exa", "error")),
         "in_body_error": Scenario(handler=_replay("exa", "in_body_error")),
     },
+    "firecrawl": {
+        "normal": Scenario(handler=_replay("firecrawl", "normal")),
+        "empty": Scenario(handler=_replay("firecrawl", "empty")),
+        "error": Scenario(handler=_replay("firecrawl", "error")),
+        "in_body_error": Scenario(handler=_replay("firecrawl", "in_body_error")),
+    },
     "fake": {
         "normal": Scenario(),
         "empty": Scenario({"text": ""}),

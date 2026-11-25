@@ -70,6 +70,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("exa", "empty")),
         "error": Scenario(handler=_replay("exa", "error")),
     },
+    "firecrawl": {
+        "normal": Scenario(handler=_replay("firecrawl", "normal")),
+        "empty": Scenario(handler=_replay("firecrawl", "empty")),
+        "error": Scenario(handler=_replay("firecrawl", "error")),
+    },
     "fake": {
         "normal": Scenario(),
         "empty": Scenario({"hits": []}),

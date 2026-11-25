@@ -179,6 +179,50 @@ Exa documents its cost as optional, so an answer without one reports none; the l
 that it reports one.
 Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
 
+## Firecrawl
+
+`firecrawl` calls Firecrawl's [Scrape API](https://docs.firecrawl.dev/api-reference/endpoint/scrape?utm_source=otari&utm_medium=integration),
+`POST /v2/scrape`, with the key as a Bearer token, read from `FIRECRAWL_API_KEY` when not passed.
+Its base URL is `https://api.firecrawl.dev`; `api_base` points it at another Firecrawl
+deployment, such as a self-hosted one.
+
+It fetches one page per call, a web page, a PDF or an image, and returns it as Markdown, rendering
+the page's scripts in a browser when it needs them. It sends what Firecrawl's Python SDK sends, the
+URL and an `origin`, here `any-fetch`, where the SDK sends its own name, and always asks for
+`formats` `["markdown"]`, so `formats` is not an option. Firecrawl has no length cap, so
+`max_chars` cuts the text and sets `text_truncated`. The native options are Firecrawl's own:
+`onlyMainContent`, `includeTags`, `excludeTags`, `maxAge`, `waitFor`, `mobile`, `timeout`,
+`location`, `removeBase64Images`, `blockAds`, `storeInCache` and `parsers`; `--describe
+firecrawl` lists them, and `None` counts as not passed. `maxAge` lets Firecrawl serve a cached
+copy up to two days old unless passed, so pass `maxAge=0` where the page as it is now matters.
+`timeout` is in milliseconds and goes through `fetch`, since `afetch`'s `timeout` argument is the
+fetcher's own. `parsers` is operator only: a PDF adds 1 Firecrawl credit per page parsed, and
+`[{"type": "pdf", "maxPages": 20}]` caps that.
+
+`final_url` is `metadata.url`, where Firecrawl found the page after redirects, so
+`reports_final_url` is true and a caller can check where a redirect led. `content_type` is
+`metadata.contentType`, and `title` is `metadata.title`, the first one when Firecrawl sends a list.
+`published` is `None`: the page's own date tags stay in `raw` in whatever form the page wrote
+them. Firecrawl reports Firecrawl credits (`creditsUsed`), not dollars, so it reports no cost.
+
+A page whose site answered with an error status, such as a 404, comes back as the text of that
+error page, with the site's status in `metadata.statusCode`; one with an empty body is an empty
+page. `success: false` in a 200 is `FetchedPage.error`, tagged with its `code`, such as
+`SCRAPE_DNS_RESOLUTION_ERROR` for a host that does not resolve, else `unsuccessful`. A page
+Firecrawl cannot read, such as a zero-byte file, HTML with an empty body or a private address,
+fails the call with a 500 tagged `SCRAPE_ALL_ENGINES_FAILED`.
+
+Any status from 400 raises `ProviderError`: `unauthorized` (401), `payment_required` (402) and
+`rate_limited` (429) by status, since those bodies are a sentence; any other status takes the
+body's `code` when it has one, else `http_error`. The `error` sentence, which can quote the URL,
+never reaches the error.
+
+Every field read from a successful answer is checked. A `success` that is missing or not a boolean, or an
+answer without `data.markdown` as a string or `data.metadata.url` as a non-empty string, raises
+`ProviderError` with the tag `unexpected_response`, and so does a `metadata.title` that is neither
+a string nor a list of strings, or a `metadata.contentType` that is not a string. Fields the
+adapter does not read are ignored.
+
 ## Tabstack
 
 `tabstack` calls the [`POST /extract/markdown`](https://docs.tabstack.ai/api/resources/extract/methods/markdown)

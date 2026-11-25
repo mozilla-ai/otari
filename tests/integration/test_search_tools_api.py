@@ -460,6 +460,7 @@ def test_search_catalog_serves_the_library_metadata(
         "brave",
         "deepseek",
         "exa",
+        "firecrawl",
         "keenable",
         "mojeek",
         "perplexity",
@@ -545,7 +546,7 @@ def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_k
 def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
     catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
     # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
-    assert list(catalog) == ["deepseek", "exa", "tabstack", "youdotcom"]
+    assert list(catalog) == ["deepseek", "exa", "firecrawl", "tabstack", "youdotcom"]
     exa = catalog["exa"]
     metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
     assert exa["kind"] == "fetch"
@@ -558,6 +559,9 @@ def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_h
     assert exa["reports_final_url"] is False
     assert catalog["tabstack"]["reports_final_url"] is False
     assert catalog["youdotcom"]["reports_final_url"] is False
+    # Firecrawl answers with the URL it found the page at, after redirects, which Otari checks.
+    assert catalog["firecrawl"]["reports_final_url"] is True
+    assert catalog["firecrawl"]["renders_javascript"] is True
     assert exa["options"] == [option.model_dump() for option in metadata.options]
     assert exa["instances"] == ["exa-fetch"]
     assert exa["max_results"] is None

@@ -46,13 +46,22 @@ def _no_builtin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_supported_providers() -> None:
-    assert AnyFetch.get_supported_providers() == ["builtin", "deepseek", "exa", "fake", "tabstack", "youdotcom"]
+    assert AnyFetch.get_supported_providers() == [
+        "builtin",
+        "deepseek",
+        "exa",
+        "fake",
+        "firecrawl",
+        "tabstack",
+        "youdotcom",
+    ]
 
 
 def test_only_a_fetcher_that_follows_redirects_itself_reports_the_final_url() -> None:
     """DeepSeek, Exa, Tabstack and You.com answer with the URL as asked even after a redirect.
 
-    So a caller cannot check where a redirect the provider followed led.
+    So a caller cannot check where a redirect the provider followed led. Firecrawl answers with the URL it
+    found the page at.
     """
     reported = {
         name: AnyFetch.get_provider_metadata(name).reports_final_url for name in AnyFetch.get_supported_providers()
@@ -62,6 +71,7 @@ def test_only_a_fetcher_that_follows_redirects_itself_reports_the_final_url() ->
         "deepseek": False,
         "exa": False,
         "fake": True,
+        "firecrawl": True,
         "tabstack": False,
         "youdotcom": False,
     }
@@ -75,7 +85,9 @@ def test_provider_class_and_metadata() -> None:
 
 @pytest.mark.parametrize("lookup", ["create", "get_provider_class", "get_provider_metadata"])
 def test_an_unknown_provider_is_refused_with_the_supported_ones(lookup: str) -> None:
-    with pytest.raises(UnsupportedProviderError, match="supported: builtin, deepseek, exa, fake, tabstack, youdotcom"):
+    with pytest.raises(
+        UnsupportedProviderError, match="supported: builtin, deepseek, exa, fake, firecrawl, tabstack, youdotcom"
+    ):
         getattr(AnyFetch, lookup)("nope")
 
 
