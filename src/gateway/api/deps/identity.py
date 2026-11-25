@@ -43,6 +43,7 @@ from gateway.repositories.identity import (
     DashboardSessionRepository,
     IdentityRepositories,
     OAuthPendingStateRepository,
+    PersonalAccessTokenRepository,
 )
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.identity.oauth_dynamic_client_repository import OAuthDynamicClientRepository
@@ -142,6 +143,7 @@ def get_deployment_user_service(
         BootstrapOperatorMarker(BootstrapMarkerRepository(db)),
         uow=uow,
         sessions=DashboardSessionRepository(db),
+        access_tokens=PersonalAccessTokenRepository(db),
         keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)),
     )
 

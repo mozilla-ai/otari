@@ -142,6 +142,25 @@ def test_deactivating_the_owner_ends_their_tokens(client: TestClient, world: _Wo
     assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(token)).status_code == 401
 
 
+def test_a_password_change_ends_the_tokens_minted_before_it(client: TestClient, world: _World) -> None:
+    token = _mint(client, world, "alpha_member")["token"]
+    changed = client.put(
+        f"{API_ROOT}/auth/password", json={"new_password": "a-new-password"}, headers=_session(world, "alpha_member")
+    )
+    assert changed.status_code == 200, changed.text
+    assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(token)).status_code == 401
+    assert client.get(_TOKENS, headers=_session(world, "alpha_member")).json()["data"] == []
+
+
+def test_reactivating_an_account_does_not_bring_its_tokens_back(client: TestClient, world: _World) -> None:
+    token = _mint(client, world, "alpha_member")["token"]
+    user = f"{API_ROOT}/admin/users/{world.users['alpha_member']}"
+    for is_active in (False, True):
+        changed = client.patch(user, json={"is_active": is_active}, headers=_session(world, "alpha_operator"))
+        assert changed.status_code == 200, changed.text
+    assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(token)).status_code == 401
+
+
 def test_the_mcp_server_requires_a_token(client: TestClient) -> None:
     assert _mcp(client, {}, "tools/list").status_code == 401
     assert _mcp(client, _bearer("otari-pat-unknown"), "tools/list").status_code == 401

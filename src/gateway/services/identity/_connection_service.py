@@ -129,6 +129,7 @@ class OIDCConnectionService:
         # opened here has closed, and a repository on a closed block refuses the read.
         self._sign_in_states = sign_in_states
         self._sessions = repositories.sessions
+        self._access_tokens = repositories.access_tokens
         self._users = repositories.users
         self._organizations = organizations
         self._domains = domains
@@ -723,7 +724,9 @@ class OIDCConnectionService:
             return
         refused = await self.members_enforcement_would_refuse(organization, connection)
         if refused:
-            await self._sessions.delete_for_users({account.id for _, account in refused})
+            refused_ids = {account.id for _, account in refused}
+            await self._sessions.delete_for_users(refused_ids)
+            await self._access_tokens.delete_all_for_users(refused_ids)
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own SSO enforcement refuses ``user`` from acting in it.

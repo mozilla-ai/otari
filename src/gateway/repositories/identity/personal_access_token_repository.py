@@ -1,23 +1,26 @@
 """Data access for the personal access tokens a person holds."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Never
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.identity import PersonalAccessToken
 from gateway.repositories.base_repository import BaseRepository
 
+_DELETE_CHUNK = 1000
+
 
 class PersonalAccessTokenRepository(BaseRepository[PersonalAccessToken, Never, Never]):
     """Query and stage personal access tokens. Writes flush and never commit."""
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        super().__init__(uow, PersonalAccessToken)
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, PersonalAccessToken)
 
     async def add(
         self,
@@ -59,6 +62,17 @@ class PersonalAccessTokenRepository(BaseRepository[PersonalAccessToken, Never, N
             )
         )
         return bool(getattr(result, "rowcount", 0))
+
+    async def delete_all_for_users(self, user_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of every token the accounts in ``user_ids`` hold, in chunks under the bind limit."""
+        ids = list(user_ids)
+        for start in range(0, len(ids), _DELETE_CHUNK):
+            chunk = ids[start : start + _DELETE_CHUNK]
+            await self.db.execute(delete(PersonalAccessToken).where(col(PersonalAccessToken.user_id).in_(chunk)))
+
+    async def delete_all(self) -> None:
+        """Stage the removal of every token on the deployment."""
+        await self.db.execute(delete(PersonalAccessToken))
 
     async def find_by_hash(self, token_hash: str) -> PersonalAccessToken | None:
         """The token stored under this hash."""

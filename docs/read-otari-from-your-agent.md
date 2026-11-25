@@ -97,8 +97,18 @@ it cannot call models or tools.
 
 ## When a token stops working
 
-A token stops at once when you delete it, when it expires, or when your account
-is deactivated. It does not end when you sign out of the dashboard.
+A token stops at once when you delete it or when it expires. Every token you
+hold also ends whenever Otari ends your dashboard sessions:
+
+- you change or reset your password;
+- you prove your email address by signing in with a provider, after a password
+  was set on it before the address was proven;
+- an operator deactivates your account, or blocks your email address or domain;
+- your organization's single sign-on enforcement starts refusing you;
+- the master key is rotated.
+
+Reactivating an account does not bring its tokens back. Signing out of the
+dashboard leaves tokens working.
 
 ## Turn the server off
 
