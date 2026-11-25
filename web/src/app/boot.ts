@@ -22,7 +22,7 @@
  * file renders on import.
  */
 
-import { ApiError } from "@/shared/api/client"
+import { ApiError, apiFetch, RedirectedError } from "@/shared/api/client"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 
 /**
@@ -52,15 +52,40 @@ export type BootState =
       isAttempting: boolean
       /** Another attempt will start on its own (a transient failure). */
       willRetry: boolean
+      /** The attempt was cut off by its own deadline rather than answered. */
+      timedOut: boolean
+      /** The browser said it was offline when the attempt failed. */
+      offline: boolean
+      /** When the attempt failed, in epoch milliseconds. */
+      failedAt: number
     }
+
+export type FailedState = Extract<BootState, { status: "failed" }>
 
 export interface BootLoader {
   getState(): BootState
   subscribe(listener: () => void): () => void
-  /** Ask again now, cutting any scheduled wait short. */
-  retryNow(): void
+  /**
+   * Ask again now, cutting any scheduled wait short. Resolves when that attempt
+   * settles, either way; an attempt already running is adopted rather than
+   * stacked on, so the promise is that attempt's.
+   */
+  retryNow(): Promise<void>
   /** Stop retrying and drop every timer and listener. */
   dispose(): void
+}
+
+/**
+ * One read of the bootstrap, without following a redirect.
+ *
+ * The gateway's bootstrap never redirects, so a redirect is something in front
+ * of it, typically an access proxy sending this browser to its sign-in page.
+ * Followed, one to another origin fails on CORS and reads as a gateway that
+ * never answered, which is retried forever; unfollowed, it arrives as a
+ * `RedirectedError` the boot screen can name.
+ */
+export function readBootstrap(signal: AbortSignal): Promise<WireBootstrap> {
+  return apiFetch<WireBootstrap>("/bootstrap", { signal, redirect: "manual" })
 }
 
 /**
@@ -74,6 +99,11 @@ export interface BootLoader {
  * same, and that one does recover. The backoff caps what the other costs.
  */
 export function isTransientBootstrapFailure(error: unknown): boolean {
+  // Something in front of the gateway wants this browser somewhere else, which
+  // asking again from here will not change.
+  if (error instanceof RedirectedError) {
+    return false
+  }
   if (!(error instanceof ApiError)) {
     return true
   }
@@ -81,6 +111,82 @@ export function isTransientBootstrapFailure(error: unknown): boolean {
     return true
   }
   return error.status < 400 || error.status >= 500
+}
+
+/**
+ * Which failure the boot screen is showing. Each one picks its own wording and
+ * action; the four that keep retrying share theirs and differ only in `reason`.
+ */
+export type BootFailureKind =
+  | "unreachable"
+  | "timedOut"
+  | "serverError"
+  | "offline"
+  | "signInRequired"
+  | "accessRefused"
+  | "unexpectedAnswer"
+  | "unchosen"
+
+export interface BootFailure {
+  kind: BootFailureKind
+  /**
+   * What the last attempt got, in the only terms the browser can know it: no
+   * response, its own deadline, a status, the device being offline, or a
+   * redirect. `null` where no gateway was asked. Never a cause the browser
+   * cannot see, such as a refused connection or who wrote a status: a fetch
+   * that fails reports neither.
+   */
+  reason: string | null
+  /** Whether the loader keeps trying on its own. */
+  willRetry: boolean
+}
+
+/**
+ * The failure the screen reports for a failed state.
+ *
+ * The bootstrap takes no credential, so a 401, a 403 or a redirect comes from
+ * something in front of the gateway rather than the gateway itself, and the
+ * way past it is that thing's own sign-in, which a reload reaches and a retry
+ * from here does not.
+ */
+export function describeBootFailure(state: FailedState): BootFailure {
+  const { error, stage, willRetry } = state
+  if (stage === "prepare") {
+    return { kind: "unchosen", reason: null, willRetry }
+  }
+  if (error instanceof RedirectedError) {
+    return {
+      kind: "signInRequired",
+      reason: "sent to sign-in",
+      willRetry,
+    }
+  }
+  const status = error instanceof ApiError ? error.status : 0
+  if (status === 401) {
+    return { kind: "signInRequired", reason: "HTTP 401", willRetry }
+  }
+  if (status === 403) {
+    return { kind: "accessRefused", reason: "HTTP 403", willRetry }
+  }
+  if (status !== 0 && !willRetry) {
+    return { kind: "unexpectedAnswer", reason: `HTTP ${status}`, willRetry }
+  }
+  if (status !== 0) {
+    // 5xx, 408, 429, and a non-JSON answer from an intermediary: a status
+    // arrived, so the gateway's address is answering something.
+    return { kind: "serverError", reason: `HTTP ${status}`, willRetry }
+  }
+  if (state.offline) {
+    return { kind: "offline", reason: "offline", willRetry }
+  }
+  if (state.timedOut) {
+    return {
+      kind: "timedOut",
+      reason: `no answer in ${BOOTSTRAP_ATTEMPT_TIMEOUT_MS / 1000} s`,
+      willRetry,
+    }
+  }
+  return { kind: "unreachable", reason: "no response", willRetry }
 }
 
 /**
@@ -114,6 +220,7 @@ export function createBootLoader({
   let retries = 0
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let inFlight: AbortController | undefined
+  let current: Promise<void> | undefined
 
   function setState(next: BootState) {
     state = next
@@ -149,18 +256,43 @@ export function createBootLoader({
     document.removeEventListener("visibilitychange", onWake)
   }
 
-  function fail(error: unknown, stage: "prepare" | "load", willRetry: boolean) {
+  function fail(
+    error: unknown,
+    stage: "prepare" | "load",
+    willRetry: boolean,
+    timedOut = false,
+  ) {
     if (willRetry) {
       retries += 1
       retryTimer = setTimeout(attempt, retryDelayMs(retries, random))
     }
-    setState({ status: "failed", error, stage, isAttempting: false, willRetry })
+    setState({
+      status: "failed",
+      error,
+      stage,
+      isAttempting: false,
+      willRetry,
+      timedOut,
+      offline: navigator.onLine === false,
+      failedAt: Date.now(),
+    })
   }
 
-  async function attempt() {
-    if (isDisposed || isAttempting || state.status === "ready") {
-      return
+  // One attempt at a time: a second call while one runs gets the running one.
+  // Keyed on `isAttempting` rather than on the promise, which settles a
+  // microtask after the attempt's state is published: a press that lands in
+  // between belongs to a new attempt, not to the one that just failed.
+  function attempt(): Promise<void> {
+    if (isDisposed || state.status === "ready") {
+      return Promise.resolve()
     }
+    if (!isAttempting || !current) {
+      current = run()
+    }
+    return current
+  }
+
+  async function run() {
     clearRetryTimer()
     isAttempting = true
     if (state.status === "failed") {
@@ -189,22 +321,36 @@ export function createBootLoader({
         ),
       BOOTSTRAP_ATTEMPT_TIMEOUT_MS,
     )
+    let outcome:
+      | { ok: true; bootstrap: WireBootstrap }
+      | { ok: false; error: unknown }
     try {
-      const bootstrap = await load(controller.signal)
-      if (isDisposed) {
-        return
-      }
-      stopListening()
-      setState({ status: "ready", bootstrap })
+      outcome = { ok: true, bootstrap: await load(controller.signal) }
     } catch (error) {
-      if (!isDisposed) {
-        fail(error, "load", isTransientBootstrapFailure(error))
-      }
-    } finally {
-      clearTimeout(deadline)
-      inFlight = undefined
-      isAttempting = false
+      outcome = { ok: false, error }
     }
+    // Settled before anyone hears about it, so a listener that asks again
+    // starts a new attempt rather than adopting this one.
+    clearTimeout(deadline)
+    inFlight = undefined
+    isAttempting = false
+    if (isDisposed) {
+      return
+    }
+    if (outcome.ok) {
+      stopListening()
+      setState({ status: "ready", bootstrap: outcome.bootstrap })
+      return
+    }
+    // Only the deadline aborts this controller on a loader that is still live
+    // (`dispose` aborts it too, and is excluded above), so an aborted signal
+    // here means the deadline fired.
+    fail(
+      outcome.error,
+      "load",
+      isTransientBootstrapFailure(outcome.error),
+      controller.signal.aborted,
+    )
   }
 
   window.addEventListener("online", retryOnWake)
@@ -217,9 +363,7 @@ export function createBootLoader({
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    retryNow() {
-      void attempt()
-    },
+    retryNow: attempt,
     dispose() {
       isDisposed = true
       clearRetryTimer()

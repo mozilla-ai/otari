@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ApiError } from "@/shared/api/client"
+import { ApiError, RedirectedError } from "@/shared/api/client"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import {
   BOOTSTRAP_ATTEMPT_TIMEOUT_MS,
   type BootLoader,
   createBootLoader,
+  describeBootFailure,
+  type FailedState,
   firstSettled,
   isTransientBootstrapFailure,
+  readBootstrap,
   retryDelayMs,
 } from "./boot"
 
@@ -96,6 +99,9 @@ describe("createBootLoader", () => {
       stage: "load",
       isAttempting: false,
       willRetry: true,
+      timedOut: false,
+      offline: false,
+      failedAt: Date.now(),
     })
 
     await vi.advanceTimersByTimeAsync(499)
@@ -122,7 +128,11 @@ describe("createBootLoader", () => {
 
     await vi.advanceTimersByTimeAsync(BOOTSTRAP_ATTEMPT_TIMEOUT_MS)
     expect(signals[0]?.aborted).toBe(true)
-    expect(boot.getState()).toMatchObject({ status: "failed", willRetry: true })
+    expect(boot.getState()).toMatchObject({
+      status: "failed",
+      willRetry: true,
+      timedOut: true,
+    })
 
     await vi.advanceTimersByTimeAsync(500)
     expect(load).toHaveBeenCalledTimes(2)
@@ -214,6 +224,75 @@ describe("createBootLoader", () => {
     expect(load).toHaveBeenCalledTimes(2)
   })
 
+  it("hands a press the attempt already running instead of starting a second", async () => {
+    let answer: ((value: WireBootstrap) => void) | undefined
+    const load = vi
+      .fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
+      .mockRejectedValueOnce(DOWN)
+      .mockImplementationOnce(
+        () =>
+          new Promise<WireBootstrap>((resolve) => {
+            answer = resolve
+          }),
+      )
+    const boot = start(load)
+    await firstSettled(boot)
+    // The background retry starts, and the press lands while it runs.
+    await vi.advanceTimersByTimeAsync(500)
+    expect(boot.getState()).toMatchObject({ isAttempting: true })
+    let settled = false
+    void boot.retryNow().then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(settled).toBe(false)
+
+    answer?.(BOOTSTRAP)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
+    expect(boot.getState().status).toBe("ready")
+  })
+
+  it("starts a new attempt for a press that lands as the last one is reported", async () => {
+    const load = vi
+      .fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
+      .mockRejectedValueOnce(DOWN)
+      .mockResolvedValue(BOOTSTRAP)
+    const boot = start(load)
+    // Pressed from inside the notification that the first attempt failed.
+    const unsubscribe = boot.subscribe(() => {
+      if (boot.getState().status === "failed") {
+        unsubscribe()
+        void boot.retryNow()
+      }
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(boot.getState().status).toBe("ready")
+  })
+
+  it("records that the browser was offline when the attempt failed", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    const boot = start(async () => {
+      throw DOWN
+    })
+    expect(await firstSettled(boot)).toMatchObject({
+      offline: true,
+      willRetry: true,
+    })
+  })
+
+  it("does not retry a redirect on its own", async () => {
+    const load = vi.fn(async (): Promise<WireBootstrap> => {
+      throw new RedirectedError()
+    })
+    const boot = start(load)
+    expect(await firstSettled(boot)).toMatchObject({ willRetry: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
   it("stops retrying once disposed", async () => {
     const load = vi.fn(async (): Promise<WireBootstrap> => {
       throw DOWN
@@ -240,6 +319,7 @@ describe("isTransientBootstrapFailure", () => {
     ["something that is not an ApiError", new TypeError("boom"), true],
     ["a 404", new ApiError(404, "not found"), false],
     ["a 403", new ApiError(403, "forbidden"), false],
+    ["a redirect", new RedirectedError(), false],
   ])("treats %s as %s", (_name, error, transient) => {
     expect(isTransientBootstrapFailure(error)).toBe(transient)
   })
@@ -258,5 +338,155 @@ describe("retryDelayMs", () => {
   it("jitters within the upper half of the ceiling", () => {
     expect(retryDelayMs(3, () => 0)).toBe(2_000)
     expect(retryDelayMs(3, () => 0.5)).toBe(3_000)
+  })
+})
+
+describe("describeBootFailure", () => {
+  function failed(
+    error: unknown,
+    overrides: Partial<FailedState> = {},
+  ): FailedState {
+    return {
+      status: "failed",
+      error,
+      stage: "load",
+      isAttempting: false,
+      willRetry: isTransientBootstrapFailure(error),
+      timedOut: false,
+      offline: false,
+      failedAt: 0,
+      ...overrides,
+    }
+  }
+
+  it.each<[string, FailedState, string, string | null, boolean]>([
+    ["no response", failed(DOWN), "unreachable", "no response", true],
+    [
+      "something that is not an ApiError",
+      failed(new TypeError("Failed to fetch")),
+      "unreachable",
+      "no response",
+      true,
+    ],
+    [
+      "its own deadline",
+      failed(new ApiError(0, "The gateway did not respond in time."), {
+        timedOut: true,
+      }),
+      "timedOut",
+      "no answer in 8 s",
+      true,
+    ],
+    [
+      "a 502",
+      failed(new ApiError(502, "Bad Gateway")),
+      "serverError",
+      "HTTP 502",
+      true,
+    ],
+    ["a 503", failed(new ApiError(503, "x")), "serverError", "HTTP 503", true],
+    ["a 408", failed(new ApiError(408, "x")), "serverError", "HTTP 408", true],
+    ["a 429", failed(new ApiError(429, "x")), "serverError", "HTTP 429", true],
+    [
+      "an intermediary's non-JSON 200",
+      failed(new ApiError(200, "not JSON")),
+      "serverError",
+      "HTTP 200",
+      true,
+    ],
+    [
+      "the device being offline",
+      failed(DOWN, { offline: true }),
+      "offline",
+      "offline",
+      true,
+    ],
+    [
+      "offline, even past the deadline",
+      failed(DOWN, { offline: true, timedOut: true }),
+      "offline",
+      "offline",
+      true,
+    ],
+    [
+      "a 401",
+      failed(new ApiError(401, "Unauthorized")),
+      "signInRequired",
+      "HTTP 401",
+      false,
+    ],
+    [
+      "a redirect",
+      failed(new RedirectedError()),
+      "signInRequired",
+      "sent to sign-in",
+      false,
+    ],
+    [
+      "a 403",
+      failed(new ApiError(403, "Forbidden")),
+      "accessRefused",
+      "HTTP 403",
+      false,
+    ],
+    [
+      "a 404",
+      failed(new ApiError(404, "Not Found")),
+      "unexpectedAnswer",
+      "HTTP 404",
+      false,
+    ],
+    [
+      "a 400",
+      failed(new ApiError(400, "x")),
+      "unexpectedAnswer",
+      "HTTP 400",
+      false,
+    ],
+    [
+      "a deployment that could not be chosen",
+      failed(new Error("no directory"), { stage: "prepare", willRetry: false }),
+      "unchosen",
+      null,
+      false,
+    ],
+  ])("reports %s", (_name, state, kind, reason, willRetry) => {
+    expect(describeBootFailure(state)).toEqual({ kind, reason, willRetry })
+  })
+
+  it("never says more than the browser can know", () => {
+    // A failed fetch reports neither a refused connection nor who wrote a
+    // status, so no reason may claim either.
+    const reasons = [
+      DOWN,
+      new ApiError(502, "Bad Gateway"),
+      new ApiError(401, "Unauthorized"),
+      new RedirectedError(),
+    ].map((error) => describeBootFailure(failed(error)).reason ?? "")
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/refused|proxy/i)
+    }
+  })
+})
+
+describe("readBootstrap", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("does not follow a redirect, so one in front of the gateway is reported", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      type: "opaqueredirect",
+      status: 0,
+      ok: false,
+      statusText: "",
+      headers: new Headers(),
+    } as Response)
+
+    await expect(
+      readBootstrap(new AbortController().signal),
+    ).rejects.toBeInstanceOf(RedirectedError)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
+      /\/api\/v1\/bootstrap$/,
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "manual" })
   })
 })

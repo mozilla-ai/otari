@@ -42,6 +42,21 @@ export class ApiError extends Error {
 }
 
 /**
+ * A response the browser was told to fetch from somewhere else, read by a
+ * caller that asked not to follow it (`redirect: "manual"`). The browser hides
+ * where it pointed, but the fact of it is the answer: the gateway's own routes
+ * do not redirect, so something in front of it, typically a proxy or an access
+ * gate sending this browser to sign in, answered instead. Followed, the same
+ * redirect fails on CORS when it crosses origins and reads as a network fault.
+ */
+export class RedirectedError extends Error {
+  constructor() {
+    super("The request was redirected.")
+    this.name = "RedirectedError"
+  }
+}
+
+/**
  * The dashboard's default retry policy for a failed query: twice, except for
  * an auth failure, which will not fix itself. `app/provider.tsx` installs it,
  * and a hook that refuses one more status composes with it rather than
@@ -733,6 +748,12 @@ export async function apiFetch<T>(
   // the deployment-wide routers on `require_deployment_operator`, a non-operator
   // member meets one on the landing page. Let it surface as an ordinary error
   // the panel reports, the way every other 4xx does.
+  // Before the status checks: an opaque redirect reports status 0 and would
+  // otherwise read as a gateway that never answered.
+  if (response.type === "opaqueredirect") {
+    throw new RedirectedError()
+  }
+
   if (response.status === 401) {
     unauthorizedHandler?.()
     throw await refusalError(response)

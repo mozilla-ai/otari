@@ -9,6 +9,7 @@ import {
   createSession,
   defaultQueryRetry,
   deleteSession,
+  RedirectedError,
   retryUnlessNotFound,
   setUnauthorizedHandler,
   signInWithPasskey,
@@ -223,6 +224,24 @@ describe("apiFetch", () => {
     await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       message: expect.stringContaining("could not reach the gateway"),
     })
+  })
+
+  it("names a redirect it was told not to follow rather than calling it unreachable", async () => {
+    // What fetch hands back for `redirect: "manual"`: a status of 0 and no
+    // body, which the status checks below would read as no answer at all.
+    const opaque = {
+      type: "opaqueredirect",
+      status: 0,
+      ok: false,
+      statusText: "",
+      headers: new Headers(),
+    } as Response
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(opaque)
+
+    await expect(
+      apiFetch("/bootstrap", { redirect: "manual" }),
+    ).rejects.toBeInstanceOf(RedirectedError)
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "manual" })
   })
 
   it("keeps the error code on a 401 as well as signing out", async () => {
