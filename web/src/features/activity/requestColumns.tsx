@@ -62,10 +62,18 @@ export const MODEL_COLUMN: RequestColumn = {
     )
     const detail = tools.map(formatToolUsage).join(" · ")
     return (
-      // The model keeps its width first; a narrow lane shortens the markers,
-      // whose labels still say it all.
+      // The model keeps its width first and a narrow lane shortens the tools
+      // marker, whose title still says it all. "hosted" is the whole of its
+      // marker, so on a hosted row the model shortens instead.
       <span className="flex items-center gap-1.5">
-        <span className="max-w-full shrink-0 truncate" title={entry.model}>
+        <span
+          className={
+            entry.deployment_paid
+              ? "min-w-0 truncate"
+              : "max-w-full shrink-0 truncate"
+          }
+          title={entry.model}
+        >
           {entry.model}
         </span>
         {/* Markers, not badges: an accent dot and a label in mono uppercase,
@@ -75,12 +83,12 @@ export const MODEL_COLUMN: RequestColumn = {
         {entry.deployment_paid ? (
           <span
             role="img"
-            className="inline-flex min-w-0 items-center gap-1.5 text-mono-overline text-muted"
+            className="inline-flex shrink-0 items-center gap-1.5 text-mono-overline text-muted"
             title="Served on a hosted provider"
             aria-label="Paid by: hosted provider"
           >
             <Dot className="bg-info" />
-            <span className="truncate">hosted</span>
+            <span>hosted</span>
           </span>
         ) : null}
         {tools.length ? (
