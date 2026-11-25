@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 from google.oauth2.service_account import Credentials
 
 from gateway.core.settings.routing import AutomaticOffering, AutomaticRouting, Region
-from gateway.services.inference import is_provider_credential_rejection, upstream_exception_shape
+from gateway.services.inference import (
+    is_provider_credential_rejection,
+    upstream_error_message,
+    upstream_exception_shape,
+)
 
 if TYPE_CHECKING:
     from gateway.services.routing.compiler import CompiledPlan
@@ -31,6 +35,13 @@ _LIMIT = 10000
 _COOLDOWN = 15.0
 _MAX_COOLDOWN = 600.0
 _REFUSAL_TTL = 300.0
+_MISSING_MODEL_TTL = 3600.0
+# How a provider's message says the model is not served on this credential. Request text a provider
+# echoes back could match too; the cost is one offering ranked last for an hour, never one switched off.
+_MISSING_MODEL = re.compile(
+    r"model\b.{0,120}\b(does not exist|not found)|(do not|don't) have access to (the )?model|model not found",
+    re.IGNORECASE | re.DOTALL,
+)
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
 _ACCOUNT_FIELDS = frozenset(
     {
@@ -186,18 +197,26 @@ class AutomaticObservation:
         if self.first_at is None:
             self.first_at = self.selection.router.clock()
 
-    def finish(self, *, success: bool = False, unhealthy: bool = False, account: bool = False) -> None:
+    def finish(
+        self, *, success: bool = False, unhealthy: bool = False, account: bool = False, missing: bool = False
+    ) -> None:
         """Release load once, then update health and session affinity for the reported outcome.
 
         ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
         which cools every model served on it rather than this one alone. It applies only with ``unhealthy``,
         so a gateway-side refusal that carries the same status never cools a shared credential.
+        ``missing`` marks a model the credential does not serve, which ranks last for the workspace
+        for an hour instead of counting against the offering's health or the credential.
         """
         if self.finished:
             return
         self.finished = True
         router = self.selection.router
         now = router.clock()
+        if missing:
+            unhealthy = account = False
+            router.remember_missing(self.selection.tenant, self.selector)
+            self.selection.forget_key(self.key)
         # A failed credential is the account's, not the offering's: it cools the account alone.
         credential = account and unhealthy
         if self.health is not None:
@@ -261,6 +280,14 @@ class AutomaticRouter:
         """Whether the credential itself failed, not one model: exhausted quota or funds (402), or a refused key."""
         return upstream_exception_shape(exc)[1] == 402 or is_provider_credential_rejection(exc)
 
+    @staticmethod
+    def is_missing_model(exc: BaseException) -> bool:
+        """Whether the provider does not serve the model on this credential: a 404, or a 400 or 403 saying so."""
+        status_code = upstream_exception_shape(exc)[1]
+        if status_code == 404:
+            return True
+        return status_code in (400, 403) and _MISSING_MODEL.search(upstream_error_message(exc)) is not None
+
     def account_key(self, attempt: Attempt, tenant: str = "") -> str:
         """Identify the credential an attempt is sent on, whatever model it names, for one ``tenant``.
 
@@ -282,6 +309,14 @@ class AutomaticRouter:
         key = self._digest((scope, selector))
         self.refusals.pop(key, None)
         self.refusals[key] = self.clock() + _REFUSAL_TTL
+        while len(self.refusals) > _LIMIT:
+            self.refusals.popitem(last=False)
+
+    def remember_missing(self, tenant: str, selector: str) -> None:
+        """Record that ``selector`` is not served on the credential ``tenant`` reaches it with."""
+        key = self._digest(("missing", tenant, selector))
+        self.refusals.pop(key, None)
+        self.refusals[key] = self.clock() + _MISSING_MODEL_TTL
         while len(self.refusals) > _LIMIT:
             self.refusals.popitem(last=False)
 
@@ -340,7 +375,8 @@ class AutomaticRouter:
             account = self.accounts.get(self.account_key(attempt, tenant))
             if (health and health.cooldown > now) or (account and account[0] > now):
                 cooling.add(selector)
-            if self.refusals.get(self._digest((scope, selector)), 0) > now:
+            refusals = (self._digest((scope, selector)), self._digest(("missing", tenant, selector)))
+            if any(self.refusals.get(key, 0) > now for key in refusals):
                 refused.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None
         previous = self.affinities.get(affinity) if affinity else None
