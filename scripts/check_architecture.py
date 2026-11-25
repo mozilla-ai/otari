@@ -1429,7 +1429,7 @@ COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
 # back three hundred lines of what a split had moved out. A fall must be recorded
 # here, so the room made cannot be spent again. The count says nothing about where
 # a builder belongs, which is a judgment no check can make.
-COMPOSITION_ROOT_SIZE_BASELINE = 89
+COMPOSITION_ROOT_SIZE_BASELINE = 87
 
 
 def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
