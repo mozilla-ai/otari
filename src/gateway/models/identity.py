@@ -60,6 +60,9 @@ class AddressAuthority(StrEnum):
     ORGANIZATION = ("organization", False)
     """One organization's word for an address any organization could have claimed."""
 
+    PROVIDER = ("provider", True)
+    """A provider whose word no tenant can set, reporting this address verified."""
+
     SESSION = ("session", False)
     """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
 

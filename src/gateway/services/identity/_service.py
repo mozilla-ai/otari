@@ -8,6 +8,7 @@ from typing import Protocol, cast
 
 import idna
 
+from gateway.core.address_proof import record_address
 from gateway.core.addresses import same_address
 from gateway.core.email_domains import blocklist_entry, blocklist_keys
 from gateway.core.tokens import generate_shared_token, generate_token, hash_token
@@ -32,6 +33,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.identity import (
+    AddressAuthority,
     BlockedEmail,
     EmailAssertion,
     MailedLinkStatus,
@@ -687,7 +689,7 @@ class IdentityService:
         if not _asserts_this_address(account, external):
             return False
         password_removed = account.hashed_password is not None
-        account.email_proven_at = datetime.now(UTC)
+        record_address(account, now=datetime.now(UTC), authority=AddressAuthority.PROVIDER)
         account.hashed_password = None
         account.email_verification_token_hash = None
         account.email_verification_token_expires_at = None
