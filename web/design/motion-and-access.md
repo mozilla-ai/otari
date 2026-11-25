@@ -13,14 +13,15 @@
 `transition-*`. A vestibular disorder is not an edge case, and the guard costs one
 utility.
 
-**Two animations run indefinitely, and both are on the same surface**: the arc
-sweeping the first-run sheet's own border (`Dialog`'s `isScanning`) and the orb
-in the listening panel pinned above its footer. They are the shape of the
-exception rather than licence to add more, and what makes them one exception
-rather than two is that neither outlives the wait. Both run
-only while the product is watching for a request that has not arrived, both stop
-when it does, and neither carries anything that is not also in the text beside
-it.
+**Two animations run indefinitely on the first-run sheet**: the arc sweeping its
+own border (`Dialog`'s `isScanning`) and the orb in the listening panel pinned
+above its footer. The same arc, in danger ink, sweeps the boot screen's card for
+as long as the dashboard keeps asking a gateway that has not answered
+(`BootFrame`'s `isScanning`). They are the shape of the exception rather than
+licence to add more, and what makes them one exception rather than several is
+that none outlives the wait. Each runs only while the product is watching for an
+answer that has not arrived, stops when it does, and carries nothing that is not
+also in the text beside it.
 
 They stop differently under `prefers-reduced-motion`, because they are different
 machinery. The arc is CSS, so it holds still on its last frame. The orb is a
@@ -89,7 +90,7 @@ than a default. Two in the tree, both deliberate:
   `max-height`. No transform does that.
 - `.otari-scan-border::after` interpolates `--scan-angle` into a conic gradient, which is a
   repaint per frame. `@property --scan-angle` is what makes it animate at all. It is bounded
-  to one element on one open dialog.
+  to one element at a time: an open dialog, or the boot screen's card before the app mounts.
 
 **`will-change` is a loan, not a decoration.** It buys a compositor layer for an element that
 is about to animate, and a layer costs memory for as long as the declaration is there. Add it

@@ -9,7 +9,6 @@ import {
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
-import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
@@ -84,29 +83,14 @@ export default function App({
   // `WireBootstrap`, not `DeploymentBootstrap`: this is the one component that
   // takes the payload as it came off the wire, and an older gateway sends fewer
   // fields than the generated type promises. `normalizeBootstrap` below is
-  // where it becomes the complete shape everything under here reads.
-  bootstrap: WireBootstrap | null
+  // where it becomes the complete shape everything under here reads. Never
+  // absent: `DeploymentGate` renders this only once the bootstrap answered.
+  bootstrap: WireBootstrap
 }) {
   // Read here rather than only in `DeploymentRoot` because the boundary below
   // resets on it: which branch renders is a function of the route, so a throw in
   // one of them must not outlive the navigation away from it.
   const route = useRoute()
-
-  // Null means /v1/bootstrap did not answer (see main.tsx). The app deliberately
-  // has no fallback deployment to assume: rendering a management dashboard at a
-  // gateway that does not serve one is the failure this contract exists to
-  // prevent, so say what happened instead.
-  if (!bootstrap) {
-    return (
-      <PageError
-        error={
-          new Error(
-            "Could not reach the gateway, so the dashboard does not know what it is connected to. Check that it is running, then reload.",
-          )
-        }
-      />
-    )
-  }
 
   // Outside the provider rather than inside it, because the provider's own
   // correction memo reads `sign_in_methods` and is therefore one of the things

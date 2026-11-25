@@ -1,111 +1,120 @@
-import type { Query, QueryClient } from "@tanstack/react-query"
-import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState, useSyncExternalStore } from "react"
-import { FiAlertTriangle } from "react-icons/fi"
+import { useEffect, useState } from "react"
+import { announce } from "@/app/announce"
+import { Dot } from "@/design-system/indicators/Dot"
+import { useGatewayUnreachable } from "@/shared/api/deployment"
+import { formatClockTime } from "@/shared/helpers/format"
 
-import { ApiError } from "@/shared/api/client"
+/** How long "Reconnected" stays before the band goes. */
+export const RECONNECTED_MS = 2_000
 
-// apiFetch normalizes an unreachable gateway to ApiError status 0 ("Network
-// error: could not reach the gateway."). A 401/403 is a different failure: the
-// backend answered, it just rejected the key, and that already bounces to
-// sign-in, so it is not "can't connect".
-function isUnreachable(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 0
-}
+export type Band = { state: "down"; since: number } | { state: "back" } | null
 
-function failedToConnect(query: Query): boolean {
-  return query.state.status === "error" && isUnreachable(query.state.error)
-}
-
-// Whether the most recent request anywhere in the cache failed to connect. Kept
-// from the cache's events rather than read off each query's state: any answer
-// from the gateway, an error included, clears it, so an errored query left
-// behind by a page the operator moved on from cannot hold the alert, and a
-// query refetching (which puts one with no data back to `pending`) does not
-// flip it on its way to the same failure. `error` fires once retries are spent.
-function trackConnection(queryClient: QueryClient) {
-  let failing = false
-  return {
-    subscribe: (onStoreChange: () => void) =>
-      queryClient.getQueryCache().subscribe((event) => {
-        if (event.type !== "updated") return
-        const { action } = event
-        // A manual cache write (`setQueryData`) reaches no gateway, so it says
-        // nothing about the connection.
-        if (action.type === "success" && !action.manual) failing = false
-        else if (action.type === "error") failing = isUnreachable(action.error)
-        else return
-        onStoreChange()
-      }),
-    getSnapshot: () => failing,
-  }
-}
-
-// It watches the whole query cache rather than any one page, so the alert is
-// the same wherever the operator is standing.
-//
-// The cache is an external store and is read as one. Subscribing in an effect
-// and calling `setState` from the listener does not hold here: the cache emits
-// synchronously when an observer is created, and an observer is created when a
-// component calls `useQuery` during its render, so the listener runs inside
-// another component's render pass. React calls that a bad `setState` in render.
-// `useSyncExternalStore` is the primitive for this shape, and React owns the
-// timing, so the same notification arrives safely.
-function useGatewayUnreachable(): boolean {
-  const queryClient = useQueryClient()
-  // Built once per client: `useSyncExternalStore` identity-checks `subscribe`
-  // and re-subscribes when it changes, and the tracker holds the state.
-  const [connection] = useState(() => trackConnection(queryClient))
-  return useSyncExternalStore(connection.subscribe, connection.getSnapshot)
-}
-
-// A bottom-right toast that surfaces a lost backend connection at the app level,
-// instead of leaving each page to render its own inline error. The gateway not
-// answering is a whole-app condition, so it belongs above any single page. Not
-// dismissible: it is tied to live state and disappears on its own once the
-// gateway responds.
-//
-// Shown only once the failing queries have been asked again and failed again.
-// One dropped request is routine (a laptop waking, a proxy closing an idle
-// connection) and the build poll does not retry, so alarming on the first
-// failure put the banner up over a healthy gateway.
+/**
+ * The gateway not answering, as a band pinned to the top of the content pane.
+ *
+ * A whole-app condition, so it sits above any page rather than in one, and it
+ * is a band in the flow rather than a toast over it: a toast covered the
+ * pagination it was floated over, and on a phone it ran to the screen's edge.
+ * The band pushes the page down instead and stays in view while it scrolls.
+ * `main` scrolls, so this is its first child, ahead of the padded column.
+ *
+ * Shown only once a liveness probe has confirmed what a failed request
+ * suggested (`useGatewayUnreachable`): one dropped request is routine. When
+ * the gateway answers again the band says so for a moment, while the pages
+ * that failed refetch, and then goes. Not dismissible: it is tied to live
+ * state.
+ *
+ * `InfoBanner`'s anatomy (the dot, the muted sentence, the prose measure)
+ * composed here rather than `InfoBanner` itself, because a band pinned under
+ * the header takes one rule below it rather than one each side, spans the pane
+ * with the page's own gutters, and carries a status word at its end and a
+ * success dot on recovery, none of which that component has.
+ *
+ * Not a live region: the content pane already holds the pages' own loading
+ * status, and a second region there is one more thing to talk over it. A
+ * screen reader is told the band's sentence once when it appears, and once
+ * when it turns to "Reconnected", through the document's one announcer.
+ */
 export function ConnectionStatus() {
-  const queryClient = useQueryClient()
-  const failing = useGatewayUnreachable()
-  const [confirmed, setConfirmed] = useState(false)
+  const down = useGatewayUnreachable()
+  const [band, setBand] = useState<Band>(null)
 
   useEffect(() => {
-    if (!failing) {
-      setConfirmed(false)
+    if (down) {
+      // The time is held from the moment the outage was confirmed: everything
+      // on screen loaded before it, and it must not creep forward while later
+      // requests keep failing.
+      setBand((current) =>
+        current?.state === "down"
+          ? current
+          : { state: "down", since: Date.now() },
+      )
       return
     }
-    let current = true
-    // A recheck that succeeds clears `failing`, which ends this run before the
-    // banner is confirmed.
-    void queryClient.refetchQueries({ predicate: failedToConnect }).then(() => {
-      if (current) setConfirmed(true)
-    })
-    return () => {
-      current = false
-    }
-  }, [failing, queryClient])
+    setBand((current) =>
+      current?.state === "down" ? { state: "back" } : current,
+    )
+  }, [down])
 
-  if (!failing || !confirmed) {
+  const said = band === null ? null : bandSentence(band)
+  useEffect(() => {
+    if (said !== null) {
+      announce(said)
+    }
+  }, [said])
+
+  useEffect(() => {
+    if (band?.state !== "back") {
+      return
+    }
+    const timer = setTimeout(() => setBand(null), RECONNECTED_MS)
+    return () => clearTimeout(timer)
+  }, [band])
+
+  return <ConnectionBand band={band} />
+}
+
+const DOWN_LEAD = "Can’t reach the gateway."
+const BACK_LEAD = "Reconnected."
+const BACK_REST = "Refreshing this page."
+
+function downRest(since: number): string {
+  return `Showing what loaded before ${formatClockTime(since, { seconds: false })}. Changes won’t save until it answers.`
+}
+
+function bandSentence(band: Exclude<Band, null>): string {
+  return band.state === "down"
+    ? `${DOWN_LEAD} ${downRest(band.since)}`
+    : `${BACK_LEAD} ${BACK_REST}`
+}
+
+/** The band itself, drawn from `band` alone so each state renders on its own. */
+export function ConnectionBand({ band }: { band: Band }) {
+  if (band === null) {
     return null
   }
-
   return (
     <div
-      role="alert"
-      aria-live="assertive"
-      className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-2.5 rounded-lg border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger shadow-elevation-lg"
+      data-connection-band={band.state}
+      className="sticky top-0 z-10 flex items-start gap-3 border-b border-border bg-background px-4 py-3 text-sm text-muted md:px-6"
     >
-      <FiAlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
-      <span>
-        <strong className="font-semibold">Can’t reach the gateway.</strong> The
-        backend isn’t responding; data won’t load or save until the connection
-        is restored.
-      </span>
+      <Dot
+        className={`mt-2 ${band.state === "down" ? "bg-danger" : "bg-success"}`}
+      />
+      <p className="min-w-0 max-w-prose flex-1">
+        <strong className="font-semibold text-foreground">
+          {band.state === "down" ? DOWN_LEAD : BACK_LEAD}
+        </strong>{" "}
+        {band.state === "down" ? downRest(band.since) : BACK_REST}
+      </p>
+      {band.state === "down" ? (
+        <span
+          aria-hidden
+          className="ml-auto shrink-0 pt-0.5 text-mono-overline text-subtle"
+        >
+          Retrying
+        </span>
+      ) : null}
     </div>
   )
 }
