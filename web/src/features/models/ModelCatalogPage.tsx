@@ -748,7 +748,14 @@ export function ModelCatalogView({
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
-        <h1 className="text-display">Models</h1>
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="text-display">Models</h1>
+          {/* Always mounted, so a refetch changes its text and never the
+              height of anything around it. */}
+          <p role="status" className="shrink-0 whitespace-nowrap text-caption">
+            {catalog.isFetching && catalog.data ? "Updating models…" : ""}
+          </p>
+        </div>
         {/* Only the public catalog says what it holds: a signed-in page opens
             with its title alone. */}
         {publicView ? (
@@ -844,11 +851,6 @@ export function ModelCatalogView({
             </Button>
           </div>
 
-          {catalog.isFetching && catalog.data ? (
-            <p role="status" className="text-caption">
-              Updating models…
-            </p>
-          ) : null}
           {catalog.isPending && !catalog.data ? (
             <PageLoading label="Loading models…" />
           ) : catalog.isError && !catalog.data ? (

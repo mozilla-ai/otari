@@ -1023,6 +1023,44 @@ describe("ModelCatalogPage", () => {
     expect(screen.queryByText("Updating models…")).not.toBeInTheDocument()
   })
 
+  it("announces a refetch from beside the title, never from the list's own column", async () => {
+    let complete: (response: CatalogResponse) => void = () => {}
+    let first = true
+    mockApi({
+      list: () => {
+        if (first) {
+          first = false
+          return { ...CATALOG, count: 26 }
+        }
+        return new Promise<CatalogResponse>((resolve) => {
+          complete = resolve
+        })
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    const list = await screen.findByRole("list", { name: "Models" })
+
+    // At rest the line is already mounted, empty, and shares a row with the
+    // title: a refetch can only change its text, so nothing below it moves.
+    const title = screen.getByRole("heading", { name: "Models" })
+    const statusBesideTitle = () =>
+      screen
+        .getAllByRole("status")
+        .find((each) => each.parentElement?.contains(title))
+    const status = statusBesideTitle()!
+    expect(status).toBeEmptyDOMElement()
+    expect(status.parentElement).not.toContainElement(list)
+
+    await user.click(screen.getByRole("button", { name: /next/i }))
+    expect(await screen.findByText("Updating models…")).toBe(status)
+    await act(async () => {
+      complete({ ...CATALOG, count: 26, models: [KIMI] })
+    })
+    await waitFor(() => expect(status).toBeEmptyDOMElement())
+    expect(statusBesideTitle()).toBe(status)
+  })
+
   it("shows a request error and lets clearing filters recover the cached catalog", async () => {
     mockApi({
       list: (params) =>
