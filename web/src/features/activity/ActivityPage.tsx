@@ -859,6 +859,56 @@ function ActivityPageContent({
         />
 
         <div className="flex flex-col gap-3">
+          {/* Under the layout's filters, as their continuation, rather than
+            under the timeline, where it read as a heading over the table. */}
+          <FilterChips chips={filterChips} toggleLabel="More filters">
+            <FilterSelect
+              label="Priced?"
+              value={pricedFilter}
+              onChange={(value) => url.patch({ priced: value })}
+              options={PRICED_OPTIONS}
+            />
+            {/* Only offered once a hosted provider served something in the
+              window, following the tool select below. */}
+            {paidByFilter ||
+            contextSummary.data?.totals?.deployment_paid_cost ? (
+              <FilterSelect
+                label="Paid by"
+                value={paidByFilter}
+                onChange={(value) => url.patch({ paid_by: value })}
+                options={PAID_BY_OPTIONS}
+              />
+            ) : null}
+            {/* Only offered once the window actually contains tool usage, following the
+              source select below: a filter whose every option returns nothing is
+              noise on the majority of gateways, which run no tools at all. */}
+            {toolFilter || contextSummary.data?.by_tool?.length ? (
+              <FilterSelect
+                label="Tool"
+                value={toolFilter}
+                onChange={(value) => url.patch({ tool: value })}
+                options={TOOL_OPTIONS}
+              />
+            ) : null}
+            {/* Provenance only earns a select once there is more than one source
+              to choose between: most gateways see only their own traffic, and a
+              filter with a single option is noise. A drill-down that arrives
+              with a source applied keeps the select so it stays clearable. */}
+            {sourceOptions.length > 1 || sourceFilter ? (
+              <FilterSelect
+                label="Source"
+                value={sourceFilter}
+                onChange={(value) => url.patch({ source: value })}
+                options={[
+                  { value: "", label: "All" },
+                  ...sourceOptions.map((source) => ({
+                    value: source,
+                    label: describeSource(source),
+                  })),
+                ]}
+              />
+            ) : null}
+          </FilterChips>
           <ActivityTimeline
             presets={ACTIVITY_PRESETS}
             hidePresets={embedded}
@@ -916,54 +966,6 @@ function ActivityPageContent({
               </span>
             }
           />
-          <FilterChips chips={filterChips} toggleLabel="More filters">
-            <FilterSelect
-              label="Priced?"
-              value={pricedFilter}
-              onChange={(value) => url.patch({ priced: value })}
-              options={PRICED_OPTIONS}
-            />
-            {/* Only offered once a hosted provider served something in the
-              window, following the tool select below. */}
-            {paidByFilter ||
-            contextSummary.data?.totals?.deployment_paid_cost ? (
-              <FilterSelect
-                label="Paid by"
-                value={paidByFilter}
-                onChange={(value) => url.patch({ paid_by: value })}
-                options={PAID_BY_OPTIONS}
-              />
-            ) : null}
-            {/* Only offered once the window actually contains tool usage, following the
-              source select below: a filter whose every option returns nothing is
-              noise on the majority of gateways, which run no tools at all. */}
-            {toolFilter || contextSummary.data?.by_tool?.length ? (
-              <FilterSelect
-                label="Tool"
-                value={toolFilter}
-                onChange={(value) => url.patch({ tool: value })}
-                options={TOOL_OPTIONS}
-              />
-            ) : null}
-            {/* Provenance only earns a select once there is more than one source
-              to choose between: most gateways see only their own traffic, and a
-              filter with a single option is noise. A drill-down that arrives
-              with a source applied keeps the select so it stays clearable. */}
-            {sourceOptions.length > 1 || sourceFilter ? (
-              <FilterSelect
-                label="Source"
-                value={sourceFilter}
-                onChange={(value) => url.patch({ source: value })}
-                options={[
-                  { value: "", label: "All" },
-                  ...sourceOptions.map((source) => ({
-                    value: source,
-                    label: describeSource(source),
-                  })),
-                ]}
-              />
-            ) : null}
-          </FilterChips>
         </div>
 
         <div className="flex flex-col gap-3">
