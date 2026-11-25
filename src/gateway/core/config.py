@@ -6,9 +6,9 @@ import re
 import secrets
 import types
 import typing
-from collections.abc import Callable, Container
+from collections.abc import Callable, Container, Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple, Self
 from urllib.parse import urlsplit
 
 import yaml
@@ -2267,6 +2267,22 @@ class GatewayConfig(
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_old_setting_names(cls, data: Any) -> Any:
+        """Read a renamed setting's old name when the config is built directly rather than by ``load_config``."""
+        if isinstance(data, dict):
+            data = dict(data)
+            _read_old_names(data, read_env=True)
+        return data
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        """Copy the config, reading a renamed setting's old name in ``update``, which pydantic does not validate."""
+        if update:
+            update = dict(update)
+            _read_old_names(update, read_env=False)
+        return super().model_copy(update=update, deep=deep)
+
     @field_validator("master_key")
     @classmethod
     def _blank_master_key_is_unset(cls, value: str | None) -> str | None:
@@ -2711,13 +2727,30 @@ def _apply_renamed_settings(config: dict[str, Any], renamed_keys: list[str]) -> 
             # The new variable, applied after this, still overrides it.
             config[new] = _coerce_scalar_env(raw, GatewayConfig.model_fields[new].annotation)
         if used:
-            logger.warning(
-                "%s is a deprecated name for %s (%s%s); set the new name instead.",
-                " and ".join(used),
-                new,
-                OTARI_ENV_PREFIX,
-                new.upper(),
-            )
+            _warn_about_old_name(" and ".join(used), new)
+
+
+def _read_old_names(data: dict[str, Any], *, read_env: bool) -> None:
+    """Move each old name in input given to ``GatewayConfig`` itself onto its new one.
+
+    ``load_config`` has already done this for its own input, so there it finds
+    nothing. With ``read_env``, an old ``OTARI_`` variable is read where the input
+    does not set the new name, which pydantic's own environment source would have.
+    """
+    for old, new in _RENAMED_SETTINGS:
+        old_env = f"{OTARI_ENV_PREFIX}{old.upper()}"
+        if old in data:
+            data.setdefault(new, data.pop(old))
+            _warn_about_old_name(old, new)
+        elif read_env and new not in data and (raw := os.getenv(old_env)):
+            data[new] = raw
+            _warn_about_old_name(old_env, new)
+
+
+def _warn_about_old_name(used: str, new: str) -> None:
+    logger.warning(
+        "%s is a deprecated name for %s (%s%s); set the new name instead.", used, new, OTARI_ENV_PREFIX, new.upper()
+    )
 
 
 def _warn_about_unknown_keys(config: dict[str, Any]) -> None:

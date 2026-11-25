@@ -385,7 +385,8 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 - `files_sweep_interval_sec`: the background sweep (hourly by default, `0` to
   disable). An expired file answers 404 at once; the sweep then reclaims its
   bytes and row, along with those of deleted files and of uploads that never
-  completed. With it at `0`, a deployment that still holds such files says so
+  completed, and drops the rows of provider copies that expired or never
+  finished. With it at `0`, a deployment that still holds any of these says so
   at startup, since nothing else reclaims them.
 - `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
 a copy of an attached file may be stored at the provider that runs a request's

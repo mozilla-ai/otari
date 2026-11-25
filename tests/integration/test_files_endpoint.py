@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,7 +32,7 @@ from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, API_VERSION, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import ERROR_CODE_HEADER, USER_MISMATCH
-from gateway.models.files import FileObject
+from gateway.models.files import FileObject, FileProviderCopy
 from gateway.services.file_extractors import ExtractionResult
 
 from .conftest import ALL_KEY_SCOPES, ALL_SERVICE_KEY_SCOPES, build_test_client
@@ -1075,15 +1076,7 @@ def test_sweep_reclaims_expired_and_deleted_files(
     assert client.get(f"{API_ROOT}/files/{live}", headers=api_key_header).status_code == 200
 
 
-def test_has_reclaimable_says_whether_the_sweep_has_work(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    tmp_file_store: None,
-    tmp_path: Path,
-    db_session: Session,
-    test_config: Any,
-) -> None:
-    """A served file is not work for the sweep; the same file once expired is."""
+def _has_reclaimable(test_config: Any, tmp_path: Path) -> bool:
     import asyncio
 
     from sqlalchemy.engine import make_url
@@ -1094,30 +1087,81 @@ def test_has_reclaimable_says_whether_the_sweep_has_work(
     from gateway.core.unit_of_work import UnitOfWork
     from gateway.services.files import FileBackends
 
-    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
-    assert resp.status_code == 200, resp.text
-    file_id = str(resp.json()["id"])
-    store = LocalDirFileStore(str(tmp_path))
-
-    async def _has_reclaimable() -> bool:
+    async def _ask() -> bool:
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
             async with async_sessionmaker(engine)() as db:
-                files = build_file_service(
-                    UnitOfWork(db), FileBackends(storage=store, provider_files=AnyLlmProviderFiles()), test_config
-                )
-                return await files.has_reclaimable()
+                backends = FileBackends(storage=LocalDirFileStore(str(tmp_path)), provider_files=AnyLlmProviderFiles())
+                return await build_file_service(UnitOfWork(db), backends, test_config).has_reclaimable()
         finally:
             await engine.dispose()
 
-    assert asyncio.run(_has_reclaimable()) is False
+    return asyncio.run(_ask())
+
+
+def test_has_reclaimable_says_whether_the_sweep_has_work(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    tmp_path: Path,
+    db_session: Session,
+    test_config: Any,
+) -> None:
+    """A served file is not work for the sweep; the same file once expired is."""
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
+    assert resp.status_code == 200, resp.text
+    file_id = str(resp.json()["id"])
+
+    assert _has_reclaimable(test_config, tmp_path) is False
 
     db_session.query(FileObject).filter(FileObject.id == file_id).update(
         {"expires_at": datetime.now(UTC) - timedelta(hours=1)}
     )
     db_session.commit()
 
-    assert asyncio.run(_has_reclaimable()) is True
+    assert _has_reclaimable(test_config, tmp_path) is True
+
+
+def test_has_reclaimable_counts_the_provider_copy_rows_the_sweep_drops(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    tmp_path: Path,
+    db_session: Session,
+    test_config: Any,
+) -> None:
+    """A live copy of a served file is not work for the sweep; an expired copy, or one left pending, is."""
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
+    assert resp.status_code == 200, resp.text
+    stored = db_session.get(FileObject, str(resp.json()["id"]))
+    assert stored is not None
+    now = datetime.now(UTC)
+    copy = FileProviderCopy(
+        id=uuid.uuid4(),
+        file_id=stored.id,
+        account_identity="account-1",
+        provider="anthropic",
+        provider_instance="anthropic",
+        credential_workspace_id=stored.workspace_id,
+        provider_file_id="file-at-provider",
+        expires_at=now + timedelta(hours=1),
+    )
+    db_session.add(copy)
+    db_session.commit()
+
+    assert _has_reclaimable(test_config, tmp_path) is False
+
+    copy.expires_at = now - timedelta(hours=1)
+    db_session.commit()
+
+    assert _has_reclaimable(test_config, tmp_path) is True
+
+    copy.provider_file_id = None
+    copy.expires_at = None
+    copy.pending_since = now - timedelta(hours=2)
+    db_session.commit()
+
+    assert _has_reclaimable(test_config, tmp_path) is True
 
 
 def test_sweep_pages_past_rows_whose_blob_will_not_delete(
