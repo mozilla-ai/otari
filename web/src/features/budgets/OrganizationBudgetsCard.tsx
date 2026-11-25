@@ -2,6 +2,7 @@ import { Button, Card } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationBudget } from "@/client"
+import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -9,7 +10,7 @@ import {
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
 } from "@/shared/api/budgets"
-import { budgetLabeler } from "./budgetLabel"
+import { budgetLabeler, shortBudgetId } from "./budgetLabel"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { limitLabel, periodLabel } from "./organizationBudget"
 
@@ -55,6 +56,18 @@ export function OrganizationBudgetsCard() {
       header: "Budget",
       isRowHeader: true,
       cell: (row) => <span className="text-body">{nameBudget(row)}</span>,
+    },
+    {
+      id: "id",
+      header: "ID",
+      cell: (row) => (
+        // Only a prefix is rendered; the copy hands over the whole id.
+        <CopyableValue value={row.budget_id} label="budget id">
+          <code className="text-mono-micro" title={row.budget_id}>
+            {shortBudgetId(row.budget_id)}
+          </code>
+        </CopyableValue>
+      ),
     },
     {
       id: "limit",
