@@ -14,7 +14,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.core.address_proof import AddressAuthority, mark_address_usable, record_address
+from gateway.core.address_proof import mark_address_usable, record_address
+from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import User
 
 PROVED_EARLIER = datetime(2026, 1, 1, tzinfo=UTC)

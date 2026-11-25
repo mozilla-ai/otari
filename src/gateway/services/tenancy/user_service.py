@@ -56,7 +56,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.address_proof import AddressAuthority, mark_address_usable, record_address
+from gateway.core.address_proof import mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -74,9 +74,9 @@ from gateway.exceptions.identity_exceptions import (
     VerificationPasswordIncorrectError,
     VerificationTokenInvalidError,
 )
+from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import CallerIdentityPublic, SignInMeans, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
-from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -398,7 +398,7 @@ async def create_user_for_signup(
     blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
-    proof: AddressProof | None = None,
+    proof: AddressAuthority | None = None,
 ) -> User | None:
     """Claim an identity ``organization_service`` already added to an organization, register a new
     one where the deployment allows it, or do nothing.
@@ -501,9 +501,10 @@ async def create_user_for_signup(
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
             if proof is not None:
-                values["email_verified_at"] = datetime.now(UTC)
-                if proof is AddressProof.MAILBOX:
-                    values["email_proven_at"] = datetime.now(UTC)
+                now = datetime.now(UTC)
+                values["email_verified_at"] = now
+                if proof.proves_the_holder:
+                    values["email_proven_at"] = now
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(

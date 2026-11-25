@@ -27,7 +27,6 @@ from gateway.adapters.identity_provider_adapter import DeploymentIdentityProvide
 from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
-from gateway.core.address_proof import AddressAuthority
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -54,7 +53,7 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402

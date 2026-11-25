@@ -51,9 +51,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_db, verify_master_key
-from gateway.core.address_proof import AddressAuthority
 from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.exceptions.identity_exceptions import CurrentPasswordRequiredError, EmailChangeNotSupportedError
+from gateway.models.identity import AddressAuthority
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
 from gateway.services.tenancy.email_address import validated_email

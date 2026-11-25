@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 from gateway.core.addresses import same_address
 from gateway.core.tokens import hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.identity import AddressAuthority
 from gateway.models.organizations import OrganizationInvitation
-from gateway.ports.signup_invite_port import AddressProof, SignupInvitePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.services.mail import Mailer
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
@@ -54,7 +55,7 @@ class InvitationLink(SignupInvitePort):
             return None
         return invitation
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
+    async def proof_for(self, token: str, *, claimed_address: str) -> AddressAuthority | None:
         """Which proof of ``claimed_address`` this token carries, or None where it carries none.
 
         A link this deployment would refuse proves nothing, which is what keeps a signup from
@@ -64,7 +65,7 @@ class InvitationLink(SignupInvitePort):
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
                 return None
-        return AddressProof.SHARED if is_shared_token(token) else AddressProof.MAILBOX
+        return AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX
 
     async def _refuses_the_address(
         self, invitation: OrganizationInvitation, *, hand_carried: bool, now: datetime
