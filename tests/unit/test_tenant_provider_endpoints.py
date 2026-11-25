@@ -48,7 +48,11 @@ def _sdk_default_headers(llm: AnyLLM) -> list[dict[str, str]]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", sorted(TENANT_ENDPOINT_PROVIDERS))
-async def test_every_sdk_client_of_a_pinnable_provider_uses_the_pinned_client(provider: str) -> None:
+async def test_every_sdk_client_of_a_pinnable_provider_uses_the_pinned_client(
+    provider: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The Foundry client reads this when no resource is passed, then refuses it beside a base URL.
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_RESOURCE", raising=False)
     pinned = owned_endpoint_sdk_client(LLMProvider(provider))
     expected = httpx2.AsyncClient if provider in TENANT_ENDPOINT_HTTPX2_PROVIDERS else httpx.AsyncClient
     assert isinstance(pinned, expected)
