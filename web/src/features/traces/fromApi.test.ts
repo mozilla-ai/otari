@@ -267,6 +267,41 @@ describe("toTrace", () => {
       expect(read(spans, "b")?.level).toBe("ERROR")
     })
 
+    it("claims neither outcome when the next call was blocked", () => {
+      const recovered = read(
+        [failedAttempt("a", 1, true), attempt("b", 2, { outcome: "blocked" })],
+        "a",
+      )
+
+      expect(recovered?.level).toBe("WARNING")
+      expect(recovered?.statusMessage).toBe(
+        "HTTP 504, routing tried the next candidate",
+      )
+    })
+
+    it("does not join calls that carry no request id", () => {
+      const recovered = read(
+        [
+          { ...failedAttempt("a", 1, true), request_id: null },
+          { ...attempt("b", 2), request_id: null },
+        ],
+        "a",
+      )
+
+      expect(recovered?.statusMessage).toBe(
+        "HTTP 504, routing tried the next candidate",
+      )
+    })
+
+    it("reads a fallback that starts at the same instant as later", () => {
+      const recovered = read(
+        [failedAttempt("a", 1, true), attempt("b", 1)],
+        "a",
+      )
+
+      expect(recovered?.statusMessage).toBe("HTTP 504, recovered by a fallback")
+    })
+
     it("claims neither outcome when no later call is visible", () => {
       const recovered = read([failedAttempt("a", 1, true)], "a")
 

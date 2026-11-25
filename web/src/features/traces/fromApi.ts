@@ -109,7 +109,7 @@ function spanLevel(
   if (span.outcome !== "error") return "DEFAULT"
   if (!span.recovered) return "ERROR"
   const { answer, next } = laterCalls(span, siblings)
-  return next && !answer ? "ERROR" : "WARNING"
+  return next?.outcome === "error" && !answer ? "ERROR" : "WARNING"
 }
 
 function returnedError(span: TraceSpan): boolean {
@@ -123,7 +123,7 @@ function spanStatus(
   verdict: GuardrailVerdict | null,
   gateMessages: ReadonlyMap<string, string>,
   blockedBy: readonly string[] = [],
-  siblings: readonly TraceSpan[] = [],
+  siblings: readonly TraceSpan[],
 ): string | undefined {
   if (verdict && gateVerdict(span)) {
     const said = GATE_STATUS[verdict]
@@ -161,7 +161,7 @@ function spanStatus(
   if (!span.recovered) return error
   const { answer, next } = laterCalls(span, siblings)
   if (answer) return `${error}, recovered by a fallback`
-  return next
+  return next?.outcome === "error"
     ? `${error}, the fallback also failed`
     : `${error}, routing tried the next candidate`
 }

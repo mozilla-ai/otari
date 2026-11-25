@@ -288,6 +288,69 @@ describe("gatewayEvents, a fallback read from what followed it", () => {
     })
   })
 
+  it("makes no claim about a next call that was blocked, not failed", () => {
+    const [event] = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      call("b", "req-1", 2, {
+        model: "gpt-oss-120b",
+        outcome: "blocked",
+        recovered: false,
+      }),
+    ])
+
+    expect(event).toMatchObject({
+      tone: "warning",
+      title: "gpt-5 failed",
+      detail: "Failed with HTTP 400. Routing tried the next candidate.",
+    })
+  })
+
+  it("says no candidate answered only when every later call failed", () => {
+    const events = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      failed("b", 2, "status_429", "gpt-oss-120b"),
+      call("c", "req-1", 3, { model: "claude-haiku", outcome: "blocked" }),
+    ])
+
+    expect(events[0].detail).toBe(
+      "Failed with HTTP 400. Routing tried gpt-oss-120b, which failed with HTTP 429.",
+    )
+  })
+
+  it("does not join calls that carry no request id", () => {
+    const spans = [
+      failed("a", 1, "status_400", "gpt-5"),
+      call("b", "req-2", 2, { model: "gpt-oss-120b" }),
+    ].map((span) => ({ ...span, request_id: null }))
+    const [event] = fallbacks(spans)
+
+    expect(event.title).toBe("gpt-5 failed")
+  })
+
+  it("reads a fallback that starts at the same instant as later", () => {
+    const [event] = fallbacks([
+      { ...failed("a", 1, "status_400", "gpt-5"), end_time: at(2) },
+      call("b", "req-1", 1, {
+        model: "gpt-oss-120b",
+        end_time: at(3),
+      }),
+    ])
+
+    expect(event.title).toBe("gpt-5 failed, gpt-oss-120b answered")
+  })
+
+  it("orders same-instant calls by their end, then by their position", () => {
+    const events = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      failed("b", 1, "status_429", "gpt-oss-120b"),
+    ])
+
+    expect(events.map((e) => e.title)).toEqual([
+      "gpt-5 failed, gpt-oss-120b failed too",
+      "gpt-oss-120b failed",
+    ])
+  })
+
   it("ignores later calls of another request", () => {
     const [event] = fallbacks([
       failed("a", 1, "status_400", "gpt-5"),

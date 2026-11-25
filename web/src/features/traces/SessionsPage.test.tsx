@@ -661,7 +661,7 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", {
-        name: /gpt-5 failed/,
+        name: /^Fallback\s?gpt-5 failed\s?Failed with error\. Routing tried the next candidate\./,
       }),
     )
 

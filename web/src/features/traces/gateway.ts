@@ -137,30 +137,46 @@ export type LaterCalls = {
   answer: TraceSpan | undefined
   // The first later call of the request, whatever its outcome.
   next: TraceSpan | undefined
-  // Whether `next` is the request's final call.
+  // Whether every later call failed, and `next` is the request's final call.
   last: boolean
+}
+
+function byEnd(a: TraceSpan, b: TraceSpan): number {
+  return (a.end_time ?? "").localeCompare(b.end_time ?? "")
 }
 
 // What routing did after a recovered attempt, read from the request's other
 // gateway calls: the backend marks every attempt it moved on from as recovered,
-// whether or not a later candidate answered.
+// whether or not a later candidate answered. A call that starts at the same
+// instant is later when it ends later, or else when it comes later in `spans`.
 export function laterCalls(
   span: TraceSpan,
   spans: readonly TraceSpan[],
 ): LaterCalls {
+  if (!span.request_id)
+    return { answer: undefined, next: undefined, last: false }
+  const own = spans.indexOf(span)
   const later = spans
+    .map((other, index) => ({ other, index }))
     .filter(
-      (other) =>
+      ({ other, index }) =>
+        other !== span &&
         other.origin === "gateway" &&
         other.kind === "llm" &&
         other.request_id === span.request_id &&
-        byStart(other, span) > 0,
+        (byStart(other, span) || byEnd(other, span) || index - own) > 0,
     )
-    .sort(byStart)
+    .sort(
+      (a, b) =>
+        byStart(a.other, b.other) ||
+        byEnd(a.other, b.other) ||
+        a.index - b.index,
+    )
+    .map(({ other }) => other)
   return {
     answer: later.find((other) => other.outcome === "ok"),
     next: later[0],
-    last: later.length === 1,
+    last: later.length === 1 && later[0].outcome === "error",
   }
 }
 
@@ -205,7 +221,7 @@ export function gatewayEvents(detail: TraceDetail): GatewayEvent[] {
         title: `${modelName(span)} failed, ${modelName(answer)} answered`,
         detail: `Failed with ${failed}. Routing tried the next candidate.`,
       })
-    } else if (next) {
+    } else if (next?.outcome === "error") {
       events.push({
         spanId: span.span_id,
         at: at(span),
