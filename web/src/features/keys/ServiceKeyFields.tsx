@@ -178,7 +178,7 @@ export function ServiceKeyFields({
   )
 
   return (
-    <div className="flex flex-col gap-3 border border-control-border p-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <Checkbox
           isSelected={value.isServiceKey}
