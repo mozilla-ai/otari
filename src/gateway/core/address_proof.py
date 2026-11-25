@@ -5,10 +5,32 @@ Both the identity domain and the tenancy services record addresses, so the vocab
 writer sit below both rather than in either, beside the address handling they are about.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import User
+
+
+@dataclass(frozen=True)
+class AddressStamp:
+    """What establishing an address records on the two columns."""
+
+    verified_at: datetime
+    proven_at: datetime | None
+
+
+def address_stamp(authority: AddressAuthority, *, now: datetime, verified_at: datetime | None) -> AddressStamp:
+    """What this authority records, given the verification the identity already carries.
+
+    The one place the rule lives, so a caller that writes the columns through a model and one
+    that writes them through a statement cannot answer differently. ``verified_at`` is what the
+    identity carries now, and None where it carries none.
+    """
+    return AddressStamp(
+        verified_at=verified_at if verified_at is not None else now,
+        proven_at=now if authority.proves_the_holder else None,
+    )
 
 
 def record_address(identity: User, *, now: datetime, authority: AddressAuthority) -> None:
@@ -21,9 +43,9 @@ def record_address(identity: User, *, now: datetime, authority: AddressAuthority
     whoever supplied the address can sign in from here on. A caller that establishes no
     address calls :func:`mark_address_usable` instead, which cannot retire one.
     """
-    if identity.email_verified_at is None:
-        identity.email_verified_at = now
-    identity.email_proven_at = now if authority.proves_the_holder else None
+    stamp = address_stamp(authority, now=now, verified_at=identity.email_verified_at)
+    identity.email_verified_at = stamp.verified_at
+    identity.email_proven_at = stamp.proven_at
 
 
 def mark_address_usable(identity: User, *, now: datetime) -> None:

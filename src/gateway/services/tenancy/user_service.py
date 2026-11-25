@@ -56,7 +56,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.address_proof import mark_address_usable, record_address
+from gateway.core.address_proof import address_stamp, mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -501,10 +501,9 @@ async def create_user_for_signup(
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
             if proof is not None:
-                now = datetime.now(UTC)
-                values["email_verified_at"] = now
-                if proof.proves_the_holder:
-                    values["email_proven_at"] = now
+                stamp = address_stamp(proof, now=datetime.now(UTC), verified_at=None)
+                values["email_verified_at"] = stamp.verified_at
+                values["email_proven_at"] = stamp.proven_at
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
