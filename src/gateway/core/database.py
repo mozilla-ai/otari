@@ -19,6 +19,7 @@ from sqlalchemy.exc import DataError, DisconnectionError, IntegrityError, Operat
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from gateway.core.change_audit import install_change_audit
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Collector, GaugeMetricFamily
@@ -531,6 +532,7 @@ def init_db(config: GatewayConfig) -> None:
         **engine_kwargs(config, connect_args=connect_args, is_sqlite=is_sqlite),
     )
     _install_timeout_translation(_engine)
+    install_change_audit()
     if not is_sqlite:
         _install_idle_ping(_engine)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
