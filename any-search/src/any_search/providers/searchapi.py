@@ -249,8 +249,11 @@ class SearchApiProvider(AnySearch):
             return SearchResult(provider=self.METADATA.name, hits=[], cost_source="none", error=error, raw=body)
         if "organic_results" not in body:
             # No results is a 200 without the key, with Google's no-results sentence in ``error`` or no ``error``
-            # at all; any other sentence is SearchApi reporting a failure inside a 200.
+            # at all; any other sentence is SearchApi reporting a failure inside a 200. An ``error`` that is
+            # present but not a sentence is a body SearchApi does not document.
             error_text = body.get("error")
+            if "error" in body and not isinstance(error_text, str):
+                raise _unexpected(response)
             if isinstance(error_text, str) and error_text != _NO_RESULTS:
                 error = SearchError(tag="provider_error")
                 return SearchResult(provider=self.METADATA.name, hits=[], cost_source="none", error=error, raw=body)
@@ -302,13 +305,14 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
     """
     if not isinstance(item, dict):
         raise _unexpected(response)
-    link, title, snippet = item.get("link"), item.get("title"), item.get("snippet")
-    if not isinstance(link, str) or not isinstance(title, str) or not isinstance(snippet, str | None):
+    # ``snippet`` is absent from some results, never null: an absent one is empty, a null one is malformed.
+    link, title, snippet = item.get("link"), item.get("title"), item.get("snippet", "")
+    if not isinstance(link, str) or not isinstance(title, str) or not isinstance(snippet, str):
         raise _unexpected(response)
     url = _destination(link)
     if url is None:
         return None
-    return SearchHit(url=url, title=title, snippet=snippet or "", raw=item)
+    return SearchHit(url=url, title=title, snippet=snippet, raw=item)
 
 
 def _destination(link: str) -> str | None:

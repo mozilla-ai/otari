@@ -288,12 +288,11 @@ async def test_unread_fields_are_ignored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_snippet_absent_or_null_is_empty() -> None:
-    without, null = _item("a"), _item("b")
+async def test_an_absent_snippet_is_empty() -> None:
+    without = _item("a")
     del without["snippet"]
-    null["snippet"] = None
-    result, _ = await _search(httpx.Response(200, json=_answer([without, null])))
-    assert [hit.snippet for hit in result.hits] == ["", ""]
+    result, _ = await _search(httpx.Response(200, json=_answer([without])))
+    assert [hit.snippet for hit in result.hits] == [""]
 
 
 @pytest.mark.asyncio
@@ -369,11 +368,22 @@ ITEM = ("organic_results", 0)
         pytest.param(_without(*ITEM, "title"), id="title-missing"),
         pytest.param(_setting(None, *ITEM, "title"), id="title-null"),
         pytest.param(_setting(["a"], *ITEM, "snippet"), id="snippet-not-a-string"),
+        pytest.param(_setting(None, *ITEM, "snippet"), id="snippet-null"),
     ],
 )
 async def test_a_field_missing_or_of_the_wrong_type_raises_without_the_body(change: Any) -> None:
     body = _answer([_item("a")])
     change(body)
+    with pytest.raises(ProviderError) as raised:
+        await _search(httpx.Response(200, json=body))
+    assert (raised.value.status, raised.value.tag) == (200, "unexpected_response")
+    assert SENTINEL not in str(raised.value) and SENTINEL not in repr(raised.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [{"message": SENTINEL}, None, 7], ids=["an-object", "null", "a-number"])
+async def test_an_error_that_is_not_a_sentence_in_a_200_without_results_raises_without_the_body(error: Any) -> None:
+    body = {"search_metadata": {"status": "Success"}, "error": error}
     with pytest.raises(ProviderError) as raised:
         await _search(httpx.Response(200, json=body))
     assert (raised.value.status, raised.value.tag) == (200, "unexpected_response")

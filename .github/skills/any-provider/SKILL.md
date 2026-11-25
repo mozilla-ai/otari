@@ -543,7 +543,8 @@ Bearer token and the query in the URL.
   `link_token` beside it. It is a URL with a host, but its `url` is usually a session token no
   caller can fetch, so the hit is dropped and the count filled from the next ones, as Serply's
   opaque tokens are; when `url` decodes to an http(s) URL, that URL is the hit. `snippet` is
-  missing from some results (a rich-snippet-only result), so it is optional.
+  missing from some results (a rich-snippet-only result), never null, so an absent one is an
+  empty snippet and a null one is `unexpected_response`, like an `error` that is not a sentence.
 - Error bodies are one sentence in `error` at every status, and the sentence quotes the request
   (`Unsupported value `zz` in time_period parameter.`), so the tag comes from the status; only a
   400 and a 401 were seen live, 402 and 429 are from the pricing page's terms.
