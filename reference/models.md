@@ -412,7 +412,9 @@ aliases:
 Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
-target's price, not a price under the alias.
+target's price, not a price under the alias. Each usage row keeps the alias as
+its `requested_model` beside the target in `model`, so a request sent under the
+alias can be told from one sent to the target.
 
 An alias also withholds its target offering from `GET /api/v1/models` in that
 workspace, where the alias is listed in its place; the model stays listed while

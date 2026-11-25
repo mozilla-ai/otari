@@ -359,7 +359,8 @@ request schemas.
 ## What is billed and what the caller sees
 
 Pricing, budgets, and usage use the resolved model. Completion responses use the
-policy name.
+policy name. Every usage row the request writes, absorbed attempts and
+failures included, keeps the name the caller sent as `requested_model`.
 
 Each failed attempt before a successful fallback gets an `absorbed` usage row.
 All attempts share a `request_group_id`, which is the request's `Otari-Request-ID`.

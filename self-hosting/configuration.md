@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/c3ac91dd7d20945c7d9a614de8b30cc9ed7ef51e/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/71c3a266432ede41dedd503137b93697c3736b6a/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -747,13 +747,9 @@ with the database. If the database holds encrypted credentials and neither
 `OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
 than generate a key that could not decrypt them.
 
-To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
-run the hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
-router's key has no re-encryption endpoint yet: re-enter it on the Subagent
-router page after the rotation. Losing every configured encryption key makes
-stored credentials unrecoverable.
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key, then run every re-encryption endpoint: `POST /api/v1/hosted-providers/reencrypt`, `POST /api/v1/search-tools/reencrypt` and `POST /api/v1/organization-provider-keys/reencrypt`.
+
+**Keep the old key configured after that.** Only the three stores above have a re-encryption endpoint, and everything else still opens with the key it was written under. A subagent router's key is re-entered on the Subagent router page. Stored trace content is sealed under `OTARI_SECRET_KEY` too, and [Keeping trace content](trace-storage.md#keeping-trace-content) says to keep a rotated-out key for as long as you keep traces. Removing the old key while any of that remains makes it unrecoverable, as losing every configured key does.
 
 ### Hosted providers in config.yml
 
@@ -877,7 +873,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/c3ac91dd7d20945c7d9a614de8b30cc9ed7ef51e/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/71c3a266432ede41dedd503137b93697c3736b6a/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1938,7 +1934,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/c3ac91dd7d20945c7d9a614de8b30cc9ed7ef51e/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/71c3a266432ede41dedd503137b93697c3736b6a/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
