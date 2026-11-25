@@ -51,6 +51,7 @@ from gateway.core.config import (
     API_ROOT,
     CONVERSATION_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     PRICING_SOURCE_HEADER,
     TAGS_HEADER,
     USAGE_UNIT_HEADER,
@@ -749,11 +750,12 @@ _CORS_ALLOW_HEADERS = (
     "Otari-Region",
     *_SDK_CORS_HEADERS,
 )
-# A speech response carries its cost on headers, which a browser on
-# another origin reads only when they are exposed.
+# A speech response carries its cost on headers, and a completion says who paid
+# for it, which a browser on another origin reads only when they are exposed.
 _CORS_EXPOSE_HEADERS = (
     BILLING_URL_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     ERROR_CODE_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
