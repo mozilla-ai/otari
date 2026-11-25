@@ -68,10 +68,6 @@ class KeyCiphertexts:
             endpoint_auth_secret=seal(self.endpoint_auth_secret),
         )
 
-    def any_held(self) -> bool:
-        """Whether the key holds anything encrypted at all."""
-        return any(value is not None for value in (self.api_key, self.client_args, self.endpoint_auth_secret))
-
 
 def resolve_active_key(candidates: Sequence[Candidate]) -> OrgProviderKey | None:
     """Pick the key a workspace should use for one provider.
