@@ -7,6 +7,8 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import PortSessionDep, get_unit_of_work
+from gateway.api.deps.ports import AgentModelRecommenderPortDep
+from gateway.api.deps.usage_and_telemetry import UsageServiceDep
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.routing import SubagentDecisionRepository
 from gateway.services.pricing_service import resolve_model_pricing
@@ -27,10 +29,15 @@ def _subagent_rate_lookup(db: AsyncSession) -> SubagentRateLookup:
 
 
 def get_subagent_decision_service(
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)], db: PortSessionDep
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: PortSessionDep,
+    usage: UsageServiceDep,
+    recommender: AgentModelRecommenderPortDep,
 ) -> SubagentDecisionService:
     """Build the subagent decision record on the request's Unit of Work."""
-    return SubagentDecisionService(uow, SubagentDecisionRepository(uow), _subagent_rate_lookup(db))
+    return SubagentDecisionService(
+        uow, SubagentDecisionRepository(uow), _subagent_rate_lookup(db), usage=usage, recommender=recommender
+    )
 
 
 SubagentDecisionServiceDep = Annotated[SubagentDecisionService, Depends(get_subagent_decision_service)]

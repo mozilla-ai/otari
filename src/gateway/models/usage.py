@@ -29,6 +29,9 @@ SERVED_HERE_SLUG = "gateway"
 # ``chat.USAGE_ENDPOINT`` does.
 PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
 
+# The endpoint label on a usage row for every decisions path.
+DECISIONS_ENDPOINT = "/v1/decisions"
+
 
 class UsageLog(Base):
     """Usage log model for tracking API requests."""

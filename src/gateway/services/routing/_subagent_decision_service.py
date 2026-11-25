@@ -17,7 +17,7 @@ from typing import Any, Literal
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.metered_pricing import RATE_FIELDS, calculate_token_cost, priced_per_request, quantize_cost
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.routing_exceptions import SubagentDecisionNotFoundError
+from gateway.exceptions.routing_exceptions import RecommenderNotConfiguredError, SubagentDecisionNotFoundError
 from gateway.log_config import logger
 from gateway.models.routing import (
     BASELINE_PARENT,
@@ -30,7 +30,8 @@ from gateway.models.routing import (
     UNPRICED_PER_REQUEST,
     SubagentDecision,
 )
-from gateway.ports.agent_model_recommender_port import SubagentSpawn
+from gateway.models.usage import DECISIONS_ENDPOINT
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, SubagentSpawn
 from gateway.repositories.routing import DecisionSums, DecisionWindow, SubagentDecisionRepository, Workspaces
 from gateway.schemas.routing import (
     SavingsAmounts,
@@ -42,7 +43,8 @@ from gateway.schemas.routing import (
     SubagentUsageLine,
 )
 from gateway.services.routing._subagent_baseline import baseline_key, model_key
-from gateway.services.usage_and_telemetry import dense_series
+from gateway.services.routing.recommend import ROUTER_LABEL_MODEL, ROUTER_LABEL_PROVIDER
+from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, UsageService, dense_series, resolve_window
 
 SAVINGS_TOP_N = 20
 _NOTHING = DecisionSums((), 0, 0, 0, 0, Decimal(0), Decimal(0), Decimal(0))
@@ -130,10 +132,20 @@ def _amounts(sums: DecisionSums) -> dict[str, Any]:
 class SubagentDecisionService:
     """Keep what each answered recommendation decided, and what came of it."""
 
-    def __init__(self, uow: UnitOfWork, decisions: SubagentDecisionRepository, rate: SubagentRateLookup) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        decisions: SubagentDecisionRepository,
+        rate: SubagentRateLookup,
+        *,
+        usage: UsageService,
+        recommender: AgentModelRecommenderPort,
+    ) -> None:
         self._uow = uow
         self._rows = decisions
         self._rate = rate
+        self._usage = usage
+        self._recommender = recommender
 
     async def record(
         self,
@@ -252,19 +264,34 @@ class SubagentDecisionService:
         self,
         *,
         workspaces: Workspaces,
-        start: datetime,
-        end: datetime,
-        user_ids: Sequence[str] | None,
+        start_date: datetime | None,
+        end_date: datetime | None,
+        user_ids: list[str] | None,
         bucket: Literal["hour", "day"],
-        recommender_available: bool,
-        router_unanswered: int,
     ) -> SubagentSavingsPublic:
-        """What the recommendations made from ``start`` to ``end`` saved.
+        """What the recommendations made in the window saved, with no dates the last 30 days.
 
         In all, over time, by subagent type and by model swap. ``workspaces``
-        is the caller's scope and ``user_ids`` narrows it. ``recommender_available``
-        and ``router_unanswered`` are the caller's to find out, and are reported as given.
+        is the caller's scope and ``user_ids`` narrows it.
         """
+        start, end = resolve_window(start_date, end_date)
+        try:
+            self._recommender.quote()
+            recommender_available = True
+        except RecommenderNotConfiguredError:
+            recommender_available = False
+        router_unanswered = await self._usage.count(
+            UsageFilters(
+                start_date=start,
+                end_date=end,
+                user_id=user_ids,
+                status="error",
+                model=[ROUTER_LABEL_MODEL],
+                provider=ROUTER_LABEL_PROVIDER,
+                endpoint=DECISIONS_ENDPOINT,
+            ),
+            UsageScope(workspaces=workspaces),
+        )
         window = DecisionWindow(workspaces=workspaces, start=start, end=end, user_ids=user_ids)
         async with self._uow:
             totals = await self._rows.totals(window)
