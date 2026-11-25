@@ -1027,6 +1027,30 @@ class GatewayConfig(
         ge=1,
         description="How long an organization invitation stays acceptable, in hours (default 7 days).",
     )
+    invitation_per_address_per_day: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
+        default=3,
+        ge=1,
+        description=(
+            "How many times one address may be invited across the deployment over 24 hours. It "
+            "bounds an address even where each organization invites it once, which is the only "
+            "one of these numbers a cancel does not reset."
+        ),
+    )
+    invitation_per_day: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
+        default=100,
+        ge=1,
+        description="How many invitations one organization may ask for over 24 hours.",
+    )
+    invitation_resend_limit: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
+        default=5,
+        ge=1,
+        description="How many times one invitation may be sent, counting the first send.",
+    )
+    invitation_resend_wait_minutes: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
+        default=15,
+        ge=1,
+        description="How long to wait between sends of one invitation, in minutes.",
+    )
     open_signup: Annotated[bool, OMITTED] = Field(
         default=False,
         description=(
