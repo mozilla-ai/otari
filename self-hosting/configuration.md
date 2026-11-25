@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/75da4d3a8762545298e2f90305a43692f38e6293/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/f7ddd7645ea15fd8520ed07c1dfe3169e9689770/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -92,6 +92,7 @@ the corresponding startup value after the database is available.
 | `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
 | `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
 | `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
+| `organization_oidc_enabled` | Offer organizations their own OIDC sign-in connection: the **Single sign-on** page and its routes. Defaults to `true`; startup setting. `false` removes both, so no organization can configure a connection or sign in through one. Stored connections are kept. See [Single sign-on](sso.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -873,7 +874,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/75da4d3a8762545298e2f90305a43692f38e6293/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/f7ddd7645ea15fd8520ed07c1dfe3169e9689770/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1945,7 +1946,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/75da4d3a8762545298e2f90305a43692f38e6293/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/f7ddd7645ea15fd8520ed07c1dfe3169e9689770/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
