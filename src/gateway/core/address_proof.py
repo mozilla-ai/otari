@@ -40,14 +40,26 @@ class AddressAuthority(StrEnum):
 
 
 def record_address(identity: User, *, now: datetime, authority: AddressAuthority) -> None:
-    """Stamp what established this identity's address, keeping a proof implied by a verification.
+    """Stamp that this authority established the identity's address.
 
     ``email_verified_at`` records the first verification and is never moved, so it stays the
     date the address became usable. ``email_proven_at`` is not monotonic.
 
     NOTE: An authority that does not prove the holder also retires an earlier proof, because
-    whoever supplied the address can sign in from here on.
+    whoever supplied the address can sign in from here on. A caller that establishes no
+    address calls :func:`mark_address_usable` instead, which cannot retire one.
     """
     if identity.email_verified_at is None:
         identity.email_verified_at = now
     identity.email_proven_at = now if authority.proves_the_holder else None
+
+
+def mark_address_usable(identity: User, *, now: datetime) -> None:
+    """Stamp that an address the identity already held became usable, which establishes nothing.
+
+    Gaining a way to sign in with an address says nothing about who receives mail there, so
+    whoever proved it, or did not, is left as they were. This reaches ``email_proven_at``
+    through no path at all, which is what separates it from :func:`record_address`.
+    """
+    if identity.email_verified_at is None:
+        identity.email_verified_at = now

@@ -56,7 +56,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.address_proof import AddressAuthority, record_address
+from gateway.core.address_proof import AddressAuthority, mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -238,11 +238,8 @@ async def set_password(
         record_address(identity, now=datetime.now(UTC), authority=authority)
     elif identity.email is None:
         raise SignInAddressRequiredError
-    elif identity.hashed_password is None and identity.email_verified_at is None:
-        # A first password makes an address the identity already held usable. It
-        # establishes nothing about who receives mail there, so a proof already
-        # recorded is left alone rather than retired.
-        identity.email_verified_at = datetime.now(UTC)
+    elif identity.hashed_password is None:
+        mark_address_usable(identity, now=datetime.now(UTC))
     identity.hashed_password = await hash_password_async(new_password)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
