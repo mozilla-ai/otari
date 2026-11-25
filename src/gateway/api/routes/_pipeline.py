@@ -6552,11 +6552,10 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
 
 def _finish_failed(observation: AutomaticObservation, exc: BaseException) -> None:
     """Report a failed call to automatic routing, as an outage, a failed credential or a model not served."""
-    upstream = not isinstance(exc, _GATEWAY_SIDE_FAILURES)
     observation.finish(
         unhealthy=_automatic_unhealthy(exc),
         account=AutomaticRouter.is_account_failure(exc),
-        missing=upstream and AutomaticRouter.is_missing_model(exc),
+        missing=AutomaticRouter.is_missing_model(exc),
     )
 
 

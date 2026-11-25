@@ -16,6 +16,7 @@ from statistics import median
 from typing import TYPE_CHECKING
 
 from google.oauth2.service_account import Credentials
+from starlette.exceptions import HTTPException
 
 from gateway.core.settings.routing import AutomaticOffering, AutomaticRouting, Region
 from gateway.services.inference import (
@@ -282,7 +283,12 @@ class AutomaticRouter:
 
     @staticmethod
     def is_missing_model(exc: BaseException) -> bool:
-        """Whether the provider does not serve the model on this credential: a 404, or a 400 or 403 saying so."""
+        """Whether the provider does not serve the model on this credential: a 404, or a 400 or 403 saying so.
+
+        A status the gateway raised itself is never the provider's.
+        """
+        if isinstance(exc, HTTPException):
+            return False
         status_code = upstream_exception_shape(exc)[1]
         if status_code == 404:
             return True
