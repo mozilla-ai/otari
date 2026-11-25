@@ -15,6 +15,7 @@ import {
   UNSEEN_LIMIT_NOTE,
 } from "@/features/home/memberHomeModel"
 import { API_ROOT } from "@/shared/api/client"
+import { formatUsd } from "@/shared/helpers/format"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -71,14 +72,34 @@ const WEEKLY = workspaceBudgetDefault({
   reset_alignment: "calendar_week",
 })
 
-function summary(start: string, cost: number): UsageSummary {
+function summary(
+  start: string,
+  cost: number,
+  { hosted = 0, cached = 0 }: { hosted?: number; cached?: number } = {},
+): UsageSummary {
   return {
     // As the server writes it back, not as it was asked.
     start_date: new Date(start).toISOString().replace(".000Z", "+00:00"),
     end_date: new Date().toISOString(),
     bucket: "day",
-    totals: usageTotals({ cost, request_count: 1 }),
-    series: [],
+    totals: usageTotals({
+      cost,
+      request_count: 1,
+      deployment_paid_cost: hosted,
+    }),
+    series: cached
+      ? [0, 1].map((hour) => ({
+          bucket_start: new Date(Date.now() - hour * 3600e3).toISOString(),
+          cache_read_tokens: cached / 2,
+          cache_write_tokens: 0,
+          cost: cost / 2,
+          errors: 0,
+          input_tokens: 500,
+          output_tokens: 100,
+          requests: 1,
+          tokens: 600,
+        }))
+      : [],
     by_api_key: [],
     by_endpoint: [],
     by_model: [],
@@ -114,6 +135,8 @@ async function renderMemberHome({
   hasTraces = false,
   url = "/",
   byModel = [],
+  hosted = 0,
+  cached = 0,
 }: {
   windowCost: number
   periodCost: number
@@ -126,6 +149,10 @@ async function renderMemberHome({
   url?: string
   /** The window's spend by model id. */
   byModel?: UsageGroupRow[]
+  /** The window's deployment-paid cost. */
+  hosted?: number
+  /** The window's input tokens read from cache, of 1,000. */
+  cached?: number
 }): Promise<URL[]> {
   const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
@@ -157,7 +184,11 @@ async function renderMemberHome({
           query.has("end_date") ||
           query.getAll("dimensions").some((one) => one !== "none")
         return Response.json({
-          ...summary(start, isWindow ? windowCost : periodCost),
+          ...summary(
+            start,
+            isWindow ? windowCost : periodCost,
+            isWindow ? { hosted, cached } : {},
+          ),
           by_api_key: [
             {
               key: LAPTOP.id,
@@ -391,6 +422,30 @@ describe("MemberHome, sessions", () => {
       await findRowMenuItem(user, /See its sessions/, table),
     ).not.toBeNull()
     expect(screen.queryByText("Failures")).toBeNull()
+  })
+})
+
+describe("MemberHome, who paid", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("keeps the request count on Tokens once the split and the cache share both take a subline", async () => {
+    await renderMemberHome({
+      windowCost: 2,
+      periodCost: 2,
+      hosted: 0.5,
+      cached: 250,
+    })
+    expect(
+      await screen.findByText(
+        `${formatUsd(0.5)} hosted · ${formatUsd(1.5)} own keys`,
+      ),
+    ).toBeVisible()
+    expect(
+      screen.getByText(/^1 requests? · 25\.0% of input from cache$/),
+    ).toBeVisible()
   })
 })
 

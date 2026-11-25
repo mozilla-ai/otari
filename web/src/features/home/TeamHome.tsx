@@ -35,6 +35,7 @@ import {
   wholePct,
 } from "@/features/spend/limits"
 import { paceOf } from "@/features/spend/pace"
+import { paidSplitLine } from "@/features/spend/paidSplit"
 import {
   comparedWith,
   DEFAULT_PERIOD,
@@ -597,9 +598,10 @@ export function TeamHome({
           subline={
             !spend.totals
               ? unreadLine
-              : delta === null
-                ? `${formatNumber(spend.totals.request_count)} requests`
-                : undefined
+              : paidSplitLine(spend.totals) ||
+                (delta === null
+                  ? `${formatNumber(spend.totals.request_count)} requests`
+                  : undefined)
           }
           graphic={
             spend.series.length > 1 ? (
@@ -683,7 +685,8 @@ export function TeamHome({
             !spend.totals
               ? unreadLine
               : cacheTotals.input > 0
-                ? `${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
+                ? // The split took the request count off the Spent tile.
+                  `${paidSplitLine(spend.totals) ? `${formatNumber(spend.totals.request_count)} requests · ` : ""}${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
                 : `${formatNumber(spend.totals.request_count)} requests`
           }
           graphic={
