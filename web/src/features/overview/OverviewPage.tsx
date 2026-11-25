@@ -11,6 +11,7 @@ import { PageError } from "@/design-system/feedback/PageError"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { ObserveFilterBar } from "@/features/observe/ObserveFilterBar"
 import {
   carrySearch,
@@ -18,6 +19,7 @@ import {
   type ObserveView,
   viewForPath,
 } from "@/features/observe/observeSearch"
+import { useViewWorkspaceFilter } from "@/features/observe/viewWorkspace"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { useHostedProviders } from "@/shared/api/hostedProviders"
@@ -203,13 +205,21 @@ function SessionsLayout() {
   const isMobile = useIsMobile()
   const pathname = useLocation({ select: (loc) => loc.pathname })
   const search = useSearch({ strict: false }) as DashboardSearch
+  const workspaceFilter = useViewWorkspaceFilter()
   const tabs = TABS.filter((tab) => hasSurface(tab.surface))
   const current = tabs.find((tab) => isUnder(pathname, tab.path))
-  // The filters travel between the two views that share the filter bar.
+  // The filters travel between the two views that share the filter bar, and a
+  // workspace a link named to every view.
+  const withWorkspace = (next: DashboardSearch | undefined) =>
+    search.workspace === undefined
+      ? next
+      : { ...next, workspace: search.workspace }
   const searchFor = (tab: SessionsTab) =>
-    current?.view && tab.view
-      ? carrySearch(current.view, tab.view, search)
-      : undefined
+    withWorkspace(
+      current?.view && tab.view
+        ? carrySearch(current.view, tab.view, search)
+        : undefined,
+    )
   // A view this deployment does not serve opens on the first one it does. A
   // tab with no view has no filters or window to carry, so the landing view
   // opens on its own defaults.
@@ -219,11 +229,11 @@ function SessionsLayout() {
     return (
       <Navigate
         to={landing.path}
-        search={
+        search={withWorkspace(
           landing.view && left?.view
             ? carrySearch(viewForPath(pathname), landing.view, search)
-            : {}
-        }
+            : {},
+        )}
         replace
       />
     )
@@ -236,7 +246,16 @@ function SessionsLayout() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Sessions" />
+      <PageIntro
+        title="Sessions"
+        action={
+          workspaceFilter ? (
+            <div inert={isCovered}>
+              <FilterSelect ariaLabel="Workspace" {...workspaceFilter} />
+            </div>
+          ) : undefined
+        }
+      />
       <div inert={isCovered}>
         {tabs.length > 1 ? (
           <div className="pb-5">

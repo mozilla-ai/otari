@@ -14,7 +14,6 @@ import { useUsageSummary } from "@/shared/api/usage"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { findPreset, localMidnightIso } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import {
   type ObserveView,
   rangesFor,
@@ -22,6 +21,7 @@ import {
   windowFor,
 } from "./observeSearch"
 import { useObserveScope } from "./useObserveScope"
+import { useViewWorkspace } from "./viewWorkspace"
 
 // The pickers read these two summaries. by_user and by_api_key carry each
 // entity's display name, so naming an option costs nothing beyond the breakdown.
@@ -72,7 +72,7 @@ export function ObserveFilterBar({
 }) {
   const url = useUrlState(URL_DEFAULTS)
   const memberLabels = useMemberAttributionLabels()
-  const { selected: workspace } = useSelectedWorkspace()
+  const workspaceId = useViewWorkspace() || undefined
 
   const status = url.get("status")
   const models = url.getAll("model")
@@ -135,12 +135,12 @@ export function ObserveFilterBar({
   const applied = statusApplies(view, status)
   const base: UsageFilters = useMemo(
     () => ({
-      workspace_id: workspace?.workspace_id,
+      workspace_id: workspaceId,
       start_date: win.start || undefined,
       end_date: win.end || undefined,
       status: applied && status ? status : undefined,
     }),
-    [workspace?.workspace_id, win, applied, status],
+    [workspaceId, win, applied, status],
   )
   const modelFilters: UsageFilters = useMemo(
     () => ({
