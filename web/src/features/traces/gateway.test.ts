@@ -209,3 +209,91 @@ describe("gateVerdict", () => {
     expect(gateVerdict(traceSpan({ kind: "guardrail" }))).toBeNull()
   })
 })
+
+describe("gatewayEvents, a fallback read from what followed it", () => {
+  const failed = (
+    id: string,
+    seconds: number,
+    errorClass: string,
+    model: string,
+    recovered = true,
+  ) =>
+    call(id, "req-1", seconds, {
+      model,
+      outcome: "error",
+      recovered,
+      error_class: errorClass,
+    })
+  const fallbacks = (spans: ReturnType<typeof call>[]) =>
+    gatewayEvents(traceDetail({ spans: [step("req-1", 0), ...spans] })).filter(
+      (e) => e.word === "Fallback",
+    )
+
+  it("says the next candidate answered when one did", () => {
+    const [event] = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      call("b", "req-1", 2, { model: "gpt-oss-120b" }),
+    ])
+
+    expect(event).toMatchObject({
+      tone: "warning",
+      title: "gpt-5 failed, gpt-oss-120b answered",
+      detail: "Failed with HTTP 400. Routing tried the next candidate.",
+    })
+  })
+
+  it("says the fallback failed too when two candidates all failed", () => {
+    const events = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      failed("b", 2, "status_504", "gpt-oss-120b", false),
+    ])
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      tone: "danger",
+      title: "gpt-5 failed, gpt-oss-120b failed too",
+      detail:
+        "Failed with HTTP 400. Routing tried gpt-oss-120b, which failed with HTTP 504. No candidate answered, so the request failed.",
+    })
+  })
+
+  it("keeps each row true when three candidates all failed", () => {
+    const events = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      failed("b", 2, "status_429", "gpt-oss-120b"),
+      failed("c", 3, "status_504", "claude-haiku", false),
+    ])
+
+    expect(events.map((e) => [e.tone, e.title, e.detail])).toEqual([
+      [
+        "danger",
+        "gpt-5 failed, gpt-oss-120b failed too",
+        "Failed with HTTP 400. Routing tried gpt-oss-120b, which failed with HTTP 429.",
+      ],
+      [
+        "danger",
+        "gpt-oss-120b failed, claude-haiku failed too",
+        "Failed with HTTP 429. Routing tried claude-haiku, which failed with HTTP 504. No candidate answered, so the request failed.",
+      ],
+    ])
+  })
+
+  it("claims neither an answer nor a failure when no later call is visible", () => {
+    const [event] = fallbacks([failed("a", 1, "status_400", "gpt-5")])
+
+    expect(event).toMatchObject({
+      tone: "warning",
+      title: "gpt-5 failed",
+      detail: "Failed with HTTP 400. Routing tried the next candidate.",
+    })
+  })
+
+  it("ignores later calls of another request", () => {
+    const [event] = fallbacks([
+      failed("a", 1, "status_400", "gpt-5"),
+      call("b", "req-2", 2, { model: "gpt-oss-120b" }),
+    ])
+
+    expect(event.title).toBe("gpt-5 failed")
+  })
+})
