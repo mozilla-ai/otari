@@ -35052,7 +35052,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.57.0"
+    "version": "0.57.1"
   },
   "openapi": "3.1.0",
   "paths": {
