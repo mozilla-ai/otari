@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from sqlalchemy import (
     JSON,
@@ -393,6 +393,8 @@ class WorkspaceProviderPolicy(Base):
     """
 
     __tablename__ = "workspace_provider_policies"
+    # Recorded on the request's span when they change (core/change_audit.py).
+    __audited__: ClassVar[tuple[str, ...]] = ("require_zero_data_retention", "allowed_data_locations")
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True

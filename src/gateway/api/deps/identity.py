@@ -4,6 +4,7 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
+from opentelemetry import trace
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
@@ -94,13 +95,16 @@ async def get_current_identity(
     the rest of the management API has it, and keeps a request with no credential
     at all from provisioning anything.
     """
-    if session_identity is not None:
-        return session_identity
-    return await ensure_bootstrap_identity(
-        db,
-        uow=uow,
-        membership_listener=membership_listener,
-    )
+    identity = session_identity
+    if identity is None:
+        identity = await ensure_bootstrap_identity(
+            db,
+            uow=uow,
+            membership_listener=membership_listener,
+        )
+    # Who made each change the request's span records (core/change_audit.py).
+    trace.get_current_span().set_attribute("enduser.id", str(identity.id))
+    return identity
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
