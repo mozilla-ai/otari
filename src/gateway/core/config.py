@@ -2724,8 +2724,9 @@ def _apply_renamed_settings(config: dict[str, Any], renamed_keys: list[str]) -> 
         raw = os.getenv(old_env)
         if raw:
             used.append(old_env)
-            # The new variable, applied after this, still overrides it.
-            config[new] = _coerce_scalar_env(raw, GatewayConfig.model_fields[new].annotation)
+            # The new variable overrides it, so the old value is only parsed without one.
+            if not os.getenv(f"{OTARI_ENV_PREFIX}{new.upper()}"):
+                config[new] = _coerce_scalar_env(raw, GatewayConfig.model_fields[new].annotation)
         if used:
             _warn_about_old_name(" and ".join(used), new)
 

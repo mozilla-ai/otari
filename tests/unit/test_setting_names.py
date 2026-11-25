@@ -320,6 +320,23 @@ def test_the_new_name_of_a_renamed_setting_wins_over_the_old_one(tmp_path: Path)
     assert load_config(str(config_file)).files_api_enabled is False
 
 
+def test_an_invalid_old_variable_is_ignored_once_the_new_one_is_set(tmp_path: Path) -> None:
+    """The new name wins, so a bad old value cannot stop the boot; without the new name it still does."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    os.environ["OTARI_FILES_ENABLED"] = "obsolete"
+    os.environ["OTARI_FILES_API_ENABLED"] = "false"
+
+    assert load_config(str(config_file)).files_api_enabled is False
+    assert GatewayConfig().files_api_enabled is False
+
+    del os.environ["OTARI_FILES_API_ENABLED"]
+    with pytest.raises(ValueError):
+        load_config(str(config_file))
+    with pytest.raises(ValueError):
+        GatewayConfig()
+
+
 def test_an_old_name_in_the_structured_environment_beats_the_new_name_in_the_file(tmp_path: Path) -> None:
     """Each source is renamed before the sources merge, so the environment still overrides the file."""
     config_file = tmp_path / "config.yml"
