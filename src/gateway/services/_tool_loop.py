@@ -317,8 +317,10 @@ def _pool_tool_names(pool: ToolBackend) -> frozenset[str]:
     return frozenset(name for tool in pool.openai_tools if (name := _tool_name(tool)) is not None)
 
 
-def _spent_tools(budget: ToolUseBudget | None, pool_names: frozenset[str]) -> tuple[frozenset[str], bool]:
-    """The pool's tools this request can no longer call, and whether that is all of them.
+def _spent_tools(
+    budget: ToolUseBudget | None, pool_names: frozenset[str], *, user_tools: list[dict[str, Any]]
+) -> tuple[frozenset[str], bool]:
+    """The pool's tools this request can no longer call, and whether nothing is left to call.
 
     A tool is used up as ``ToolUseBudget.used_up`` says. A round with every one of them
     used up and none of the caller's tools has nothing left to call, so it is the last
@@ -327,7 +329,7 @@ def _spent_tools(budget: ToolUseBudget | None, pool_names: frozenset[str]) -> tu
     if budget is None:
         return frozenset(), False
     spent = frozenset(name for name in pool_names if budget.used_up(name))
-    return spent, bool(spent) and spent == pool_names
+    return spent, bool(spent) and spent == pool_names and not user_tools
 
 
 def _without_withheld(choice: Any, withheld: Callable[[str], bool]) -> Any:
@@ -525,7 +527,6 @@ def _round_kwargs(
             kwargs["tool_choice"] = choice
     if not tools:
         kwargs.pop("tool_choice", None)
-    if not tools:
         # OpenAI refuses parallel_tool_calls on a request that declares no tools.
         kwargs.pop("parallel_tool_calls", None)
     return kwargs
@@ -618,8 +619,8 @@ async def run_tool_loop(
     pool_names = _pool_tool_names(pool)
 
     for iteration in range(1, max_iterations + 1):
-        spent, all_spent = _spent_tools(use_budget, pool_names)
-        final = iteration == max_iterations or (all_spent and not user_tools)
+        spent, nothing_left = _spent_tools(use_budget, pool_names, user_tools=user_tools)
+        final = iteration == max_iterations or nothing_left
         kwargs = _round_request(
             strategy.transcript_key,
             base,
@@ -751,8 +752,8 @@ async def run_tool_loop_stream(
     pool_names = _pool_tool_names(pool)
 
     for iteration in range(1, max_iterations + 1):
-        spent, all_spent = _spent_tools(use_budget, pool_names)
-        final = iteration == max_iterations or (all_spent and not user_tools)
+        spent, nothing_left = _spent_tools(use_budget, pool_names, user_tools=user_tools)
+        final = iteration == max_iterations or nothing_left
         kwargs = _round_request(
             strategy.transcript_key,
             base,
