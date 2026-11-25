@@ -569,15 +569,6 @@ class RoutingPolicy(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "spec": self.spec,
-            "user_id": self.user_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
 
 # Unique over the rows switched on, so a second one cannot be. Named so the
 # repository can tell this refusal from any other integrity error.

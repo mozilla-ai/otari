@@ -123,9 +123,6 @@ class ProbeBilling:
     async def concurrency_limit(self, *, organization_id, billed, actor_user_id):
         return LIMIT["concurrency"]
 
-    async def require_unheld_funds(self, *, organization_id):
-        raise AssertionError("no holds on the completion path")
-
     async def hold(self, *, organization_id, amount):
         raise AssertionError("no holds on the completion path")
 

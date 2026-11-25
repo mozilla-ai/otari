@@ -1909,12 +1909,6 @@ class GatewayConfig(
         for name, target in self.aliases.items():
             self.validate_alias(name, target)
 
-    def policy_names(self) -> set[str]:
-        """Every configured routing-policy name. Empty when routing is disabled."""
-        if not self.routing.enabled:
-            return set()
-        return set(self.routing.policies)
-
     def validate_routing_policies(self) -> None:
         """Validate the ``routing:`` block at startup so misconfig fails fast.
 
