@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { TeamHome } from "@/features/home/TeamHome"
 import { OverviewIndex } from "@/features/overview/OverviewPage"
 import { RouterSavingsPage } from "@/features/routerSavings/RouterSavingsPage"
 import { SessionsPage } from "@/features/traces/SessionsPage"
@@ -50,6 +51,9 @@ function mockGateway({ workspacesFail = false } = {}): string[] {
       return jsonResponse({ providers: [{ provider: "openai" }] })
     }
     if (url.endsWith("/hosted-providers")) {
+      return jsonResponse({ data: [], count: 0 })
+    }
+    if (url.includes("/spend-ceilings")) {
       return jsonResponse({ data: [], count: 0 })
     }
     if (/\/workspaces(\?|$)/.test(url)) {
@@ -118,9 +122,14 @@ function renderSessions(subject: ReactElement, url: string) {
         </DeploymentProvider>
       </QueryClientProvider>
     ),
-    routes: url.startsWith("/sessions")
-      ? []
-      : [{ path: "/sessions", element: <SessionsPage embedded /> }],
+    routes: [
+      ...(url.startsWith("/sessions")
+        ? []
+        : [{ path: "/sessions", element: <SessionsPage embedded /> }]),
+      ...(url.startsWith("/router-savings")
+        ? []
+        : [{ path: "/router-savings", element: <RouterSavingsPage /> }]),
+    ],
   })
 }
 
@@ -247,5 +256,37 @@ describe("A Sessions view whose link names a workspace", () => {
     expect(searchOf().get("peek")).toBeNull()
     expect(searchOf().get("peek_workspace")).toBeNull()
     expect(searchOf().get("span")).toBeNull()
+  })
+})
+
+describe("A link from Home into Sessions", () => {
+  it("opens the sessions of the workspace Home shows, not the shell's", async () => {
+    const user = userEvent.setup()
+    const urls = mockGateway()
+    await renderSessions(<TeamHome />, "/?workspace=ws-2")
+
+    await user.click(
+      await screen.findByRole("link", { name: "See the sessions" }),
+    )
+
+    await waitFor(() => expect(searchOf().get("workspace")).toBe("ws-2"))
+    await waitFor(() => expect(scopesOf(urls, SESSION_LIST)).toContain("ws-2"))
+    expect(scopesOf(urls, SESSION_LIST)).not.toContain("ws-1")
+    expect(selectTrigger("Workspace")).toHaveTextContent("Staging")
+  })
+
+  it("opens router savings on every workspace when Home shows them all", async () => {
+    const user = userEvent.setup()
+    const urls = mockGateway()
+    await renderSessions(<TeamHome />, "/")
+
+    await user.click(
+      await screen.findByRole("link", { name: "See router savings" }),
+    )
+
+    await screen.findByRole("grid", { name: "Savings by subagent type" })
+    expect(searchOf().get("workspace")).toBe("all")
+    expect(selectTrigger("Workspace")).toHaveTextContent("All workspaces")
+    expect(scopesOf(urls, SAVINGS)).not.toContain("ws-1")
   })
 })

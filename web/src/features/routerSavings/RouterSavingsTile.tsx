@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
 
+import { workspaceSearch } from "@/features/observe/viewWorkspace"
 import { formatSaved, pricedCount } from "@/features/routerSavings/savingsModel"
 import {
   isPeriodKey,
@@ -13,7 +14,7 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 /**
  * One line on Home saying what the subagent router saved over Home's own
  * window, with the way to the Sessions view that breaks it down over the same
- * period and for the same people. Draws nothing until a
+ * period, workspace and people. Draws nothing until a
  * routed subagent has a priced outcome, so a deployment that never routes one
  * never sees it.
  */
@@ -55,6 +56,7 @@ export function RouterSavingsTile({
         to="/router-savings"
         search={{
           ...(isPeriodKey(window.kind) ? { period: window.kind } : {}),
+          ...workspaceSearch(workspaceId),
           ...(userId ? { who: "me" } : {}),
         }}
         className="text-link underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
