@@ -8,7 +8,7 @@ Nullable with no backfill: an existing row's name was never recorded.
 Unindexed until a read filters on it.
 
 Revision ID: 02003653d88c
-Revises: f6b8d0a2c4e7
+Revises: c7e1b9d4a260
 Create Date: 2026-11-24 00:00:00.000000
 
 """
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "02003653d88c"
-down_revision: str | Sequence[str] | None = "f6b8d0a2c4e7"
+down_revision: str | Sequence[str] | None = "c7e1b9d4a260"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
