@@ -17,6 +17,9 @@ Create one budget per feature in **Spend & budgets**, as in
 - `end-user-budget-ai`, $0.10 a day
 - `end-user-budget-memories`, with its own limit
 
+A budget's id, which the end-user API takes as `budget_id`, is in the **ID**
+column of **Spend & budgets**, with a button to copy it.
+
 Each end user gets a copy of the budget it starts on: the full limit and its own
 reset period. An organization's budget can limit spend, tokens and requests per
 period, but not requests or tokens per minute.
@@ -56,7 +59,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f7ddd7645ea15fd8520ed07c1dfe3169e9689770/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/c435fd342c2ae3257729c037c1ad65c83676906f/docs/public/openapi.json).
 
 A service key created without naming scopes can make model calls for its end
 users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
