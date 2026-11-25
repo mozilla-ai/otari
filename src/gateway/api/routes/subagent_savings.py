@@ -13,23 +13,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from gateway.api.deps import (
-    AgentModelRecommenderPortDep,
-    CurrentIdentity,
-    UsageServiceDep,
-    WorkspaceAccessDep,
-    verify_master_key,
-)
+from gateway.api.deps import CurrentIdentity, WorkspaceAccessDep, verify_master_key
 from gateway.api.deps.routing import SubagentDecisionServiceDep
-from gateway.api.routes._passthrough import DECISIONS_ENDPOINT
 from gateway.api.routes.usage import _END_DESC, _START_DESC, _USER_MULTI_DESC, _WORKSPACE_DESC
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.surface import Surface
-from gateway.exceptions.routing_exceptions import RecommenderNotConfiguredError
 from gateway.schemas.routing import SubagentSavingsPublic
 from gateway.schemas.usage_and_telemetry import Bucket
-from gateway.services.routing import ROUTER_LABEL_MODEL, ROUTER_LABEL_PROVIDER
-from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, resolve_window
 
 router = APIRouter(
     prefix="/organizations/me/subagent-savings",
@@ -45,8 +35,6 @@ async def read_subagent_savings(
     identity: CurrentIdentity,
     access: WorkspaceAccessDep,
     decisions: SubagentDecisionServiceDep,
-    usage: UsageServiceDep,
-    recommender: AgentModelRecommenderPortDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     bucket: Annotated[Bucket, Query(description="The grain of `series`.")] = "day",
@@ -67,30 +55,6 @@ async def read_subagent_savings(
     counted under `measured`. With no dates, the last 30 days.
     """
     workspaces = await access.readable_workspaces(user=identity, workspace_id=workspace_id)
-    start, end = resolve_window(start_date, end_date)
-    try:
-        recommender.quote()
-        recommender_available = True
-    except RecommenderNotConfiguredError:
-        recommender_available = False
-    unanswered = await usage.count(
-        UsageFilters(
-            start_date=start,
-            end_date=end,
-            user_id=user_id,
-            status="error",
-            model=[ROUTER_LABEL_MODEL],
-            provider=ROUTER_LABEL_PROVIDER,
-            endpoint=DECISIONS_ENDPOINT,
-        ),
-        UsageScope(workspaces=workspaces),
-    )
     return await decisions.savings(
-        workspaces=workspaces,
-        start=start,
-        end=end,
-        user_ids=user_id,
-        bucket=bucket,
-        recommender_available=recommender_available,
-        router_unanswered=unanswered,
+        workspaces=workspaces, start_date=start_date, end_date=end_date, user_ids=user_id, bucket=bucket
     )

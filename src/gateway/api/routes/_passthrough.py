@@ -89,7 +89,7 @@ from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
-from gateway.models.usage import UsageLog
+from gateway.models.usage import DECISIONS_ENDPOINT, UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
@@ -1178,9 +1178,6 @@ def _billable_tokens(reported: ReportedUsage) -> BillableUsage | None:
         cache_tokens_included=True,
     )
 
-
-DECISIONS_ENDPOINT = "/v1/decisions"
-"""The usage-log label for every decisions path. See chat.USAGE_ENDPOINT."""
 
 # An answer is a handful of tokens (one label, or a number), so the reservation
 # holds this many output tokens per question rather than a completion's default.
