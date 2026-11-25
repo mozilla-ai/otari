@@ -2,7 +2,7 @@
 
 An organization **Owner or Admin** can let colleagues sign in to Otari through the company's own identity provider, such as Okta, Auth0, Microsoft Entra ID or Google Workspace. Any provider that speaks OpenID Connect (OIDC) works. SAML is not supported.
 
-Everything here is done from the organization's own settings. You do not need whoever runs the Otari deployment.
+Everything here is done from the organization's own settings. Once the deployment offers single sign-on, you do not need whoever runs it.
 
 ## Before you start
 
@@ -10,6 +10,8 @@ You need two things from your own company:
 
 - Someone who can register an application (an OIDC client) in your identity provider.
 - Someone who can add a DNS record for your email domain.
+
+You also need a deployment that offers single sign-on. It does by default. If **Single sign-on** is missing from **Organization**, whoever runs the deployment has turned it off, and only they can turn it back on.
 
 ## Register Otari with your identity provider
 

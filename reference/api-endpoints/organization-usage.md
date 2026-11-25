@@ -1,5 +1,9 @@
 # Organization usage
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/organizations/me/subagent-savings" method="get" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/organizations/me/usage" method="get" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
