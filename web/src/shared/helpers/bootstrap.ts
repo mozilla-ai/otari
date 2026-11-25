@@ -64,6 +64,10 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     // that has them.
     passkeys_enabled: wire.passkeys_enabled ?? true,
     passkeys_ready: wire.passkeys_ready ?? false,
+    // On, for the reason passkeys_enabled is: a gateway old enough to omit this
+    // had no way to turn organization SSO off, so reading absence as off would
+    // hide the option from a deployment that serves it.
+    organization_oidc_enabled: wire.organization_oidc_enabled ?? true,
     // Not "sends_only", though that is the narrower reading of the retired
     // flag. A deployment old enough to omit `mail` gated both questions on that
     // one flag, so this is the mapping under which it behaves exactly as it did

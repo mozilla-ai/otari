@@ -165,7 +165,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       {
         to: "/organization/sso",
         label: "Single sign-on",
-        surface: "organizations",
+        surface: "organization_sso",
         icon: FiLogIn,
       },
     ],

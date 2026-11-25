@@ -275,7 +275,9 @@ describe("nav registry", () => {
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
-      ["Single sign-on", "organizations"],
+      // Its own surface, because a deployment can turn organization SSO off
+      // while still serving the rest of the organization pages.
+      ["Single sign-on", "organization_sso"],
     ])
     // One row. An organization's rates are set on Providers, beside the models
     // they price, and `/organization/pricing` is a redirect, which a rail row
@@ -402,6 +404,7 @@ describe("nav registry", () => {
       "models",
       "organization_guardrails",
       "organization_providers",
+      "organization_sso",
       "organization_usage",
       "organizations",
       "pricing",

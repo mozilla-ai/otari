@@ -157,6 +157,7 @@ export const SURFACES = [
   "models",
   "organization_guardrails",
   "organization_providers",
+  "organization_sso",
   "organization_usage",
   "organizations",
   "playground",
@@ -195,6 +196,10 @@ export function bootstrap(
     // On, the setting default: the tests about a deployment that switched
     // passkeys off say so.
     passkeys_enabled: true,
+    // On, the setting default, and it matches the organization_sso surface
+    // this fixture publishes: the tests about a deployment that switched
+    // organization SSO off set both.
+    organization_oidc_enabled: true,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,

@@ -121,6 +121,7 @@ _SETTING_NAMES = frozenset(
         "oauth_open_apps",
         "oidc_allow_private_hosts",
         "open_signup",
+        "organization_oidc_enabled",
         "passkeys_enabled",
         "password_reset_expiry_hours",
         "platform_url",

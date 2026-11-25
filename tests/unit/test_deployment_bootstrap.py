@@ -77,9 +77,9 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        # The trace explorer, the Health page, the MCP catalog and the update check are core features, published
-        # on top of the declared surfaces while they are on.
-        "surfaces": sorted({*SURFACES, "health_checks", "mcp_catalog", "traces", "update_check"}),
+        # The trace explorer, the Health page, the MCP catalog, organization SSO and the update check are core
+        # features, published on top of the declared surfaces while they are on.
+        "surfaces": sorted({*SURFACES, "health_checks", "mcp_catalog", "organization_sso", "traces", "update_check"}),
         "sign_in_methods": ["master_key"],
         "docs_url": None,
         "terms_url": None,
@@ -88,6 +88,7 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "maintenance_mode": False,
         "passkeys_enabled": True,
         "passkeys_ready": False,
+        "organization_oidc_enabled": True,
         "oauth_providers": [],
         "feedback_enabled": False,
         "platform_connect": True,
@@ -307,9 +308,29 @@ SURFACE_ROUTE_PREFIXES = {
     "update_check": f"{API_ROOT}/update-check",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
+    "organization_sso": f"{API_ROOT}/organizations/me/sso",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
     "subagent_savings": f"{API_ROOT}/organizations/me/subagent-savings",
 }
+
+
+def test_a_deployment_with_sso_off_offers_no_sso_sign_in(tmp_path: Path) -> None:
+    """The sign-in screen renders ahead of every surface gate, so it reads this field instead.
+
+    Answered from the features the app resolved rather than from the setting, so a deployment
+    that withholds the routes cannot publish the same answer as one that serves them.
+    """
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
+        master_key=MASTER_KEY,
+        organization_oidc_enabled=False,
+    )
+
+    with TestClient(create_app(config)) as client:
+        payload = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert payload["organization_oidc_enabled"] is False
+    assert "organization_sso" not in payload["surfaces"]
 
 
 def test_the_organization_guardrail_surface_is_published(tmp_path: Path) -> None:
