@@ -1128,6 +1128,15 @@ class HostedProviderService:
         async with self.uow:
             return await self.sources.zero_data_retention_names(organization_id)
 
+    async def data_locations(self, *, organization_id: uuid.UUID | None) -> dict[str, tuple[str | None, ...]]:
+        """Where each enabled provider serveable to ``organization_id`` keeps request data, by name.
+
+        ``None`` is the deployment's own view, which sees every provider. A
+        location is None where the connection declares none.
+        """
+        async with self.uow:
+            return await self.sources.data_locations(organization_id)
+
     async def profiles(self) -> dict[str, HostedProviderProfile]:
         """Every hosted provider's implementation, terms of service and privacy policy, by name.
 

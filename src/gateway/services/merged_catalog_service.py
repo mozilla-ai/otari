@@ -1217,6 +1217,30 @@ async def viewer_zero_data_retention(
     )
 
 
+@dataclass(frozen=True)
+class DataLocations:
+    """Where each hosted provider the viewer may use keeps request data, by name; an undeclared location is left out."""
+
+    hosted: dict[str, tuple[str, ...]]
+
+    def of(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> list[str]:
+        """The declared locations of an offering on ``instance``, distinct and sorted, where ``served_on`` is hosted.
+
+        A ``config.yml`` instance and an organization's own key declare none.
+        """
+        return sorted(set(self.hosted.get(instance, ()))) if served_on == "hosted" else []
+
+
+async def viewer_data_locations(
+    hosted_providers: "HostedProviderService", organization_id: uuid.UUID | None
+) -> DataLocations:
+    """What the hosted providers serveable to the viewer's organization declare as their data locations."""
+    declared = await hosted_providers.data_locations(organization_id=organization_id)
+    return DataLocations(
+        hosted={name: tuple(each for each in locations if each is not None) for name, locations in declared.items()}
+    )
+
+
 async def apply_organization_pricing(
     db: AsyncSession,
     config: GatewayConfig,
