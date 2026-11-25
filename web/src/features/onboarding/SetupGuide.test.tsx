@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
+import { useWorkspaceActivation } from "@/shared/api/activation"
 import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
@@ -125,6 +126,12 @@ function mockApi({
   })
 }
 
+/** Another reader of the same answer, which is what leaves it cached for a guide whose own query is off. */
+function ActivationReader() {
+  useWorkspaceActivation(WORKSPACE)
+  return null
+}
+
 /** Stands in for the shell's workspace switcher. */
 function Switcher() {
   const { memberships, select } = useSelectedWorkspace()
@@ -179,11 +186,9 @@ function snippet(tab: string): HTMLElement {
   return screen.getByRole("region", { name: `${tab} code` })
 }
 
-/** Asks the sheet for its key, which it never mints on its own. */
-async function createKey(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(
-    await screen.findByRole("button", { name: "Create API key" }),
-  )
+/** Waits for the key the sheet mints as it opens. */
+async function keyArrives() {
+  await screen.findByLabelText("Your API key")
 }
 
 function mintCalls(fetchMock: ReturnType<typeof mockApi>) {
@@ -227,7 +232,7 @@ describe("SetupGuide", () => {
   it("holds back while nothing can serve the request", async () => {
     // The Overview's own getting-started panel is the guide at that point, and
     // a key handed out here would be for a call that cannot succeed.
-    mockApi()
+    const fetchMock = mockApi()
     await renderGuide(false)
 
     await waitFor(() => {
@@ -235,6 +240,43 @@ describe("SetupGuide", () => {
         screen.queryByRole("heading", { name: "Send your first request" }),
       ).not.toBeInTheDocument()
     })
+    expect(mintCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it("mints nothing from a cached answer once nothing can serve the request", async () => {
+    // A disabled query keeps the answer it cached, and the flow mints as it
+    // mounts, so the flag has to hold the flow back on its own.
+    const fetchMock = mockApi()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await renderWithRouter(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider value={bootstrap()}>
+          <SelectedWorkspaceProvider>
+            <ActivationReader />
+            <SetupGuide canServeRequests={false} />
+            <Switcher />
+          </SelectedWorkspaceProvider>
+        </DeploymentProvider>
+      </QueryClientProvider>,
+    )
+
+    // The answer is in the cache, and the workspace selected, once both reads land.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "switch to Research" }),
+      ).toBeEnabled()
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).endsWith("/activation"),
+        ),
+      ).toBe(true)
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
+    expect(mintCalls(fetchMock)).toHaveLength(0)
   })
 
   it("shows nothing for a workspace that is not being offered the guide", async () => {
@@ -248,13 +290,12 @@ describe("SetupGuide", () => {
     })
   })
 
-  it("mints nothing until somebody asks, then once", async () => {
-    // Opening the sheet is not a request for a credential: a workspace whose
-    // guide was skipped before the press keeps no key nobody asked for (#3000).
-    // StrictMode, because its double-invoked effects are what would turn an
-    // effect-driven mint into two.
+  it("mints the key as the sheet opens, once", async () => {
+    // The sheet exists to hand a key over, so it does not wait for a press.
+    // StrictMode, because its double-invoked effects are what would turn the
+    // mint into two, and its remount is what detaches the mutation's observer
+    // from the result.
     const fetchMock = mockApi()
-    const user = userEvent.setup()
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -270,13 +311,47 @@ describe("SetupGuide", () => {
       </StrictMode>,
     )
 
-    await screen.findByRole("button", { name: "Create API key" })
-    expect(screen.queryByLabelText("Your API key")).toBeNull()
-    expect(mintCalls(fetchMock)).toHaveLength(0)
-
-    await createKey(user)
-    expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      CONCEALED_KEY,
+    )
+    expect(
+      screen.queryByRole("button", { name: "Create API key" }),
+    ).not.toBeInTheDocument()
     expect(mintCalls(fetchMock)).toHaveLength(1)
+    // As a create-only request, so opening the sheet never rotates a key.
+    expect(String(mintCalls(fetchMock)[0]?.[0])).toContain("replace=false")
+  })
+
+  it("leaves a key someone else holds alone, and replaces it only on a press", async () => {
+    // Another manager's key is not offered back to this one, so the sheet
+    // would otherwise rotate it out from under whoever pasted it.
+    const fetchMock = mockApi()
+    const real = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/activation/key?replace=false")) {
+        return Response.json(
+          { detail: "already issued", code: "setup_key_already_issued" },
+          { status: 409 },
+        )
+      }
+      return real?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await renderGuide()
+
+    const press = await screen.findByRole("button", { name: "Create API key" })
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByText(/Shown once/)).toBeNull()
+    expect(screen.queryByText("Creating your API key…")).toBeNull()
+
+    await user.click(press)
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      CONCEALED_KEY,
+    )
+    expect(mintCalls(fetchMock).map(([input]) => String(input))).toEqual([
+      expect.stringContaining("replace=false"),
+      expect.not.stringContaining("replace"),
+    ])
   })
 
   it("holds the control pending rather than showing an empty concealed field", async () => {
@@ -292,27 +367,29 @@ describe("SetupGuide", () => {
       if (String(input).includes("/activation/key")) await held
       return real?.(input, init) as Promise<Response>
     })
-    const user = userEvent.setup()
     await renderGuide()
 
-    await createKey(user)
     expect(
-      screen.getByRole("button", { name: "Create API key" }),
-    ).toHaveAttribute("data-pending", "true")
+      await screen.findByText("Creating your API key…"),
+    ).toBeInTheDocument()
     expect(screen.queryByLabelText("Your API key")).toBeNull()
+    // Nothing to reveal or copy yet.
+    expect(screen.queryByText(/Shown once/)).toBeNull()
 
     release?.()
     expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
   })
 
-  it("does not tell an operator to copy a key that failed to mint", async () => {
+  it("does not tell an operator to copy a key that failed to mint, and offers another try", async () => {
     // The contradiction this pins: "the key could not be created" and "copy
     // this key now, it is shown once" on the same first-run screen, where the
     // reader has no context to reconcile them.
     const fetchMock = mockApi()
     const real = fetchMock.getMockImplementation()
+    let failures = 1
     fetchMock.mockImplementation(async (input, init) => {
-      if (String(input).includes("/activation/key")) {
+      if (String(input).includes("/activation/key") && failures > 0) {
+        failures -= 1
         return new Response(JSON.stringify({ detail: "no" }), { status: 500 })
       }
       return real?.(input, init) as Promise<Response>
@@ -320,10 +397,16 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await createKey(user)
-    await waitFor(() => {
-      expect(screen.queryByText(/Copy this key now/)).toBeNull()
-    })
+    const retry = await screen.findByRole("button", { name: "Create API key" })
+    expect(screen.queryByText(/Shown once/)).toBeNull()
+    expect(screen.queryByLabelText("Your API key")).toBeNull()
+
+    await user.click(retry)
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      CONCEALED_KEY,
+    )
+    expect(screen.getByText(/Shown once/)).toBeInTheDocument()
+    expect(mintCalls(fetchMock)).toHaveLength(2)
   })
 
   it("conceals the key and the example built around it until asked", async () => {
@@ -332,7 +415,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       CONCEALED_KEY,
@@ -356,7 +439,7 @@ describe("SetupGuide", () => {
     mockApi({ hasFingerprint: false })
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       "••••••••••••••••",
@@ -371,7 +454,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
 
     await user.click(
       await screen.findByRole("button", { name: "Copy Your API key" }),
@@ -386,7 +469,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
     await screen.findByLabelText("Your API key")
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
@@ -413,7 +496,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
     await screen.findByLabelText("Your API key")
     for (const label of ["Agent", "cURL", "Python", "TypeScript"]) {
       await user.click(screen.getByRole("button", { name: label }))
@@ -442,7 +525,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
 
     // The agent prompt is the default, and names the environment variable
     // rather than carrying the key.
@@ -605,7 +688,7 @@ describe("SetupGuide", () => {
     const api = mockApi()
     const user = userEvent.setup()
     await renderGuide()
-    await createKey(user)
+    await keyArrives()
 
     await user.click(
       await screen.findByRole("button", { name: "Show Your API key" }),
@@ -620,7 +703,7 @@ describe("SetupGuide", () => {
     await user.click(
       await screen.findByRole("button", { name: "switch to Research" }),
     )
-    await createKey(user)
+    await keyArrives()
 
     // The other workspace's sheet, with the other workspace's key: concealed
     // again, because the reveal belonged to the key that is gone.
@@ -712,8 +795,9 @@ describe("SetupGuide", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await keyArrives()
 
-    await user.click(await screen.findByRole("button", { name: "Skip" }))
+    await user.click(screen.getByRole("button", { name: "Skip" }))
 
     await waitFor(() => {
       expect(
@@ -725,8 +809,8 @@ describe("SetupGuide", () => {
     )
     expect(dismissed).toBeDefined()
     expect(dismissed?.[1]?.method).toBe("POST")
-    // Skipped before asking, so no key was left behind.
-    expect(mintCalls(fetchMock)).toHaveLength(0)
+    // The key minted on open stays: whoever skips may have copied it already.
+    expect(mintCalls(fetchMock)).toHaveLength(1)
   })
 
   it("retires the guide on the way to a page a guidance link names", async () => {

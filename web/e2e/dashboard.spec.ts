@@ -58,23 +58,21 @@ test.describe("dashboard core flows", () => {
   test("the first-run sheet hands out a key, then skips for good", async ({
     page,
   }) => {
+    // The key is minted as the sheet opens, so the wait starts before the page
+    // that opens it. Shown once, in a labeled field they can select and copy,
+    // and concealed there until they ask for it (otari-ai#2111).
+    const mintedKey = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/activation/key") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    )
     await login(page)
 
     // A sheet over the Overview, not a panel on it: a workspace with no traffic
     // has nothing on that page worth reading yet.
     const sheet = page.getByRole("dialog", { name: "Send your first request" })
     await expect(sheet).toBeVisible()
-
-    // The key is minted on a press, never by the sheet opening (#3000). Shown
-    // once, in a labeled field they can select and copy, and concealed there
-    // until they ask for it (otari-ai#2111).
-    const mintedKey = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/activation/key") &&
-        response.request().method() === "POST" &&
-        response.ok(),
-    )
-    await sheet.getByRole("button", { name: "Create API key" }).click()
     const { key: fullKey } = await (await mintedKey).json()
     // By role, not by label: `getByLabel` matches a substring, so it also
     // picks up the field's own "Show API key" toggle.

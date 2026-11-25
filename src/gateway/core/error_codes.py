@@ -90,6 +90,8 @@ PROVIDER_ERROR = "provider_error"
 PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 # Creating or first claiming an account needs the terms of service the deployment publishes.
 TERMS_NOT_ACCEPTED = "terms_not_accepted"
+# The setup guide asked for a key only if the workspace holds none, and it holds one that still authenticates.
+SETUP_KEY_ALREADY_ISSUED = "setup_key_already_issued"
 # A workspace with web access (fetch or search) turned off refused a request that declared a web tool.
 WEB_ACCESS_DISABLED = "web_access_disabled"
 

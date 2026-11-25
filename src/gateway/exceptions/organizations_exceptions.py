@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import SETUP_KEY_ALREADY_ISSUED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -552,6 +553,20 @@ class WorkspaceAlreadyActivatedError(TenancyConflictError):
 
     def __init__(self) -> None:
         super().__init__("This workspace has already served a successful request")
+
+
+class SetupKeyAlreadyIssuedError(TenancyConflictError):
+    """The guide asked for a key only if none is in use, and one is.
+
+    The sheet asks this way as it opens, so that opening it never rotates a key
+    another manager, or the same one in another tab, may already have pasted.
+    Replacing it stays an explicit request.
+    """
+
+    error_code = SETUP_KEY_ALREADY_ISSUED
+
+    def __init__(self) -> None:
+        super().__init__("This workspace already holds a setup key; replace it to issue a new one")
 
 
 class SignupRegistrationUnresolvedError(TenancyError):

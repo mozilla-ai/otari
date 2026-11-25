@@ -134,7 +134,7 @@
         "type": "object"
       },
       "ActivationApiKeyPublic": {
-        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, on the press that asked for it, and never stored in\nplaintext, like every other key this gateway mints.",
+        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, when the guide opens or is asked for a replacement, and\nnever stored in plaintext, like every other key this gateway mints.",
         "properties": {
           "key": {
             "title": "Key",
@@ -63865,7 +63865,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/key": {
       "post": {
-        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed, or,\nwith ``replace`` false, while a setup key still authenticates.",
         "operationId": "workspace-activation-create_workspace_activation_key",
         "parameters": [
           {
@@ -63876,6 +63876,18 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Whether to rotate a setup key that still authenticates. False answers 409 (`setup_key_already_issued`) instead, which is how the guide asks as it opens.",
+            "in": "query",
+            "name": "replace",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Whether to rotate a setup key that still authenticates. False answers 409 (`setup_key_already_issued`) instead, which is how the guide asks as it opens.",
+              "title": "Replace",
+              "type": "boolean"
             }
           }
         ],

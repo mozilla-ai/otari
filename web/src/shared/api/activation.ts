@@ -48,16 +48,26 @@ export function useWorkspaceActivation(
   })
 }
 
+export const SETUP_KEY_ALREADY_ISSUED = "setup_key_already_issued"
+
 // Issues the workspace's setup key and returns its plaintext exactly once, like
 // `useCreateKey`: the caller shows it and must never write the response into the
 // query cache. KEYS is invalidated because the key it rotates is an ordinary row
 // on the Keys page, and ACTIVATION because the guide's state now records it.
-export function useCreateActivationKey() {
+//
+// `replace: false` is how the sheet asks as it opens: a key that still
+// authenticates is refused with `SETUP_KEY_ALREADY_ISSUED` rather than rotated,
+// so opening the sheet never breaks a key another manager or tab handed out.
+export function useCreateActivationKey({
+  replace = true,
+}: {
+  replace?: boolean
+} = {}) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (workspaceId: string) =>
       apiFetch<ActivationApiKey>(
-        `/workspaces/${encodeURIComponent(workspaceId)}/activation/key`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/activation/key${replace ? "" : "?replace=false"}`,
         { method: "POST" },
       ),
     onSuccess: () => {
