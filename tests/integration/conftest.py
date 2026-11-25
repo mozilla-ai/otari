@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -45,11 +46,12 @@ from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
-from gateway.models.tenancy import OrganizationMember, OrganizationMemberRole
+from gateway.models.tenancy import DashboardSession, OrganizationMember, OrganizationMemberRole
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.users import User as AttributionUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
@@ -787,3 +789,38 @@ def seed_member(
         return SeededMember(user_id=user.id, organization_member_id=membership.id)
 
     return _seed
+
+
+@pytest.fixture
+def signed_in_member(
+    db_session: Session, client: TestClient, seed_member: Callable[..., SeededMember]
+) -> Callable[..., TenancyUser]:
+    """Seed a member and sign the client in as them, returning the identity it signed in as.
+
+    Yields a function taking the address and the role, for a test that acts as
+    an ordinary member rather than as the operator.
+
+    NOTE: The client keeps the cookie for the rest of the test, so a later
+    request made without clearing it speaks for this member and not the
+    operator, whatever credential it carries.
+    """
+
+    def _signed_in(*, email: str, role: OrganizationMemberRole = "member") -> TenancyUser:
+        seeded = seed_member(email=email, role=role)
+        identity = db_session.get(TenancyUser, seeded.user_id)
+        assert identity is not None
+        token = f"session-{uuid.uuid4().hex}"
+        now = datetime.now(UTC)
+        db_session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=identity.id,
+                created_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+        db_session.commit()
+        client.cookies.set(SESSION_COOKIE_NAME, token)
+        return identity
+
+    return _signed_in

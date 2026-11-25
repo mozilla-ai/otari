@@ -9,6 +9,11 @@ Compared here: every column that says what the address proved, whether the
 account can sign in, which organization it belongs to, what it may do there,
 and whether it can own a key. Ids and timestamps differ by construction and
 are not compared.
+
+NOTE: Each comparison needs an endpoint that adds a member to compare against.
+Where none remains, they go, and what is left is the invariant stated outright
+below, which names the seeded shape rather than deriving it from a second
+writer.
 """
 
 from collections.abc import Callable
