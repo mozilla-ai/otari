@@ -4,6 +4,21 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.57.1](https://github.com/mozilla-ai/otari/releases/tag/v0.57.1) - 2026-11-25
+
+
+
+### Bug Fixes
+
+- **dashboard:** Show budget ids on the organization's Spend & budgets table in [#3588](https://github.com/mozilla-ai/otari/pull/3588) by [@jigjigjig](https://github.com/jigjigjig) ([`c435fd3`](https://github.com/mozilla-ai/otari/commit/c435fd342c2ae3257729c037c1ad65c83676906f))
+
+
+### Security
+
+- **identity:** Prove only the address the provider asserted in [#3590](https://github.com/mozilla-ai/otari/pull/3590) by [@peteski22](https://github.com/peteski22) ([`2c0be82`](https://github.com/mozilla-ai/otari/commit/2c0be821693253fa8d34c7b1bebf710f97fd5535))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.57.0...v0.57.1
 ## [0.57.0](https://github.com/mozilla-ai/otari/releases/tag/v0.57.0) - 2026-11-25
 
 
