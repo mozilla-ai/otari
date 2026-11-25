@@ -25,9 +25,12 @@ React. Do not guess a deployment when that request fails: `app/boot.ts` keeps
 retrying it with backoff, and `app/DeploymentGate.tsx` shows the failure in the
 sign-in shell's frame and mounts `App` once an attempt answers. A redirect is
 followed once, deliberately: one that lands on the bootstrap (a canonical host,
-HTTPS) opens the dashboard, while one that fails on the way or lands on a page
-that is not JSON is something in front of the gateway asking this browser to
-sign in, and the screen says so rather than retrying it.
+HTTPS) opens the dashboard, and one that lands on a page that is not JSON is
+something in front of the gateway asking this browser to sign in, which the
+screen says rather than retrying. A followed redirect whose fetch fails is a
+sign-in only if its destination answers a `no-cors` read (it is up and refused
+to share, as a cross-origin sign-in page does); if nothing answers, the gateway
+is unreachable and the loader keeps retrying.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

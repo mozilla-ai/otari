@@ -26,8 +26,8 @@
 import {
   ApiError,
   apiFetch,
-  probeGateway,
   RedirectedError,
+  reachesAfterRedirects,
 } from "@/shared/api/client"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 
@@ -96,11 +96,12 @@ export interface BootLoader {
  * the redirect led to passes through as itself, and so does the deadline.
  *
  * A followed redirect whose fetch fails is the ambiguous case. A cross-origin
- * sign-in fails that way, but so does a gateway that is down behind a
- * canonical-URL redirect the browser cached and replays without asking. The
- * gateway's own liveness route tells them apart: if anything answers it, the
- * address is up and the redirect is what failed; if nothing does, the gateway
- * is unreachable and the original failure stands, to be retried.
+ * sign-in page fails that way, refused by CORS, but so does a canonical host
+ * that is down, or a gateway that is down behind a redirect the browser cached
+ * and replays without asking. Following the same redirects without CORS tells
+ * them apart: if anything answers at the end, it is up and only refused to
+ * share, which is a sign-in; if nothing answers, the failure stands as the
+ * gateway being unreachable, to be retried.
  */
 export async function readBootstrap(
   signal: AbortSignal,
@@ -133,7 +134,7 @@ export async function readBootstrap(
       throw error
     }
     try {
-      await probeGateway("/health/liveness", signal, "manual")
+      await reachesAfterRedirects("/bootstrap", signal)
     } catch {
       throw error
     }
@@ -293,6 +294,11 @@ export function createBootLoader({
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let inFlight: AbortController | undefined
   let current: Promise<void> | undefined
+  // The preparation in flight, kept across attempts: one that outlasted an
+  // attempt's deadline is waited on again by the next attempt rather than
+  // started a second time, since the replacing module's contract is that it
+  // runs once before the bootstrap is read.
+  let preparing: Promise<void> | undefined
   // The browser came back online, or the tab was shown again, while an
   // attempt was running: if that attempt fails, the next one starts at once.
   let wokeDuringAttempt = false
@@ -389,8 +395,16 @@ export function createBootLoader({
     await Promise.resolve()
     if (!isPrepared) {
       try {
-        await withDeadline(prepare())
-        isPrepared = true
+        preparing ??= prepare().then(
+          () => {
+            isPrepared = true
+          },
+          (error: unknown) => {
+            preparing = undefined
+            throw error
+          },
+        )
+        await withDeadline(preparing)
       } catch (error) {
         isAttempting = false
         if (!isDisposed) {

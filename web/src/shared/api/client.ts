@@ -674,10 +674,9 @@ async function readJson<T>(
 export async function probeGateway(
   path: string,
   signal: AbortSignal,
-  redirect: RequestRedirect = "follow",
 ): Promise<number> {
   try {
-    const response = await request(path, { method: "GET", signal, redirect })
+    const response = await request(path, { method: "GET", signal })
     await response.body?.cancel()
     return response.status
   } catch (error) {
@@ -686,6 +685,27 @@ export async function probeGateway(
     }
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
+}
+
+/**
+ * Whether following `path`'s redirects reaches anything that answers, from
+ * any origin. A `no-cors` read follows a cross-origin redirect without needing
+ * the destination's consent and resolves with an opaque response if anything
+ * answers there; it rejects only when nothing does. The response is unreadable
+ * by design, which is fine: this asks whether the destination is up, never
+ * what it said. Rejects with the fetch's own error.
+ */
+export async function reachesAfterRedirects(
+  path: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await request(path, {
+    method: "GET",
+    mode: "no-cors",
+    redirect: "follow",
+    signal,
+  })
+  await response.body?.cancel()
 }
 
 /**

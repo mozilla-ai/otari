@@ -288,11 +288,19 @@ describe("ConnectionStatus", () => {
   })
 
   it("re-runs only what is on screen, not a page the operator has left", async () => {
-    let dropped = 0
+    let settingsDropped = false
+    let livenessAnswered = false
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (isLiveness(input)) return jsonResponse("I'm alive!")
-      if (String(input).endsWith("/left") || dropped === 0) {
-        dropped += 1
+      if (isLiveness(input)) {
+        livenessAnswered = true
+        return jsonResponse("I'm alive!")
+      }
+      if (String(input).endsWith("/left")) {
+        throw new TypeError("Failed to fetch")
+      }
+      // The page on screen drops its first request too, so a recovery runs.
+      if (!settingsDropped) {
+        settingsDropped = true
         throw new TypeError("Failed to fetch")
       }
       return jsonResponse({ ok: true })
@@ -310,9 +318,14 @@ describe("ConnectionStatus", () => {
         <ConnectionStatus />
       </QueryClientProvider>,
     )
+    await waitFor(() => expect(livenessAnswered).toBe(true))
     await waitFor(() =>
       expect(client.getQueryState(["probe"])?.status).toBe("success"),
     )
+    const settings = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/settings"))
+    expect(settings).toHaveLength(2)
     const left = vi
       .mocked(globalThis.fetch)
       .mock.calls.filter(([url]) => String(url).endsWith("/left"))

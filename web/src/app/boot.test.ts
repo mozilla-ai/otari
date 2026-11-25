@@ -376,6 +376,32 @@ describe("createBootLoader", () => {
     expect(load).not.toHaveBeenCalled()
   })
 
+  it("waits on a preparation still running from a timed-out attempt instead of starting another", async () => {
+    let prepared: (() => void) | undefined
+    const prepare = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          prepared = resolve
+        }),
+    )
+    const load = vi.fn(async () => BOOTSTRAP)
+    const boot = start(load, prepare)
+    await vi.advanceTimersByTimeAsync(BOOTSTRAP_ATTEMPT_TIMEOUT_MS)
+    expect(boot.getState()).toMatchObject({
+      status: "failed",
+      stage: "prepare",
+    })
+
+    void boot.retryNow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(prepare).toHaveBeenCalledTimes(1)
+
+    prepared?.()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(boot.getState().status).toBe("ready")
+  })
+
   it("records that the browser was offline when the attempt failed", async () => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
     const boot = start(async () => {
@@ -606,20 +632,30 @@ describe("readBootstrap", () => {
       .mockResolvedValueOnce(OPAQUE)
       // What a cross-origin redirect without CORS looks like when followed.
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      // The gateway's address still answers, here with the same redirect.
-      .mockResolvedValueOnce(OPAQUE)
+      // Followed without CORS, the redirect's destination answers: an
+      // opaque response, which a page that is down cannot give.
+      .mockResolvedValueOnce({
+        type: "opaque",
+        status: 0,
+        ok: false,
+      } as Response)
 
     await expect(
       readBootstrap(new AbortController().signal),
     ).rejects.toBeInstanceOf(RedirectedError)
     expect(String(fetchMock.mock.calls[2]?.[0])).toMatch(
-      /\/api\/v1\/health\/liveness$/,
+      /\/api\/v1\/bootstrap$/,
     )
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+      mode: "no-cors",
+      redirect: "follow",
+    })
   })
 
-  it("calls a redirect it cannot follow unreachable when the gateway's address does not answer either", async () => {
-    // A browser that cached a canonical-URL 301 replays it without asking, so
-    // an outage behind one fails the same way a cross-origin sign-in does.
+  it("calls a redirect it cannot follow unreachable when its destination does not answer either", async () => {
+    // A canonical host that is down, or a cached 301 replayed in front of a
+    // gateway that is down, fails the same way a cross-origin sign-in does,
+    // until something checks whether the destination answers at all.
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(OPAQUE)
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
