@@ -13131,7 +13131,7 @@ export interface components {
              * @description Whether this deployment accepts deliberate feedback submissions.
              */
             feedback_enabled: boolean;
-            /** @description How far an email this deployment sends gets. Signup, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature. */
+            /** @description How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature. */
             mail: components["schemas"]["MailReadiness"];
             /**
              * Maintenance Mode
