@@ -51,12 +51,12 @@ below is what gives it a way to sign in.
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.address_proof import AddressAuthority, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -103,34 +103,6 @@ _EMAIL_UNIQUE_INDEX = "ix_user_email"
 # reset): the value is never checked against anything, only its length and the
 # fixed bcrypt cost matter, so a constant is as good as a real one.
 _TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
-
-
-class AddressAuthority(StrEnum):
-    """What established an identity's sign-in address.
-
-    ``proves_the_holder`` is what ``email_proven_at`` records. An authority that could assert
-    any address answers false, because its word is not evidence that the holder controls it.
-    """
-
-    MAILBOX = ("mailbox", True)
-    """A link that reached the inbox, so whoever opened it receives mail at the address."""
-
-    OPERATOR = ("operator", True)
-    """Deployment authority supplied it, which sits above every organization here."""
-
-    ORGANIZATION = ("organization", False)
-    """One organization's word for an address any organization could have claimed."""
-
-    SESSION = ("session", False)
-    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
-
-    proves_the_holder: bool
-
-    def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
-        member = str.__new__(cls, value)
-        member._value_ = value
-        member.proves_the_holder = proves_the_holder
-        return member
 
 
 async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
@@ -263,7 +235,7 @@ async def set_password(
         )
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
-        _record_address(identity, now=datetime.now(UTC), authority=authority)
+        record_address(identity, now=datetime.now(UTC), authority=authority)
     elif identity.email is None:
         raise SignInAddressRequiredError
     elif identity.hashed_password is None and identity.email_verified_at is None:
@@ -646,7 +618,7 @@ async def verify_email(
         ):
             raise VerificationTokenInvalidError
 
-    _record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.MAILBOX)
+    record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.MAILBOX)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
     db.add(identity)
@@ -871,7 +843,7 @@ async def reset_password(
     identity.password_reset_token_hash = None
     identity.password_reset_token_expires_at = None
     unverified = identity.email_verified_at is None
-    _record_address(
+    record_address(
         identity,
         now=now,
         authority=AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX,
@@ -882,20 +854,6 @@ async def reset_password(
     db.add(identity)
     await db.commit()
     return identity if first_claim else None
-
-
-def _record_address(identity: User, *, now: datetime, authority: AddressAuthority) -> None:
-    """Stamp what established this identity's address, keeping a proof implied by a verification.
-
-    ``email_verified_at`` records the first verification and is never moved, so it stays the
-    date the address became usable. ``email_proven_at`` is not monotonic.
-
-    NOTE: An authority that does not prove the holder also retires an earlier proof, because
-    whoever supplied the address can sign in from here on.
-    """
-    if identity.email_verified_at is None:
-        identity.email_verified_at = now
-    identity.email_proven_at = now if authority.proves_the_holder else None
 
 
 def _schedule_account_exists_notice(

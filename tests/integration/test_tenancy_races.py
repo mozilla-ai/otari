@@ -27,6 +27,7 @@ from gateway.adapters.identity_provider_adapter import DeploymentIdentityProvide
 from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
+from gateway.core.address_proof import AddressAuthority
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -98,7 +99,7 @@ from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
-from gateway.services.tenancy.user_service import AddressAuthority, set_password
+from gateway.services.tenancy.user_service import set_password
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
