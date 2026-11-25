@@ -29,7 +29,9 @@ def _account(*, verified_at: datetime | None = None, proven_at: datetime | None 
     return account
 
 
-@pytest.mark.parametrize("authority", [AddressAuthority.MAILBOX, AddressAuthority.OPERATOR])
+@pytest.mark.parametrize(
+    "authority", [AddressAuthority.MAILBOX, AddressAuthority.OPERATOR, AddressAuthority.TRUSTED_PROVIDER]
+)
 def test_an_authority_that_proves_the_holder_records_a_proof(authority: AddressAuthority) -> None:
     account = _account()
     record_address(account, now=NOW, authority=authority)
@@ -52,11 +54,15 @@ def test_a_verification_already_recorded_is_never_moved() -> None:
     assert account.email_verified_at == PROVED_EARLIER
 
 
-def test_making_an_address_usable_cannot_retire_a_proof() -> None:
-    """The reason the two are separate functions rather than one with a flag."""
-    account = _account(verified_at=None, proven_at=PROVED_EARLIER)
+@pytest.mark.parametrize("verified_at", [None, PROVED_EARLIER])
+def test_making_an_address_usable_cannot_retire_a_proof(verified_at: datetime | None) -> None:
+    """Separating the two functions is what makes this unconstructible rather than merely caught.
+
+    The reachable case is the second: a provider proved the address and the identity holds no
+    password, so a first password makes it usable without establishing anything.
+    """
+    account = _account(verified_at=verified_at, proven_at=PROVED_EARLIER)
     mark_address_usable(account, now=NOW)
-    assert account.email_verified_at == NOW
     assert account.email_proven_at == PROVED_EARLIER
 
 
@@ -68,6 +74,7 @@ def test_making_an_address_usable_cannot_record_a_proof() -> None:
 
 
 def test_making_an_address_usable_leaves_an_earlier_verification_alone() -> None:
-    account = _account(verified_at=PROVED_EARLIER)
+    account = _account(verified_at=PROVED_EARLIER, proven_at=PROVED_EARLIER)
     mark_address_usable(account, now=NOW + timedelta(days=1))
     assert account.email_verified_at == PROVED_EARLIER
+    assert account.email_proven_at == PROVED_EARLIER

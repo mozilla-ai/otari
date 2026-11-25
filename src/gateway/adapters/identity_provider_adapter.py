@@ -134,7 +134,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         password_removed = False
         if identity.email_proven_at is None:
             password_removed = identity.hashed_password is not None
-            record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.PROVIDER)
+            record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
             # The address was not proved when these were set, so they may not be this person's.
             identity.hashed_password = None
             identity.email_verification_token_hash = None

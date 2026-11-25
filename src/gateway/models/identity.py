@@ -60,11 +60,15 @@ class AddressAuthority(StrEnum):
     ORGANIZATION = ("organization", False)
     """One organization's word for an address any organization could have claimed."""
 
-    PROVIDER = ("provider", True)
-    """A provider whose word no tenant can set, reporting this address verified."""
-
     SESSION = ("session", False)
     """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
+
+    TRUSTED_PROVIDER = ("trusted_provider", True)
+    """A provider no tenant can configure, reporting this address verified.
+
+    NOTE: An organization's own connection is a provider too and is never this. A caller
+    must establish that no tenant sets what the provider says before naming this member.
+    """
 
     proves_the_holder: bool
 

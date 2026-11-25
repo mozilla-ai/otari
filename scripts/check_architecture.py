@@ -3236,67 +3236,83 @@ def _ambiguous_model_names(
 # The two columns that say an identity's address is usable and that somebody proved its
 # holder. Domain auto-join and the add-or-invite refusals read the second to grant access
 # across organizations, so what may write either is a rule rather than a preference.
-# Each entry names the modules that may assign the column. The list only shrinks: a module
-# that stops writing one fails the check until its entry goes, which is how a consolidation
-# is proved rather than asserted.
-COLUMN_WRITER_BASELINE: dict[str, tuple[str, ...]] = {
-    "email_proven_at": (
-        "gateway/core/address_proof.py",
-        "gateway/services/tenancy/user_service.py",
-    ),
-    "email_verified_at": (
-        "gateway/core/address_proof.py",
-        "gateway/services/tenancy/user_service.py",
-    ),
+# Each entry names the modules that may write the column. A module that stops writing one
+# fails the check until its entry goes, so a consolidation is proved rather than asserted.
+# Deliberately not a baseline: a baseline records debt and only shrinks, and this records the
+# design, which changes when the design does. Freezing it would block the move DOMAINS.md
+# schedules for these modules.
+COLUMN_WRITERS: dict[str, tuple[str, ...]] = {
+    "email_proven_at": ("gateway/core/address_proof.py",),
+    "email_verified_at": ("gateway/core/address_proof.py",),
 }
 
 
 def _assigned_column_names(node: ast.AST) -> Iterator[str]:
-    """Yield the column each assignment target in this node names, by attribute or by string key.
+    """Yield the column name each node writes, by any spelling that reaches the database.
 
-    Both forms reach the database: an attribute store sets it on a model, and a subscript
-    store with a string key carries it into a statement's values. A rule that reads only one
-    of them misses the other, which is how a column with a single writer grows a second.
+    A write is an attribute store, a subscript store under a string key, a key in a mapping
+    literal, a keyword argument, or a ``setattr`` naming the column. All of them land the same
+    value in the same column, so a rule that reads one spelling is not a rule. A store is what the
+    parser marks as one, so a loop target and a context manager's target count, and a column read
+    to build a key does not. The mark is the grammar's, so a declaration carrying no value counts
+    as well, which fails a build rather than letting a writer through.
+
+    NOTE: The name is what this matches, not the type, so a field of the same name on anything
+    else counts. Modules outside ``src/gateway``, including the migrations, are out of scope.
+
+    NOTE: A function's own parameter named for a column is not a write. It is a conduit, and
+    whatever it conducts into is one of the forms above.
     """
-    targets: list[ast.expr] = []
-    if isinstance(node, ast.Assign):
-        targets = list(node.targets)
-    elif isinstance(node, ast.AugAssign | ast.AnnAssign):
-        targets = [node.target]
-    for target in targets:
-        if isinstance(target, ast.Attribute):
-            yield target.attr
-        elif isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant):
-            if isinstance(target.slice.value, str):
-                yield target.slice.value
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+        yield node.attr
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+        if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            yield node.slice.value
+    if isinstance(node, ast.Dict):
+        for key in node.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                yield key.value
+    if isinstance(node, ast.Call):
+        for keyword in node.keywords:
+            if keyword.arg is not None:
+                yield keyword.arg
+        if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 2:
+            named = node.args[1]
+            if isinstance(named, ast.Constant) and isinstance(named.value, str):
+                yield named.value
 
 
 def check_column_writers(src_root: Path) -> list[str]:
-    """Check that only the listed modules assign each address-proof column.
+    """Check that only the listed modules write each address-proof column.
 
-    An assignment is an attribute store or a subscript store with a string key, so a module
-    cannot route a write through a free-form mapping to avoid the rule. Reading a column,
-    naming it in a docstring and comparing against it are not writes.
+    What counts as a write is in :func:`_assigned_column_names`. Reading a column, naming it
+    in a docstring and comparing against it are not writes.
+
+    NOTE: This watches writes, not calls. It says nothing about which authority a caller
+    names, only about who may turn one into a column value.
     """
     violations: list[str] = []
-    seen: dict[str, set[str]] = {column: set() for column in COLUMN_WRITER_BASELINE}
+    seen: dict[str, set[str]] = {column: set() for column in COLUMN_WRITERS}
     for relative_path, tree in _parsed_modules(src_root, "gateway"):
         for node in ast.walk(tree):
             for column in _assigned_column_names(node):
-                if column not in COLUMN_WRITER_BASELINE:
+                if column not in COLUMN_WRITERS:
                     continue
                 seen[column].add(relative_path)
-                if relative_path not in COLUMN_WRITER_BASELINE[column]:
+                if relative_path not in COLUMN_WRITERS[column]:
                     line = getattr(node, "lineno", 0)
                     violations.append(
                         f"{relative_path}:{line} assigns {column}; "
-                        f"only {', '.join(COLUMN_WRITER_BASELINE[column])} may, so that what an address "
+                        f"only {', '.join(COLUMN_WRITERS[column])} may, so that what an address "
                         f"proves is decided in one place"
                     )
-    for column, writers in COLUMN_WRITER_BASELINE.items():
+    for column, writers in COLUMN_WRITERS.items():
+        # A listed module that is gone wrote nothing because it does not exist, which is a
+        # different thing from one that stopped, and is plain in the diff that removed it.
+        still_there = {writer for writer in writers if (src_root / writer).is_file()}
         violations.extend(
-            f"{stale} no longer assigns {column}; remove it from COLUMN_WRITER_BASELINE"
-            for stale in sorted(set(writers) - seen[column])
+            f"{stale} no longer assigns {column}; remove it from COLUMN_WRITERS"
+            for stale in sorted(still_there - seen[column])
         )
     return violations
 

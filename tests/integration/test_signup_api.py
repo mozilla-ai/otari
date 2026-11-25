@@ -196,6 +196,55 @@ def test_an_invited_address_signs_up_verified_and_signs_in_at_once(
     assert signed_in.status_code == 200, signed_in.text
 
 
+class _OverreachingInvites:
+    """A rebound port answering an authority no invitation carries."""
+
+    async def proof_for(self, token: str, *, claimed_address: str) -> AddressAuthority | None:
+        del token, claimed_address
+        return AddressAuthority.OPERATOR
+
+
+@pytest.fixture
+def overreaching_invites(client: TestClient) -> Iterator[None]:
+    from fastapi import FastAPI
+
+    from gateway.api.deps import get_signup_invite_port
+
+    app = client.app
+    assert isinstance(app, FastAPI)
+    app.dependency_overrides[get_signup_invite_port] = _OverreachingInvites
+    yield
+    app.dependency_overrides.pop(get_signup_invite_port, None)
+
+
+@pytest.mark.usefixtures("overreaching_invites")
+def test_an_invite_claiming_authority_it_cannot_carry_is_ignored(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The signup proceeds as though the caller named no invitation, rather than stranding it."""
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    _add_member(client, master_key_header, email="hopper@example.com")
+
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        response = client.post(
+            f"{API_ROOT}/auth/signup", json={"email": "hopper@example.com", "password": PASSWORD, "invite": "tok"}
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is False
+    assert _TOKEN_IN_LINK.search(caplog.text), "the address has no way to become usable without one"
+    unverified = client.post(f"{API_ROOT}/auth/session", json={"email": "hopper@example.com", "password": PASSWORD})
+    assert unverified.status_code == 403
+
+
 @pytest.mark.usefixtures("invites")
 def test_an_invite_for_another_address_proves_nothing(
     client: TestClient,

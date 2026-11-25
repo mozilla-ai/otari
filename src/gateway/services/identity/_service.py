@@ -689,7 +689,7 @@ class IdentityService:
         if not _asserts_this_address(account, external):
             return False
         password_removed = account.hashed_password is not None
-        record_address(account, now=datetime.now(UTC), authority=AddressAuthority.PROVIDER)
+        record_address(account, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
         account.hashed_password = None
         account.email_verification_token_hash = None
         account.email_verification_token_expires_at = None

@@ -56,7 +56,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.address_proof import address_stamp, mark_address_usable, record_address
+from gateway.core.address_proof import address_values, mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -102,6 +102,10 @@ _EMAIL_UNIQUE_INDEX = "ix_user_email"
 # that has no password of its own to burn the cost against (resend, request a
 # reset): the value is never checked against anything, only its length and the
 # fixed bcrypt cost matter, so a constant is as good as a real one.
+# What an invitation token may establish. The port is rebindable, so a wider answer would let
+# an overlay stamp a proof from a token rather than from a mailbox.
+_INVITATION_AUTHORITIES = frozenset({AddressAuthority.MAILBOX, AddressAuthority.ORGANIZATION})
+
 _TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
 
 
@@ -438,6 +442,8 @@ async def create_user_for_signup(
     no verification email is sent, so the caller can sign in at once. A shared proof leaves
     ``email_proven_at`` null, because an organization's word for an address is weaker than
     the address answering and does not satisfy every rule a proved address does.
+    An authority an invitation cannot carry is ignored, and the signup proceeds as though
+    the caller named no invitation.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -446,6 +452,8 @@ async def create_user_for_signup(
     caller tell it from the early return by response time. The account is
     durable whether or not the message goes out.
     """
+    if proof not in _INVITATION_AUTHORITIES:
+        proof = None
     mailer = Mailer(config)
     if proof is None:
         mailer.require_ready()
@@ -501,9 +509,7 @@ async def create_user_for_signup(
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
             if proof is not None:
-                stamp = address_stamp(proof, now=datetime.now(UTC), verified_at=None)
-                values["email_verified_at"] = stamp.verified_at
-                values["email_proven_at"] = stamp.proven_at
+                values.update(address_values(proof, now=datetime.now(UTC)))
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
