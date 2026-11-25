@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { API_ROOT } from "@/shared/api/client"
@@ -27,14 +28,14 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 function Mounted({
   children,
   signInMethods = ["master_key"],
-  mailReady = false,
+  mail = "none",
   maintenanceMode = false,
   oauthProviders = [],
   openSignup = false,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
-  mailReady?: boolean
+  mail?: MailReadiness
   maintenanceMode?: boolean
   oauthProviders?: string[]
   openSignup?: boolean
@@ -44,7 +45,7 @@ function Mounted({
       <DeploymentProvider
         value={bootstrap({
           sign_in_methods: signInMethods,
-          mail_ready: mailReady,
+          mail,
           maintenance_mode: maintenanceMode,
           oauth_providers: oauthProviders,
           open_signup: openSignup,
@@ -169,7 +170,7 @@ describe("Login", () => {
 
   it("links to signup, recovery and a fresh verification link once mail works", async () => {
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -188,7 +189,7 @@ describe("Login", () => {
 
   it("hides recovery on an unclaimed deployment, where no password exists to reset", async () => {
     render(
-      <Mounted mailReady>
+      <Mounted mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -287,7 +288,7 @@ describe("Login", () => {
 
   it("offers recovery to a member holding a password on an unclaimed deployment", () => {
     render(
-      <Mounted mailReady signInMethods={["master_key", "password"]}>
+      <Mounted mail="delivers" signInMethods={["master_key", "password"]}>
         <Harness />
       </Mounted>,
     )
@@ -299,7 +300,7 @@ describe("Login", () => {
 
   it("invites registration rather than a claim where signup is open", () => {
     render(
-      <Mounted mailReady openSignup>
+      <Mounted mail="delivers" openSignup>
         <Harness />
       </Mounted>,
     )
@@ -308,6 +309,28 @@ describe("Login", () => {
       screen.getByRole("link", { name: /Create an account/ }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
+  })
+
+  it("keeps the mail-only ways in where a send reaches no recipient", () => {
+    // Signup, recovery and a verification resend each only send a message, and
+    // the endpoints behind them accept one on this deployment, so taking the
+    // links away would hide a flow that works.
+    render(
+      <Mounted
+        mail="sends_only"
+        openSignup
+        signInMethods={["master_key", "password"]}
+      >
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Create an account/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: /Forgot your password/ }),
+    ).toBeInTheDocument()
   })
 
   it("links to the auth-free welcome page", async () => {
@@ -636,7 +659,7 @@ describe("Login", () => {
       jsonResponse({ detail: "Verify your email before signing in" }, 403),
     )
     const first = render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -698,7 +721,7 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -723,7 +746,7 @@ describe("Login", () => {
   it("renders the unverified refusal without a link on a gateway that cannot mail one", async () => {
     // The resend page starts by sending a message, so on a mailless gateway
     // the link would lead to a flow that can only 503. The refusal still
-    // renders; hiding the action is the same call `mail_ready` already makes
+    // renders; hiding the action is the same call the mail state already makes
     // for signup and recovery.
     const refusal =
       "Verify your email before signing in; request a new verification email if yours expired"

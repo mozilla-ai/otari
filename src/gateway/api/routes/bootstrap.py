@@ -44,6 +44,7 @@ from gateway.core.database import describe_database_error
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
 from gateway.log_config import logger
+from gateway.services.mail import Mailer, MailReadiness
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password, password_sign_in_possible
 from gateway.services.tenancy.webauthn_service import has_any_credential
@@ -223,15 +224,14 @@ class DeploymentBootstrap(BaseModel):
             "federation_member_rules setting), so the dashboard offers workload identity on their keys."
         )
     )
-    mail_ready: bool = Field(
+    mail: MailReadiness = Field(
         description=(
-            "Whether this deployment can deliver a message carrying a link back to itself "
-            "(an invitation's accept link, and the verification and reset links to come), "
-            "not merely whether a transport is configured: it also needs to know its own "
-            "public URL to put in one. Lets the dashboard disable or hide a mail-dependent "
-            "affordance instead of offering one that would fail at send time. Every "
-            "message this deployment sends carries such a link, which is why this is "
-            "one flag and not one per feature."
+            "How far an email this deployment sends gets. Signing up without an invitation, a "
+            "verification resend and a password reset are accepted wherever this is not 'none', "
+            "and anything whose outcome depends on somebody receiving the message needs "
+            "'delivers'. Every message this deployment sends carries a link back to itself and "
+            "needs its own public URL to build one, so one value answers for every feature "
+            "rather than one per feature."
         )
     )
 
@@ -268,7 +268,7 @@ async def get_bootstrap(
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         platform_connect=any(feature.name == "platform_connect" for feature in enabled_features),
         federation_member_rules=config.federation_member_rules,
-        mail_ready=config.mail_ready,
+        mail=Mailer(config).readiness,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
         # has no transport would otherwise get a page inviting registrations

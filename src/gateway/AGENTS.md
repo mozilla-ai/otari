@@ -325,6 +325,10 @@ worker's, a flow that falls back to handing the link over, and any decision abou
 what a link proves: a link the recipient's mailbox never saw is hand-carried,
 whatever the transport reported.
 
+`Mailer.readiness` answers both at once, as `MailReadiness`, and that is what
+`GET /api/v1/bootstrap` publishes as `mail`. A caller outside this package that
+needs both questions reads it rather than deriving the pair separately.
+
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing
 work.

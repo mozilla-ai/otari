@@ -13131,11 +13131,8 @@ export interface components {
              * @description Whether this deployment accepts deliberate feedback submissions.
              */
             feedback_enabled: boolean;
-            /**
-             * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
-             */
-            mail_ready: boolean;
+            /** @description How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature. */
+            mail: components["schemas"]["MailReadiness"];
             /**
              * Maintenance Mode
              * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
@@ -16144,6 +16141,17 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * MailReadiness
+         * @description How far an email carrying a link back to this deployment gets.
+         *
+         *     The members are exclusive and cover every deployment.
+         *     ``none`` means no message is sent at all.
+         *     ``sends_only`` means a message is sent and no link the recipient can open reaches them.
+         *     ``delivers`` means the recipient's mailbox receives it.
+         * @enum {string}
+         */
+        MailReadiness: "none" | "sends_only" | "delivers";
+        /**
          * MailSettings
          * @description What this deployment can send, and what stands in the way if it cannot.
          */
@@ -16175,7 +16183,7 @@ export interface components {
             public_base_url: string | null;
             /**
              * Ready
-             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.
+             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.
              */
             ready: boolean;
             /**

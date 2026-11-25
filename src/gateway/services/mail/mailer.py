@@ -9,6 +9,7 @@ Which shape a given surface takes, and why, is in ``src/gateway/AGENTS.md``.
 """
 
 import asyncio
+from enum import StrEnum
 from urllib.parse import urlsplit
 
 from gateway.core.config import GatewayConfig
@@ -26,6 +27,21 @@ from gateway.services.mail.transports import redact_email, select_transport
 # What a console-only deployment sends from when no address is configured. Never
 # reached by SMTP, which requires mail_from_email before its transport is built.
 _FALLBACK_SENDER = "otari@localhost"
+
+
+class MailReadiness(StrEnum):
+    """How far an email carrying a link back to this deployment gets.
+
+    The members are exclusive and cover every deployment.
+    ``none`` means no message is sent at all.
+    ``sends_only`` means a message is sent and no link the recipient can open reaches them.
+    ``delivers`` means the recipient's mailbox receives it.
+    """
+
+    # Ordered by how far a message gets, not A-Z, so the published enum reads as the ladder it is.
+    NONE = "none"
+    SENDS_ONLY = "sends_only"
+    DELIVERS = "delivers"
 
 
 class Mailer:
@@ -85,6 +101,17 @@ class Mailer:
         return link.scheme in ("http", "https") and bool(link.hostname)
 
     @property
+    def readiness(self) -> MailReadiness:
+        """How far a message carrying a link back to this deployment gets.
+
+        Derived here rather than by pairing the two predicates above, so one
+        answer cannot drift from the other.
+        """
+        if not self.can_send_links:
+            return MailReadiness.NONE
+        return MailReadiness.DELIVERS if self.can_deliver_links else MailReadiness.SENDS_ONLY
+
+    @property
     def missing_settings(self) -> tuple[str, ...]:
         """Which settings stand between this deployment and a delivered link."""
         return self._config.missing_mail_settings
@@ -92,9 +119,11 @@ class Mailer:
     def require_ready(self) -> None:
         """Raise :class:`MailNotConfiguredError` unless a linked message can be sent.
 
-        For the surfaces with no fallback. A surface that can degrade (an
-        invitation) must not call this: refusing there would take away a flow
-        that works perfectly well without mail.
+        Satisfied wherever :attr:`readiness` is above ``none``, so a deployment
+        that sends without delivering passes this. For the surfaces with no
+        fallback. A surface that can degrade (an invitation) must not call this:
+        refusing there would take away a flow that works perfectly well without
+        mail.
         """
         if not self.can_send_links:
             raise MailNotConfiguredError(self.missing_settings)

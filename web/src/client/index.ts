@@ -34,6 +34,7 @@ export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 // knows whether it can authenticate at all.
 // ---------------------------------------------------------------------------
 export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
+export type MailReadiness = Schemas["MailReadiness"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials

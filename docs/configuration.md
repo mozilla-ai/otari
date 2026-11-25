@@ -1760,6 +1760,17 @@ Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
 `POST /api/v1/settings/mail/test`.
 
+Nothing reaches a recipient on that transport, so anything whose outcome depends
+on somebody receiving the message behaves as it does with no mail at all. An
+invitation hands its accept link back, a password link is shown instead of
+emailed, and health check alerts tell nobody. Signing up without an invitation,
+a verification resend and a password reset need `public_base_url` as well, and
+are refused without it. With it set they are accepted, because their message is
+written to the log for an operator to pass on, and the page that follows says to
+ask for the link rather than to watch an inbox. Signing up from an invitation is
+accepted either way, because the invitation names the address and the account
+needs no verification link.
+
 ### Invitations
 
 An invitation link expires after `invitation_expiry_hours` (default `168`, seven

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import type { PublicAuthPath } from "@/features/auth/publicAuthPaths"
 import { apiFetch } from "@/shared/api/client"
@@ -20,7 +21,7 @@ function renderPage(
   path: PublicAuthPath | null,
   {
     route = path === null ? "/" : `#${path}`,
-    mailReady = true,
+    mail = "delivers" as MailReadiness,
     oauthProviders = [] as string[],
   } = {},
 ) {
@@ -36,7 +37,7 @@ function renderPage(
       <AppProviders>
         <DeploymentProvider
           value={bootstrap({
-            mail_ready: mailReady,
+            mail,
             oauth_providers: oauthProviders,
           })}
         >
@@ -65,7 +66,7 @@ describe("PublicAuthPage: the mail gate", () => {
   ] as const)(
     "answers %s with a panel instead of a form when this gateway cannot send mail",
     (path) => {
-      renderPage(path, { mailReady: false })
+      renderPage(path, { mail: "none" })
 
       expect(
         screen.getByRole("heading", { name: "Not available on this gateway" }),
@@ -75,10 +76,25 @@ describe("PublicAuthPage: the mail gate", () => {
     },
   )
 
+  it.each(["/signup", "/resend-verification", "/recover-password"] as const)(
+    "still opens %s where a send reaches no recipient",
+    (path) => {
+      // These endpoints accept the request on such a deployment, so a panel
+      // here would refuse a flow the server does not.
+      renderPage(path, { mail: "sends_only" })
+
+      expect(
+        screen.queryByRole("heading", {
+          name: "Not available on this gateway",
+        }),
+      ).not.toBeInTheDocument()
+    },
+  )
+
   it("still opens a reset link, whose message was sent while mail worked", () => {
     renderPage("/reset-password", {
       route: "/reset-password?token=abc",
-      mailReady: false,
+      mail: "none",
     })
 
     expect(
@@ -120,7 +136,7 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
 
   it("does not gate an OAuth callback on mail, which it never sends", () => {
     renderPage("/sign-in/google/callback", {
-      mailReady: false,
+      mail: "none",
       oauthProviders: ["google"],
     })
 
@@ -142,7 +158,7 @@ describe("PublicAuthPage: the organization-connection callback", () => {
     // above it, and a route with no arm in the switch renders nothing: this is
     // the dispatch itself, not the callback page's own refusal handling.
     renderPage("/sign-in/sso/callback", {
-      mailReady: false,
+      mail: "none",
       oauthProviders: [],
     })
 

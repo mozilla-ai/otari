@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { InvitationPreview } from "@/client"
+import type { InvitationPreview, MailReadiness } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
@@ -109,7 +109,7 @@ function mockApi(opts: {
 function renderPage(
   route: string,
   {
-    mailReady = true,
+    mail = "delivers" as MailReadiness,
     oauthProviders = [] as string[],
     termsUrl = null as string | null,
   } = {},
@@ -126,7 +126,7 @@ function renderPage(
           <AuthProvider>
             <DeploymentProvider
               value={bootstrap({
-                mail_ready: mailReady,
+                mail,
                 oauth_providers: oauthProviders,
                 terms_url: termsUrl,
               })}
@@ -291,7 +291,7 @@ describe("AcceptInvitationPage", () => {
     // the link over, and setting the password here is the whole way in.
     mockApi({ nextStep: "set_password" })
     const user = userEvent.setup()
-    renderPage("/accept-invitation?token=abc123", { mailReady: false })
+    renderPage("/accept-invitation?token=abc123", { mail: "none" })
 
     await user.type(await screen.findByLabelText("Password"), "correct-horse")
     await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
@@ -352,7 +352,7 @@ describe("AcceptInvitationPage", () => {
     const accepted = mockApi({ nextStep: "set_password", waysIn: ["provider"] })
     const user = userEvent.setup()
     renderPage("/accept-invitation?token=abc123", {
-      mailReady: false,
+      mail: "none",
       oauthProviders: ["google"],
     })
 
@@ -372,7 +372,7 @@ describe("AcceptInvitationPage", () => {
 
   describe("where the deployment publishes terms", () => {
     const terms = {
-      mailReady: false,
+      mail: "none" as MailReadiness,
       oauthProviders: ["google"],
       termsUrl: "https://otari.example.com/terms",
     }
@@ -486,7 +486,7 @@ describe("AcceptInvitationPage", () => {
   it("sends a stranded invitee to whoever administers the gateway", async () => {
     mockApi({ nextStep: "use_another_way_in" })
     const user = userEvent.setup()
-    renderPage("/accept-invitation?token=abc123", { mailReady: false })
+    renderPage("/accept-invitation?token=abc123", { mail: "none" })
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
