@@ -13,11 +13,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from gateway.api.deps import AgentModelRecommenderPortDep, CurrentIdentity, UsageServiceDep, verify_master_key
-from gateway.api.deps._base import PortSessionDep
+from gateway.api.deps import (
+    AgentModelRecommenderPortDep,
+    CurrentIdentity,
+    UsageServiceDep,
+    WorkspaceAccessDep,
+    verify_master_key,
+)
 from gateway.api.deps.routing import SubagentDecisionServiceDep
 from gateway.api.routes._passthrough import DECISIONS_ENDPOINT
-from gateway.api.routes.organization_usage import _scope
 from gateway.api.routes.usage import _END_DESC, _START_DESC, _USER_MULTI_DESC, _WORKSPACE_DESC
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.surface import Surface
@@ -25,7 +29,7 @@ from gateway.exceptions.routing_exceptions import RecommenderNotConfiguredError
 from gateway.schemas.routing import SubagentSavingsPublic
 from gateway.schemas.usage_and_telemetry import Bucket
 from gateway.services.routing import ROUTER_LABEL_MODEL, ROUTER_LABEL_PROVIDER
-from gateway.services.usage_and_telemetry import UsageFilters, resolve_window
+from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, resolve_window
 
 router = APIRouter(
     prefix="/organizations/me/subagent-savings",
@@ -39,7 +43,7 @@ SURFACE = Surface("subagent_savings")
 @router.get("")
 async def read_subagent_savings(
     identity: CurrentIdentity,
-    db: PortSessionDep,
+    access: WorkspaceAccessDep,
     decisions: SubagentDecisionServiceDep,
     usage: UsageServiceDep,
     recommender: AgentModelRecommenderPortDep,
@@ -62,7 +66,7 @@ async def read_subagent_savings(
     never reported or could not be priced. The figures are estimates unless
     counted under `measured`. With no dates, the last 30 days.
     """
-    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    workspaces = await access.readable_workspaces(user=identity, workspace_id=workspace_id)
     start, end = resolve_window(start_date, end_date)
     try:
         recommender.quote()
@@ -79,10 +83,10 @@ async def read_subagent_savings(
             provider=ROUTER_LABEL_PROVIDER,
             endpoint=DECISIONS_ENDPOINT,
         ),
-        scope,
+        UsageScope(workspaces=workspaces),
     )
     return await decisions.savings(
-        workspaces=scope.workspaces if scope.workspaces is not None else [],
+        workspaces=workspaces,
         start=start,
         end=end,
         user_ids=user_id,

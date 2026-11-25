@@ -31,6 +31,7 @@ from gateway.repositories.tenancy.organization_member_repository import Organiza
 from gateway.repositories.tenancy.organization_repository import OrganizationRepository
 from gateway.repositories.tenancy.user_repository import UserRepository, user_alphabetical_order
 from gateway.repositories.tenancy.workspace_repository import (
+    WorkspaceIds,
     WorkspaceMemberRepository,
     WorkspaceRepository,
     ids_in_organization,
@@ -46,6 +47,7 @@ __all__ = [
     "OrganizationMemberRepository",
     "OrganizationRepository",
     "UserRepository",
+    "WorkspaceIds",
     "WorkspaceMemberRepository",
     "WorkspaceProviderKeyOverrideRepository",
     "WorkspaceProviderModelRestrictionRepository",
