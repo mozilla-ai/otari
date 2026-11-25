@@ -1,5 +1,6 @@
 import {
   buildAgentPrompt,
+  buildAgentSetupPrompt,
   buildCurlSnippet,
   buildPythonSnippet,
   buildTypescriptSnippet,
@@ -37,14 +38,27 @@ export const SETUP_TABS: ReadonlyArray<{
  */
 export const DEFAULT_SETUP_TAB: SetupSnippetId = "agent"
 
-/** The agent prompt names the environment variable; the other tabs carry its value. */
+/**
+ * The agent prompt names the environment variable; the other tabs carry its value.
+ *
+ * With `cliSetup`, the gateway accepts `otari setup`, and the agent prompt hands
+ * the agent that command in place of a single request.
+ */
 export function buildSetupSnippets(
   input: RequestSnippetInput,
+  { cliSetup = false }: { cliSetup?: boolean } = {},
 ): Record<SetupSnippetId, string> {
   return {
-    agent: buildAgentPrompt(input),
+    agent: cliSetup ? buildAgentSetupPrompt(input) : buildAgentPrompt(input),
     curl: buildCurlSnippet(input),
     python: buildPythonSnippet(input),
     typescript: buildTypescriptSnippet(input),
   }
+}
+
+/** The line under the agent prompt, which says what pasting it leads to. */
+export function agentPromptNote(cliSetup: boolean): string {
+  return cliSetup
+    ? "Works with Claude Code, Codex and OpenCode. You approve a key with a spending limit in your browser."
+    : "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
 }

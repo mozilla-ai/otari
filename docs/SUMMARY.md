@@ -26,6 +26,7 @@
 
 ## Integrations
 
+* [Set up coding tools with one command](setup-coding-tools.md)
 * [Claude Code](claude-code.md)
 * [Codex](codex.md)
 * [Cursor](cursor.md)

@@ -20,6 +20,14 @@ class OAuthAppConfig(BaseModel):
         min_length=1,
         description="The scopes of each key the app is issued. An app key is never a service key.",
     )
+    accept_client_user: bool = Field(
+        default=False,
+        description=(
+            "Issue each of the app's keys with reject_user_mismatch off, for an app that hands its "
+            "key to clients which name a user of their own on every request, as coding agents do. "
+            "Spend stays bound to the key's own user either way."
+        ),
+    )
 
     @field_validator("redirect_uris")
     @classmethod

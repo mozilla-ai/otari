@@ -24,6 +24,11 @@ registration named when the person approved it, and the [default scopes](api-key
 names none, so an app calls models and tools and nothing else unless you say so. An app key is never a
 service key, so it cannot hold the `end-users` scopes.
 
+A coding agent names a user of its own on every request, which a key refuses by
+default (see `reject_user_mismatch` in [API keys](api-keys.md)). Set
+`accept_client_user: true` on an app whose keys go to such clients, and each key
+it is issued accepts that name. Spend stays bound to the key's own user either way.
+
 Restart the gateway after changing registration. Empty `oauth_apps` disables
 these endpoints unless `oauth_open_apps` is on. Removing a registration prevents new approvals and exchanges;
 revoke already-issued keys on the API keys page. With `oauth_open_apps` on, a removed
@@ -33,6 +38,26 @@ that origin and marked as unverified. HTTPS redirects match exactly. HTTP is all
 loopback hosts; a native app may choose a different port on the registered
 loopback host and path, as RFC 8252 requires. Wildcards, query strings, fragments
 and embedded credentials are not accepted in registrations.
+
+## Register the otari CLI
+
+[`otari setup`](setup-coding-tools.md) asks for its key through this flow, as the
+app `otari-cli`. A gateway accepts it once that app is registered:
+
+```yaml
+oauth_apps:
+  otari-cli:
+    name: Otari CLI
+    redirect_uris:
+      - http://127.0.0.1/callback
+    scopes: [inference:run, usage:read]
+    accept_client_user: true
+```
+
+`usage:read` lets the command report the key's remaining limit and what its test
+request cost. Add tool scopes, such as `web:search` or `mcp:execute`, only if the
+coding tools on your gateway should use them. Where the app is registered, the
+setup guide's agent prompt hands the agent `otari setup` in place of a single request.
 
 ## Let unregistered apps connect
 

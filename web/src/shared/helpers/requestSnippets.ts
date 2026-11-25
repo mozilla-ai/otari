@@ -239,6 +239,48 @@ export function buildAgentPrompt({
 }
 
 /**
+ * How the prompt names the `otari` command. A build may point it at a checkout
+ * with VITE_OTARI_CLI; otherwise it runs the released CLI without installing it.
+ */
+const OTARI_CLI: string =
+  (import.meta.env.VITE_OTARI_CLI as string | undefined) ||
+  "uvx --from otari-agent otari"
+
+/**
+ * The prompt for a gateway that has registered the `otari` CLI as an app, where
+ * the agent can do the whole setup and not only the first request.
+ *
+ * It hands the agent one command, `otari setup`, which asks this gateway for a
+ * key in the browser, stores it, writes each coding tool's settings and sends a
+ * test request. The key is never in the prompt, and the agent is told not to
+ * ask for one or print one: the person's only step is approving the spending
+ * limit in the browser.
+ */
+export function buildAgentSetupPrompt({
+  baseUrl,
+  model = SNIPPET_MODEL_PLACEHOLDER,
+}: Omit<RequestSnippetInput, "apiKey">): string {
+  const command = [
+    `${OTARI_CLI} setup --yes`,
+    `--url ${baseUrl}`,
+    ...(model === SNIPPET_MODEL_PLACEHOLDER ? [] : [`--model ${model}`]),
+  ].join(" ")
+  return [
+    "Set up Otari on this machine for me.",
+    "",
+    "Run this command and wait for it to finish. Give it up to five minutes:",
+    "it opens my browser and waits while I approve a key with a spending limit.",
+    "",
+    command,
+    "",
+    "Do not ask me for an API key and never print one. The command stores the key itself.",
+    "Do not edit any of my editor or tool settings yourself.",
+    "When it finishes, tell me which coding tools it set up, how to start each one,",
+    "and what the test request replied.",
+  ].join("\n")
+}
+
+/**
  * Where a snippet should send its request: the request policy's public origin
  * when it names one, otherwise the origin the dashboard's own API requests reach.
  *
