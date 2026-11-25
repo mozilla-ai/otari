@@ -732,6 +732,7 @@ def test_a_model_the_credential_does_not_serve_ranks_last_for_its_tenant_for_an_
         (400, "The model or service ID deepseek-v4-flash-0731 does not exist. Please check it.", True),
         (403, "You do not have access to model `deepseek-ai/DeepSeek-V4-Flash-0731`.", True),
         (404, "Model not found, inaccessible, and/or not deployed", True),
+        (403, "Model example is not accessible on this account", True),
         (400, "max_tokens is too large for this model", False),
         (403, "Invalid API key", False),
         (503, "The model is overloaded", False),
@@ -762,3 +763,16 @@ def test_a_gateway_404_is_not_a_missing_model(router: AutomaticRouter) -> None:
     assert plan.automatic is not None
     _finish_failed(plan.automatic.start(plan.head), HTTPException(404, "Model not found"))
     assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_rotated_key_does_not_inherit_a_missing_model(router: AutomaticRouter) -> None:
+    """A missing model is remembered for the credential that reported it, not for the next key."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    rotated = CompiledPlan(
+        policy_name="acme/model",
+        attempts=[replace(a, kwargs={"api_key": "rotated"}) if a.instance == "us" else a for a in _plan().attempts],
+    )
+    assert _rank(router, plan=rotated, tenant="workspace-a").head.instance == "us"

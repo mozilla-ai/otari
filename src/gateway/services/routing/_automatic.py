@@ -40,7 +40,8 @@ _MISSING_MODEL_TTL = 3600.0
 # How a provider's message says the model is not served on this credential. Request text a provider
 # echoes back could match too; the cost is one offering ranked last for an hour, never one switched off.
 _MISSING_MODEL = re.compile(
-    r"model\b.{0,120}\b(does not exist|not found)|(do not|don't) have access to (the )?model|model not found",
+    r"model\b.{0,120}\b(does not exist|not found|not accessible)"
+    r"|(do not|don't) have access to (the )?model|model not found",
     re.IGNORECASE | re.DOTALL,
 )
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
@@ -216,7 +217,7 @@ class AutomaticObservation:
         now = router.clock()
         if missing:
             unhealthy = account = False
-            router.remember_missing(self.selection.tenant, self.selector)
+            router.remember_missing(self.selection.tenant, self.key)
             self.selection.forget_key(self.key)
         # A failed credential is the account's, not the offering's: it cools the account alone.
         credential = account and unhealthy
@@ -318,9 +319,9 @@ class AutomaticRouter:
         while len(self.refusals) > _LIMIT:
             self.refusals.popitem(last=False)
 
-    def remember_missing(self, tenant: str, selector: str) -> None:
-        """Record that ``selector`` is not served on the credential ``tenant`` reaches it with."""
-        key = self._digest(("missing", tenant, selector))
+    def remember_missing(self, tenant: str, candidate: str) -> None:
+        """Record that the offering ``candidate`` identifies, on its credential, does not serve ``tenant``."""
+        key = self._digest(("missing", tenant, candidate))
         self.refusals.pop(key, None)
         self.refusals[key] = self.clock() + _MISSING_MODEL_TTL
         while len(self.refusals) > _LIMIT:
@@ -381,7 +382,7 @@ class AutomaticRouter:
             account = self.accounts.get(self.account_key(attempt, tenant))
             if (health and health.cooldown > now) or (account and account[0] > now):
                 cooling.add(selector)
-            refusals = (self._digest((scope, selector)), self._digest(("missing", tenant, selector)))
+            refusals = (self._digest((scope, selector)), self._digest(("missing", tenant, keys[selector])))
             if any(self.refusals.get(key, 0) > now for key in refusals):
                 refused.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None

@@ -733,7 +733,7 @@ Selection uses these signals:
   workspace that saw it. An offering the deployment refuses to serve a caller on its
   credential ranks last for that caller for 5 minutes, and one whose provider says it
   does not serve the model on that credential (a 404, or a 400 or 403 saying so) ranks
-  last for that workspace for an hour. Each stays available as a last
+  last for that workspace on that credential for an hour. Each stays available as a last
   resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
