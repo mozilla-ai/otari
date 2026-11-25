@@ -49,7 +49,11 @@ class OrganizationSettings(BaseModel):
     invitation_resend_limit: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
         default=5,
         ge=1,
-        description="How many times one invitation may be sent, counting the first send.",
+        description=(
+            "How many times one invitation may be sent again after its first send. A deployment that "
+            "also wants to bound how often an address hears from it sets invitation_per_address_per_day, "
+            "which is counted over 24 hours rather than over the invitation's life."
+        ),
     )
     invitation_resend_wait_minutes: Annotated[int, Shown(SettingsGroup.MAIL)] = Field(
         default=15,

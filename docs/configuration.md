@@ -1803,9 +1803,11 @@ not stop the rest:
 | `invitation_per_day` | Invitations asked for | 100 |
 | `invitation_per_address_per_day` | Invitations to one address | 3 |
 
-Two more bound how often one invitation may be sent again. `invitation_resend_limit`
-(default `5`) counts every send of it, the first included, and
-`invitation_resend_wait_minutes` (default `15`) is how long to wait between them.
+Two more bound how often one invitation may be sent again.
+`invitation_resend_limit` (default `5`) is how many sends it may have after the
+first, and `invitation_resend_wait_minutes` (default `15`) is how long to wait
+between them. A resend also spends `invitation_per_address_per_day`, so over any
+24 hours that limit is the one an admin meets first.
 Canceling an invitation and inviting the address again starts both over, which is
 why `invitation_per_address_per_day` is the one number a cancel does not reset.
 

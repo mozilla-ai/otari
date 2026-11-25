@@ -1,10 +1,9 @@
 """How a request reaches the invitation flow.
 
-The flow spans three domains: organizations owns the invitation, identity
-answers whether a connection refuses a way in, and tenancy admits the member.
-Its builders sit here rather than with organizations because the connection
-service is reached through `gateway.api.deps.identity`, which imports
-`gateway.api.deps.organizations` and so cannot be imported back from it.
+The flow spans three domains, so it belongs to none of their modules:
+organizations owns the invitation, identity answers whether a connection
+refuses a way in, and tenancy admits the member. The three builders share most
+of their collaborators and are kept together for that reason.
 """
 
 from typing import Annotated
@@ -15,7 +14,6 @@ from gateway.api.deps._base import ContainerDep, UnitOfWorkDep, get_config
 from gateway.api.deps.identity import OIDCConnectionServiceDep
 from gateway.api.deps.organizations import MembershipOrganizationServiceDep, invitation_policy_of
 from gateway.core.config import GatewayConfig
-from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.organizations import OrganizationRepositories
@@ -37,8 +35,8 @@ from gateway.services.organizations import (
 )
 
 
-def build_invitation_link(uow: UnitOfWork, config: GatewayConfig) -> InvitationLink:
-    """Build the reader of what one invitation token still opens."""
+def get_invitation_link(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationLink:
+    """Build the reader of what one invitation token still opens, on the request's Unit of Work."""
     blocked = EmailBlocklist(uow, BlockedEmailRepository(uow))
     return InvitationLink(
         uow,
@@ -47,11 +45,6 @@ def build_invitation_link(uow: UnitOfWork, config: GatewayConfig) -> InvitationL
         delivery=DeliveryRule(OrganizationClaimedDomains(OrganizationDomainRepository(uow)), blocked),
         mailer=Mailer(config),
     )
-
-
-def get_invitation_link(uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationLink:
-    """Build the invitation link reader on the request's Unit of Work."""
-    return build_invitation_link(uow, config)
 
 
 InvitationLinkDep = Annotated[InvitationLink, Depends(get_invitation_link)]

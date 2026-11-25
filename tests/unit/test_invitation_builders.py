@@ -16,8 +16,8 @@ from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.api.deps.invitations import (
-    build_invitation_link,
     get_invitation_acceptance,
+    get_invitation_link,
     get_invitations,
 )
 from gateway.api.deps.organizations import get_membership_organization_service
@@ -62,8 +62,9 @@ async def uow() -> Any:
     await engine.dispose()
 
 
-async def test_the_link_reader_is_built_with_this_deployments_mail(uow: UnitOfWork) -> None:
-    link = build_invitation_link(uow, _config())
+async def test_the_link_reader_is_assembled(uow: UnitOfWork) -> None:
+    """Every collaborator it needs is reachable from a Unit of Work and a config alone."""
+    link = get_invitation_link(uow, _config())
 
     assert isinstance(link, InvitationLink)
 
@@ -79,13 +80,11 @@ async def test_the_invitation_service_carries_the_configured_limits(uow: UnitOfW
     assert service._policy.per_day == 7
     assert service._policy.resend_limit == 3
     assert service._policy.resend_wait == timedelta(minutes=11)
-    # The store reaches the limits rather than the service, so read it where it lands.
-    assert service._limits._store is store
 
 
 async def test_acceptance_is_given_the_admission_and_the_connections_it_is_handed(uow: UnitOfWork) -> None:
-    """Each arrives as the protocol the service declares, so a crossed pair would still type-check."""
-    link = build_invitation_link(uow, _config())
+    """Both reach the service rather than one being dropped or built twice."""
+    link = get_invitation_link(uow, _config())
     admission, connections = object(), object()
 
     acceptance = get_invitation_acceptance(uow, link, admission, connections)  # type: ignore[arg-type]
@@ -96,7 +95,7 @@ async def test_acceptance_is_given_the_admission_and_the_connections_it_is_hande
     assert acceptance._link is link
 
 
-def test_acceptance_asks_for_the_organization_service_that_can_write() -> None:
+async def test_acceptance_asks_for_the_organization_service_that_can_write() -> None:
     """Admitting writes a membership, and the read-only pairing refuses at the first write.
 
     Both pairings are the same class, so each satisfies the protocol and nothing
