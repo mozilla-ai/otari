@@ -5,6 +5,7 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -43,6 +44,8 @@ from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
+from gateway.models.tenancy import OrganizationMember
+from gateway.models.tenancy import User as TenancyUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
@@ -719,3 +722,47 @@ def live_server(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> Gene
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@dataclass(frozen=True)
+class SeededMember:
+    """A member seeded straight into the database, with the ids its callers read back."""
+
+    user_id: uuid.UUID
+    organization_member_id: uuid.UUID
+
+
+@pytest.fixture
+def seed_member(
+    db_session: Session, client: TestClient, master_key_header: dict[str, str]
+) -> Callable[..., SeededMember]:
+    """Put a member at an address into the caller's active organization, without a route.
+
+    For a test that needs a member to exist before the behavior it covers runs.
+    A test of adding a member exercises the endpoint instead.
+
+    NOTE: The seeded identity holds the address and nothing else: no password,
+    ``email_verified_at`` unset and ``email_proven_at`` unset. That is deliberate
+    rather than incomplete. An address is recorded as proved only where whoever
+    controls it took part, and nobody did here.
+    """
+
+    def _seed(*, email: str, role: str = "member") -> SeededMember:
+        active = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
+        assert active.status_code == 200, active.text
+        organization_id = uuid.UUID(active.json()["organization"]["id"])
+
+        user = TenancyUser(
+            email=email.strip().lower(),
+            full_name=None,
+            active_organization_id=organization_id,
+            default_organization_id=organization_id,
+        )
+        db_session.add(user)
+        db_session.flush()
+        membership = OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active")
+        db_session.add(membership)
+        db_session.commit()
+        return SeededMember(user_id=user.id, organization_member_id=membership.id)
+
+    return _seed
