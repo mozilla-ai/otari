@@ -21,6 +21,7 @@ import {
   ApiError,
   apiFetch,
   DASHBOARD_BUILD_PATH,
+  probeGateway,
   siteFetch,
 } from "@/shared/api/client"
 import {
@@ -109,7 +110,17 @@ const GATEWAY_LIVENESS_TIMEOUT_MS = 5_000
  * The probe runs when the newest unreachable failure is newer than its own last
  * success, and keeps asking every few seconds for as long as it fails. It runs
  * whatever the browser believes about being online, because an offline browser
- * cannot reach the gateway either and the answer should say so.
+ * cannot reach the gateway either and the answer should say so. Any response
+ * is an answer: only no response at all counts as down, and the probe does not
+ * go through `apiFetch`, so a 401 from something in front of the gateway does
+ * not sign the operator out.
+ *
+ * Each time the probe answers, the queries on screen that failed to connect
+ * are run again, so a page's own error clears whether the gateway was down
+ * for a minute or a request merely dropped. A query that fails that way again
+ * while the gateway answers is left alone until it next succeeds, rather than
+ * re-run on every probe; the gateway coming back from a confirmed outage runs
+ * all of them regardless.
  *
  * "Down" is read from the timestamps, not `status`: a query that has never held
  * data goes back to `pending` on every refetch, so `isError` would drop the
@@ -127,9 +138,10 @@ export function useGatewayUnreachable(): boolean {
   const liveness = useQuery({
     queryKey: [GATEWAY_LIVENESS],
     queryFn: () =>
-      apiFetch<string>("/health/liveness", {
-        signal: AbortSignal.timeout(GATEWAY_LIVENESS_TIMEOUT_MS),
-      }),
+      probeGateway(
+        "/health/liveness",
+        AbortSignal.timeout(GATEWAY_LIVENESS_TIMEOUT_MS),
+      ),
     enabled: (query) =>
       isDown(query.state) || unreachableSince > query.state.dataUpdatedAt,
     retry: 2,
@@ -140,20 +152,43 @@ export function useGatewayUnreachable(): boolean {
     staleTime: 0,
   })
   const down = isDown(liveness)
-  // Back up: re-run what failed to reach it, so a page's own error clears with
-  // the banner instead of waiting for focus or navigation.
+  const answeredAt = liveness.dataUpdatedAt
+  // Answering: re-run what failed to reach it, so a page's own error clears
+  // instead of waiting for focus or navigation. When each query was last re-run
+  // this way, keyed by its hash.
   const wasDown = useRef(false)
+  const reRunAt = useRef(new Map<string, number>())
   useEffect(() => {
-    if (wasDown.current && !down) {
-      void queryClient.refetchQueries({
+    const recovered = wasDown.current && !down
+    wasDown.current = down
+    if (down || answeredAt === 0) {
+      return
+    }
+    const due = queryClient
+      .getQueryCache()
+      .findAll({
+        type: "active",
         predicate: (query) =>
           query.queryKey[0] !== GATEWAY_LIVENESS &&
           query.state.status === "error" &&
           isUnreachable(query.state.error),
       })
+      .filter((query) => {
+        const at = reRunAt.current.get(query.queryHash)
+        return recovered || at === undefined || query.state.dataUpdatedAt > at
+      })
+    if (due.length === 0) {
+      return
     }
-    wasDown.current = down
-  }, [down, queryClient])
+    const now = Date.now()
+    for (const query of due) {
+      reRunAt.current.set(query.queryHash, now)
+    }
+    void queryClient.refetchQueries({
+      type: "active",
+      predicate: (query) => due.includes(query),
+    })
+  }, [answeredAt, down, queryClient])
   return down
 }
 

@@ -8,7 +8,7 @@ import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { announce } from "@/app/announce"
 import { ConnectionStatus, RECONNECTED_MS } from "@/app/ConnectionStatus"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, setUnauthorizedHandler } from "@/shared/api/client"
 
 // Drives one management request so the query cache carries a real success/error,
 // exactly what ConnectionStatus watches. No retry, like the build poll every page
@@ -135,11 +135,8 @@ describe("ConnectionStatus", () => {
       livenessAnswered = true
       return jsonResponse("I'm alive!")
     })
-    const { client } = renderWithProbe()
+    renderWithProbe()
 
-    await waitFor(() =>
-      expect(client.getQueryState(["probe"])?.status).toBe("error"),
-    )
     await waitFor(() => expect(livenessAnswered).toBe(true))
     // Let the probe's answer settle into the cache before reading the DOM.
     await act(async () => {})
@@ -269,6 +266,102 @@ describe("ConnectionStatus", () => {
       vi.useRealTimers()
     }
   })
+
+  it("re-runs what failed to connect when the gateway answers the first check, so a blip leaves no stale error", async () => {
+    // One dropped request, then a probe that answers at once: no outage was
+    // ever confirmed, so there is no recovery to hang the refetch on.
+    let dropped = false
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (isLiveness(input)) return jsonResponse("I'm alive!")
+      if (!dropped) {
+        dropped = true
+        throw new TypeError("Failed to fetch")
+      }
+      return jsonResponse({ ok: true })
+    })
+    const { client } = renderWithProbe()
+
+    await waitFor(() =>
+      expect(client.getQueryState(["probe"])?.status).toBe("success"),
+    )
+    expect(queryDown()).not.toBeInTheDocument()
+  })
+
+  it("re-runs only what is on screen, not a page the operator has left", async () => {
+    let dropped = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (isLiveness(input)) return jsonResponse("I'm alive!")
+      if (String(input).endsWith("/left") || dropped === 0) {
+        dropped += 1
+        throw new TypeError("Failed to fetch")
+      }
+      return jsonResponse({ ok: true })
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+    })
+    // A query from a page no longer mounted: in the cache, with no observer.
+    await client
+      .fetchQuery({ queryKey: ["left"], queryFn: () => apiFetch("/left") })
+      .catch(() => {})
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+        <ConnectionStatus />
+      </QueryClientProvider>,
+    )
+    await waitFor(() =>
+      expect(client.getQueryState(["probe"])?.status).toBe("success"),
+    )
+    const left = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/left"))
+    expect(left).toHaveLength(1)
+  })
+
+  it("does not keep re-running a request that fails on its own while the gateway answers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (isLiveness(input)) return jsonResponse("I'm alive!")
+      // Blocked in the browser, say, every time.
+      throw new TypeError("Failed to fetch")
+    })
+    renderWithProbe()
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    const settings = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/settings"))
+    expect(settings).toHaveLength(2)
+    expect(queryDown()).not.toBeInTheDocument()
+  })
+
+  it.each([401, 404, 500])(
+    "counts a %s from the liveness check as the gateway answering, without signing out",
+    async (status) => {
+      const onUnauthorized = vi.fn()
+      setUnauthorizedHandler(onUnauthorized)
+      try {
+        let probed = 0
+        vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+          if (!isLiveness(input)) throw new TypeError("Failed to fetch")
+          probed += 1
+          return jsonResponse({ detail: "no" }, status)
+        })
+        renderWithProbe()
+
+        await waitFor(() => expect(probed).toBeGreaterThan(0))
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        })
+        expect(queryDown()).not.toBeInTheDocument()
+        expect(onUnauthorized).not.toHaveBeenCalled()
+      } finally {
+        setUnauthorizedHandler(null)
+      }
+    },
+  )
 
   it("stays quiet for an error that is not a lost connection", async () => {
     // A 500 means the backend answered; that is a page-level error, not "offline".

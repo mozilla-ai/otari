@@ -863,8 +863,8 @@ function AppShellChrome() {
           and the pricing alarm above it is a band in flow, so a
           viewport-relative offset would leave the drawer covering the header by
           however tall that band is, taking the only control that closes it with
-          it. The connection status is out of flow and carries its own fill, so
-          it does not enter into this. */}
+          it. The connection band is not up here: it is the first thing inside
+          `main`, below this row's top edge, so it does not enter into this. */}
       <div
         className="relative flex min-h-0 flex-1"
         // What the rail costs the content beside it, for a `position: fixed`
