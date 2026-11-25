@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col, select
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.identity import EmailAssertion
 from gateway.models.tenancy import OrganizationMember, User
 from gateway.services.secret_box import generate_secret_key
 
@@ -31,6 +32,7 @@ from .test_auth_sso_routes import (
 )
 
 OTHER_DOMAIN_ADDRESS = "member@acme.example"
+SAME_DOMAIN_ADDRESS = "other@connected.example"
 CHOSEN_PASSWORD = "a-chosen-password"  # pragma: allowlist secret
 
 
@@ -55,6 +57,7 @@ def _sign_in(client: TestClient, slug: str, code: str) -> Any:
 
 
 def _account(db_session: Session, account_id: uuid.UUID) -> User:
+    """Read the account back, past anything this session already holds from before the request wrote."""
     db_session.expire_all()
     return db_session.execute(select(User).where(col(User.id) == account_id)).scalars().one()
 
@@ -97,3 +100,40 @@ def test_a_returning_sign_in_does_not_prove_an_address_the_provider_never_assert
         .all()
     )
     assert [m.organization_id for m in memberships] == [connected.id]
+
+
+def test_a_connection_a_tenant_supplies_proves_nothing_even_about_the_address_it_asserts(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The issuer asserts the account's own address, verified, and the sign-in still proves nothing.
+
+    Its verification and the address both line up, so the only thing left refusing is that a tenant
+    supplies the issuer and can make it say whatever it likes.
+    """
+    connected = _add_organization(db_session, slug="connected")
+    _add_connection(db_session, connected.id, issuer=ISSUER)
+    _add_claim(db_session, connected.id, domain="connected.example")
+
+    stub_exchange(monkeypatch, subject="a-subject", email="someone@connected.example", full_name="Someone")
+
+    first = _sign_in(client, "connected", "code-one")
+    account_id = uuid.UUID(first["user_id"])
+
+    recorded = client.put(
+        f"{API_ROOT}/auth/password",
+        json={"email": SAME_DOMAIN_ADDRESS, "new_password": CHOSEN_PASSWORD},
+    )
+    assert recorded.status_code == 200, recorded.text
+
+    stub_exchange(
+        monkeypatch,
+        subject="a-subject",
+        email=SAME_DOMAIN_ADDRESS,
+        full_name="Someone",
+        email_verified=EmailAssertion.VERIFIED,
+    )
+    _sign_in(client, "connected", "code-two")
+
+    account = _account(db_session, account_id)
+    assert account.email == SAME_DOMAIN_ADDRESS
+    assert account.email_proven_at is None
