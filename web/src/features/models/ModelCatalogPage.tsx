@@ -35,7 +35,9 @@ import {
   catalogListFromUrl,
   catalogRequest,
   catalogUrlChanges,
+  dataLocationOptions,
   EMPTY_FILTERS,
+  hostedInLabel,
   listedPrices,
   listedRate,
   MODALITIES,
@@ -212,6 +214,10 @@ function FilterRail({
     vendors.flatMap((option) => (option.markKey ? [option.markKey] : [])),
   )
   const types = modelTypeOptions(facets?.types ?? [])
+  const locations = dataLocationOptions(
+    facets?.data_locations,
+    filters.dataLocations,
+  )
   return (
     <div className="flex flex-col">
       {types.length > 0 ? (
@@ -377,6 +383,28 @@ function FilterRail({
           Zero data retention only
         </Checkbox>
       </FilterGroup>
+      {locations.length > 0 ? (
+        <FilterGroup label="Data location" count={filters.dataLocations.length}>
+          {locations.map((option) => (
+            <Checkbox
+              key={option.value}
+              isSelected={filters.dataLocations.includes(option.value)}
+              onChange={(isOn) =>
+                set(
+                  "dataLocations",
+                  toggle(filters.dataLocations, option.value, isOn),
+                )
+              }
+            >
+              {option.label}
+            </Checkbox>
+          ))}
+          <p className="text-caption">
+            European Union includes its member states. Global matches only
+            providers declared global.
+          </p>
+        </FilterGroup>
+      ) : null}
       <FilterGroup label="Source" count={filters.source !== "all" ? 1 : 0}>
         <RadioList
           name="Source"
@@ -431,11 +459,15 @@ function ModelCard({
   model,
   publicView,
   openState,
+  pickedLocations,
 }: {
   model: CatalogModelSummary
   publicView: boolean
   openState?: HistoryState
+  /** The data locations the list is narrowed to, which lead the card's own. */
+  pickedLocations: readonly string[]
 }) {
+  const hostedIn = hostedInLabel(model.data_locations, pickedLocations)
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const makerKey = makerKeyOf(model)
   const titleClass =
@@ -482,6 +514,7 @@ function ModelCard({
               <span className="tabular-nums">{price}</span>
             </Fact>
           ))}
+          {hostedIn ? <Fact>{hostedIn}</Fact> : null}
         </span>
       </p>
     </>
@@ -514,7 +547,9 @@ function ModelCard({
   )
 }
 
-const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
+const tableColumns = (
+  pickedLocations: readonly string[],
+): DataTableColumn<CatalogModelSummary>[] => [
   {
     id: "name",
     header: "Model",
@@ -522,6 +557,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
     allowsSorting: true,
     cell: (row) => {
       const makerKey = makerKeyOf(row)
+      const hostedIn = hostedInLabel(row.data_locations, pickedLocations)
       return (
         <div className="flex min-w-0 flex-col">
           <span className="text-body break-words">{row.name}</span>
@@ -539,6 +575,7 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
                 ? "1 provider"
                 : `${row.provider_count} providers`}
               {hasZeroDataRetention(row) ? " · Zero data retention" : ""}
+              {hostedIn ? ` · ${hostedIn}` : ""}
             </span>
           </span>
         </div>
@@ -825,7 +862,7 @@ export function ModelCatalogView({
             <TableScrollFrame className="otari-models-table">
               <DataTable
                 ariaLabel="Models"
-                columns={TABLE_COLUMNS}
+                columns={tableColumns(filters.dataLocations)}
                 rows={pageRows}
                 getRowKey={rowKey}
                 sortDescriptor={sortDescriptor}
@@ -854,6 +891,7 @@ export function ModelCatalogView({
                     model={model}
                     publicView={publicView}
                     openState={openState}
+                    pickedLocations={filters.dataLocations}
                   />
                 </li>
               ))}

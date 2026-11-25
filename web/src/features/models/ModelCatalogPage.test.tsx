@@ -802,6 +802,86 @@ describe("ModelCatalogPage", () => {
     expect(asked.at(-1)?.get("zero_data_retention")).toBe("true")
   })
 
+  it("narrows by data location, offering the union for its member states", async () => {
+    const asked: URLSearchParams[] = []
+    const glm = { ...GLM, data_locations: ["DE", "US"] }
+    const kimi = { ...KIMI, data_locations: ["GLOBAL"] }
+    const facets = {
+      ...CATALOG.facets!,
+      data_locations: ["DE", "GLOBAL", "US"],
+    }
+    mockApi({
+      list: (params) => {
+        asked.push(params)
+        const models =
+          params.get("data_location") === "EU" ? [glm] : [glm, kimi]
+        return { ...CATALOG, count: models.length, models, facets }
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      await within(list).findByText("Hosted in Germany, United States"),
+    ).toBeVisible()
+    expect(within(list).getByText("Hosted in Global")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    // The facet holds no `EU`, but Germany is a member state, so the union is offered.
+    expect(
+      screen
+        .getAllByRole("checkbox")
+        .map(
+          (box) =>
+            box.getAttribute("aria-label") ?? box.closest("label")?.textContent,
+        ),
+    ).toEqual(
+      expect.arrayContaining([
+        "Global",
+        "European Union",
+        "Germany",
+        "United States",
+      ]),
+    )
+    expect(
+      screen.getByText(
+        "European Union includes its member states. Global matches only providers declared global.",
+      ),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "European Union" }))
+
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
+    expect(asked.at(-1)?.getAll("data_location")).toEqual(["EU"])
+    expect(
+      screen.getByRole("button", { name: /^Data location\s*1$/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("names a model's data locations on its card and in the table", async () => {
+    const glm = { ...GLM, data_locations: ["US", "DE", "FR", "EU", "JP"] }
+    mockApi({ catalog: { ...CATALOG, models: [glm, KIMI] } })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      await within(list).findByText(
+        "Hosted in European Union, France, Germany +2 more",
+      ),
+    ).toBeVisible()
+    // A model with none declared says nothing about it.
+    expect(within(list).queryAllByText(/Hosted in/)).toHaveLength(1)
+
+    await user.click(screen.getByRole("radio", { name: "Table" }))
+    expect(
+      await screen.findByText(
+        /· Hosted in European Union, France, Germany \+2 more/,
+      ),
+    ).toBeVisible()
+  })
+
   it("narrows by what a model produces", async () => {
     mockApi({
       catalog: {
