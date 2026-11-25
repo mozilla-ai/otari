@@ -4,7 +4,7 @@ import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { MultiSelect } from "@/design-system/forms/MultiSelect"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
-import { Tab } from "@/design-system/navigation/TabRow"
+import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 
 // An access-list is a tri-state:
 //   undefined -> "inherit" (`null` on the wire: unrestricted, or the owner's)
@@ -126,14 +126,12 @@ export function AccessListControl({
     <div className="flex flex-col gap-3">
       <ControlField label={title} description={description} />
       {/* No track: a tab row is bare, and the selected segment's own fill is
-          what marks it. A track plus a fill was two ways of saying one thing.
-          It wraps where a TabRow scrolls: these are the three answers to one
-          question, and a phone has to see all three. */}
-      <div className="flex flex-wrap items-center gap-1">
+          what marks it. A track plus a fill was two ways of saying one thing. */}
+      <TabRow wraps>
         {modeButton("inherit", copy.inherit)}
         {modeButton("only", copy.only)}
         {modeButton("block", copy.block)}
-      </div>
+      </TabRow>
 
       {mode === "block" ? (
         <div className="flex items-center gap-2 border-y border-border py-2 text-xs text-muted">

@@ -48,6 +48,11 @@ A row that runs past its column scrolls rather than wraps, and fades out on the
 edge that has more beyond it, so a tab cut at the screen's edge reads as more to
 reach rather than as a rendering fault.
 
+The exception is `TabRow wraps`, for the few answers to one question (a key's
+model access: inherit, only selected, block all). There an answer hidden past the
+edge reads as no answer, so whole tabs wrap onto another line instead. A label
+still never wraps.
+
 ## Segmented
 
 The track is what says "these are the alternatives and there are no others". Native

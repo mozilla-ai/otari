@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from "react"
+import { type RefObject, useEffect, useId, useRef, useState } from "react"
 import type { CreateKeyResponse, KeyScope } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -218,6 +218,7 @@ export function CreateKeyDialog({
   ])
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [created, setCreated] = useState<CreateKeyResponse>()
+  const limitErrorId = useId()
   // Held across the await: a second press lands before `isPending` renders.
   const isSubmitting = useRef(false)
   const hasSecret = created !== undefined
@@ -396,6 +397,7 @@ export function CreateKeyDialog({
                 inputMode="decimal"
                 placeholder="No limit"
                 isInvalid={!isLimitValid}
+                describedBy={isLimitValid ? undefined : limitErrorId}
                 shouldReserveMessage={false}
               />
             </div>
@@ -411,9 +413,7 @@ export function CreateKeyDialog({
               />
             </div>
           </div>
-          {/* The error is said across the row rather than under the 160px
-              field, where it wrapped to three lines and pushed the period
-              picker out of line with the input. */}
+          {/* The error spans the row: the 160px field is too narrow for it. */}
           {isLimitValid ? (
             <p className="text-sm text-muted">
               Optional. Past it, requests on this key are refused until the
@@ -421,7 +421,7 @@ export function CreateKeyDialog({
               owner’s limit applies as well.
             </p>
           ) : (
-            <p role="alert" className="text-sm text-danger">
+            <p id={limitErrorId} role="alert" className="text-sm text-danger">
               Enter a number above zero, like 12.50, or leave it empty.
             </p>
           )}
