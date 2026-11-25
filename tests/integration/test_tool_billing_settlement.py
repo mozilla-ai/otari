@@ -932,6 +932,40 @@ async def test_a_reported_zero_settles_at_zero_beside_an_unreported_call_at_the_
 
 
 @pytest.mark.asyncio
+async def test_the_row_records_what_the_deployments_account_ran_whoever_paid_for_the_model(
+    async_db: AsyncSession,
+) -> None:
+    """A search the deployment ran is its charge even on a model call the organization paid for."""
+    async_db.add(
+        ModelPricing(
+            model_key="otari:web_search", input_price_per_million=_SEARCH_RATE_PER_MILLION, output_price_per_million=0.0
+        )
+    )
+    await async_db.commit()
+    tally = ToolUsageTally()
+    hits = "1. Otari\n   https://otari.example"
+    tally.record_result("web_search", hits, deployment_paid=True)
+    tally.record_result("web_search", hits, deployment_paid=False)
+    writer = _Writer()
+
+    await log_usage(
+        db=async_db,
+        log_writer=writer,
+        api_key_id=None,
+        model=MODEL_NAME,
+        provider=None,
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        tool_tally=tally,
+    )
+
+    [row] = writer.logs
+    assert row.deployment_paid is False
+    assert row.tool_cost == Decimal(str(2 * _SEARCH_UNIT_COST))
+    assert row.deployment_paid_cost == Decimal(str(_SEARCH_UNIT_COST))
+
+
+@pytest.mark.asyncio
 async def test_a_pricing_lookup_that_times_out_keeps_the_counts_on_the_row(async_db: AsyncSession) -> None:
     """A connect timeout raises a bare ``TimeoutError``; settlement still writes the row with its tool counts."""
     tally = ToolUsageTally()

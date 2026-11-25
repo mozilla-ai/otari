@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -174,9 +174,13 @@ describe("OrganizationProvidersPage", () => {
 
     expect(await screen.findByText("UNREADABLE")).toBeInTheDocument()
     expect(
-      screen.getByText(/can't be decrypted on this deployment/i),
+      screen.getByText(/cannot be served as it stands/i),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Re-enter the API key/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /re-enter both the API key and the endpoint credential/i,
+      ),
+    ).toBeInTheDocument()
   })
 
   it("counts each key's serving models and flags a key serving none", async () => {
@@ -218,7 +222,7 @@ describe("OrganizationProvidersPage", () => {
     await screen.findByText("Production")
     expect(screen.queryByText("UNREADABLE")).not.toBeInTheDocument()
     expect(
-      screen.queryByText(/can't be decrypted on this deployment/i),
+      screen.queryByText(/cannot be served as it stands/i),
     ).not.toBeInTheDocument()
   })
 
@@ -439,6 +443,444 @@ describe("OrganizationProvidersPage", () => {
       )
       expect(post?.body).toMatchObject({ provider: "anthropic", slug: "syn" })
     })
+  })
+
+  it("asks for an endpoint credential only once the key has an address of its own", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    expect(
+      screen.queryByRole("textbox", { name: /Endpoint credential header/ }),
+    ).toBeNull()
+
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+
+    expect(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("sends the endpoint credential the key's proxy requires", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Fronted")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    await user.type(screen.getByLabelText("Endpoint credential"), "edge-s3cret")
+    fireEvent.change(screen.getByLabelText("Credential expires"), {
+      target: { value: "2027-03-01" },
+    })
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => {
+      const post = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
+      )
+      expect(post?.body).toMatchObject({
+        endpoint_auth: {
+          method: "static_header",
+          header_name: "Fastly-Key",
+          secret: "edge-s3cret",
+        },
+      })
+    })
+  })
+
+  // A credential with no rotation date is refused by the gateway, so the form
+  // does not offer to send one.
+  it("will not add a key whose endpoint credential has no rotation date", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Fronted")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    await user.type(screen.getByLabelText("Endpoint credential"), "edge-s3cret")
+
+    expect(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    ).toBeDisabled()
+  })
+
+  // Clearing the header is how a key stops carrying one, so the body has to say
+  // so rather than leave the field out, which keeps what is stored.
+  it("clears a stored endpoint credential when its header is removed", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ endpoint_auth: null })
+    })
+  })
+
+  it("marks a key whose stored endpoint credential cannot be read", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: null,
+          endpoint_auth_unreadable: true,
+          usable: false,
+        }),
+      ],
+    })
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(
+      await screen.findByText(/Endpoint credential unreadable/),
+    ).toBeInTheDocument()
+  })
+
+  // The fields come up empty for an unreadable credential, so the draft never
+  // differs from it and the save would carry nothing. Without this the only way
+  // to clear one is to delete the whole key.
+  it("removes an unreadable endpoint credential on a save that leaves the header blank", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: null,
+          endpoint_auth_unreadable: true,
+          usable: false,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ endpoint_auth: null })
+    })
+  })
+
+  // The date field holds minutes, so resending an untouched credential would
+  // rewrite a stored rotation date that carried seconds, and could be refused
+  // on the account of a date the person saving never touched.
+  it("leaves a stored endpoint credential out of a save that did not change it", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:37+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /^Name/ }))
+    await user.type(screen.getByRole("textbox", { name: /^Name/ }), "renamed")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ name: "renamed" })
+      expect(patch?.body).not.toHaveProperty("endpoint_auth")
+    })
+  })
+
+  // The inputs hold minutes, so converting the draft back would move a rotation
+  // date the person never touched, and the gateway re-checks the date whenever
+  // the credential changes.
+  it("keeps the stored rotation instant when only the secret is rotated", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:37+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "rotated-value",
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({
+        endpoint_auth: {
+          secret: "rotated-value",
+          expires_at: "2027-03-01T00:00:37+00:00",
+        },
+      })
+    })
+  })
+
+  // The gateway refuses to carry a stored value to a host the person saving it
+  // never proved they hold, so the dialog asks rather than offering the save.
+  it("asks for the endpoint credential again when the key moves to another address", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "new-edge-s3cret",
+    )
+
+    // Still disabled: this key holds an API key too, and the gateway names
+    // every stored credential a move would carry, not only this one.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
+  // Without this the dialog offers the save, the gateway refuses it, and the
+  // person has retyped every credential on the key to reach that refusal.
+  it("says on the address field that a credential cannot travel without TLS", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "http://proxy.example.com/v1",
+    )
+
+    expect(
+      screen.getByText(
+        "Must be HTTPS, since the endpoint credential travels with it.",
+      ),
+    ).toBeInTheDocument()
+
+    // Retyping every credential does not rescue it, which is what made the
+    // refusal arrive last rather than first.
+    await user.type(
+      screen.getByLabelText("Endpoint credential"),
+      "new-edge-s3cret",
+    )
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  // The caption said to leave it blank to keep the key, in the one state where
+  // a blank is refused.
+  it("asks for the API key again on the field when the address moves", async () => {
+    mockApi({
+      keys: [orgProviderKey({ api_base: "https://proxy.example.com/v1" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    expect(screen.getByLabelText(/API key/)).not.toBeRequired()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByLabelText(/API key/)).toBeRequired()
+    expect(
+      screen.getByText(/Enter it again: it goes to the new address/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Leave blank to keep the current key/),
+    ).not.toBeInTheDocument()
+  })
+
+  // The same rule from the other side: a key with nothing stored under the
+  // endpoint credential still has to resend the API key.
+  it("asks for the API key again when a key with no endpoint credential moves", async () => {
+    mockApi({
+      keys: [orgProviderKey({ api_base: "https://proxy.example.com/v1" })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://other.example.com/v1",
+    )
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/API key/), "sk-live-5678")
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
+  it("sends no endpoint credential once the key has no address of its own", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ api_base: null, endpoint_auth: null })
+    })
+  })
+
+  it("can still be saved after the address a half-typed credential belonged to is removed", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    const save = () =>
+      screen.getByRole("button", { name: "Add provider key", hidden: false })
+    expect(save()).toBeDisabled()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+
+    expect(save()).toBeEnabled()
   })
 
   it("still finds a provider by the name the gateway gives it", async () => {

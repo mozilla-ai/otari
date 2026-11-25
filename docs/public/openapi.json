@@ -717,6 +717,7 @@
       "AgentModelRecommendation": {
         "description": "The model recommended for the subagent.",
         "example": {
+          "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
           "model": "sonnet",
           "probabilities": {
             "haiku": 0.21,
@@ -726,6 +727,19 @@
           "reason": "sonnet with 72%"
         },
         "properties": {
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The gateway's record of this recommendation. Absent where the record could not be kept.",
+            "title": "Decision Id"
+          },
           "model": {
             "description": "A model alias or id the harness can start the subagent on.",
             "title": "Model",
@@ -7918,10 +7932,9 @@
             "title": "Feedback Enabled",
             "type": "boolean"
           },
-          "mail_ready": {
-            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.",
-            "title": "Mail Ready",
-            "type": "boolean"
+          "mail": {
+            "$ref": "#/components/schemas/MailReadiness",
+            "description": "How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature."
           },
           "maintenance_mode": {
             "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.",
@@ -7939,6 +7952,11 @@
           "open_signup": {
             "description": "Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.",
             "title": "Open Signup",
+            "type": "boolean"
+          },
+          "organization_oidc_enabled": {
+            "description": "Whether this deployment offers organizations their own OIDC sign-in connection (the organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen renders no option to continue through an organization's provider. Additive to sign_in_methods rather than part of it, the way oauth_providers is: whether a given address resolves to a connection is answered per address, not published here.",
+            "title": "Organization Oidc Enabled",
             "type": "boolean"
           },
           "passkeys_enabled": {
@@ -8032,10 +8050,11 @@
           "passkeys_enabled",
           "passkeys_ready",
           "oauth_providers",
+          "organization_oidc_enabled",
           "open_signup",
           "feedback_enabled",
           "federation_member_rules",
-          "mail_ready"
+          "mail"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"
@@ -9024,6 +9043,103 @@
         ],
         "title": "EndUsersDeleted",
         "type": "object"
+      },
+      "EndpointAuthMethod": {
+        "description": "How the credential for one endpoint is produced.",
+        "enum": [
+          "static_header"
+        ],
+        "title": "EndpointAuthMethod",
+        "type": "string"
+      },
+      "EndpointAuthPublic": {
+        "description": "What an endpoint credential reports. Never carries the value, only its last four characters.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "title": "Header Name",
+            "type": "string"
+          },
+          "last4": {
+            "description": "The last four characters of the stored value.",
+            "title": "Last4",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced."
+          },
+          "state": {
+            "$ref": "#/components/schemas/EndpointAuthState",
+            "description": "How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request."
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "last4",
+          "expires_at",
+          "state"
+        ],
+        "title": "EndpointAuthPublic",
+        "type": "object"
+      },
+      "EndpointAuthRequest": {
+        "description": "The credential an edge proxy in front of a key's base URL requires.\n\n``method`` is a closed set of ways to produce request headers. TLS client\nauthentication is not one of them: it is presented when the connection is\nmade, so it would be a field of its own rather than a method here.",
+        "properties": {
+          "expires_at": {
+            "description": "When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "description": "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Header Name",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced. `static_header` sends one stored value as one header."
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.",
+            "title": "Secret"
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "expires_at"
+        ],
+        "title": "EndpointAuthRequest",
+        "type": "object"
+      },
+      "EndpointAuthState": {
+        "description": "How a stored credential stands against its own expiry.\n\nReported so every reader draws the line in the same place. None of the\nmembers refuses a request.",
+        "enum": [
+          "expired",
+          "expiring_soon",
+          "valid"
+        ],
+        "title": "EndpointAuthState",
+        "type": "string"
       },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
@@ -14233,6 +14349,16 @@
         "title": "ListedSearchToolSchema",
         "type": "object"
       },
+      "MailReadiness": {
+        "description": "How far an email carrying a link back to this deployment gets.\n\nThe members are exclusive and cover every deployment.\n``none`` means no message is sent at all.\n``sends_only`` means a message is sent and no link the recipient can open reaches them.\n``delivers`` means the recipient's mailbox receives it.",
+        "enum": [
+          "none",
+          "sends_only",
+          "delivers"
+        ],
+        "title": "MailReadiness",
+        "type": "string"
+      },
       "MailSettings": {
         "description": "What this deployment can send, and what stands in the way if it cannot.",
         "properties": {
@@ -14279,7 +14405,7 @@
             "title": "Public Base Url"
           },
           "ready": {
-            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.",
+            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.",
             "title": "Ready",
             "type": "boolean"
           },
@@ -17845,6 +17971,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`."
+          },
           "name": {
             "maxLength": 255,
             "title": "Name",
@@ -18143,6 +18280,22 @@
             "title": "Created At",
             "type": "string"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endpoint_auth_unreadable": {
+            "default": false,
+            "description": "True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.",
+            "title": "Endpoint Auth Unreadable",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -18211,7 +18364,7 @@
             "title": "Updated At"
           },
           "usable": {
-            "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
+            "description": "False when the key cannot be served as stored, so it supplies nothing at dispatch and the catalog withholds its provider: a credential this deployment cannot decrypt or read, a provider that cannot take a custom base URL, or an endpoint credential the key may not carry. Such a row is still listed, because deleting or replacing it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
           },
@@ -18273,6 +18426,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored."
+          },
           "name": {
             "anyOf": [
               {
@@ -18319,6 +18483,30 @@
           "count"
         ],
         "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
+      "OrgProviderKeysReencryptPublic": {
+        "description": "What re-encrypting the stored organization provider credentials did.\n\nEach count is keys, not values, because a key holding one value no\nconfigured secret reads has to be re-entered whole: it serves nothing until\nit is. ``unreadable`` counts those, left exactly as they were;\n``skipped`` those edited while the rotation ran, already written under the\nprimary secret.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "OrgProviderKeysReencryptPublic",
         "type": "object"
       },
       "OrgProviderModelsRefreshPublic": {
@@ -24797,6 +24985,212 @@
         "title": "SandboxProvider",
         "type": "string"
       },
+      "SavingsAmounts": {
+        "description": "What a group of subagent decisions comes to, in USD.\n\nThe two costs sum only the decisions whose outcome is priced on both\nsides, which `measured` and `estimated` count. `router_cost` sums every\ndecision in the group, so `net_saved` can be negative.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved"
+        ],
+        "title": "SavingsAmounts",
+        "type": "object"
+      },
+      "SavingsByAgentType": {
+        "description": "One subagent type.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "agent_type": {
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "agent_type"
+        ],
+        "title": "SavingsByAgentType",
+        "type": "object"
+      },
+      "SavingsBySwap": {
+        "description": "Reported outcomes with one baseline model and one model run on.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "baseline_model": {
+            "description": "The priced model the baseline was read as, or the harness's name for it where it was read as none.",
+            "title": "Baseline Model",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "ran_on": {
+            "description": "The model the subagent ran on, as the harness named it.",
+            "title": "Ran On",
+            "type": "string"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "baseline_model",
+          "ran_on"
+        ],
+        "title": "SavingsBySwap",
+        "type": "object"
+      },
       "ScopedBudgetResponse": {
         "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
         "properties": {
@@ -26843,6 +27237,290 @@
           }
         },
         "title": "StoredSearchToolTestRequest",
+        "type": "object"
+      },
+      "SubagentOutcomeReport": {
+        "additionalProperties": false,
+        "description": "What the subagent a recommendation started has consumed so far, in total.\n\nEach report replaces the one before it, so a harness sends running totals\nand may send them more than once.",
+        "example": {
+          "usage": [
+            {
+              "cache_read_tokens": 42000,
+              "cache_write_tokens": 9000,
+              "input_tokens": 1200,
+              "model": "claude-haiku-5-5",
+              "output_tokens": 800
+            }
+          ]
+        },
+        "properties": {
+          "usage": {
+            "description": "One line per model the subagent ran on.",
+            "items": {
+              "$ref": "#/components/schemas/SubagentUsageLine"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Usage",
+            "type": "array"
+          }
+        },
+        "required": [
+          "usage"
+        ],
+        "title": "SubagentOutcomeReport",
+        "type": "object"
+      },
+      "SubagentSavingsPoint": {
+        "description": "One time bucket, by when the recommendation was made.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "bucket_start": {
+            "description": "Canonical ISO-8601 UTC.",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "bucket_start"
+        ],
+        "title": "SubagentSavingsPoint",
+        "type": "object"
+      },
+      "SubagentSavingsPublic": {
+        "description": "What the subagent router saved in a window, within the caller's scope.",
+        "properties": {
+          "by_agent_type": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsByAgentType"
+            },
+            "title": "By Agent Type",
+            "type": "array"
+          },
+          "by_swap": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsBySwap"
+            },
+            "title": "By Swap",
+            "type": "array"
+          },
+          "estimated": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is the harness's own count."
+          },
+          "measured": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is metered."
+          },
+          "recommender_available": {
+            "description": "Whether anything answers a recommendation on this deployment.",
+            "title": "Recommender Available",
+            "type": "boolean"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SubagentSavingsPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SubagentSavingsTotals"
+          }
+        },
+        "required": [
+          "recommender_available",
+          "totals",
+          "measured",
+          "estimated",
+          "series",
+          "by_agent_type",
+          "by_swap"
+        ],
+        "title": "SubagentSavingsPublic",
+        "type": "object"
+      },
+      "SubagentSavingsTotals": {
+        "description": "The whole window.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "no_outcome": {
+            "description": "Decisions with no consumption reported. Their router cost still counts.",
+            "title": "No Outcome",
+            "type": "integer"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "router_unanswered": {
+            "description": "Recommendation requests the router failed to answer.",
+            "title": "Router Unanswered",
+            "type": "integer"
+          },
+          "unpriced": {
+            "description": "Reported outcomes left out of the costs because a side has no price.",
+            "title": "Unpriced",
+            "type": "integer"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "no_outcome",
+          "unpriced",
+          "router_unanswered"
+        ],
+        "title": "SubagentSavingsTotals",
+        "type": "object"
+      },
+      "SubagentUsageLine": {
+        "additionalProperties": false,
+        "description": "What a subagent consumed on one model, as its harness counted it.\n\nThe cache counts are beside `input_tokens`, not inside it.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "description": "Input tokens that were neither read from nor written to a cache.",
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "description": "The model, as the harness names it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_tokens": {
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "SubagentUsageLine",
         "type": "object"
       },
       "SwitchActiveOrganizationRequest": {
@@ -29336,6 +30014,17 @@
             "title": "By Filter",
             "type": "boolean"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -29653,6 +30342,11 @@
             "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
             "title": "Data Location"
           },
+          "deployment_paid": {
+            "default": false,
+            "title": "Deployment Paid",
+            "type": "boolean"
+          },
           "endpoint": {
             "title": "Endpoint",
             "type": "string"
@@ -29791,6 +30485,17 @@
               }
             ],
             "title": "Request Group Id"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
           },
           "selection_reason": {
             "anyOf": [
@@ -30404,6 +31109,17 @@
             ],
             "title": "Cache Write Price Per Million"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -30804,6 +31520,11 @@
           },
           "cost": {
             "title": "Cost",
+            "type": "number"
+          },
+          "deployment_paid_cost": {
+            "default": 0.0,
+            "title": "Deployment Paid Cost",
             "type": "number"
           },
           "error_count": {
@@ -40671,7 +41392,7 @@
     },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/search-tools/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -42266,6 +42987,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -42574,6 +43313,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -45546,6 +46303,36 @@
         "summary": "Exchange Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/v1/organization-provider-keys/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
+        "operationId": "provider-keys-reencrypt_org_provider_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeysReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Org Provider Keys",
+        "tags": [
+          "provider-keys"
         ]
       }
     },
@@ -50450,6 +51237,143 @@
         ]
       }
     },
+    "/api/v1/organizations/me/subagent-savings": {
+      "get": {
+        "description": "What the subagent router saved, within what the caller's membership lets them see.\n\nEach recommendation records the model the subagent would have started on\nwithout it: the model the caller asked for, else the parent's. When the\nharness reports what the subagent consumed, those tokens are priced at the\nmodels it ran on and at that baseline. The saving is the difference, less\nwhat the recommendations themselves cost, so it can be negative.\n\nThe costs count only the outcomes priced on both sides. `router_cost`\ncounts every recommendation in the window, also one whose subagent was\nnever reported or could not be priced. The figures are estimates unless\ncounted under `measured`. With no dates, the last 30 days.",
+        "operationId": "organization-usage-read_subagent_savings",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "The grain of `series`.",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "The grain of `series`.",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubagentSavingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Read Subagent Savings",
+        "tags": [
+          "organization-usage"
+        ]
+      }
+    },
     "/api/v1/organizations/me/switch": {
       "post": {
         "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists, and for one whose own SSO enforcement refuses the caller.",
@@ -52245,6 +53169,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -52649,6 +53591,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -53043,6 +54003,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -53411,6 +54389,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -56493,6 +57489,74 @@
         ]
       }
     },
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+      "put": {
+        "description": "Report what the subagent a recommendation started has consumed.\n\nThe harness sends the token counts it holds for the subagent, one line per\nmodel it ran on, as running totals: each report replaces the one before\nit. The gateway prices those tokens twice, at the models named and at the\nmodel the subagent would have started on without the recommendation, and\nkeeps both amounts as an estimate. No content is sent, nothing is charged\nand no usage row is written.\n\nAuthentication modes:\n- Master key: any decision.\n- API key: a decision made for the key's own user in the key's workspace.",
+        "operationId": "routing-report_subagent_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubagentOutcomeReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationRefusal"
+                }
+              }
+            },
+            "description": "No decision of the caller's has this id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Report Subagent Outcome",
+        "tags": [
+          "routing"
+        ],
+        "x-otari-key-scopes": [
+          "agents:write"
+        ]
+      }
+    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -56739,7 +57803,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate. `decision_id` names the record of\nthis answer, and is absent where the record could not be kept.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -57600,7 +58664,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
@@ -60230,6 +61294,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -60631,6 +61713,24 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -61166,6 +62266,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -61584,6 +62702,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {

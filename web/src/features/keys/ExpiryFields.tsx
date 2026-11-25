@@ -3,8 +3,17 @@ import { Field } from "@/design-system/forms/Field"
 
 const MIDNIGHT = "00:00"
 
+/** An ISO timestamp in the shape these inputs read, or "" when there is none. */
+export function toDatetimeLocal(iso: string | null): string {
+  if (!iso) return ""
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ""
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
 /**
- * A key's expiry as a date and a time, with the time already at midnight.
+ * An expiry as a date and a time, with the time already at midnight.
  *
  * `value` is the datetime-local shape ("YYYY-MM-DDTHH:mm", local time), or ""
  * for no expiry. It is two inputs rather than one `datetime-local` because
@@ -17,11 +26,14 @@ export function ExpiryFields({
   value,
   onChange,
   description,
+  isRequired,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   description: ReactNode
+  /** Marks the date, which is the segment with no default of its own. */
+  isRequired?: boolean
 }) {
   const [date, time] = value ? value.split("T") : ["", undefined]
   const [pendingTime, setPendingTime] = useState(MIDNIGHT)
@@ -46,6 +58,7 @@ export function ExpiryFields({
           onChange={changeDate}
           type="date"
           description={description}
+          isRequired={isRequired}
           shouldReserveMessage
         />
       </div>

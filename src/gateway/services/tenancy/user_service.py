@@ -121,6 +121,9 @@ class AddressAuthority(StrEnum):
     ORGANIZATION = ("organization", False)
     """One organization's word for an address any organization could have claimed."""
 
+    SESSION = ("session", False)
+    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
+
     proves_the_holder: bool
 
     def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
@@ -181,11 +184,16 @@ async def update_password(
         raise CurrentPasswordIncorrectError
     if current_password == new_password:
         raise UnmodifiedPasswordError
+    # NOTE: This records no address, since it supplies none and the identity already
+    # holds a password. Stated rather than defaulted, so a change that makes this record
+    # one cannot inherit a proof it never earned: proving a password says the caller owns
+    # the account, not that they receive mail at the address.
     await set_password(
         db,
         identity,
         new_password=new_password,
         sso_enforcement=sso_enforcement,
+        authority=AddressAuthority.SESSION,
         keep_session_token_hash=keep_session_token_hash,
     )
 
@@ -196,26 +204,37 @@ async def set_password(
     *,
     new_password: str,
     sso_enforcement: SsoEnforcement,
+    authority: AddressAuthority,
     email: str | None = None,
     keep_session_token_hash: str | None = None,
 ) -> None:
     """Set a password without proof of the previous one, and commit.
 
-    Reachable only by a caller who has already proved deployment authority: the
-    master key in a header, or a session on a deployment where no password has
-    been set yet, which is a session the master key must have minted. The route
-    owns that gate (`gateway.api.routes.auth_password`); this function does not
-    re-derive it, and must not be called from anywhere that has not applied it.
+    Set a password where no proof of a previous one is available: the master key
+    in a header, a session on a deployment nobody has claimed, or an identity that
+    holds no password yet. The route owns that gate
+    (`gateway.api.routes.auth_password`); this function does not re-derive it.
+
+    NOTE: Holding no password is not evidence of deployment authority. An account
+    provisioned by an organization's own connection holds none either, so callers
+    must state ``authority`` from what the caller proved rather than from the state
+    of the identity.
 
     ``email`` claims a sign-in address for an identity that has none, which is
     the state first boot leaves the operator in. It is refused if another
     identity already holds it, because the column is unique and the address is
     the handle sign-in matches on.
 
+    ``authority`` says what established the address, and only one that proves the
+    holder sets ``email_proven_at``. A session proves who is calling and nothing
+    about who receives mail at the address, so a claim made with one leaves the
+    address usable and unproved: auto-join skips it and another organization can
+    neither add nor invite it.
+
     ``email_verified_at`` is stamped when this call is the one that makes the
     identity able to sign in at all: a first password, or a newly supplied
-    address. Both are reachable only through deployment authority, which is what
-    the stamp records, and both are what the module docstring promises #650 will
+    address. It records that the address became usable rather than that anyone
+    proved it, and both are what the module docstring promises #650 will
     find already satisfied. It deliberately covers the identity adopted from an
     existing tenancy (`docs/access-control.md`), which arrives *with* an address,
     so a claim on it supplies no ``email`` and would otherwise leave the column
@@ -242,13 +261,16 @@ async def set_password(
         raise PasswordLinkUnavailableError(
             "Every organization this account belongs to requires sign-in through its own connection."
         )
-    records_the_address = email is not None or identity.hashed_password is None
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
+        _record_address(identity, now=datetime.now(UTC), authority=authority)
     elif identity.email is None:
         raise SignInAddressRequiredError
-    if records_the_address:
-        _record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.OPERATOR)
+    elif identity.hashed_password is None and identity.email_verified_at is None:
+        # A first password makes an address the identity already held usable. It
+        # establishes nothing about who receives mail there, so a proof already
+        # recorded is left alone rather than retired.
+        identity.email_verified_at = datetime.now(UTC)
     identity.hashed_password = await hash_password_async(new_password)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None

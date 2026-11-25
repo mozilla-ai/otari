@@ -412,7 +412,9 @@ aliases:
 Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
-target's price, not a price under the alias.
+target's price, not a price under the alias. Each usage row keeps the alias as
+its `requested_model` beside the target in `model`, so a request sent under the
+alias can be told from one sent to the target.
 
 An alias also withholds its target offering from `GET /api/v1/models` in that
 workspace, where the alias is listed in its place; the model stays listed while
@@ -697,8 +699,12 @@ ranked independently. Region remains a preference, so fallback can cross regions
 Selection uses these signals:
 
 - **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
-  put an offering behind healthy alternatives for 15 seconds. It stays available
-  as a last resort. Client cancellation and gateway refusals do not count as outages.
+  put an offering behind healthy alternatives for 15 seconds, doubling with each
+  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  credential cools every model served on that credential the same way, for the
+  workspace that saw it. An offering the deployment refuses to serve a caller on its
+  credential ranks last for that caller for 5 minutes. Each stays available as a last
+  resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
   pricing where requested. It uses the caller's organization prices, then the

@@ -207,6 +207,13 @@ and why. If Otari does not answer, the subagent starts on the model it would
 have had anyway, and the line says so. Forks always inherit their parent's
 model.
 
+When a subagent Otari chose the model of finishes, the plugin (from version
+0.2.0) also sends Otari the models it ran on and its token counts, and no
+content. Otari prices those tokens at the model the subagent would have started
+on without the recommendation, which is how it works out what the
+recommendation saved; see
+[Agent model recommendations](routing.md#agent-model-recommendations).
+
 ## Send Claude Code sessions to Otari
 
 Otari can record each Claude Code session without routing its model traffic:

@@ -29,6 +29,9 @@ SERVED_HERE_SLUG = "gateway"
 # ``chat.USAGE_ENDPOINT`` does.
 PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
 
+# The endpoint label on a usage row for every decisions path.
+DECISIONS_ENDPOINT = "/v1/decisions"
+
 
 class UsageLog(Base):
     """Usage log model for tracking API requests."""
@@ -145,6 +148,12 @@ class UsageLog(Base):
     # is, where looking up the tools' prices failed, and on every row written
     # before the column existed.
     tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The part of ``cost`` the deployment's account ran, which is what it charges the
+    # organization for: the model's cost where ``deployment_paid``, plus each
+    # gateway-run tool call it ran whoever paid for the model call. Null where
+    # neither part has a cost, on rows written by a path that does not split it, and
+    # on every row written before the column existed.
+    deployment_paid_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
@@ -207,6 +216,11 @@ class UsageLog(Base):
     # `Otari-Request-ID` it sent the caller here on every row, routed or not, so a
     # caller can look a request's cost up by that id.
     policy_name: Mapped[str | None] = mapped_column(index=True)
+    # The model name the caller sent, before an alias or a policy resolved it into
+    # ``model``. Null on rows written before the column, and on rows that bill
+    # something other than a model the caller named (a vision side-call, imported
+    # usage).
+    requested_model: Mapped[str | None] = mapped_column()
     selection_reason: Mapped[str | None] = mapped_column()
     attempt_position: Mapped[int | None] = mapped_column()
     attempt_count: Mapped[int | None] = mapped_column()

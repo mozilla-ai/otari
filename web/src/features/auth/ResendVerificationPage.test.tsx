@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
 import {
   readSignInAddress,
@@ -31,13 +32,13 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
-function renderPage() {
+function renderPage(mail: MailReadiness = "delivers") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>
+      <DeploymentProvider value={bootstrap({ mail })}>
         <ThemeProvider>
           <ResendVerificationPage />
         </ThemeProvider>
@@ -104,6 +105,18 @@ describe("ResendVerificationPage", () => {
       expect(currentRoute()).toBe("/check-email?type=resend")
     })
     expect(readSignInAddress()).toBe("grace@example.com")
+  })
+
+  it("offers to create a link where this deployment cannot email a working one", () => {
+    renderPage("sends_only")
+
+    expect(
+      screen.getByText(/cannot email it, so ask whoever runs it/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/we will mail a fresh link/)).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Create link" }),
+    ).toBeInTheDocument()
   })
 })
 

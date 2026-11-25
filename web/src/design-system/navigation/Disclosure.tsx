@@ -17,11 +17,18 @@ export function Disclosure({
   heading,
   children,
   isDefaultExpanded = false,
+  isFlush = false,
 }: {
   /** The always-visible label. It is the button, so it says what opening reveals. */
   heading: ReactNode
   children: ReactNode
   isDefaultExpanded?: boolean
+  /**
+   * Starts the content at the heading's left edge instead of HeroUI's 8px
+   * inset. For a disclosure that continues a form, whose fields above it set
+   * the edge.
+   */
+  isFlush?: boolean
 }) {
   return (
     <HeroDisclosure.Root defaultExpanded={isDefaultExpanded}>
@@ -31,7 +38,9 @@ export function Disclosure({
           <HeroDisclosure.Indicator />
         </HeroDisclosure.Trigger>
       </HeroDisclosure.Heading>
-      <HeroDisclosure.Content>
+      <HeroDisclosure.Content
+        className={isFlush ? "[&>[data-slot=disclosure-body]]:px-0" : undefined}
+      >
         <HeroDisclosure.Body className="pb-3">{children}</HeroDisclosure.Body>
       </HeroDisclosure.Content>
     </HeroDisclosure.Root>

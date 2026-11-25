@@ -9,6 +9,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
 from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
+from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.user_service import create_user_for_signup
 
@@ -20,16 +21,18 @@ _EMAIL = "ada@example.com"
 _PASSWORD = "a-str0ng-Passphrase!"
 
 
-def _config() -> GatewayConfig:
+def _config(*, sends_links: bool = True) -> GatewayConfig:
     return GatewayConfig(
         mail_from_email="otari@example.com",
-        mail_transport="smtp",
-        public_base_url="https://otari.example.com",
+        mail_transport="smtp" if sends_links else "console",
+        public_base_url="https://otari.example.com" if sends_links else None,
         smtp_host="smtp.example.com",
     )
 
 
-async def _signup(session: AsyncSession, *, proof: AddressProof | None) -> User | None:
+async def _signup(
+    session: AsyncSession, *, proof: AddressProof | None, config: GatewayConfig | None = None
+) -> User | None:
     organization = await create_organization(session, slug=f"signup-{proof or 'none'}")
     identity = await UserRepository(session).create_local_identity(
         full_name="Ada", active_organization_id=organization.id, email=_EMAIL
@@ -42,7 +45,7 @@ async def _signup(session: AsyncSession, *, proof: AddressProof | None) -> User 
     uow = UnitOfWork(session)
     return await create_user_for_signup(
         session,
-        _config(),
+        config or _config(),
         background_tasks=BackgroundTasks(),
         email=_EMAIL,
         password=_PASSWORD,
@@ -68,3 +71,17 @@ async def test_a_shared_proof_verifies_the_address_without_proving_it(async_db: 
     assert claimed is not None
     assert claimed.email_verified_at is not None
     assert claimed.email_proven_at is None
+
+
+async def test_a_proved_address_signs_up_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
+    """The proof stands in for the verification link, so no deployment setting gates it."""
+    claimed = await _signup(async_db, proof=AddressProof.MAILBOX, config=_config(sends_links=False))
+
+    assert claimed is not None
+    assert claimed.email_verified_at is not None
+
+
+async def test_an_unproved_address_is_refused_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
+    """Without a proof the verification link is the only way out of the unverified state."""
+    with pytest.raises(MailNotConfiguredError):
+        await _signup(async_db, proof=None, config=_config(sends_links=False))

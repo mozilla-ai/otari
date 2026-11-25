@@ -4,6 +4,61 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.57.0](https://github.com/mozilla-ai/otari/releases/tag/v0.57.0) - 2026-11-25
+
+
+
+### Bug Fixes
+
+- **usage:** Record the model name the caller sent on each usage row in [#3568](https://github.com/mozilla-ai/otari/pull/3568) by [@daavoo](https://github.com/daavoo) ([`71c3a26`](https://github.com/mozilla-ai/otari/commit/71c3a266432ede41dedd503137b93697c3736b6a))
+- **keys:** Fix clipped and misaligned parts of the Create API key dialog in [#3578](https://github.com/mozilla-ai/otari/pull/3578) by [@jigjigjig](https://github.com/jigjigjig) ([`ec7c953`](https://github.com/mozilla-ai/otari/commit/ec7c953ab08e541bd0f0ab230973cafb9cf9e942))
+
+
+### Features
+
+- **routing:** Record each subagent decision by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a2262ca`](https://github.com/mozilla-ai/otari/commit/a2262caad8a77a152e3508a788bb8190492a74af))
+- **routing:** Accept a subagent's outcome and price its baseline by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0e3fbf2`](https://github.com/mozilla-ai/otari/commit/0e3fbf2bc8b54e0f34aee408185fb9719ab0ba89))
+- **otari-router:** Report each routed subagent's tokens by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`207afef`](https://github.com/mozilla-ai/otari/commit/207afefa18a4dbe2e5c9bb6fbc42b3e1bbd8f728))
+- **routing:** Read what the subagent router saved by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`afa44d9`](https://github.com/mozilla-ai/otari/commit/afa44d90ed3eafa59c47d3590e040f57da403703))
+- **web:** Add a router savings view to sessions by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4463315`](https://github.com/mozilla-ai/otari/commit/4463315be9f1aa3cb340fb4a38ac96bca98d9ab4))
+- **web:** Show the router's saving on home in [#3545](https://github.com/mozilla-ai/otari/pull/3545) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1e5cecc`](https://github.com/mozilla-ai/otari/commit/1e5ceccc9198cd65f7bf1306ca08cb8d907f9482))
+- **inference:** Say whether the deployment paid for a completion in [#3562](https://github.com/mozilla-ai/otari/pull/3562) by [@daavoo](https://github.com/daavoo) ([`99372fe`](https://github.com/mozilla-ai/otari/commit/99372fecb45c66191fb2babeca3b596773e0f1bd))
+- **web:** Let a link name the workspace a sessions view shows by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`802533d`](https://github.com/mozilla-ai/otari/commit/802533dae8e2a9df924509f67a8386f6b73f8148))
+- **web:** Carry the team home workspace filter into the sessions views by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4fc2f25`](https://github.com/mozilla-ai/otari/commit/4fc2f25f90984a7bd1617b8a6c4840477a58e682))
+- **identity:** Let an operator turn organization SSO off for the deployment in [#3580](https://github.com/mozilla-ai/otari/pull/3580) by [@peteski22](https://github.com/peteski22) ([`f7ddd76`](https://github.com/mozilla-ai/otari/commit/f7ddd7645ea15fd8520ed07c1dfe3169e9689770))
+
+
+### Maintenance
+
+- **BREAKING:** **mail:** Publish how far an email gets, not whether one can be sent in [#3566](https://github.com/mozilla-ai/otari/pull/3566) by [@peteski22](https://github.com/peteski22) ([`702c63a`](https://github.com/mozilla-ai/otari/commit/702c63abaa8b17e8318e35e4fd701eb4e6525f2e))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.56.1...v0.57.0
+## [0.56.1](https://github.com/mozilla-ai/otari/releases/tag/v0.56.1) - 2026-11-24
+
+
+
+### Bug Fixes
+
+- **routing:** Stop leading with offerings that keep failing in [#3564](https://github.com/mozilla-ai/otari/pull/3564) by [@hasangzl](https://github.com/hasangzl) ([`b0c85eb`](https://github.com/mozilla-ai/otari/commit/b0c85eb3bc5ae680fe49e708a03422e1ebc4ab26))
+- **tools:** Code execution takes a language and refuses the ones it cannot run in [#3549](https://github.com/mozilla-ai/otari/pull/3549) by [@aittalam](https://github.com/aittalam) ([`c3ac91d`](https://github.com/mozilla-ai/otari/commit/c3ac91dd7d20945c7d9a614de8b30cc9ed7ef51e))
+- **web:** An organization key's hint names the allowance it spares, not the address in [#3565](https://github.com/mozilla-ai/otari/pull/3565) by [@aittalam](https://github.com/aittalam) ([`588a70f`](https://github.com/mozilla-ai/otari/commit/588a70f351fb653b1e91ae9cb9d534c254b8c1dd))
+
+
+### Features
+
+- **hook:** Add a native pi harness to otari hook in [#2427](https://github.com/mozilla-ai/otari/pull/2427) by [@agpituk](https://github.com/agpituk) ([`dfa2a4e`](https://github.com/mozilla-ai/otari/commit/dfa2a4e48671ecfaefd543c4038bc50f93acd26c))
+- **usage:** Report which usage the deployment paid for in [#3550](https://github.com/mozilla-ai/otari/pull/3550) by [@daavoo](https://github.com/daavoo) ([`0c8b835`](https://github.com/mozilla-ai/otari/commit/0c8b8350d5f35ba49f8f36cdf89637ccae595e1c))
+- **any-search:** Add Keenable, with or without an API key in [#3555](https://github.com/mozilla-ai/otari/pull/3555) by [@aittalam](https://github.com/aittalam) ([`8cbab9b`](https://github.com/mozilla-ai/otari/commit/8cbab9b9873c80398127fd221104b3a475c4e9aa))
+- **providers:** Authenticate to a tenant endpoint behind an edge proxy in [#3532](https://github.com/mozilla-ai/otari/pull/3532) by [@peteski22](https://github.com/peteski22) ([`0adc7f6`](https://github.com/mozilla-ai/otari/commit/0adc7f6ac1e8b9d916578f48030f7de68c31abb4))
+
+
+### Security
+
+- **identity:** Do not treat an address claimed through a session as proved in [#3567](https://github.com/mozilla-ai/otari/pull/3567) by [@peteski22](https://github.com/peteski22) ([`783a445`](https://github.com/mozilla-ai/otari/commit/783a4454015da86c928ee2e9b7c4d43ed40017d0))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.56.0...v0.56.1
 ## [0.56.0](https://github.com/mozilla-ai/otari/releases/tag/v0.56.0) - 2026-11-24
 
 

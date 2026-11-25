@@ -47,6 +47,16 @@ def test_a_key_is_optional_where_the_provider_needs_none() -> None:
     assert resolve_api_key(KEYED.model_copy(update={"requires_api_key": False, "env_key": None}), None) is None
 
 
+def test_an_optional_key_is_read_from_the_environment_and_never_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    optional = KEYED.model_copy(update={"requires_api_key": False})
+    monkeypatch.delenv("KEYED_API_KEY", raising=False)
+    assert resolve_api_key(optional, None) is None
+    monkeypatch.setenv("KEYED_API_KEY", "from-env")
+    assert resolve_api_key(optional, None) == "from-env"
+    # An explicit empty key means none, so a host's empty credential never picks up the environment's key.
+    assert resolve_api_key(optional, "") is None
+
+
 def test_the_base_url_is_explicit_then_environment_then_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KEYED_API_BASE", raising=False)
     assert resolve_api_base(KEYED, None) == "https://api.keyed.example"

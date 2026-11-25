@@ -29,6 +29,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OverviewIndexRouteImport } from './routes/_overview.index'
 import { Route as OverviewRequestsRouteImport } from './routes/_overview.requests'
+import { Route as OverviewRouterSavingsRouteImport } from './routes/_overview.router-savings'
 import { Route as OverviewSessionsRouteImport } from './routes/_overview.sessions'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminBudgetsRouteImport } from './routes/admin.budgets'
@@ -163,6 +164,11 @@ const OverviewIndexRoute = OverviewIndexRouteImport.update({
 const OverviewRequestsRoute = OverviewRequestsRouteImport.update({
   id: '/requests',
   path: '/requests',
+  getParentRoute: () => OverviewRoute,
+} as any)
+const OverviewRouterSavingsRoute = OverviewRouterSavingsRouteImport.update({
+  id: '/router-savings',
+  path: '/router-savings',
   getParentRoute: () => OverviewRoute,
 } as any)
 const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
@@ -370,6 +376,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
@@ -421,6 +428,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
@@ -478,6 +486,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/_overview/requests': typeof OverviewRequestsRoute
+  '/_overview/router-savings': typeof OverviewRouterSavingsRoute
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
@@ -538,6 +547,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
     | '/admin/budgets'
@@ -589,6 +599,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
     | '/admin/budgets'
@@ -645,6 +656,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/_overview/requests'
+    | '/_overview/router-savings'
     | '/_overview/sessions'
     | '/admin/accounts'
     | '/admin/budgets'
@@ -856,6 +868,13 @@ declare module '@tanstack/react-router' {
       path: '/requests'
       fullPath: '/requests'
       preLoaderRoute: typeof OverviewRequestsRouteImport
+      parentRoute: typeof OverviewRoute
+    }
+    '/_overview/router-savings': {
+      id: '/_overview/router-savings'
+      path: '/router-savings'
+      fullPath: '/router-savings'
+      preLoaderRoute: typeof OverviewRouterSavingsRouteImport
       parentRoute: typeof OverviewRoute
     }
     '/_overview/sessions': {
@@ -1115,12 +1134,14 @@ declare module '@tanstack/react-router' {
 
 interface OverviewRouteChildren {
   OverviewRequestsRoute: typeof OverviewRequestsRoute
+  OverviewRouterSavingsRoute: typeof OverviewRouterSavingsRoute
   OverviewSessionsRoute: typeof OverviewSessionsRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
 }
 
 const OverviewRouteChildren: OverviewRouteChildren = {
   OverviewRequestsRoute: OverviewRequestsRoute,
+  OverviewRouterSavingsRoute: OverviewRouterSavingsRoute,
   OverviewSessionsRoute: OverviewSessionsRoute,
   OverviewIndexRoute: OverviewIndexRoute,
 }

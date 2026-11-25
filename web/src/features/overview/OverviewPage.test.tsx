@@ -92,7 +92,12 @@ function mockScopedApi(b: Bodies = {}) {
 /** Reports where a navigation landed, for the routes `renderPage` mounts. */
 function LocationProbe() {
   const loc = useLocation()
-  return <div data-testid="loc">{loc.pathname}</div>
+  return (
+    <>
+      <div data-testid="loc">{loc.pathname}</div>
+      <div data-testid="search">{loc.searchStr}</div>
+    </>
+  )
 }
 
 // The fixture's roster plus traces, so every tab of Sessions is served.
@@ -160,7 +165,7 @@ describe("the Sessions layout", () => {
       "http://localhost",
     )
 
-  it("titles the page Sessions over both views", async () => {
+  it("titles the page Sessions over its views", async () => {
     mockApi()
     renderPage(<OverviewIndex />, "/requests")
 
@@ -171,7 +176,49 @@ describe("the Sessions layout", () => {
       tabs()
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Sessions", "Requests"])
+    ).toEqual(["Sessions", "Requests", "Router savings"])
+  })
+
+  it("opens Router savings as a view with controls of its own", async () => {
+    mockApi()
+    renderPage(<OverviewIndex />, "/router-savings")
+
+    expect(
+      await screen.findByRole("heading", { name: "Sessions" }),
+    ).toBeInTheDocument()
+    expect(
+      tabs().getByRole("link", { name: "Router savings" }),
+    ).toHaveAttribute("aria-current", "page")
+    // The tab carries no session filters across, in either direction.
+    expect(hrefOf("Router savings").search).toBe("")
+    expect(hrefOf("Requests").search).toBe("")
+  })
+
+  it("leaves Router savings out where the deployment does not serve it", async () => {
+    mockApi()
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <DeploymentProvider
+          value={bootstrap({
+            surfaces: ALL_SURFACES.filter(
+              (surface) => surface !== "subagent_savings",
+            ),
+          })}
+        >
+          <OverviewIndex />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+      { wrapper: withRouter({ url: "/sessions" }) },
+    )
+
+    await screen.findByRole("navigation", SESSIONS_VIEWS)
+    expect(
+      tabs().queryByRole("link", { name: "Router savings" }),
+    ).not.toBeInTheDocument()
   })
 
   it("marks the tab the path renders", async () => {
@@ -266,6 +313,14 @@ describe("the Sessions tabs by deployment", () => {
     renderWith(["usage"], "/sessions", "/requests")
 
     expect(await screen.findByTestId("loc")).toHaveTextContent("/requests")
+  })
+
+  it("lands Router savings on the first view's own defaults where it is not served", async () => {
+    renderWith(["usage"], "/router-savings?period=30d&who=me", "/requests")
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/requests")
+    // Usage's 30-day default is not pinned on a view that opens on 24 hours.
+    expect(screen.getByTestId("search")).toBeEmptyDOMElement()
   })
 })
 

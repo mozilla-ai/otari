@@ -131,6 +131,7 @@ from gateway.api.deps.ports import (
     get_telemetry_storage_port,
     model_provider_port_on,
 )
+from gateway.api.deps.routing import SubagentDecisionServiceDep, get_subagent_decision_service
 from gateway.api.deps.tools import (
     CodeExecutionEnvironmentServiceDep,
     DirectToolAvailabilityDep,
@@ -192,6 +193,7 @@ from gateway.api.deps.traces import (
     workspace_members,
     workspaces_keeping_content_for,
 )
+from gateway.api.deps.usage_and_telemetry import UsageServiceDep, get_usage_service
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import get_db
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
@@ -318,7 +320,7 @@ from gateway.services.tools import (
     WorkspaceMcpServerUrls,
 )
 from gateway.services.update_check import UpdateCheckService
-from gateway.services.usage_and_telemetry import UsageService, VideoUsageWriter
+from gateway.services.usage_and_telemetry import VideoUsageWriter
 from gateway.services.workspace_scope import default_workspace_id, organization_for_workspace_id
 from gateway.types.traces import (
     ContentReader,
@@ -969,14 +971,6 @@ def get_automatic_router(request: Request) -> AutomaticRouter:
     return router
 
 
-def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
-    """Build the usage service on the request's Unit of Work; its labels come from the key and user domains."""
-    return UsageService(uow, UsageLogRepository(uow), keys=get_api_key_service(uow), users=get_user_access(uow))
-
-
-UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
-
-
 class _BatchAccountingClaim:
     """Claims a recorded batch's one-time results accounting on the request's session."""
 
@@ -1246,6 +1240,7 @@ __all__ = [
     "SelectorReindexDep",
     "ServiceKey",
     "SignupInvitePortDep",
+    "SubagentDecisionServiceDep",
     "TRACE_CONTENT_HEADER_INVALID_DETAIL",
     "TelemetryStoragePortDep",
     "ToolPorts",
@@ -1334,6 +1329,7 @@ __all__ = [
     "get_selector_reindex",
     "get_session_identity",
     "get_signup_invite_port",
+    "get_subagent_decision_service",
     "get_telemetry_storage_port",
     "get_tool_ports",
     "get_trace_service",

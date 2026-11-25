@@ -92,6 +92,7 @@ the corresponding startup value after the database is available.
 | `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
 | `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
 | `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
+| `organization_oidc_enabled` | Offer organizations their own OIDC sign-in connection: the **Single sign-on** page and its routes. Defaults to `true`; startup setting. `false` removes both, so no organization can configure a connection or sign in through one. Stored connections are kept. See [Single sign-on](sso.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -747,13 +748,9 @@ with the database. If the database holds encrypted credentials and neither
 `OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
 than generate a key that could not decrypt them.
 
-To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
-run the hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
-router's key has no re-encryption endpoint yet: re-enter it on the Subagent
-router page after the rotation. Losing every configured encryption key makes
-stored credentials unrecoverable.
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key, then run every re-encryption endpoint: `POST /api/v1/hosted-providers/reencrypt`, `POST /api/v1/search-tools/reencrypt` and `POST /api/v1/organization-provider-keys/reencrypt`.
+
+**Keep the old key configured after that.** Only the three stores above have a re-encryption endpoint, and everything else still opens with the key it was written under. A subagent router's key is re-entered on the Subagent router page. Stored trace content is sealed under `OTARI_SECRET_KEY` too, and [Keeping trace content](trace-storage.md#keeping-trace-content) says to keep a rotated-out key for as long as you keep traces. Removing the old key while any of that remains makes it unrecoverable, as losing every configured key does.
 
 ### Hosted providers in config.yml
 
@@ -1763,6 +1760,17 @@ With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anyt
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
 `POST /api/v1/settings/mail/test`.
+
+Nothing reaches a recipient on that transport, so anything whose outcome depends
+on somebody receiving the message behaves as it does with no mail at all. An
+invitation hands its accept link back, a password link is shown instead of
+emailed, and health check alerts tell nobody. Signing up without an invitation,
+a verification resend and a password reset need `public_base_url` as well, and
+are refused without it. With it set they are accepted, because their message is
+written to the log for an operator to pass on, and the page that follows says to
+ask for the link rather than to watch an inbox. Signing up from an invitation is
+accepted either way, because the invitation names the address and the account
+needs no verification link.
 
 ### Invitations
 

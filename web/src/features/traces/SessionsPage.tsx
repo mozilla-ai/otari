@@ -17,6 +17,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import { useObserveScope } from "@/features/observe/useObserveScope"
+import { useViewWorkspace } from "@/features/observe/viewWorkspace"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   DEFAULT_TRACE_SORT,
@@ -37,7 +38,6 @@ import {
   SESSION_PRESETS,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
@@ -133,7 +133,7 @@ export function SessionsPage({ embedded = false }: { embedded?: boolean }) {
 
 function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
-  const { selected: workspace } = useSelectedWorkspace()
+  const workspaceId = useViewWorkspace() ?? ""
   // Said on the page as well as in the workspace's settings, because a manager
   // turns it on and a member may never have opted in themselves.
   const workspaces = useWorkspaces()
@@ -143,7 +143,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     ? (workspaces.data ?? []).filter(
         (candidate) =>
           candidate.trace_content_enabled &&
-          (workspace ? candidate.id === workspace.workspace_id : true),
+          (workspaceId ? candidate.id === workspaceId : true),
       )
     : []
   const keepsContent = keeping.length > 0
@@ -216,7 +216,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
 
   const search = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
   const base: Omit<TraceFilters, "start"> = {
-    workspaceId: workspace?.workspace_id ?? "",
+    workspaceId,
     q: search,
     userIds: userFilters,
     apiKeyIds: apiKeyFilters,
@@ -408,7 +408,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
         {embedded ? null : <PageIntro title="Sessions" />}
         {keepsContent ? (
           <InfoBanner>
-            {workspace ? "This workspace keeps" : "Your workspaces keep"} what
+            {workspaceId ? "This workspace keeps" : "Your workspaces keep"} what
             your sessions were about: the prompts and tool calls your agents
             send{keepsToolOutput ? ", and what each tool returned" : ""}. Otari
             shows yours only to you, unless you share a session.{" "}

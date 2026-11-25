@@ -461,13 +461,13 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
-  it.each([false, true])(
-    "offers the invitation whether or not mail can be sent (mail_ready: %s)",
-    async (mailReady) => {
+  it.each(["none", "delivers"] as const)(
+    "offers the invitation whether or not mail is delivered (mail: %s)",
+    async (mail) => {
       // Adding someone straight to `active` left an identity nobody could claim
       // where mail cannot be sent; an invitation always hands back a link.
       mockApi({ members: [OWNER] })
-      renderPage(<OrganizationMembersPage />, { mail_ready: mailReady })
+      renderPage(<OrganizationMembersPage />, { mail })
 
       await screen.findByRole("button", { name: "Invite member" })
       expect(screen.queryByRole("button", { name: "Add member" })).toBeNull()
@@ -673,7 +673,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -698,7 +698,7 @@ describe("OrganizationMembersPage", () => {
   it("invites a member by email and shows the accept link when the send did not go out", async () => {
     const requests = mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -754,7 +754,7 @@ describe("OrganizationMembersPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -807,7 +807,7 @@ describe("OrganizationMembersPage", () => {
     })
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />, {
-      mail_ready: true,
+      mail: "delivers",
       open_signup: true,
     })
 
@@ -856,7 +856,7 @@ describe("OrganizationMembersPage", () => {
       },
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -899,7 +899,24 @@ describe("OrganizationMembersPage", () => {
   it("says how the invitee joins when mail cannot be sent", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: false })
+    renderPage(<OrganizationMembersPage />, { mail: "none" })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    expect(
+      screen.getByText(
+        /an accept link to share, or accepting once they sign in/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("says how the invitee joins when the email reaches nobody", async () => {
+    // A transport that delivers to nobody hands the inviter a link, exactly as
+    // no transport does, so the dialog must not promise an email either.
+    mockApi({ members: [OWNER] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail: "sends_only" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -914,7 +931,7 @@ describe("OrganizationMembersPage", () => {
   it("says the email will be sent when mail is configured", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -1709,7 +1726,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
 
   it("keeps the intro to the essentials and puts the rest behind How roles work", async () => {
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail: "delivers" })
 
     await user.click(
       await screen.findByRole("button", { name: "How roles work" }),

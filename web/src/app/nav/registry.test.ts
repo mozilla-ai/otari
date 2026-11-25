@@ -275,7 +275,9 @@ describe("nav registry", () => {
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
-      ["Single sign-on", "organizations"],
+      // Its own surface, because a deployment can turn organization SSO off
+      // while still serving the rest of the organization pages.
+      ["Single sign-on", "organization_sso"],
     ])
     // One row. An organization's rates are set on Providers, beside the models
     // they price, and `/organization/pricing` is a redirect, which a rail row
@@ -341,13 +343,15 @@ describe("nav registry", () => {
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("files Requests under Sessions rather than a row of its own", () => {
-    // Sessions and Requests are two views under one title, each gated on its
-    // own surface inside the page, so Requests adds no row.
+  it("files Requests and Router savings under Sessions rather than rows of their own", () => {
+    // Views under one title, each gated on its own surface inside the page,
+    // so neither adds a row.
     const sessions = NAV_ITEMS.find((item) => item.label === "Sessions")
-    expect(sessions?.views).toEqual(["/requests"])
-    expect(NAV_ITEMS.map((item) => item.to)).not.toContain("/requests")
-    expect(railPathForPath("/requests")).toBe("/sessions")
+    expect(sessions?.views).toEqual(["/requests", "/router-savings"])
+    for (const view of ["/requests", "/router-savings"]) {
+      expect(NAV_ITEMS.map((item) => item.to)).not.toContain(view)
+      expect(railPathForPath(view)).toBe("/sessions")
+    }
   })
 
   it("declares who in the organization may open a destination, and no others", () => {
@@ -400,6 +404,7 @@ describe("nav registry", () => {
       "models",
       "organization_guardrails",
       "organization_providers",
+      "organization_sso",
       "organization_usage",
       "organizations",
       "pricing",
@@ -976,6 +981,7 @@ const WORKSPACE = [
   "/",
   "/sessions",
   "/requests",
+  "/router-savings",
   "/people",
   "/rules",
   "/models",

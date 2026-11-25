@@ -31,7 +31,7 @@ class WebToolCallCap:
 
     def claim(self) -> bool:
         """Take a slot for one call; ``False``, taking none, once every slot is taken."""
-        if self._used >= self._limit:
+        if self.reached:
             return False
         self._used += 1
         return True

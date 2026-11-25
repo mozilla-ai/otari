@@ -2256,7 +2256,9 @@ export interface paths {
          * Reencrypt Hosted Providers
          * @description Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
          *
-         *     Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/search-tools/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``.
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
@@ -3520,6 +3522,33 @@ export interface paths {
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
         post: operations["oauth-exchange_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization-provider-keys/reencrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reencrypt Org Provider Keys
+         * @description Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
+         *
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
+         *     encrypted values: the provider API key, the stored client arguments and the
+         *     endpoint credential. A key holding one no configured secret reads is left
+         *     as it is and counted, to be re-entered.
+         */
+        post: operations["provider-keys-reencrypt_org_provider_keys"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5155,6 +5184,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/subagent-savings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Subagent Savings
+         * @description What the subagent router saved, within what the caller's membership lets them see.
+         *
+         *     Each recommendation records the model the subagent would have started on
+         *     without it: the model the caller asked for, else the parent's. When the
+         *     harness reports what the subagent consumed, those tokens are priced at the
+         *     models it ran on and at that baseline. The saving is the difference, less
+         *     what the recommendations themselves cost, so it can be negative.
+         *
+         *     The costs count only the outcomes priced on both sides. `router_cost`
+         *     counts every recommendation in the window, also one whose subagent was
+         *     never reported or could not be priced. The figures are estimates unless
+         *     counted under `measured`. With no dates, the last 30 days.
+         */
+        get: operations["organization-usage-read_subagent_savings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/switch": {
         parameters: {
             query?: never;
@@ -6491,6 +6551,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Report Subagent Outcome
+         * @description Report what the subagent a recommendation started has consumed.
+         *
+         *     The harness sends the token counts it holds for the subagent, one line per
+         *     model it ran on, as running totals: each report replaces the one before
+         *     it. The gateway prices those tokens twice, at the models named and at the
+         *     model the subagent would have started on without the recommendation, and
+         *     keeps both amounts as an estimate. No content is sent, nothing is charged
+         *     and no usage row is written.
+         *
+         *     Authentication modes:
+         *     - Master key: any decision.
+         *     - API key: a decision made for the key's own user in the key's workspace.
+         */
+        put: operations["routing-report_subagent_outcome"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -6592,7 +6683,8 @@ export interface paths {
          *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
-         *     and its probability for each candidate.
+         *     and its probability for each candidate. `decision_id` names the record of
+         *     this answer, and is absent where the record could not be kept.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -6874,8 +6966,9 @@ export interface paths {
          * Reencrypt Stored Search Tool Keys
          * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
          *
-         *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be
          *     decrypted are left untouched and must be recovered by replacing the affected
          *     tool's key.
          */
@@ -9643,6 +9736,7 @@ export interface components {
          * AgentModelRecommendation
          * @description The model recommended for the subagent.
          * @example {
+         *       "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
          *       "model": "sonnet",
          *       "probabilities": {
          *         "haiku": 0.21,
@@ -9653,6 +9747,11 @@ export interface components {
          *     }
          */
         AgentModelRecommendation: {
+            /**
+             * Decision Id
+             * @description The gateway's record of this recommendation. Absent where the record could not be kept.
+             */
+            decision_id?: string | null;
             /**
              * Model
              * @description A model alias or id the harness can start the subagent on.
@@ -13032,11 +13131,8 @@ export interface components {
              * @description Whether this deployment accepts deliberate feedback submissions.
              */
             feedback_enabled: boolean;
-            /**
-             * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
-             */
-            mail_ready: boolean;
+            /** @description How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature. */
+            mail: components["schemas"]["MailReadiness"];
             /**
              * Maintenance Mode
              * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
@@ -13052,6 +13148,11 @@ export interface components {
              * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.
              */
             open_signup: boolean;
+            /**
+             * Organization Oidc Enabled
+             * @description Whether this deployment offers organizations their own OIDC sign-in connection (the organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen renders no option to continue through an organization's provider. Additive to sign_in_methods rather than part of it, the way oauth_providers is: whether a given address resolves to a connection is answered per address, not published here.
+             */
+            organization_oidc_enabled: boolean;
             /**
              * Passkeys Enabled
              * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
@@ -13554,6 +13655,71 @@ export interface components {
              */
             deleted: number;
         };
+        /**
+         * EndpointAuthMethod
+         * @description How the credential for one endpoint is produced.
+         * @enum {string}
+         */
+        EndpointAuthMethod: "static_header";
+        /**
+         * EndpointAuthPublic
+         * @description What an endpoint credential reports. Never carries the value, only its last four characters.
+         */
+        EndpointAuthPublic: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Header Name */
+            header_name: string;
+            /**
+             * Last4
+             * @description The last four characters of the stored value.
+             */
+            last4: string;
+            /** @description How the credential is produced. */
+            method: components["schemas"]["EndpointAuthMethod"];
+            /** @description How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request. */
+            state: components["schemas"]["EndpointAuthState"];
+        };
+        /**
+         * EndpointAuthRequest
+         * @description The credential an edge proxy in front of a key's base URL requires.
+         *
+         *     ``method`` is a closed set of ways to produce request headers. TLS client
+         *     authentication is not one of them: it is presented when the connection is
+         *     made, so it would be a field of its own rather than a method here.
+         */
+        EndpointAuthRequest: {
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.
+             */
+            expires_at: string;
+            /**
+             * Header Name
+             * @description The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.
+             */
+            header_name: string;
+            /** @description How the credential is produced. `static_header` sends one stored value as one header. */
+            method: components["schemas"]["EndpointAuthMethod"];
+            /**
+             * Secret
+             * @description The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.
+             */
+            secret?: string | null;
+        };
+        /**
+         * EndpointAuthState
+         * @description How a stored credential stands against its own expiry.
+         *
+         *     Reported so every reader draws the line in the same place. None of the
+         *     members refuses a request.
+         * @enum {string}
+         */
+        EndpointAuthState: "expired" | "expiring_soon" | "valid";
         /**
          * ExecutionState
          * @description Whether the remote tool may have run.
@@ -15980,6 +16146,17 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * MailReadiness
+         * @description How far an email carrying a link back to this deployment gets.
+         *
+         *     The members are exclusive and cover every deployment.
+         *     ``none`` means no message is sent at all.
+         *     ``sends_only`` means a message is sent and no link the recipient can open reaches them.
+         *     ``delivers`` means the recipient's mailbox receives it.
+         * @enum {string}
+         */
+        MailReadiness: "none" | "sends_only" | "delivers";
+        /**
          * MailSettings
          * @description What this deployment can send, and what stands in the way if it cannot.
          */
@@ -16011,7 +16188,7 @@ export interface components {
             public_base_url: string | null;
             /**
              * Ready
-             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.
+             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.
              */
             ready: boolean;
             /**
@@ -17753,6 +17930,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name: string;
             /** Provider */
@@ -17882,6 +18061,13 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            endpoint_auth?: components["schemas"]["EndpointAuthPublic"] | null;
+            /**
+             * Endpoint Auth Unreadable
+             * @description True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.
+             * @default false
+             */
+            endpoint_auth_unreadable: boolean;
             /**
              * Id
              * Format: uuid
@@ -17919,7 +18105,7 @@ export interface components {
             updated_at?: string | null;
             /**
              * Usable
-             * @description False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.
+             * @description False when the key cannot be served as stored, so it supplies nothing at dispatch and the catalog withholds its provider: a credential this deployment cannot decrypt or read, a provider that cannot take a custom base URL, or an endpoint credential the key may not carry. Such a row is still listed, because deleting or replacing it is what fixes it.
              */
             usable: boolean;
             /**
@@ -17941,6 +18127,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name?: string | null;
             /** Zero Data Retention */
@@ -17952,6 +18140,24 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
+         * OrgProviderKeysReencryptPublic
+         * @description What re-encrypting the stored organization provider credentials did.
+         *
+         *     Each count is keys, not values, because a key holding one value no
+         *     configured secret reads has to be re-entered whole: it serves nothing until
+         *     it is. ``unreadable`` counts those, left exactly as they were;
+         *     ``skipped`` those edited while the rotation ran, already written under the
+         *     primary secret.
+         */
+        OrgProviderKeysReencryptPublic: {
+            /** Reencrypted */
+            reencrypted: number;
+            /** Skipped */
+            skipped: number;
+            /** Unreadable */
+            unreadable: number;
         };
         /**
          * OrgProviderModelsRefreshPublic
@@ -21111,6 +21317,175 @@ export interface components {
          */
         SandboxProvider: "protocol" | "e2b";
         /**
+         * SavingsAmounts
+         * @description What a group of subagent decisions comes to, in USD.
+         *
+         *     The two costs sum only the decisions whose outcome is priced on both
+         *     sides, which `measured` and `estimated` count. `router_cost` sums every
+         *     decision in the group, so `net_saved` can be negative.
+         */
+        SavingsAmounts: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsByAgentType
+         * @description One subagent type.
+         */
+        SavingsByAgentType: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /** Agent Type */
+            agent_type: string;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsBySwap
+         * @description Reported outcomes with one baseline model and one model run on.
+         */
+        SavingsBySwap: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Baseline Model
+             * @description The priced model the baseline was read as, or the harness's name for it where it was read as none.
+             */
+            baseline_model: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Ran On
+             * @description The model the subagent ran on, as the harness named it.
+             */
+            ran_on: string;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
          *
@@ -22119,6 +22494,211 @@ export interface components {
             url?: string | null;
         };
         /**
+         * SubagentOutcomeReport
+         * @description What the subagent a recommendation started has consumed so far, in total.
+         *
+         *     Each report replaces the one before it, so a harness sends running totals
+         *     and may send them more than once.
+         * @example {
+         *       "usage": [
+         *         {
+         *           "cache_read_tokens": 42000,
+         *           "cache_write_tokens": 9000,
+         *           "input_tokens": 1200,
+         *           "model": "claude-haiku-5-5",
+         *           "output_tokens": 800
+         *         }
+         *       ]
+         *     }
+         */
+        SubagentOutcomeReport: {
+            /**
+             * Usage
+             * @description One line per model the subagent ran on.
+             */
+            usage: components["schemas"]["SubagentUsageLine"][];
+        };
+        /**
+         * SubagentSavingsPoint
+         * @description One time bucket, by when the recommendation was made.
+         */
+        SubagentSavingsPoint: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Bucket Start
+             * @description Canonical ISO-8601 UTC.
+             */
+            bucket_start: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SubagentSavingsPublic
+         * @description What the subagent router saved in a window, within the caller's scope.
+         */
+        SubagentSavingsPublic: {
+            /**
+             * By Agent Type
+             * @description Largest saving first, at most 20.
+             */
+            by_agent_type: components["schemas"]["SavingsByAgentType"][];
+            /**
+             * By Swap
+             * @description Largest saving first, at most 20.
+             */
+            by_swap: components["schemas"]["SavingsBySwap"][];
+            /** @description The decisions whose outcome is the harness's own count. */
+            estimated: components["schemas"]["SavingsAmounts"];
+            /** @description The decisions whose outcome is metered. */
+            measured: components["schemas"]["SavingsAmounts"];
+            /**
+             * Recommender Available
+             * @description Whether anything answers a recommendation on this deployment.
+             */
+            recommender_available: boolean;
+            /** Series */
+            series: components["schemas"]["SubagentSavingsPoint"][];
+            totals: components["schemas"]["SubagentSavingsTotals"];
+        };
+        /**
+         * SubagentSavingsTotals
+         * @description The whole window.
+         */
+        SubagentSavingsTotals: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * No Outcome
+             * @description Decisions with no consumption reported. Their router cost still counts.
+             */
+            no_outcome: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * Router Unanswered
+             * @description Recommendation requests the router failed to answer.
+             */
+            router_unanswered: number;
+            /**
+             * Unpriced
+             * @description Reported outcomes left out of the costs because a side has no price.
+             */
+            unpriced: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SubagentUsageLine
+         * @description What a subagent consumed on one model, as its harness counted it.
+         *
+         *     The cache counts are beside `input_tokens`, not inside it.
+         */
+        SubagentUsageLine: {
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Input Tokens
+             * @description Input tokens that were neither read from nor written to a cache.
+             */
+            input_tokens: number;
+            /**
+             * Model
+             * @description The model, as the harness names it.
+             */
+            model: string;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
          * SwitchActiveOrganizationRequest
          * @description Point the caller's identity at one of the organizations they belong to.
          *
@@ -23088,6 +23668,8 @@ export interface components {
              * @default false
              */
             by_filter: boolean;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -23162,6 +23744,11 @@ export interface components {
              * @description Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.
              */
             data_location?: string | null;
+            /**
+             * Deployment Paid
+             * @default false
+             */
+            deployment_paid: boolean;
             /** Endpoint */
             endpoint: string;
             /** Error Message */
@@ -23190,6 +23777,8 @@ export interface components {
             reasoning_tokens?: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Selection Reason */
             selection_reason?: string | null;
             /** Source */
@@ -23425,6 +24014,8 @@ export interface components {
             cache_read_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -23577,6 +24168,11 @@ export interface components {
             completion_tokens: number;
             /** Cost */
             cost: number;
+            /**
+             * Deployment Paid Cost
+             * @default 0
+             */
+            deployment_paid_cost: number;
             /** Error Count */
             error_count: number;
             /** Prompt Tokens */
@@ -29159,6 +29755,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
             };
@@ -29217,6 +29815,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
@@ -30894,6 +31494,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+        };
+    };
+    "provider-keys-reencrypt_org_provider_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeysReencryptPublic"];
                 };
             };
         };
@@ -33701,6 +34321,46 @@ export interface operations {
             };
         };
     };
+    "organization-usage-read_subagent_savings": {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description The grain of `series`. */
+                bucket?: "hour" | "day";
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentSavingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organizations-switch_active_organization": {
         parameters: {
             query?: never;
@@ -34203,6 +34863,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -34269,6 +34931,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -34335,6 +34999,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -34399,6 +35065,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -36087,6 +36755,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-report_subagent_outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubagentOutcomeReport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No decision of the caller's has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationRefusal"];
                 };
             };
             /** @description Validation Error */
@@ -37816,6 +38526,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -37915,6 +38627,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -38065,6 +38779,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -38162,6 +38878,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
