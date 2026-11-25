@@ -10,7 +10,7 @@ import html
 import json
 import re
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -37,7 +37,6 @@ from openai.types.responses import ResponseFunctionToolCall, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlmodel import col
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
@@ -53,7 +52,7 @@ from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, McpConnectionService, _mcp_oauth
 from gateway.services.tools._mcp_oauth import AUTH_METHOD_NONE, McpOAuthClient, McpOAuthMetadata, McpOAuthTokens
 
-from .conftest import ALL_KEY_SCOPES, MODEL_NAME
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, SeededMember
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 ISSUER = "https://93.184.216.36"
@@ -271,11 +270,13 @@ def _sent_on_to(response: Any) -> str:
     return html.unescape(found.group(1))
 
 
-def _dashboard_session(client: TestClient, master: dict[str, str], test_db: Session, email: str) -> Identity:
+def _dashboard_session(
+    client: TestClient, seed_member: Callable[..., SeededMember], test_db: Session, email: str
+) -> Identity:
     """Sign the client in to the dashboard as a new member with this email."""
-    added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": email}, headers=master)
-    assert added.status_code == 201, added.text
-    identity = test_db.scalars(select(Identity).where(col(Identity.email) == email)).one()
+    seeded = seed_member(email=email)
+    identity = test_db.get(Identity, seeded.user_id)
+    assert identity is not None
     token = f"session-{uuid.uuid4().hex}"
     test_db.add(
         DashboardSession(
@@ -492,11 +493,11 @@ def test_only_the_links_own_page_can_start_its_sign_in(
 
 
 def test_a_link_opened_in_another_users_dashboard_session_is_refused(
-    client: TestClient, master_key_header: dict[str, str], test_db: Session
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, seed_member: Callable[..., SeededMember]
 ) -> None:
     """Mallory sends Bob her link: Bob's session is not Mallory's user, so he is not offered Continue."""
     link = _per_user_link(client, master_key_header, test_db, "mallory")
-    _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+    _dashboard_session(client, seed_member, test_db, "bob@example.com")
 
     opened = _open(client, link)
     confirmed = _confirm(client, link)
@@ -510,9 +511,9 @@ def test_a_link_opened_in_another_users_dashboard_session_is_refused(
 
 
 def test_a_link_confirmed_in_its_own_users_dashboard_session_is_bound_to_it(
-    client: TestClient, master_key_header: dict[str, str], test_db: Session
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, seed_member: Callable[..., SeededMember]
 ) -> None:
-    identity = _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+    identity = _dashboard_session(client, seed_member, test_db, "bob@example.com")
     link = _per_user_link(client, master_key_header, test_db, str(identity.id))
 
     opened = _open(client, link)
@@ -589,10 +590,10 @@ def test_the_browser_keeps_a_link_sign_ins_cookie_as_long_as_the_sign_in_may_tak
 
 
 def test_a_link_for_a_dashboard_account_needs_that_accounts_session(
-    client: TestClient, master_key_header: dict[str, str], test_db: Session
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, seed_member: Callable[..., SeededMember]
 ) -> None:
     """Whoever holds Bob's link cannot attach their own account to Bob's user without Bob's session."""
-    identity = _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+    identity = _dashboard_session(client, seed_member, test_db, "bob@example.com")
     link = _per_user_link(client, master_key_header, test_db, str(identity.id))
     client.cookies.clear()
 
