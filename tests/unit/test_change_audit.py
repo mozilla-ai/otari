@@ -10,7 +10,7 @@ from opentelemetry.util.types import Attributes
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from gateway.core.change_audit import SETTING_CHANGED_EVENT, install_change_audit
+from gateway.core.change_audit import SETTING_CHANGED_EVENT, UNLOADED, install_change_audit
 
 
 class _Base(DeclarativeBase):
@@ -133,3 +133,81 @@ def test_a_new_and_a_deleted_row_are_recorded() -> None:
         "change.row": "2",
         "change.enabled": "None -> True",
     }
+
+
+async def _set_enabled(session: AsyncSession, value: bool) -> None:
+    row = await session.get(_Setting, 1)
+    assert row is not None
+    row.enabled = value
+    await session.flush()
+
+
+def _enabled_changes(events: list[tuple[str, Attributes]]) -> list[object]:
+    return [(attributes or {}).get("change.enabled") for _, attributes in events]
+
+
+def test_a_failed_savepoint_keeps_the_changes_made_before_it() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _set_enabled(session, True)
+        try:
+            async with session.begin_nested():
+                raise RuntimeError
+        except RuntimeError:
+            pass
+        await session.commit()
+
+    assert _enabled_changes(_run(scenario)) == ["False -> True"]
+
+
+def test_a_change_inside_a_rolled_back_savepoint_is_not_recorded() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        try:
+            async with session.begin_nested():
+                await _set_enabled(session, True)
+                raise RuntimeError
+        except RuntimeError:
+            pass
+        await session.commit()
+
+    assert _run(scenario) == []
+
+
+def test_a_released_savepoint_records_nothing_until_the_outer_transaction_commits() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        async with session.begin_nested():
+            await _set_enabled(session, True)
+        await session.rollback()
+
+    assert _run(scenario) == []
+
+
+def test_a_released_savepoint_is_recorded_when_the_outer_transaction_commits() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        async with session.begin_nested():
+            await _set_enabled(session, True)
+        await session.commit()
+
+    assert _enabled_changes(_run(scenario)) == ["False -> True"]
+
+
+def test_a_session_closed_without_committing_does_not_leak_into_its_next_commit() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        await _set_enabled(session, True)
+        await session.close()
+        row = await session.get(_Unaudited, 1)
+        assert row is not None
+        row.enabled = True
+        await session.commit()
+
+    assert _run(scenario) == []
+
+
+def test_a_value_the_session_never_loaded_is_not_reported_as_none() -> None:
+    async def scenario(session: AsyncSession) -> None:
+        row = await session.get(_Setting, 1)
+        assert row is not None
+        session.expire(row, ["enabled"])
+        row.enabled = True
+        await session.commit()
+
+    assert _enabled_changes(_run(scenario)) == [f"{UNLOADED} -> True"]
