@@ -6,11 +6,12 @@ against a real Unit of Work and read back what it was given.
 """
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, get_args, get_type_hints
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from fastapi import params
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
@@ -19,6 +20,7 @@ from gateway.api.deps.invitations import (
     get_invitation_acceptance,
     get_invitations,
 )
+from gateway.api.deps.organizations import get_membership_organization_service
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.services.organizations import InvitationAcceptance, InvitationLink, Invitations
@@ -92,3 +94,15 @@ async def test_acceptance_is_given_the_admission_and_the_connections_it_is_hande
     assert acceptance._admission is admission
     assert acceptance._sso is connections
     assert acceptance._link is link
+
+
+def test_acceptance_asks_for_the_organization_service_that_can_write() -> None:
+    """Admitting writes a membership, and the read-only pairing refuses at the first write.
+
+    Both pairings are the same class, so each satisfies the protocol and nothing
+    but this says which one the route is handed.
+    """
+    annotation = get_type_hints(get_invitation_acceptance, include_extras=True)["organizations"]
+    depends = next(item for item in get_args(annotation)[1:] if isinstance(item, params.Depends))
+
+    assert depends.dependency is get_membership_organization_service

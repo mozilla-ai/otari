@@ -1793,6 +1793,22 @@ An invitation over a limit is still created, and its link is returned to share
 by hand, as when mail is off: the link costs the deployment nothing, and
 refusing would stop a legitimate admin partway through a bulk invite.
 
+How many invitations may be asked for is bounded separately from how much mail
+they send, over the same 24 hours and in the same store. Each of these counts an
+organization and an inviting account separately, so one admin running out does
+not stop the rest:
+
+| Setting | Limits | Default |
+| --- | --- | --- |
+| `invitation_per_day` | Invitations asked for | 100 |
+| `invitation_per_address_per_day` | Invitations to one address | 3 |
+
+Two more bound how often one invitation may be sent again. `invitation_resend_limit`
+(default `5`) counts every send of it, the first included, and
+`invitation_resend_wait_minutes` (default `15`) is how long to wait between them.
+Canceling an invitation and inviting the address again starts both over, which is
+why `invitation_per_address_per_day` is the one number a cancel does not reset.
+
 A member added directly through `POST /api/v1/organizations/me/members` gets
 no invitation link, so on a deployment with no mail and no provider sign-in a
 new address waits for an operator's password link. Invite it instead, since the

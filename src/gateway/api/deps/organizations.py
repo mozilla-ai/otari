@@ -141,11 +141,7 @@ InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_m
 
 
 def invitation_policy_of(config: GatewayConfig) -> InvitationPolicy:
-    """The frozen limits an invitation service is held to on this deployment.
-
-    NOTE: The period the two daily limits count over is 24 hours, a constant. It
-    can become a setting where a deployment needs another period.
-    """
+    """The frozen limits an invitation service is held to on this deployment."""
     return InvitationPolicy(
         expires_after=timedelta(hours=config.invitation_expiry_hours),
         per_address_per_day=config.invitation_per_address_per_day,
