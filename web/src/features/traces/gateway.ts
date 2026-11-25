@@ -179,9 +179,7 @@ export function laterCalls(
     // A recovered next call is not the request's end, even when the call routing
     // moved on to is missing from the trace.
     last:
-      later.length === 1 &&
-      later[0].outcome === "error" &&
-      !later[0].recovered,
+      later.length === 1 && later[0].outcome === "error" && !later[0].recovered,
   }
 }
 
