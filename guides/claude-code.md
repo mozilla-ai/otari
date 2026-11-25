@@ -200,12 +200,19 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/71c3a266432ede41dedd503137b93697c3736b6a/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/99372fecb45c66191fb2babeca3b596773e0f1bd/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would
 have had anyway, and the line says so. Forks always inherit their parent's
 model.
+
+When a subagent Otari chose the model of finishes, the plugin (from version
+0.2.0) also sends Otari the models it ran on and its token counts, and no
+content. Otari prices those tokens at the model the subagent would have started
+on without the recommendation, which is how it works out what the
+recommendation saved; see
+[Agent model recommendations](https://docs.otari.ai/reference/gateway/routing#agent-model-recommendations).
 
 ## Send Claude Code sessions to Otari
 

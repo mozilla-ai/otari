@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/71c3a266432ede41dedd503137b93697c3736b6a/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/99372fecb45c66191fb2babeca3b596773e0f1bd/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -166,8 +166,8 @@ refusals as well, and records it on the request's usage rows, so
 finds the request's cost by it.
 
 The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
-`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
-request and how long it took; see
+`Otari-Deployment-Paid`, `Otari-Response-Duration-Ms` and `Server-Timing` headers
+say what served the request, who paid for it and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -1157,7 +1157,8 @@ Anthropic itself and resolves the alias on its side; it may not send
 {
   "model": "haiku",
   "reason": "haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 },
+  "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11"
 }
 ```
 
@@ -1166,12 +1167,50 @@ Anthropic itself and resolves the alias on its side; it may not send
 | `model` | One of the candidates: a model alias or id the harness can start the subagent on. |
 | `reason` | One short sentence the harness may show, or `null`. |
 | `probabilities` | The decision model's probability for each candidate, or `null` when it reports none. |
+| `decision_id` | The gateway's record of this recommendation, or `null` where the record could not be kept. The record holds the subagent type and the model names, never the task. |
 
 **Errors.** No [subagent router](routing.md#subagent-routers) stored, or every
 stored one switched off, is a `400`. The decision model's refusal of the request (400, 422, or 501) is a
 `400`, its rate limit a `429`, its refusal of the gateway's credential (401 or
 403) a `424` with `provider_credential_rejected`, and any other failure, or an
 answer that names no candidate, a `502`.
+
+### Report what the subagent consumed
+
+`PUT /api/v1/routing/decisions/{decision_id}/outcome` tells Otari what the
+subagent a recommendation started has consumed, with a key holding the
+`agents` scope. Send it when the subagent finishes, or more than once as it
+runs: each report holds running totals and replaces the one before it.
+
+```bash
+curl -X PUT "$OTARI_URL/api/v1/routing/decisions/$DECISION_ID/outcome" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usage": [
+      {
+        "model": "claude-haiku-5-5",
+        "input_tokens": 1200,
+        "output_tokens": 800,
+        "cache_read_tokens": 42000,
+        "cache_write_tokens": 9000
+      }
+    ]
+  }'
+```
+
+| Field | Meaning |
+|---|---|
+| `usage` | One to 16 lines, one per model the subagent ran on. |
+| `usage[].model` | The model, as the harness names it. |
+| `usage[].input_tokens` | Input tokens that were neither read from nor written to a cache. |
+| `usage[].output_tokens` | Output tokens. |
+| `usage[].cache_read_tokens`, `usage[].cache_write_tokens` | Cache tokens, counted beside `input_tokens`. Zero when left out. |
+
+The answer is a `204` with no body. Nothing is charged and no usage row is
+written. An id that is not a decision of the caller's own is a `404`: an API
+key reaches the decisions made for its user in its workspace, and the master
+key reaches any.
 
 ## Provider error details
 
