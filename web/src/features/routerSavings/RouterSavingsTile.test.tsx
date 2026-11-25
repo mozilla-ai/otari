@@ -57,7 +57,7 @@ afterEach(() => {
 })
 
 describe("RouterSavingsTile", () => {
-  it("says what the router saved and links to the page", async () => {
+  it("says what the router saved and links to the page on its scope", async () => {
     const urls = mockSavings(subagentSavings())
     await renderTile({ workspaceId: "ws-1", userId: "me" })
 
@@ -68,18 +68,18 @@ describe("RouterSavingsTile", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "See router savings" }),
-    ).toHaveAttribute("href", "/router-savings?period=7d&who=me")
+    ).toHaveAttribute("href", "/router-savings?period=7d&workspace=ws-1&who=me")
     expect(urls.at(-1)).toContain("workspace_id=ws-1")
     expect(urls.at(-1)).toContain("user_id=me")
   })
 
-  it("links to everyone's savings where it counts everyone's", async () => {
+  it("links to everyone's savings in every workspace where it counts those", async () => {
     mockSavings(subagentSavings())
     await renderTile()
 
     expect(
       await screen.findByRole("link", { name: "See router savings" }),
-    ).toHaveAttribute("href", "/router-savings?period=7d")
+    ).toHaveAttribute("href", "/router-savings?period=7d&workspace=all")
   })
 
   it("says a loss as a loss", async () => {

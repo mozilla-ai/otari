@@ -24,6 +24,7 @@ import { canOpenInKeys } from "@/features/home/keyAccess"
 import { useHomeAccount } from "@/features/home/overlayHomeAccount"
 import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
+import { workspaceSearch } from "@/features/observe/viewWorkspace"
 import { RouterSavingsTile } from "@/features/routerSavings/RouterSavingsTile"
 import { limitDialogCopy } from "@/features/spend/limitCopy"
 import {
@@ -711,7 +712,10 @@ export function TeamHome({
             hasSessions ? (
               <Link
                 to="/sessions"
-                search={sessionsSearchFor(window)}
+                search={{
+                  ...sessionsSearchFor(window),
+                  ...workspaceSearch(workspaceId),
+                }}
                 className="self-start text-xs text-link underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
               >
                 See the sessions
