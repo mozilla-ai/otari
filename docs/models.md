@@ -234,9 +234,9 @@ no `name`.
 
 From the same models.dev entry, each model also carries `description`,
 `release_date` (`YYYY-MM-DD`) and `knowledge_cutoff`, the training data cutoff
-as models.dev writes it (`2025-05`). A model whose provider's listing gives no
-creation time takes its release date as `created`, at midnight UTC, rather
-than 0. An alias reports none of the three, and keeps a `created` of 0.
+as models.dev writes it (`2025-05`). An alias reports none of the three.
+`created` stays the provider's own timestamp, 0 where its listing gives none,
+so sort by `release_date` to order models by when they came out.
 
 ### Overriding a model's details
 

@@ -6,7 +6,6 @@ the pricing snapshot.
 """
 
 import uuid
-from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, NamedTuple
 
 from any_llm import AnyLLM
@@ -262,17 +261,6 @@ def model_capabilities(
     )
 
 
-def _release_timestamp(release_date: str | None) -> int | None:
-    """models.dev's ``YYYY-MM-DD`` release date as a Unix timestamp at UTC midnight, or ``None``."""
-    if not release_date:
-        return None
-    try:
-        day = date.fromisoformat(release_date)
-    except ValueError:
-        return None
-    return int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp())
-
-
 def apply_model_metadata(
     config: GatewayConfig,
     models_dev: ModelsDevCatalog | None,
@@ -286,8 +274,7 @@ def apply_model_metadata(
     """Fill ``obj``'s token limits and capabilities from ``metadata_selector``, or from its own id.
 
     ``with_name=False`` leaves the display name, description and dates unset, for
-    an alias whose target's would say what the alias hides. A ``created`` of 0,
-    which is what a provider that gives no timestamp leaves, takes the release date.
+    an alias whose target's would say what the alias hides.
     ``organization_id`` is the caller's, whose own provider keys describe the
     models it reaches on them.
     ``provider_type`` names the provider behind an instance the config does not
@@ -307,8 +294,6 @@ def apply_model_metadata(
     obj.description = capabilities.description if with_name else None
     obj.release_date = capabilities.release_date if with_name else None
     obj.knowledge_cutoff = capabilities.knowledge_cutoff if with_name else None
-    if obj.created == 0 and (released := _release_timestamp(obj.release_date)) is not None:
-        obj.created = released
     obj.supported_parameters = capabilities.supported_parameters
     obj.architecture = ModelArchitecture(
         input_modalities=capabilities.input_modalities, output_modalities=capabilities.output_modalities
