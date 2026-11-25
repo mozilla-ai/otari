@@ -67,6 +67,18 @@ const ACTION_LABEL: Record<Action, string> = {
   retry: "Retry",
 }
 
+/**
+ * The Last try row after a pressed Retry failed. A status or the device being
+ * offline is kept beside it, because that is the difference between a gateway
+ * that replied and one that did not; no response is what "no answer" already
+ * says.
+ */
+function stillNoAnswer(failure: BootFailure): string {
+  return failure.kind === "unreachable" || failure.kind === "timedOut"
+    ? "still no answer"
+    : `still no answer · ${failure.reason}`
+}
+
 export function bootFailureTitle(kind: BootFailureKind): string {
   const copy = BOOT_FAILURE_COPY[kind]
   return `${copy.title ?? copy.mark} · Otari`
@@ -110,14 +122,14 @@ export function BootFailureView({
         <h1 className="text-display">{copy.heading}</h1>
       </div>
       <p className="text-center text-sm text-pretty text-muted">{copy.body}</p>
-      {failure.reason === null ? null : (
+      {failure.reason === "" ? null : (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-t border-border pt-3 text-mono-caption leading-(--text-caption-step--line-height) tabular-nums">
           <dt className="text-subtle">Address</dt>
           <dd className="break-all text-muted">{host}</dd>
           <dt className="text-subtle">Last try</dt>
           <dd className={isStillNoAnswer ? "text-foreground" : "text-muted"}>
             {formatClockTime(failedAt)} ·{" "}
-            {isStillNoAnswer ? "still no answer" : failure.reason}
+            {isStillNoAnswer ? stillNoAnswer(failure) : failure.reason}
           </dd>
         </dl>
       )}

@@ -78,7 +78,7 @@ export const SignInRequired: Story = {
   },
 }
 
-/** A proxy's sign-in redirect, which the bootstrap read does not follow. */
+/** A redirect to a sign-in page, which the bootstrap read cannot follow to an answer. */
 export const SignInRedirect: Story = {
   args: {
     failure: {
@@ -108,7 +108,7 @@ export const UnexpectedAnswer: Story = {
 /** No gateway was asked, so there is nothing to diagnose. */
 export const NoGatewayChosen: Story = {
   args: {
-    failure: { kind: "unchosen", reason: null, willRetry: false },
+    failure: { kind: "unchosen", reason: "", willRetry: false },
   },
 }
 

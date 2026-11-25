@@ -663,6 +663,32 @@ async function readJson<T>(
 }
 
 /**
+ * Whether the gateway answers at all, for the outage check.
+ *
+ * Resolves on any response, whatever its status: a 401, a 404 or a 500 is the
+ * gateway (or something in front of it) answering, which is all this asks.
+ * Rejects with `ApiError` status 0 only when no response arrives, by network
+ * fault or by `signal`. Not `apiFetch`, whose 401 handler signs the operator
+ * out: a liveness check refused by an access proxy must not end a session.
+ */
+export async function probeGateway(
+  path: string,
+  signal: AbortSignal,
+  redirect: RequestRedirect = "follow",
+): Promise<number> {
+  try {
+    const response = await request(path, { method: "GET", signal, redirect })
+    await response.body?.cancel()
+    return response.status
+  } catch (error) {
+    if (isTimeout(error) || signal.aborted) {
+      throw new ApiError(0, "The gateway did not respond in time.")
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+}
+
+/**
  * Read something the gateway serves at its own root rather than under the API.
  *
  * A handful of things are not API resources and are mounted beside the
@@ -736,6 +762,12 @@ export async function apiFetch<T>(
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
 
+  // Before the status checks: an opaque redirect reports status 0 and would
+  // otherwise read as a gateway that never answered.
+  if (response.type === "opaqueredirect") {
+    throw new RedirectedError()
+  }
+
   // Only 401. A 401 means the credential is gone: the session expired or was
   // revoked, so dropping it and bouncing to sign-in is the right move.
   //
@@ -748,12 +780,6 @@ export async function apiFetch<T>(
   // the deployment-wide routers on `require_deployment_operator`, a non-operator
   // member meets one on the landing page. Let it surface as an ordinary error
   // the panel reports, the way every other 4xx does.
-  // Before the status checks: an opaque redirect reports status 0 and would
-  // otherwise read as a gateway that never answered.
-  if (response.type === "opaqueredirect") {
-    throw new RedirectedError()
-  }
-
   if (response.status === 401) {
     unauthorizedHandler?.()
     throw await refusalError(response)

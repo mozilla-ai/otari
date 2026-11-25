@@ -23,10 +23,11 @@ foundations, components with their states, and the page archetypes as artboards.
 `src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
 React. Do not guess a deployment when that request fails: `app/boot.ts` keeps
 retrying it with backoff, and `app/DeploymentGate.tsx` shows the failure in the
-sign-in shell's frame and mounts `App` once an attempt answers. The read does
-not follow redirects: the bootstrap never redirects, so one is something in
-front of the gateway asking this browser to sign in, and the screen says so
-rather than retrying it.
+sign-in shell's frame and mounts `App` once an attempt answers. A redirect is
+followed once, deliberately: one that lands on the bootstrap (a canonical host,
+HTTPS) opens the dashboard, while one that fails on the way or lands on a page
+that is not JSON is something in front of the gateway asking this browser to
+sign in, and the screen says so rather than retrying it.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

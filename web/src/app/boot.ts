@@ -2,10 +2,11 @@
  * The order the dashboard starts in: settle where the API is, then read the
  * deployment's bootstrap from there, and keep asking until it answers.
  *
- * A preparation that rejects is a deployment that could not be chosen. Loading
- * the bootstrap anyway would read it from wherever the request policy happened
- * to point, which is a deployment nobody selected (web/AGENTS.md: do not guess a
- * deployment when that request fails), so it fails the boot instead. It is not
+ * A preparation that rejects, or does not settle within the attempt deadline,
+ * is a deployment that could not be chosen. Loading the bootstrap anyway would
+ * read it from wherever the request policy happened to point, which is a
+ * deployment nobody selected (web/AGENTS.md: do not guess a deployment when
+ * that request fails), so it fails the boot instead. It is not
  * retried on a timer: the replacing module owns how its choice is made, and a
  * refusal from it is an answer rather than a stall. The Retry control asks it
  * again.
@@ -22,7 +23,12 @@
  * file renders on import.
  */
 
-import { ApiError, apiFetch, RedirectedError } from "@/shared/api/client"
+import {
+  ApiError,
+  apiFetch,
+  probeGateway,
+  RedirectedError,
+} from "@/shared/api/client"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 
 /**
@@ -76,16 +82,63 @@ export interface BootLoader {
 }
 
 /**
- * One read of the bootstrap, without following a redirect.
+ * One read of the bootstrap, telling a redirect to a sign-in page from one
+ * that only moves the request.
  *
- * The gateway's bootstrap never redirects, so a redirect is something in front
- * of it, typically an access proxy sending this browser to its sign-in page.
- * Followed, one to another origin fails on CORS and reads as a gateway that
- * never answered, which is retried forever; unfollowed, it arrives as a
- * `RedirectedError` the boot screen can name.
+ * The gateway's own bootstrap route does not redirect, but what is in front
+ * of it may, for two different reasons. A canonical host, an HTTPS upgrade or
+ * a path rewrite lands on the bootstrap and should just be followed. An access
+ * proxy sending this browser to its sign-in page should be named: followed
+ * blindly, one to another origin fails on CORS and reads as a gateway that
+ * never answered, retried forever. So the first read does not follow, and a
+ * redirect is then followed once: an answer is the bootstrap, and a page that
+ * is not JSON is a sign-in, reported as a `RedirectedError`. Any other refusal
+ * the redirect led to passes through as itself, and so does the deadline.
+ *
+ * A followed redirect whose fetch fails is the ambiguous case. A cross-origin
+ * sign-in fails that way, but so does a gateway that is down behind a
+ * canonical-URL redirect the browser cached and replays without asking. The
+ * gateway's own liveness route tells them apart: if anything answers it, the
+ * address is up and the redirect is what failed; if nothing does, the gateway
+ * is unreachable and the original failure stands, to be retried.
  */
-export function readBootstrap(signal: AbortSignal): Promise<WireBootstrap> {
-  return apiFetch<WireBootstrap>("/bootstrap", { signal, redirect: "manual" })
+export async function readBootstrap(
+  signal: AbortSignal,
+): Promise<WireBootstrap> {
+  try {
+    return await apiFetch<WireBootstrap>("/bootstrap", {
+      signal,
+      redirect: "manual",
+    })
+  } catch (error) {
+    if (!(error instanceof RedirectedError)) {
+      throw error
+    }
+  }
+  try {
+    return await apiFetch<WireBootstrap>("/bootstrap", {
+      signal,
+      redirect: "follow",
+    })
+  } catch (error) {
+    if (signal.aborted || !(error instanceof ApiError)) {
+      throw error
+    }
+    // A 2xx here can only be a body that was not JSON: a page in the
+    // bootstrap's place.
+    if (error.status >= 200 && error.status < 300) {
+      throw new RedirectedError()
+    }
+    if (error.status !== 0) {
+      throw error
+    }
+    try {
+      await probeGateway("/health/liveness", signal, "manual")
+    } catch {
+      throw error
+    }
+    throw new RedirectedError()
+  }
 }
 
 /**
@@ -132,11 +185,11 @@ export interface BootFailure {
   /**
    * What the last attempt got, in the only terms the browser can know it: no
    * response, its own deadline, a status, the device being offline, or a
-   * redirect. `null` where no gateway was asked. Never a cause the browser
+   * redirect. Empty where no gateway was asked. Never a cause the browser
    * cannot see, such as a refused connection or who wrote a status: a fetch
    * that fails reports neither.
    */
-  reason: string | null
+  reason: string
   /** Whether the loader keeps trying on its own. */
   willRetry: boolean
 }
@@ -152,7 +205,7 @@ export interface BootFailure {
 export function describeBootFailure(state: FailedState): BootFailure {
   const { error, stage, willRetry } = state
   if (stage === "prepare") {
-    return { kind: "unchosen", reason: null, willRetry }
+    return { kind: "unchosen", reason: "", willRetry }
   }
   if (error instanceof RedirectedError) {
     return {
@@ -202,6 +255,25 @@ export function retryDelayMs(retry: number, random: () => number): number {
   return Math.round(ceiling / 2 + (random() * ceiling) / 2)
 }
 
+/**
+ * `promise`, or a `TimeoutError` once the attempt deadline passes. For the
+ * preparation, which has no signal to abort: a choice of gateway that never
+ * settles would otherwise hold the loading screen up indefinitely.
+ */
+function withDeadline<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new DOMException("Choosing a gateway timed out.", "TimeoutError"),
+        ),
+      BOOTSTRAP_ATTEMPT_TIMEOUT_MS,
+    )
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+}
+
 export function createBootLoader({
   prepare,
   load,
@@ -221,6 +293,9 @@ export function createBootLoader({
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let inFlight: AbortController | undefined
   let current: Promise<void> | undefined
+  // The browser came back online, or the tab was shown again, while an
+  // attempt was running: if that attempt fails, the next one starts at once.
+  let wokeDuringAttempt = false
 
   function setState(next: BootState) {
     state = next
@@ -243,11 +318,15 @@ export function createBootLoader({
   }
 
   // Only a failure that would be retried anyway is cut short: a definitive one
-  // waits for the operator's Retry, and an attempt already running is left to
-  // finish rather than stacked on.
+  // waits for the operator's Retry. An attempt already running is left to
+  // finish rather than stacked on, and the wake is kept for when it does.
   function retryOnWake() {
-    if (state.status === "failed" && state.willRetry && !isAttempting) {
-      attempt()
+    if (isAttempting) {
+      wokeDuringAttempt = true
+      return
+    }
+    if (state.status === "failed" && state.willRetry) {
+      void attempt()
     }
   }
 
@@ -264,8 +343,12 @@ export function createBootLoader({
   ) {
     if (willRetry) {
       retries += 1
-      retryTimer = setTimeout(attempt, retryDelayMs(retries, random))
+      retryTimer = setTimeout(
+        attempt,
+        wokeDuringAttempt ? 0 : retryDelayMs(retries, random),
+      )
     }
+    wokeDuringAttempt = false
     setState({
       status: "failed",
       error,
@@ -281,33 +364,42 @@ export function createBootLoader({
   // One attempt at a time: a second call while one runs gets the running one.
   // Keyed on `isAttempting` rather than on the promise, which settles a
   // microtask after the attempt's state is published: a press that lands in
-  // between belongs to a new attempt, not to the one that just failed.
+  // between belongs to a new attempt, not to the one that just failed. The
+  // new attempt's promise is in place before anyone is told it started, so a
+  // press made from that notification joins it.
   function attempt(): Promise<void> {
     if (isDisposed || state.status === "ready") {
       return Promise.resolve()
     }
-    if (!isAttempting || !current) {
-      current = run()
+    if (isAttempting && current) {
+      return current
+    }
+    clearRetryTimer()
+    isAttempting = true
+    wokeDuringAttempt = false
+    current = run()
+    if (state.status === "failed") {
+      setState({ ...state, isAttempting: true })
     }
     return current
   }
 
   async function run() {
-    clearRetryTimer()
-    isAttempting = true
-    if (state.status === "failed") {
-      setState({ ...state, isAttempting: true })
-    }
-
+    // Lets `attempt` publish the promise before anything here runs.
+    await Promise.resolve()
     if (!isPrepared) {
       try {
-        await prepare()
+        await withDeadline(prepare())
         isPrepared = true
       } catch (error) {
         isAttempting = false
         if (!isDisposed) {
           fail(error, "prepare", false)
         }
+        return
+      }
+      if (isDisposed) {
+        isAttempting = false
         return
       }
     }

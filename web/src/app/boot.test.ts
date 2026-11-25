@@ -37,6 +37,11 @@ function setVisibility(value: DocumentVisibilityState) {
   })
 }
 
+/** Drops the override, so `document` reads the environment's own value again. */
+function restoreVisibility() {
+  Reflect.deleteProperty(document, "visibilityState")
+}
+
 describe("createBootLoader", () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -47,7 +52,7 @@ describe("createBootLoader", () => {
     loader = undefined
     vi.useRealTimers()
     vi.restoreAllMocks()
-    setVisibility("visible")
+    restoreVisibility()
   })
 
   it("reads the bootstrap once the request policy is settled", async () => {
@@ -272,6 +277,105 @@ describe("createBootLoader", () => {
     expect(boot.getState().status).toBe("ready")
   })
 
+  it("hands a press made as an attempt starts that attempt, not a second one", async () => {
+    const answers: Array<(value: WireBootstrap) => void> = []
+    const load = vi
+      .fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
+      .mockRejectedValueOnce(DOWN)
+      .mockImplementation(
+        () =>
+          new Promise<WireBootstrap>((resolve) => {
+            answers.push(resolve)
+          }),
+      )
+    const boot = start(load)
+    await firstSettled(boot)
+    // Pressed from inside the notification that the background retry began.
+    let joined: Promise<void> | undefined
+    const unsubscribe = boot.subscribe(() => {
+      const state = boot.getState()
+      if (state.status === "failed" && state.isAttempting) {
+        unsubscribe()
+        joined = boot.retryNow()
+      }
+    })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(load).toHaveBeenCalledTimes(2)
+
+    let settled = false
+    void joined?.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    // Still waiting on the attempt it joined, not the one that already failed.
+    expect(settled).toBe(false)
+    answers[0]?.(BOOTSTRAP)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it("asks again at once after a failure when the browser came back online during the attempt", async () => {
+    let fail: ((error: unknown) => void) | undefined
+    const load = vi
+      .fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
+      .mockRejectedValueOnce(DOWN)
+      .mockRejectedValueOnce(DOWN)
+      .mockRejectedValueOnce(DOWN)
+      .mockImplementationOnce(
+        () =>
+          new Promise<WireBootstrap>((_resolve, reject) => {
+            fail = reject
+          }),
+      )
+      .mockResolvedValue(BOOTSTRAP)
+    const boot = start(load)
+    await firstSettled(boot)
+    // Three failures in, the next wait is 4s; the fourth attempt is running.
+    await vi.advanceTimersByTimeAsync(500 + 1_000 + 2_000)
+    expect(load).toHaveBeenCalledTimes(4)
+
+    window.dispatchEvent(new Event("online"))
+    fail?.(DOWN)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(load).toHaveBeenCalledTimes(5)
+    expect(boot.getState().status).toBe("ready")
+  })
+
+  it("does not ask for the bootstrap once disposed during preparation", async () => {
+    let prepared: (() => void) | undefined
+    const load = vi.fn(async () => BOOTSTRAP)
+    const boot = start(
+      load,
+      () =>
+        new Promise<void>((resolve) => {
+          prepared = resolve
+        }),
+    )
+    boot.dispose()
+    prepared?.()
+    await vi.advanceTimersByTimeAsync(BOOTSTRAP_ATTEMPT_TIMEOUT_MS * 2)
+
+    expect(load).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("gives up on a preparation that does not settle in time, as no gateway chosen", async () => {
+    const load = vi.fn(async () => BOOTSTRAP)
+    const boot = start(load, () => new Promise<void>(() => {}))
+
+    await vi.advanceTimersByTimeAsync(BOOTSTRAP_ATTEMPT_TIMEOUT_MS - 1)
+    expect(boot.getState().status).toBe("loading")
+    await vi.advanceTimersByTimeAsync(1)
+    expect(boot.getState()).toMatchObject({
+      status: "failed",
+      stage: "prepare",
+      willRetry: false,
+    })
+    expect(load).not.toHaveBeenCalled()
+  })
+
   it("records that the browser was offline when the attempt failed", async () => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
     const boot = start(async () => {
@@ -359,7 +463,7 @@ describe("describeBootFailure", () => {
     }
   }
 
-  it.each<[string, FailedState, string, string | null, boolean]>([
+  it.each<[string, FailedState, string, string, boolean]>([
     ["no response", failed(DOWN), "unreachable", "no response", true],
     [
       "something that is not an ApiError",
@@ -447,7 +551,7 @@ describe("describeBootFailure", () => {
       "a deployment that could not be chosen",
       failed(new Error("no directory"), { stage: "prepare", willRetry: false }),
       "unchosen",
-      null,
+      "",
       false,
     ],
   ])("reports %s", (_name, state, kind, reason, willRetry) => {
@@ -462,7 +566,7 @@ describe("describeBootFailure", () => {
       new ApiError(502, "Bad Gateway"),
       new ApiError(401, "Unauthorized"),
       new RedirectedError(),
-    ].map((error) => describeBootFailure(failed(error)).reason ?? "")
+    ].map((error) => describeBootFailure(failed(error)).reason)
     for (const reason of reasons) {
       expect(reason).not.toMatch(/refused|proxy/i)
     }
@@ -472,21 +576,84 @@ describe("describeBootFailure", () => {
 describe("readBootstrap", () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it("does not follow a redirect, so one in front of the gateway is reported", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      type: "opaqueredirect",
-      status: 0,
-      ok: false,
-      statusText: "",
-      headers: new Headers(),
-    } as Response)
+  const OPAQUE = {
+    type: "opaqueredirect",
+    status: 0,
+    ok: false,
+    statusText: "",
+    headers: new Headers(),
+  } as Response
 
-    await expect(
-      readBootstrap(new AbortController().signal),
-    ).rejects.toBeInstanceOf(RedirectedError)
+  it("follows a redirect that lands on the bootstrap, such as a canonical host or HTTPS", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(OPAQUE)
+      .mockResolvedValueOnce(Response.json(BOOTSTRAP))
+
+    await expect(readBootstrap(new AbortController().signal)).resolves.toEqual(
+      BOOTSTRAP,
+    )
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
       /\/api\/v1\/bootstrap$/,
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "manual" })
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ redirect: "follow" })
+  })
+
+  it("reports a redirect that cannot be followed from here, as to a sign-in page on another origin", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(OPAQUE)
+      // What a cross-origin redirect without CORS looks like when followed.
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      // The gateway's address still answers, here with the same redirect.
+      .mockResolvedValueOnce(OPAQUE)
+
+    await expect(
+      readBootstrap(new AbortController().signal),
+    ).rejects.toBeInstanceOf(RedirectedError)
+    expect(String(fetchMock.mock.calls[2]?.[0])).toMatch(
+      /\/api\/v1\/health\/liveness$/,
+    )
+  })
+
+  it("calls a redirect it cannot follow unreachable when the gateway's address does not answer either", async () => {
+    // A browser that cached a canonical-URL 301 replays it without asking, so
+    // an outage behind one fails the same way a cross-origin sign-in does.
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(OPAQUE)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+
+    const error = await readBootstrap(new AbortController().signal).catch(
+      (caught: unknown) => caught,
+    )
+    expect(error).not.toBeInstanceOf(RedirectedError)
+    expect(error).toMatchObject({ status: 0 })
+  })
+
+  it("reports a redirect that lands on a page rather than the bootstrap", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(OPAQUE)
+      .mockResolvedValueOnce(
+        new Response("<html>Sign in</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+
+    await expect(
+      readBootstrap(new AbortController().signal),
+    ).rejects.toBeInstanceOf(RedirectedError)
+  })
+
+  it("passes on a refusal the redirect led to, rather than calling it a sign-in", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(OPAQUE)
+      .mockResolvedValueOnce(Response.json({ detail: "x" }, { status: 503 }))
+
+    await expect(
+      readBootstrap(new AbortController().signal),
+    ).rejects.toMatchObject({ status: 503 })
   })
 })

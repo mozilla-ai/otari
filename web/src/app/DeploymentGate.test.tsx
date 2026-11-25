@@ -11,6 +11,17 @@ import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/app/announce", () => ({ announce: vi.fn() }))
 
+// The seam this build answers "same origin" through, mutable so a case can
+// stand in for a build whose API is on another host.
+const policy = vi.hoisted(() => ({
+  origin: "",
+  credentials: "same-origin" as RequestCredentials,
+}))
+vi.mock("@/shared/api/overlayRequestPolicy", () => ({
+  prepareRequests: async () => {},
+  requestPolicy: () => policy,
+}))
+
 const DOWN = new ApiError(0, "Network error: could not reach the gateway.")
 const UNREACHABLE = "Can’t reach the gateway"
 
@@ -69,6 +80,7 @@ describe("DeploymentGate", () => {
     window.localStorage.clear()
     window.history.replaceState(null, "", "/")
     document.title = ""
+    policy.origin = ""
   })
 
   it("says the gateway is unreachable instead of guessing a deployment", async () => {
@@ -322,6 +334,33 @@ describe("DeploymentGate", () => {
       "This address didn’t answer like a gateway",
       "Sign in to continue",
     ])
+  })
+
+  it("names the address it asked, where that is not the page's own", async () => {
+    policy.origin = "https://api.example.com:8443"
+    await mountGate(async () => {
+      throw DOWN
+    })
+
+    expect(screen.getByText("api.example.com:8443")).toBeInTheDocument()
+    expect(screen.queryByText(window.location.host)).toBeNull()
+  })
+
+  it("keeps the status a pressed Retry got, beside saying it still failed", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const load = vi
+      .fn<Load>()
+      .mockRejectedValueOnce(DOWN)
+      .mockRejectedValueOnce(new ApiError(503, "Service Unavailable"))
+    await mountGate(load)
+
+    await user.click(retryButton())
+
+    await vi.waitFor(() =>
+      expect(lastTry()).toMatch(
+        /^\d\d:\d\d:\d\d · still no answer · HTTP 503$/,
+      ),
+    )
   })
 
   it("has no live region in the card", async () => {

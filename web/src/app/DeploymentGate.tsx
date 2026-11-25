@@ -12,6 +12,17 @@ import {
   describeBootFailure,
   type FailedState,
 } from "@/app/boot"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
+
+/**
+ * The host the bootstrap was asked of: the page's own, unless the request
+ * policy points the API at another origin, in which case that one, since it
+ * is the address that did not answer.
+ */
+function askedHost(): string {
+  const { origin } = requestPolicy()
+  return origin === "" ? window.location.host : new URL(origin).host
+}
 
 /** Read aloud when a pressed Retry fails the way the last attempt did. */
 const STILL_NO_ANSWER = "Still no answer."
@@ -111,7 +122,7 @@ function BootFailure({
     <BootFailureView
       failure={failure}
       failedAt={state.failedAt}
-      host={window.location.host}
+      host={askedHost()}
       isPending={isPressed}
       isStillNoAnswer={
         pressFailedAt === state.failedAt &&
