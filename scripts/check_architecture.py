@@ -528,7 +528,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
-    "gateway/api/routes/organization_usage.py",
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
@@ -1346,7 +1345,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 67,
+    "tenancy": 66,
 }
 
 
@@ -2846,7 +2845,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
             "gateway/api/routes/organization_routing.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
             "gateway/repositories/budgets/workspace_budget_default_repository.py",
             "gateway/repositories/overview/overview_repository.py",
