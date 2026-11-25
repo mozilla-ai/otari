@@ -750,7 +750,7 @@ def test_a_missing_model_is_recognized(status: int, message: str, missing: bool)
     plan = _rank(router, tenant="workspace-a")
     assert plan.automatic is not None
     _finish_failed(plan.automatic.start(plan.head), exc)
-    assert bool(router.refusals) is missing
+    assert bool(router.missing) is missing
 
 
 def test_a_gateway_404_is_not_a_missing_model(router: AutomaticRouter) -> None:
@@ -776,3 +776,49 @@ def test_a_rotated_key_does_not_inherit_a_missing_model(router: AutomaticRouter)
         attempts=[replace(a, kwargs={"api_key": "rotated"}) if a.instance == "us" else a for a in _plan().attempts],
     )
     assert _rank(router, plan=rotated, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_still_missing_is_refused_for_longer(router: AutomaticRouter, now: list[float]) -> None:
+    """A model still missing when its refusal lapses is refused for three hours, then twelve; a success clears it."""
+
+    def fail() -> None:
+        plan = _rank(router, tenant="workspace-a")
+        assert plan.automatic is not None
+        attempt = next(a for a in plan.attempts if a.instance == "us")
+        plan.automatic.start(attempt).finish(missing=True)
+
+    def refused_for() -> float:
+        return next(iter(router.missing.values()))[0] - now[0]
+
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 600
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 3601
+    fail()
+    assert refused_for() == pytest.approx(3 * 3600)
+    now[0] += 3 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+    now[0] += 12 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.attempts[-1]).finish(success=True)
+    assert not router.missing
+    assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_missing_again_long_after_starts_over(router: AutomaticRouter, now: list[float]) -> None:
+    """A failure more than twelve hours after a refusal lapsed is refused for an hour again."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    now[0] += 3600 + 12 * 3600 + 1
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert next(iter(router.missing.values()))[0] - now[0] == pytest.approx(3600)

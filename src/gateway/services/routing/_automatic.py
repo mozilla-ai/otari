@@ -36,9 +36,10 @@ _LIMIT = 10000
 _COOLDOWN = 15.0
 _MAX_COOLDOWN = 600.0
 _REFUSAL_TTL = 300.0
-_MISSING_MODEL_TTL = 3600.0
+# A model still missing once its refusal lapses is refused for longer, up to the last step.
+_MISSING_MODEL_STEPS = (3600.0, 3 * 3600.0, 12 * 3600.0)
 # How a provider's message says the model is not served on this credential. Request text a provider
-# echoes back could match too; the cost is one offering ranked last for an hour, never one switched off.
+# echoes back could match too; the cost is one offering ranked last for a while, never one switched off.
 _MISSING_MODEL = re.compile(
     r"model\b.{0,120}\b(does not exist|not found|not accessible)"
     r"|(do not|don't) have access to (the )?model|model not found",
@@ -207,8 +208,8 @@ class AutomaticObservation:
         ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
         which cools every model served on it rather than this one alone. It applies only with ``unhealthy``,
         so a gateway-side refusal that carries the same status never cools a shared credential.
-        ``missing`` marks a model the credential does not serve, which ranks last for the workspace
-        for an hour instead of counting against the offering's health or the credential.
+        ``missing`` marks a model the credential does not serve, which ranks last for the workspace for a while
+        (:meth:`AutomaticRouter.remember_missing`) instead of counting against the offering's health or credential.
         """
         if self.finished:
             return
@@ -238,6 +239,7 @@ class AutomaticObservation:
             router.cool_account(self.account, now)
         elif success:
             router.accounts.pop(self.account, None)
+            router.missing.pop(router._digest(("missing", self.selection.tenant, self.key)), None)
         if unhealthy:
             self.selection.forget_key(self.key)
         if success and self.selection.affinity:
@@ -263,6 +265,8 @@ class AutomaticRouter:
         # Credential-wide cooldowns as (until, consecutive failures), and per-caller refusals as expiry times.
         self.accounts: OrderedDict[str, tuple[float, int]] = OrderedDict()
         self.refusals: OrderedDict[str, float] = OrderedDict()
+        # Models a credential does not serve, as (until, step reached).
+        self.missing: OrderedDict[str, tuple[float, int]] = OrderedDict()
 
     def _digest(self, value: object) -> str:
         """Create a private process-local fingerprint without retaining its input."""
@@ -320,12 +324,20 @@ class AutomaticRouter:
             self.refusals.popitem(last=False)
 
     def remember_missing(self, tenant: str, candidate: str) -> None:
-        """Record that the offering ``candidate`` identifies, on its credential, does not serve ``tenant``."""
+        """Record that the offering ``candidate`` identifies, on its credential, does not serve ``tenant``.
+
+        Refused for an hour, then three, then twelve while it is still missing each time a refusal lapses.
+        A failure during a refusal restarts it at the same length; one long after it lapsed starts over.
+        """
         key = self._digest(("missing", tenant, candidate))
-        self.refusals.pop(key, None)
-        self.refusals[key] = self.clock() + _MISSING_MODEL_TTL
-        while len(self.refusals) > _LIMIT:
-            self.refusals.popitem(last=False)
+        now = self.clock()
+        previous = self.missing.pop(key, None)
+        step = 0
+        if previous is not None and now - previous[0] <= _MISSING_MODEL_STEPS[-1]:
+            step = previous[1] if now < previous[0] else min(previous[1] + 1, len(_MISSING_MODEL_STEPS) - 1)
+        self.missing[key] = (now + _MISSING_MODEL_STEPS[step], step)
+        while len(self.missing) > _LIMIT:
+            self.missing.popitem(last=False)
 
     def _health(self, key: str) -> _Health | None:
         """Get tracked health, evicting an idle entry when full; never evict active calls."""
@@ -382,8 +394,8 @@ class AutomaticRouter:
             account = self.accounts.get(self.account_key(attempt, tenant))
             if (health and health.cooldown > now) or (account and account[0] > now):
                 cooling.add(selector)
-            refusals = (self._digest((scope, selector)), self._digest(("missing", tenant, keys[selector])))
-            if any(self.refusals.get(key, 0) > now for key in refusals):
+            missing = self.missing.get(self._digest(("missing", tenant, keys[selector])))
+            if self.refusals.get(self._digest((scope, selector)), 0) > now or (missing and missing[0] > now):
                 refused.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None
         previous = self.affinities.get(affinity) if affinity else None
