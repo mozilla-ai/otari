@@ -21,9 +21,10 @@ is shown again, and offers a **Retry now** button. It opens as soon as an
 attempt answers, with no reload. A refusal such as a 404 is not retried on its
 own; use **Retry** once the address is fixed. A 401, or a redirect to a
 sign-in page from something in front of the gateway such as an access proxy,
-is not retried either: the dashboard asks for a **Reload**, which opens that
-sign-in. A 403 also offers **Reload**, to sign in again, or ask whoever runs
-the gateway for access.
+asks for a **Reload**, which opens that sign-in; behind a redirect the
+dashboard also keeps asking in the background and opens by itself if the
+gateway answers. A 403 also offers **Reload**, to sign in again, or ask
+whoever runs the gateway for access.
 
 ## Sign-in and secrets
 

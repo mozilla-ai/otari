@@ -667,18 +667,30 @@ async function readJson<T>(
  *
  * Resolves on any response, whatever its status: a 401, a 404 or a 500 is the
  * gateway (or something in front of it) answering, which is all this asks.
- * Rejects with `ApiError` status 0 only when no response arrives, by network
- * fault or by `signal`. Not `apiFetch`, whose 401 handler signs the operator
- * out: a liveness check refused by an access proxy must not end a session.
+ * The result is that status, or `null` for an answer whose status cannot be
+ * read: a redirect to another origin, such as an access proxy's sign-in page,
+ * fails the ordinary read on CORS, and a `no-cors` read of the same path then
+ * shows that something answered there. Rejects with `ApiError` status 0 only
+ * when nothing answers, by network fault or by `signal`. Not `apiFetch`, whose
+ * 401 handler signs the operator out: a liveness check refused by an access
+ * proxy must not end a session.
  */
 export async function probeGateway(
   path: string,
   signal: AbortSignal,
-): Promise<number> {
+): Promise<number | null> {
   try {
     const response = await request(path, { method: "GET", signal })
     await response.body?.cancel()
     return response.status
+  } catch (error) {
+    if (isTimeout(error) || signal.aborted) {
+      throw new ApiError(0, "The gateway did not respond in time.")
+    }
+  }
+  try {
+    await reachesAfterRedirects(path, signal)
+    return null
   } catch (error) {
     if (isTimeout(error) || signal.aborted) {
       throw new ApiError(0, "The gateway did not respond in time.")

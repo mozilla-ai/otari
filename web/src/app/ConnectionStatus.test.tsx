@@ -95,8 +95,11 @@ describe("ConnectionStatus", () => {
     // its retries failing too. The failed request itself is not sent again: it
     // may be a heavy read, and the probe is what rechecks.
     const fetchMock = vi.mocked(globalThis.fetch)
+    // Three probes, each with its no-cors second look, since nothing answered.
     expect(
-      fetchMock.mock.calls.filter(([url]) => isLiveness(url)),
+      fetchMock.mock.calls.filter(
+        ([url, init]) => isLiveness(url) && init?.mode !== "no-cors",
+      ),
     ).toHaveLength(3)
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/settings")),
@@ -347,6 +350,25 @@ describe("ConnectionStatus", () => {
       .mocked(globalThis.fetch)
       .mock.calls.filter(([url]) => String(url).endsWith("/settings"))
     expect(settings).toHaveLength(2)
+    expect(queryDown()).not.toBeInTheDocument()
+  })
+
+  it("counts a liveness check redirected to a sign-in page on another origin as the gateway answering", async () => {
+    let answered = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (!isLiveness(input)) throw new TypeError("Failed to fetch")
+      // Followed with CORS, the redirect to another origin is refused; read
+      // without CORS, something there answers.
+      if (init?.mode !== "no-cors") throw new TypeError("Failed to fetch")
+      answered += 1
+      return { type: "opaque", status: 0, ok: false, body: null } as Response
+    })
+    renderWithProbe()
+
+    await waitFor(() => expect(answered).toBeGreaterThan(0))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
     expect(queryDown()).not.toBeInTheDocument()
   })
 

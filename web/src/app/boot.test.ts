@@ -413,14 +413,21 @@ describe("createBootLoader", () => {
     })
   })
 
-  it("does not retry a redirect on its own", async () => {
-    const load = vi.fn(async (): Promise<WireBootstrap> => {
-      throw new RedirectedError()
-    })
+  it("keeps asking quietly behind a sign-in redirect, and opens once an attempt answers", async () => {
+    // Which side of a redirect answered cannot always be told from here (a
+    // canonical host's 503 without CORS reads like a sign-in page), so the
+    // sign-in screen is not a dead end.
+    const load = vi
+      .fn<(signal: AbortSignal) => Promise<WireBootstrap>>()
+      .mockRejectedValueOnce(new RedirectedError())
+      .mockRejectedValueOnce(new RedirectedError())
+      .mockResolvedValue(BOOTSTRAP)
     const boot = start(load)
-    expect(await firstSettled(boot)).toMatchObject({ willRetry: false })
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(load).toHaveBeenCalledTimes(1)
+    expect(await firstSettled(boot)).toMatchObject({ willRetry: true })
+
+    await vi.advanceTimersByTimeAsync(500 + 1_000)
+    expect(load).toHaveBeenCalledTimes(3)
+    expect(boot.getState().status).toBe("ready")
   })
 
   it("stops retrying once disposed", async () => {
@@ -449,7 +456,7 @@ describe("isTransientBootstrapFailure", () => {
     ["something that is not an ApiError", new TypeError("boom"), true],
     ["a 404", new ApiError(404, "not found"), false],
     ["a 403", new ApiError(403, "forbidden"), false],
-    ["a redirect", new RedirectedError(), false],
+    ["a redirect", new RedirectedError(), true],
   ])("treats %s as %s", (_name, error, transient) => {
     expect(isTransientBootstrapFailure(error)).toBe(transient)
   })
@@ -550,7 +557,7 @@ describe("describeBootFailure", () => {
       failed(new RedirectedError()),
       "signInRequired",
       "sent to sign-in",
-      false,
+      true,
     ],
     [
       "a 403",

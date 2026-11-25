@@ -27,10 +27,12 @@ sign-in shell's frame and mounts `App` once an attempt answers. A redirect is
 followed once, deliberately: one that lands on the bootstrap (a canonical host,
 HTTPS) opens the dashboard, and one that lands on a page that is not JSON is
 something in front of the gateway asking this browser to sign in, which the
-screen says rather than retrying. A followed redirect whose fetch fails is a
-sign-in only if its destination answers a `no-cors` read (it is up and refused
-to share, as a cross-origin sign-in page does); if nothing answers, the gateway
-is unreachable and the loader keeps retrying.
+screen says, with a Reload. A followed redirect whose fetch fails is a sign-in
+only if its destination answers a `no-cors` read (it is up and refused to
+share, as a cross-origin sign-in page does); if nothing answers, the gateway is
+unreachable. Either way the loader keeps asking in the background, quietly on
+the sign-in screen, because a host that answered without CORS reads the same
+as a sign-in page from here and only it recovers on its own.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through

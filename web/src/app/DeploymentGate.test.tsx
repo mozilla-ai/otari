@@ -233,10 +233,38 @@ describe("DeploymentGate", () => {
     })
     await mountGate(load)
 
+    const before = load.mock.calls.length
     await user.click(screen.getByRole("button", { name: "Reload" }))
 
     expect(reload).toHaveBeenCalledTimes(1)
-    expect(load).toHaveBeenCalledTimes(1)
+    // The press reloads; it does not start an attempt of its own.
+    expect(load).toHaveBeenCalledTimes(before)
+  })
+
+  it("opens the app from the sign-in screen, without a press, once the gateway answers", async () => {
+    const { container } = await mountGate(
+      vi
+        .fn<Load>()
+        .mockRejectedValueOnce(new RedirectedError())
+        .mockResolvedValue(bootstrap()),
+    )
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Sign in to continue" }),
+    ).toBeInTheDocument()
+    // Retrying quietly: no sweep on a screen that asks the reader to act.
+    expect(
+      container
+        .querySelector("[data-boot-card]")
+        ?.classList.contains("otari-scan-border"),
+    ).toBe(false)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+
+    expect(
+      await screen.findByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
   })
 
   it("keeps Retry pressable and unpending while background attempts run", async () => {
@@ -346,7 +374,7 @@ describe("DeploymentGate", () => {
     expect(screen.queryByText(window.location.host)).toBeNull()
   })
 
-  it("keeps the status a pressed Retry got, beside saying it still failed", async () => {
+  it("shows the status a pressed Retry got, in place of saying it still failed", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const load = vi
       .fn<Load>()
@@ -357,10 +385,9 @@ describe("DeploymentGate", () => {
     await user.click(retryButton())
 
     await vi.waitFor(() =>
-      expect(lastTry()).toMatch(
-        /^\d\d:\d\d:\d\d · still no answer · HTTP 503$/,
-      ),
+      expect(lastTry()).toMatch(/^\d\d:\d\d:\d\d · HTTP 503$/),
     )
+    expect(vi.mocked(announce).mock.calls.at(-1)).toEqual(["Still no answer."])
   })
 
   it("has no live region in the card", async () => {

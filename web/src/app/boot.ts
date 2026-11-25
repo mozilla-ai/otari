@@ -153,10 +153,12 @@ export async function readBootstrap(
  * same, and that one does recover. The backoff caps what the other costs.
  */
 export function isTransientBootstrapFailure(error: unknown): boolean {
-  // Something in front of the gateway wants this browser somewhere else, which
-  // asking again from here will not change.
+  // Something in front of the gateway wants this browser somewhere else. The
+  // screen asks for a reload, but the loader keeps asking quietly: from here a
+  // sign-in page and a host that answered without CORS can look the same, and
+  // only the second one recovers on its own.
   if (error instanceof RedirectedError) {
-    return false
+    return true
   }
   if (!(error instanceof ApiError)) {
     return true

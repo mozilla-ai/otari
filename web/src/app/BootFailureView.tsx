@@ -68,15 +68,13 @@ const ACTION_LABEL: Record<Action, string> = {
 }
 
 /**
- * The Last try row after a pressed Retry failed. A status or the device being
- * offline is kept beside it, because that is the difference between a gateway
- * that replied and one that did not; no response is what "no answer" already
- * says.
+ * The Last try row after a pressed Retry failed. A status takes the place of
+ * "still no answer", because it is the difference between a gateway that
+ * replied and one that did not, and the new time already shows it was tried
+ * again; with no status, "still no answer" is what happened.
  */
 function stillNoAnswer(failure: BootFailure): string {
-  return failure.kind === "unreachable" || failure.kind === "timedOut"
-    ? "still no answer"
-    : `still no answer · ${failure.reason}`
+  return failure.kind === "serverError" ? failure.reason : "still no answer"
 }
 
 export function bootFailureTitle(kind: BootFailureKind): string {
@@ -114,7 +112,9 @@ export function BootFailureView({
 }) {
   const copy = BOOT_FAILURE_COPY[failure.kind]
   return (
-    <BootFrame isScanning={failure.willRetry}>
+    // The sweep is for a screen that is waiting. One that asks the reader to
+    // act (sign in, reload) holds still, even while the loader keeps asking.
+    <BootFrame isScanning={failure.willRetry && copy.action === "retryNow"}>
       <div className="flex flex-col items-center gap-2.5 text-center">
         <div className="text-mono-overline leading-4">
           <SeverityMark severity={{ status: "alert", word: copy.mark }} />
