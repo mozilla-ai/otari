@@ -32,7 +32,14 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    DEPLOYMENT_PAID_HEADER,
+    FALLBACK_HEADER,
+    GatewayConfig,
+)
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 
@@ -1368,6 +1375,7 @@ def test_native_refusal_of_the_model_is_served_as_chat_on_the_same_attempt(
     assert resp.status_code == 200, resp.text
     assert resp.headers[ATTEMPT_COUNT_HEADER] == "1"
     assert resp.headers[FALLBACK_HEADER] == "false"
+    assert resp.headers[DEPLOYMENT_PAID_HEADER] == "false"
     assert resp.headers["Otari-Provider"] == "openai"
     assert "OK 42" in resp.text
 
