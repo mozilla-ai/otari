@@ -704,3 +704,133 @@ def test_a_credential_failure_with_transport_settings_stays_with_its_tenant(rout
     assert serving.automatic is not None and serving.head.instance == "us"
     serving.automatic.start(serving.head).finish(success=True)
     assert _rank(router, plan=plan, costs=costs, tenant="workspace-a").head.instance == "eu"
+
+
+def test_a_model_the_credential_does_not_serve_ranks_last_for_its_tenant_for_an_hour(
+    router: AutomaticRouter, now: list[float]
+) -> None:
+    """A missing model is tried last by the workspace that met it, without cooling the credential's other models."""
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.02"), "eu:model": Decimal("0.05")}
+    plan = _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True, account=True, missing=True)
+    assert not router.accounts
+    assert router.health[router.candidate_key(plan.head)].cooldown == 0
+    ranked = _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a")
+    assert [(a.instance, a.model) for a in ranked.attempts] == [("us", "model-b"), ("eu", "model"), ("us", "model")]
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-b").head.model == "model"
+    now[0] += 3599
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a").head.model == "model-b"
+    now[0] += 2
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a").head.model == "model"
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "missing"),
+    [
+        (404, "Error code: 404", True),
+        (400, "The model or service ID deepseek-v4-flash-0731 does not exist. Please check it.", True),
+        (403, "You do not have access to model `deepseek-ai/DeepSeek-V4-Flash-0731`.", True),
+        (404, "Model not found, inaccessible, and/or not deployed", True),
+        (403, "Model example is not accessible on this account", True),
+        (404, "model: claude-example", True),
+        (404, "Previous response with id 'resp_123' not found.", False),
+        (404, "No such File object: file-abc123", False),
+        (400, "max_tokens is too large for this model", False),
+        (403, "Invalid API key", False),
+        (503, "The model is overloaded", False),
+    ],
+)
+def test_a_missing_model_is_recognized(status: int, message: str, missing: bool) -> None:
+    """A 404, or a 400 or 403 saying the model is not served, is a missing model; other refusals are not."""
+    from gateway.api.routes._pipeline import _finish_failed
+
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.test/v1/chat/completions"))
+    exc = openai.APIStatusError(message, response=response, body=None)
+    assert AutomaticRouter.is_missing_model(exc) is missing
+
+    router = AutomaticRouter()
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    _finish_failed(plan.automatic.start(plan.head), exc)
+    assert bool(router.missing) is missing
+
+
+def test_a_gateway_404_is_not_a_missing_model(router: AutomaticRouter) -> None:
+    """A 404 the gateway raised itself leaves the offering's ranking alone."""
+    from fastapi import HTTPException
+
+    from gateway.api.routes._pipeline import _finish_failed
+
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    _finish_failed(plan.automatic.start(plan.head), HTTPException(404, "Model not found"))
+    assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_rotated_key_does_not_inherit_a_missing_model(router: AutomaticRouter) -> None:
+    """A missing model is remembered for the credential that reported it, not for the next key."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    rotated = CompiledPlan(
+        policy_name="acme/model",
+        attempts=[replace(a, kwargs={"api_key": "rotated"}) if a.instance == "us" else a for a in _plan().attempts],
+    )
+    assert _rank(router, plan=rotated, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_still_missing_is_refused_for_longer(router: AutomaticRouter, now: list[float]) -> None:
+    """A model still missing when its refusal lapses is refused for three hours, then twelve; a success clears it."""
+
+    def fail() -> None:
+        plan = _rank(router, tenant="workspace-a")
+        assert plan.automatic is not None
+        attempt = next(a for a in plan.attempts if a.instance == "us")
+        plan.automatic.start(attempt).finish(missing=True)
+
+    def refused_for() -> float:
+        return next(iter(router.missing.values()))[0] - now[0]
+
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 600
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 3601
+    fail()
+    assert refused_for() == pytest.approx(3 * 3600)
+    now[0] += 3 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+    now[0] += 12 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.attempts[-1]).finish(success=True)
+    assert not router.missing
+    assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_missing_again_long_after_starts_over(router: AutomaticRouter, now: list[float]) -> None:
+    """A failure more than twelve hours after a refusal lapsed is refused for an hour again."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    now[0] += 3600 + 12 * 3600 + 1
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert next(iter(router.missing.values()))[0] - now[0] == pytest.approx(3600)
+
+
+def test_a_missing_model_is_remembered_per_endpoint(router: AutomaticRouter) -> None:
+    """A model one API lacks is not ranked last for another API the offering still serves."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    assert _rank(router, tenant="workspace-a", mode="responses:completion").head.instance == "us"
