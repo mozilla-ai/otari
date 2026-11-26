@@ -16991,9 +16991,31 @@
             "title": "Deployment Managed",
             "type": "boolean"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
           },
           "max_output_tokens": {
             "anyOf": [
@@ -17040,6 +17062,17 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
           },
           "supported_parameters": {
             "anyOf": [

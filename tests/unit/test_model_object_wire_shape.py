@@ -30,9 +30,12 @@ OMITTABLE_FIELDS = {
     "ModelObject": {
         "architecture",
         "context_window",
+        "description",
+        "knowledge_cutoff",
         "max_output_tokens",
         "name",
         "pricing",
+        "release_date",
         "supported_parameters",
         "type",
     },

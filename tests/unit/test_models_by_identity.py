@@ -215,7 +215,13 @@ def test_an_organization_key_offering_is_listed_under_the_id_the_index_builds(
 def test_an_organization_key_offering_shows_the_metadata_its_slug_hides(config: GatewayConfig, no_index: None) -> None:
     """The offering is built before the slug map is known, so the folded row reads the model under its provider."""
     deepseek = ModelsDevModel(
-        id="deepseek-flash", name="DeepSeek V4.1 Flash 1017", context_window=1048576, tool_call=True, reasoning=True
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash 1017",
+        description="The October 17 snapshot of DeepSeek V4.1 Flash",
+        release_date="2026-10-17",
+        context_window=1048576,
+        tool_call=True,
+        reasoning=True,
     )
     described = ModelsDevModel(
         id="deepseek-ai/DeepSeek-V4.1-Flash-1017",
@@ -248,6 +254,53 @@ def test_an_organization_key_offering_shows_the_metadata_its_slug_hides(config: 
     assert row.name == "DeepSeek V4.1 Flash 1017"
     assert row.type == "chat"
     assert row.supported_parameters == ["tools", "tool_choice", "reasoning"]
+    assert (row.description, row.release_date) == ("The October 17 snapshot of DeepSeek V4.1 Flash", "2026-10-17")
+
+
+def test_an_organization_key_offering_is_read_whichever_ranking_it_gets(config: GatewayConfig, no_index: None) -> None:
+    """Read under the slug's provider even when it ranks last, so the earliest date wins and a description is found."""
+    deepseek = ModelsDevModel(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash 1017",
+        description="The October 17 snapshot of DeepSeek V4.1 Flash",
+        release_date="2026-10-17",
+        knowledge="2025-05",
+        context_window=1048576,
+    )
+    described = ModelsDevModel(
+        id="deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        name="DeepSeek V4.1 Flash 1017",
+        release_date="2026-11-20",
+        context_window=1000000,
+        max_output_tokens=384000,
+    )
+    catalog = ModelsDevCatalog(
+        providers={
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={deepseek.id: deepseek}),
+            "deepinfra": ModelsDevProvider(
+                id="deepinfra", name="DeepInfra", doc=None, models={described.id: described}
+            ),
+        }
+    )
+    org = _offering("acme-ds:deepseek-flash", 0.9)
+    selectors.apply_model_metadata(config, catalog, org)
+    deployment = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, deployment)
+    assert org.release_date is None
+
+    listed = models_by_identity(config, catalog, [org, deployment], slug_providers={"acme-ds": "deepseek"})
+
+    (row,) = listed
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.3
+    assert (row.release_date, row.description, row.knowledge_cutoff) == (
+        "2026-10-17",
+        "The October 17 snapshot of DeepSeek V4.1 Flash",
+        "2025-05",
+    )
+    # The row still takes its limits from the offering it is named after, as the org key's own are unread.
+    assert (row.context_window, row.max_output_tokens) == (1000000, 384000)
+    assert org.release_date is None
 
 
 @pytest.mark.parametrize(
@@ -257,3 +310,26 @@ def test_an_organization_key_offering_shows_the_metadata_its_slug_hides(config: 
 def test_only_a_catalog_id_or_policy_is_read_from_the_listing(model_id: str, expected: bool) -> None:
     """An alias and a selector have cheaper reads of their own, so the catalog is not built for them."""
     assert answered_by_listing(model_id, {"fast": _NEBIUS}) is expected
+
+
+def test_a_folded_row_derives_its_dates_and_description_across_offerings(config: GatewayConfig, no_index: None) -> None:
+    """The release date does not move with the ranking, and an undescribed first offering borrows a description."""
+    tried_first = _offering(_NEBIUS, 0.5).model_copy(update={"release_date": "2026-10-20"})
+    described = _offering(_FIREWORKS, 0.7).model_copy(
+        update={"release_date": "2026-10-17", "description": "A sparse model", "knowledge_cutoff": "2025-05"}
+    )
+
+    (row,) = models_by_identity(config, None, [tried_first, described])
+
+    assert (row.release_date, row.description, row.knowledge_cutoff) == ("2026-10-17", "A sparse model", "2025-05")
+
+
+def test_a_folded_row_keeps_the_description_of_the_offering_it_is_named_after(
+    config: GatewayConfig, no_index: None
+) -> None:
+    tried_first = _offering(_NEBIUS, 0.5).model_copy(update={"description": "Nebius's", "knowledge_cutoff": "2025-04"})
+    other = _offering(_FIREWORKS, 0.7).model_copy(update={"description": "Fireworks's", "knowledge_cutoff": "2025-05"})
+
+    (row,) = models_by_identity(config, None, [tried_first, other])
+
+    assert (row.description, row.knowledge_cutoff) == ("Nebius's", "2025-04")

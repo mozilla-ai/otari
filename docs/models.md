@@ -232,6 +232,17 @@ All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
+From the same models.dev entry, each model also carries `description`,
+`release_date` and `knowledge_cutoff`, the training data cutoff. Both dates are
+as models.dev writes them, `YYYY-MM-DD` or, where it knows only the month,
+`YYYY-MM`. A model several providers serve takes the earliest release date any
+of them gives, and the description and cutoff of the provider tried first,
+else of any other, as its page in the catalog does. An alias leaves all three
+out, and so does a model models.dev does not describe. `created` stays the
+provider's own timestamp, 0 where its listing gives none; it is a different
+fact, so a client ordering models by when they came out sorts by
+`release_date`, which orders only the models models.dev dates.
+
 ### Overriding a model's details
 
 Where a provider's server and models.dev say nothing about a model, or say it

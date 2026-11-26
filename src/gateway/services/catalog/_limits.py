@@ -45,6 +45,9 @@ class ModelCapabilities(NamedTuple):
     supported_parameters: list[str]
     input_modalities: list[str]
     output_modalities: list[str]
+    description: str | None = None
+    release_date: str | None = None
+    knowledge_cutoff: str | None = None
 
 
 # Where models.dev lists open-weight models by their Hugging Face ids, which is
@@ -252,6 +255,9 @@ def model_capabilities(
         supported_parameters=[parameter for flag, parameters in flags if flag for parameter in parameters],
         input_modalities=input_modalities,
         output_modalities=metadata.output_modalities if metadata else ["text"],
+        description=metadata.description if metadata else None,
+        release_date=metadata.release_date if metadata else None,
+        knowledge_cutoff=metadata.knowledge_cutoff if metadata else None,
     )
 
 
@@ -267,9 +273,10 @@ def apply_model_metadata(
 ) -> None:
     """Fill ``obj``'s token limits and capabilities from ``metadata_selector``, or from its own id.
 
-    ``with_name=False`` leaves the display name unset, for an alias whose target's
-    name would say what the alias hides. ``organization_id`` is the caller's,
-    whose own provider keys describe the models it reaches on them.
+    ``with_name=False`` leaves the display name, description and dates unset, for
+    an alias whose target's would say what the alias hides.
+    ``organization_id`` is the caller's, whose own provider keys describe the
+    models it reaches on them.
     ``provider_type`` names the provider behind an instance the config does not
     declare, which is what an organization's key slug is.
     """
@@ -281,8 +288,12 @@ def apply_model_metadata(
     capabilities = model_capabilities(config, models_dev, selector, organization_id, provider_type=provider_type)
     if capabilities is None:
         obj.name = obj.supported_parameters = obj.architecture = None
+        obj.description = obj.release_date = obj.knowledge_cutoff = None
         return
     obj.name = capabilities.name if with_name else None
+    obj.description = capabilities.description if with_name else None
+    obj.release_date = capabilities.release_date if with_name else None
+    obj.knowledge_cutoff = capabilities.knowledge_cutoff if with_name else None
     obj.supported_parameters = capabilities.supported_parameters
     obj.architecture = ModelArchitecture(
         input_modalities=capabilities.input_modalities, output_modalities=capabilities.output_modalities
