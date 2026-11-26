@@ -158,8 +158,7 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
       ) : null}
       {declined === null ? null : (
         <span className="text-caption">
-          The router did not choose, so the policy&apos;s default served:{" "}
-          {declined}
+          The router did not choose: {declined}
         </span>
       )}
     </div>

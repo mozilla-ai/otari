@@ -307,7 +307,12 @@ def test_a_candidate_dropped_twice_is_named_once(config: GatewayConfig) -> None:
 
 
 def test_an_ordering_a_condition_discarded_takes_its_drops_with_it(config: GatewayConfig) -> None:
-    """Nothing read the ranking, so nothing read the pool it was ranked from either."""
+    """Nothing read the ranking, so nothing read the pool it was ranked from either.
+
+    The empty variant is the one a caller can get wrong: a decline looks like a fact
+    worth keeping, but a router that was never asked did not decline, and recording
+    it would claim the default target served for a reason it did not serve for.
+    """
     spec = PolicySpec.model_validate(
         {
             "select": [
@@ -317,16 +322,21 @@ def test_an_ordering_a_condition_discarded_takes_its_drops_with_it(config: Gatew
             ]
         }
     )
-    ordering = RouterOrdering(
+    ranked = RouterOrdering(
         ["openai:gpt-5-mini"],
         dropped=[DroppedCandidate("openai:gpt-5-nano", "not_allowed", "is not in allowed_models for this caller")],
     )
+    declined = RouterOrdering(
+        [],
+        rationale="no candidate in the pool is usable by this caller",
+        dropped=[DroppedCandidate("openai:gpt-5-nano", "not_allowed", "is not in allowed_models for this caller")],
+    )
 
-    plan = compile_policy(config, "routed", spec, budget=BudgetState(used_pct=95.0), router_ordering=ordering)
-
-    assert plan.selection_reason == "condition:budget_used_pct"
-    assert plan.router_ordering is None
-    assert plan.dropped == []
+    for ordering in (ranked, declined):
+        plan = compile_policy(config, "routed", spec, budget=BudgetState(used_pct=95.0), router_ordering=ordering)
+        assert plan.selection_reason == "condition:budget_used_pct"
+        assert plan.router_ordering is None
+        assert plan.dropped == []
 
 
 def test_a_router_ranking_becomes_the_whole_plan(config: GatewayConfig) -> None:

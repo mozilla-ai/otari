@@ -8,7 +8,7 @@ nullable ``routing_plan``: null on an unrouted row, and on a routed one whose pl
 dropped nothing and whose router did not decline.
 
 Revision ID: c4b1e7f20a15
-Revises: 124a7328c1b3
+Revises: da9ab6d90202
 Create Date: 2026-11-19
 """
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c4b1e7f20a15"
-down_revision: str | Sequence[str] | None = "124a7328c1b3"
+down_revision: str | Sequence[str] | None = "da9ab6d90202"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

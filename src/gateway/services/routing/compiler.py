@@ -345,9 +345,12 @@ def compile_policy(
     # A router's pool is filtered before it ranks (so it never picks something the
     # caller may not use), which means those candidates never reach `ordered` and
     # their reasons would otherwise be lost. Merged in only when the plan keeps the
-    # ordering: a `when` entry that won discarded the whole ranking.
+    # ordering, which is when the ranking was used or when the router declined and
+    # the default target served: a `when` entry that won never consulted the router,
+    # so its answer and the pool it was ranked from are both irrelevant.
     declined = router_ordering is not None and not router_ordering.selectors
-    kept_ordering = router_ordering if routed or declined else None
+    consulted = routed or (declined and selected[0][1] == "default")
+    kept_ordering = router_ordering if consulted else None
 
     if not attempts:
         raise NoEligibleCandidatesError(policy_name, dropped)
