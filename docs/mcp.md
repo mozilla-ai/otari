@@ -800,8 +800,10 @@ opens no connection to the server while the listing is kept:
 
 - The `Age` response header is how many seconds ago Otari last asked the server.
 - Send `Cache-Control: no-cache` to have Otari ask the server again, for example
-  right after you changed the server's tools yourself. The answer replaces the
-  kept listing for everyone.
+  right after you changed the server's tools yourself. Each Otari replica keeps
+  its own listing, so the fresh answer replaces only the copy on the replica
+  that served your request; another replica may answer from its own copy for
+  up to five minutes.
 - An edit to the stored server (its URL, credential or allowlist, everything
   `server_revision` covers) is never answered from a listing kept before it.
 - A per-user server's listing is kept per user, read with that user's own token.

@@ -22,7 +22,12 @@ LISTING_TTL_S = 300.0
 """How long a listing is served before the server is asked again: the bound on missing a tool it changed itself."""
 
 LISTINGS_MAX_BYTES = 32 * 1024 * 1024
-"""Ceiling on the serialized size of every kept listing together; the least recently used leave first."""
+"""Ceiling on the estimated memory of every kept listing together; the least recently used leave first."""
+
+_MEMORY_PER_JSON_BYTE = 8
+"""Parsed ``Tool`` objects measure about five times their JSON; the estimate rounds that up."""
+
+_ENTRY_OVERHEAD_BYTES = 1024
 
 LISTINGS_MAX_ENTRIES = 4096
 """Ceiling on how many listings are kept, which bounds the empty ones the byte ceiling does not count."""
@@ -107,13 +112,22 @@ class McpToolListings:
 
     def _keep(self, key: str, tools: list[MCPTool]) -> None:
         self._drop(key)
-        size = sum(len(tool.model_dump_json(by_alias=True, exclude_none=True)) for tool in tools)
+        self._sweep()
+        size = _ENTRY_OVERHEAD_BYTES + _MEMORY_PER_JSON_BYTE * sum(
+            len(tool.model_dump_json(by_alias=True, exclude_none=True)) for tool in tools
+        )
         if size > self._max_bytes:
             return
         while self._entries and (self._bytes + size > self._max_bytes or len(self._entries) >= self._max_entries):
             self._drop(next(iter(self._entries)))
         self._entries[key] = _Entry(tools=tools, size=size, loaded_at=self._clock())
         self._bytes += size
+
+    def _sweep(self) -> None:
+        """Drop every expired listing, so one nobody reads again does not hold memory until it is pushed out."""
+        now = self._clock()
+        for key in [key for key, entry in self._entries.items() if now - entry.loaded_at >= self._ttl_s]:
+            self._drop(key)
 
     def _drop(self, key: str) -> None:
         entry = self._entries.pop(key, None)

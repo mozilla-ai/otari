@@ -104,7 +104,9 @@ async def test_a_failed_load_keeps_nothing_and_the_next_caller_loads() -> None:
 
 @pytest.mark.asyncio
 async def test_the_least_recently_used_listing_leaves_when_the_byte_ceiling_is_reached() -> None:
-    size = len(TOOLS[0].model_dump_json(by_alias=True, exclude_none=True))
+    listings = McpToolListings()
+    await listings.get_or_load("probe", _Loader())
+    size = listings._bytes
     listings = McpToolListings(max_bytes=size * 2)
     load = _Loader()
 
@@ -140,6 +142,22 @@ async def test_empty_listings_are_bounded_by_count() -> None:
 
     assert len(listings._entries) == 2
     assert load.calls == 4
+
+
+@pytest.mark.asyncio
+async def test_storing_a_listing_sweeps_the_expired_ones() -> None:
+    clock = _Clock()
+    listings = McpToolListings(ttl_s=60, clock=clock)
+    load = _Loader()
+    await listings.get_or_load("old", load)
+    clock.now += 30
+    await listings.get_or_load("recent", load)
+    clock.now += 30
+
+    await listings.get_or_load("new", load)
+
+    assert list(listings._entries) == ["recent", "new"]
+    assert listings._bytes == sum(entry.size for entry in listings._entries.values())
 
 
 def _server(**overrides: object) -> ResolvedMcpServer:
