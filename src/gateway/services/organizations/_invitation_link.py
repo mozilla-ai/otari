@@ -1,4 +1,4 @@
-"""What an invitation link still opens, and whether it entitles an account."""
+"""What an invitation link still opens, and whether it allows an account."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -55,14 +55,12 @@ class InvitationLink(SignupInvitePort):
             return None
         return invitation
 
-    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
-        """Whether this token entitles an account for ``claimed_address``.
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
+        """Whether this token allows an account for ``claimed_address``.
 
-        A link carried by hand reached no mailbox, so it entitles nothing and an account on that
-        address is still reached by verifying it. A link this deployment would refuse entitles
-        nothing either, and neither does one naming an organization whose members arrive through
-        its own connection, which is what keeps a signup from minting an account that joining
-        would then turn away.
+        A link carried by hand reached no mailbox, so it allows none. Nor does a link whose
+        address this deployment refuses, nor one naming an organization whose members arrive
+        through its own connection.
         """
         if is_shared_token(token):
             return False

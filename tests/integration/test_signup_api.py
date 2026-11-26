@@ -147,7 +147,7 @@ def test_signup_on_an_untouched_address_is_enumeration_safe(
 class _Invites:
     """An invitation ``tok`` emailed to ada@example.com."""
 
-    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         return token == "tok" and same_address("ada@example.com", claimed_address)
 
 

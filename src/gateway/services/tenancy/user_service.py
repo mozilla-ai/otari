@@ -386,7 +386,7 @@ async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background
 
 @dataclass(frozen=True, slots=True)
 class SignupSubmission:
-    """What somebody submitted at the signup form, as the one unit it arrives as."""
+    """The fields one signup submits."""
 
     email: str
     password: str
@@ -445,11 +445,11 @@ async def create_user_for_signup(
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
     ``submission.invite_token`` is the invitation the caller named, and None where they named
-    none. Where ``invites`` answers that it entitles an account, the address is recorded as the
-    mailbox the link reached, no verification email is sent, and the caller can sign in at
-    once. That answer is taken inside the transaction that writes the account, so an
-    invitation canceled in the meantime is not honored. An entitled signup gets the account
-    and nothing else: it belongs to no organization until the invitation is accepted.
+    none. Where ``invites`` allows an account for it, the address is recorded as proved by the
+    mailbox the link reached, no verification email is sent, and the caller can sign in at once.
+    The answer is read inside the transaction that writes the account, so an invitation canceled
+    in the meantime is not honored. Such an account belongs to no organization until the
+    invitation is accepted.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -483,7 +483,7 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
-            entitled = submission.invite_token is not None and await invites.entitles_an_account(
+            entitled = submission.invite_token is not None and await invites.allows_an_account(
                 submission.invite_token, claimed_address=address
             )
             if not entitled:
@@ -496,8 +496,7 @@ async def create_user_for_signup(
                 )
             if identity is None:
                 if entitled:
-                    # The account is all this writes. Granting the membership belongs to the
-                    # invitation, when whoever holds it accepts.
+                    # The membership is the invitation's to grant, so this writes the account alone.
                     identity = await UserRepository(db).try_create(
                         email=address, full_name=full_name, active_organization_id=None
                     )

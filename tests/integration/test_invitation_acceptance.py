@@ -500,13 +500,13 @@ async def test_an_accept_that_would_leave_no_active_owner_is_refused_and_keeps_t
     assert role == "owner"
 
 
-async def test_an_emailed_link_entitles_an_account_for_the_address_it_was_sent_to(
+async def test_an_emailed_link_allows_an_account_for_the_address_it_was_sent_to(
     async_db: AsyncSession,
 ) -> None:
     organization = await create_organization(async_db, slug="lookup-live")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="ada@example.com") is True
+    assert await _link(async_db).allows_an_account(_TOKEN, claimed_address="ada@example.com") is True
 
 
 async def test_a_token_no_invitation_still_opens_entitles_no_account(async_db: AsyncSession) -> None:
@@ -524,9 +524,9 @@ async def test_a_token_no_invitation_still_opens_entitles_no_account(async_db: A
     lookup = _link(async_db)
 
     answers = [
-        await lookup.entitles_an_account("expired-token", claimed_address="expired@example.com"),
-        await lookup.entitles_an_account("declined-token", claimed_address="declined@example.com"),
-        await lookup.entitles_an_account("a-token-nobody-was-sent", claimed_address="ada@example.com"),
+        await lookup.allows_an_account("expired-token", claimed_address="expired@example.com"),
+        await lookup.allows_an_account("declined-token", claimed_address="declined@example.com"),
+        await lookup.allows_an_account("a-token-nobody-was-sent", claimed_address="ada@example.com"),
     ]
 
     assert answers == [False, False, False]
@@ -562,7 +562,7 @@ async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: Asyn
 
     async with uow:
         opened = await link.open(hand_carried)
-    entitled = await link.entitles_an_account(hand_carried, claimed_address="ada@example.com")
+    entitled = await link.allows_an_account(hand_carried, claimed_address="ada@example.com")
 
     assert (opened, entitled) == (None, False)
 
@@ -578,7 +578,7 @@ async def test_a_link_that_was_emailed_is_not_held_to_another_organization_prove
 
     link = _link(async_db, mail_transport="console")
 
-    assert await link.entitles_an_account(emailed, claimed_address="ada@example.com") is True
+    assert await link.allows_an_account(emailed, claimed_address="ada@example.com") is True
 
 
 async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_deliver(
@@ -594,7 +594,7 @@ async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_del
     hand_carried = generate_shared_token()
     await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
 
-    entitled = await _link(async_db).entitles_an_account(hand_carried, claimed_address="ada@example.com")
+    entitled = await _link(async_db).allows_an_account(hand_carried, claimed_address="ada@example.com")
 
     assert entitled is False
 
@@ -604,7 +604,7 @@ async def test_a_token_entitles_no_account_on_an_address_it_was_not_sent_to(asyn
     organization = await create_organization(async_db, slug="proof-other-address")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="bob@example.com") is False
+    assert await _link(async_db).allows_an_account(_TOKEN, claimed_address="bob@example.com") is False
 
 
 async def test_a_hand_carried_link_entitles_no_account_where_an_emailed_one_does(
@@ -619,8 +619,8 @@ async def test_a_hand_carried_link_entitles_no_account_where_an_emailed_one_does
     lookup = _link(async_db)
 
     answers = (
-        await lookup.entitles_an_account(hand_carried, claimed_address="carried@example.com"),
-        await lookup.entitles_an_account(emailed, claimed_address="mailed@example.com"),
+        await lookup.allows_an_account(hand_carried, claimed_address="carried@example.com"),
+        await lookup.allows_an_account(emailed, claimed_address="mailed@example.com"),
     )
 
     assert answers == (False, True)
@@ -638,4 +638,4 @@ async def test_a_link_entitles_no_account_where_the_organization_requires_its_ow
     await _invite(async_db, organization, email="ada@example.com")
     await async_db.flush()
 
-    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="ada@example.com") is False
+    assert await _link(async_db).allows_an_account(_TOKEN, claimed_address="ada@example.com") is False

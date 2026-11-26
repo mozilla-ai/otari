@@ -33,7 +33,7 @@ _TOKEN = "an-invitation-token"
 class _EntitlingInvite:
     """Answers that its one token entitles an account."""
 
-    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         del claimed_address
         return token == _TOKEN
 
@@ -48,7 +48,7 @@ class _ReadsThroughTheUnitOfWork:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 
-    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         del claimed_address
         await OrganizationInvitationRepository(self._uow).get_by_token_hash(hash_token(token))
         return True
@@ -70,7 +70,7 @@ class _OpensItsOwnBlock:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 
-    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         del claimed_address
         async with self._uow:
             await OrganizationInvitationRepository(self._uow).get_by_token_hash(hash_token(token))

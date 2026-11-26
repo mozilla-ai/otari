@@ -383,7 +383,7 @@ def register(container):
         build_container("stale_growth_bootstrap:register")
 
 
-def test_a_signup_invite_adapter_written_before_entitles_an_account_fails_at_build(
+def test_a_signup_invite_adapter_written_before_allows_an_account_fails_at_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Without the check, a signup carrying an invitation fails as a 500 with no startup signal."""
@@ -408,7 +408,7 @@ def register(container):
 """,
     )
 
-    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks entitles_an_account"):
+    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks allows_an_account"):
         build_container("stale_invite_bootstrap:register")
 
 
@@ -437,13 +437,11 @@ def register(container):
 """,
     )
 
-    with pytest.raises(
-        PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks entitles_an_account"
-    ):
+    with pytest.raises(PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks allows_an_account"):
         build_container("inherited_stub_bootstrap:register")
 
 
-def test_a_signup_invite_adapter_that_delegates_entitles_an_account_builds(
+def test_a_signup_invite_adapter_that_delegates_allows_an_account_builds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An adapter may carry the method on the instance, which is an implementation like any other."""
@@ -459,7 +457,7 @@ from gateway.ports.signup_invite_port import SignupInvitePort
 class DelegatingInvite(SignupInvitePort):
     def __init__(self, session):
         del session
-        self.entitles_an_account = NullSignupInviteAdapter().entitles_an_account
+        self.allows_an_account = NullSignupInviteAdapter().allows_an_account
 
 
 def register(container):
