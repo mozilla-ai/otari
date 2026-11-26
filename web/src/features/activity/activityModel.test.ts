@@ -542,6 +542,46 @@ describe("describeAttempt", () => {
     ).toBe("the policy's only target")
   })
 
+  it("says the primary was left out when a lone fallback served", () => {
+    expect(
+      describeAttempt(
+        attempt({
+          status: "success",
+          attempt_count: 1,
+          attempt_position: 1,
+          selection_reason: "on_failure",
+          routing_plan: {
+            dropped: [
+              {
+                selector: "openai:gpt-5",
+                reason: "not_allowed",
+                detail: "is not in allowed_models for this caller",
+              },
+            ],
+          },
+        }),
+        null,
+      ),
+    ).toBe("a fallback candidate; the primary was left out before dispatch")
+  })
+
+  it("keeps the plain fallback sentence when nothing was left out", () => {
+    // A pre-`routing_plan` row, or one whose plan really did have a single target:
+    // the sentence must not claim a drop that the row cannot evidence.
+    expect(
+      describeAttempt(
+        attempt({
+          status: "success",
+          attempt_count: 1,
+          attempt_position: 1,
+          selection_reason: "on_failure",
+          routing_plan: { dropped: [] },
+        }),
+        null,
+      ),
+    ).toBe("a fallback candidate")
+  })
+
   it("answers null for a row carrying neither a plan nor a reason", () => {
     expect(
       describeAttempt(

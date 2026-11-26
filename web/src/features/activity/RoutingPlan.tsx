@@ -30,6 +30,10 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
   const isComplete = siblings.length > 0
   const served = attempts.find((attempt) => attempt.status === "success")
   const total = entry.attempt_count ?? attempts.length
+  // Every row of the request carries the same record, so the open row's is the
+  // plan's. `declined` is the router's own words for why it did not choose.
+  const dropped = entry.routing_plan?.dropped ?? []
+  const declined = entry.routing_plan?.declined ?? null
 
   // "Loading" only while a lookup is actually outstanding: a failed lookup, or a row
   // that carries no group to look up, would otherwise sit on that line forever.
@@ -132,6 +136,27 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
         Cost and tool charges settle on the attempt that served, so a failed
         attempt carries its tokens and no charge.
       </span>
+      {/* What never became an attempt: no row exists for these, so this list is the
+          only place the plan can account for them. */}
+      {dropped.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-overline">Left out</span>
+          <ul className="flex flex-col gap-1 text-sm">
+            {dropped.map((item) => (
+              <li key={`${item.selector}:${item.reason}`}>
+                <span className="text-foreground">{item.selector}</span>
+                <span className="text-muted"> · {item.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {declined === null ? null : (
+        <span className="text-caption">
+          The router did not choose, so the policy&apos;s default served:{" "}
+          {declined}
+        </span>
+      )}
     </div>
   )
 }

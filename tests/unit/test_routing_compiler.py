@@ -26,6 +26,7 @@ from gateway.models.routing import MAX_CANDIDATES, PolicySpec
 from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.routing import (
     BudgetState,
+    DroppedCandidate,
     NoEligibleCandidatesError,
     RouterOrdering,
     compile_catalog_plan,
@@ -221,8 +222,111 @@ def test_no_ordering_serves_the_default_and_says_nothing(
         plan = compile_policy(config, "routed", _router_spec(), router_ordering=ordering)
         assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
         assert plan.selection_reason == "default"
-        assert plan.router_ordering is None
+        assert plan.dropped == []
+    # No ordering at all leaves nothing on the plan; a decline keeps its own
+    # ordering, because the rationale is why the default target served.
+    assert compile_policy(config, "routed", _router_spec()).router_ordering is None
+    declined = compile_policy(config, "routed", _router_spec(), router_ordering=RouterOrdering([], rationale="opt out"))
+    assert declined.router_ordering is not None
+    assert declined.router_ordering.rationale == "opt out"
     assert router_warnings() == []
+
+
+def test_a_declined_ordering_stays_on_the_plan(config: GatewayConfig) -> None:
+    """A decline is normal operation, but it is not silence.
+
+    A caller who sent ``Otari-Router: off`` and a policy with no router at all both
+    compile to ``default``, and the row records the same selection reason for both.
+    Keeping the empty ordering is what lets the usage row say which one happened.
+    """
+    ordering = RouterOrdering([], rationale="caller sent Otari-Router: off")
+
+    plan = compile_policy(config, "routed", _router_spec(), router_ordering=ordering)
+
+    assert plan.selection_reason == "default"
+    assert plan.router_ordering is not None
+    assert plan.router_ordering.selectors == []
+    assert plan.router_ordering.rationale == "caller sent Otari-Router: off"
+
+
+def test_a_candidate_the_router_pool_lost_is_dropped_with_its_reason(config: GatewayConfig) -> None:
+    """The pool is filtered before ranking, so the compiler never sees those candidates.
+
+    A weighted policy whose heaviest candidate the caller may not use would otherwise
+    compile to a plan that reports nothing dropped, and the row would have no way to
+    say why the split it is running is not the split the operator wrote.
+    """
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {
+                    "router": "weighted",
+                    "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"],
+                    "weights": {"openai:gpt-5-nano": 70, "openai:gpt-5-mini": 30},
+                },
+                {"default": "openai:gpt-5-mini"},
+            ],
+        }
+    )
+    ordering = RouterOrdering(
+        ["openai:gpt-5-mini"],
+        confidence=1.0,
+        rationale="weighted split (openai:gpt-5-mini 100%)",
+        dropped=[DroppedCandidate("openai:gpt-5-nano", "not_allowed", "is not in allowed_models for this caller")],
+    )
+
+    plan = compile_policy(config, "routed", spec, allowlist=["openai:gpt-5-mini"], router_ordering=ordering)
+
+    assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
+    assert [(item.selector, item.reason) for item in plan.dropped] == [("openai:gpt-5-nano", "not_allowed")]
+
+
+def test_a_candidate_dropped_twice_is_named_once(config: GatewayConfig) -> None:
+    """The pool and the failure chain are separate lists, so one selector can be in both.
+
+    ``openai:gpt-5-nano`` is in the router's pool and in ``on_failure``, and the
+    caller may not use it, so both paths refuse it. The row names it once.
+    """
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {"router": "priority", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5-mini"},
+            ],
+            "on_failure": ["openai:gpt-5-nano"],
+        }
+    )
+    ordering = RouterOrdering(
+        ["openai:gpt-5-mini"],
+        dropped=[DroppedCandidate("openai:gpt-5-nano", "not_allowed", "is not in allowed_models for this caller")],
+    )
+
+    plan = compile_policy(config, "routed", spec, allowlist=["openai:gpt-5-mini"], router_ordering=ordering)
+
+    assert [item.selector for item in plan.dropped] == ["openai:gpt-5-nano"]
+
+
+def test_an_ordering_a_condition_discarded_takes_its_drops_with_it(config: GatewayConfig) -> None:
+    """Nothing read the ranking, so nothing read the pool it was ranked from either."""
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {"when": {"budget_used_pct": {"gte": 80}}, "target": "openai:gpt-5-mini"},
+                {"router": "priority", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5-mini"},
+            ]
+        }
+    )
+    ordering = RouterOrdering(
+        ["openai:gpt-5-mini"],
+        dropped=[DroppedCandidate("openai:gpt-5-nano", "not_allowed", "is not in allowed_models for this caller")],
+    )
+
+    plan = compile_policy(config, "routed", spec, budget=BudgetState(used_pct=95.0), router_ordering=ordering)
+
+    assert plan.selection_reason == "condition:budget_used_pct"
+    assert plan.router_ordering is None
+    assert plan.dropped == []
 
 
 def test_a_router_ranking_becomes_the_whole_plan(config: GatewayConfig) -> None:

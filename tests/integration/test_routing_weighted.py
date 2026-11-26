@@ -201,6 +201,9 @@ def test_every_served_request_is_attributable_to_the_router(client: TestClient) 
     rows = [row for row in _usage_rows(client) if row["model"] in {"gpt-5", "claude-sonnet-4-5"}]
     assert len(rows) == 6
     assert {row["selection_reason"] for row in rows} == {"router:weighted"}
+    # Nothing was left out and the router did not decline, so the plan record costs
+    # no payload on an ordinary routed row.
+    assert {row["routing_plan"] for row in rows} == {None}
 
 
 def test_a_provider_failure_stays_inside_the_balanced_pool(client: TestClient) -> None:
@@ -245,6 +248,9 @@ def test_otari_router_off_serves_the_default_target(client: TestClient) -> None:
         assert calls[0] == HEAVY
     rows = [row for row in _usage_rows(client) if row["status"] != "absorbed"]
     assert {row["selection_reason"] for row in rows} == {"default"}
+    # Opting out and having no router at all both serve the default target, so the
+    # row has to carry the decline to tell them apart.
+    assert {row["routing_plan"]["declined"] for row in rows} == {"caller sent Otari-Router: off"}
 
 
 def test_the_split_never_dispatches_a_candidate_the_key_forbids(client: TestClient) -> None:
@@ -260,6 +266,27 @@ def test_the_split_never_dispatches_a_candidate_the_key_forbids(client: TestClie
         served, calls = _chat(client, "balanced", headers={API_KEY_HEADER: f"Bearer {key}"})
         assert served.status_code == 200, served.text
         assert calls[0] == LIGHT
+
+    # The refused candidate is filtered out before the router ranks, so the
+    # compiler never sees it. The row still has to say the split it ran is not the
+    # split the policy declares, or an operator has no way to find this.
+    rows = _usage_rows(client)
+    assert rows
+    for row in rows:
+        # The pool's heavier candidate and the `on_failure` backup are both refused,
+        # and the two lists are merged rather than one hiding the other.
+        assert row["routing_plan"]["dropped"] == [
+            {
+                "selector": HEAVY,
+                "reason": "not_allowed",
+                "detail": "is not in allowed_models for this caller",
+            },
+            {
+                "selector": BACKUP,
+                "reason": "not_allowed",
+                "detail": "is not in allowed_models for this caller",
+            },
+        ]
 
 
 # -- the management surfaces ------------------------------------------------

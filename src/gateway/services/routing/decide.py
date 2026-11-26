@@ -9,7 +9,9 @@ The candidate pool is filtered *before* the backend sees it: a router that picke
 a model the caller's allow-list forbids would have its choice dropped by the
 compiler and silently serve something else, which reads as the router
 misbehaving. Filtering first means the backend only ever ranks models this
-request could actually use.
+request could actually use. What the filter refuses is reported back with the
+ordering (see :func:`filter_router_pool`), since those candidates never reach the
+compiler and would otherwise leave no trace in the plan.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from gateway.services.routing.backends import (
     known_backends,
     owes_missing_backend_warning,
 )
-from gateway.services.routing.compiler import RouterOrdering
+from gateway.services.routing.compiler import DroppedCandidate, RouterOrdering
 from gateway.services.routing.weighted import declared_shares, describe_split, explain_ordering
 
 __all__ = [
@@ -43,6 +45,7 @@ __all__ = [
     "WeightedShare",
     "decide_ordering",
     "explain_router_ordering",
+    "filter_router_pool",
     "usable_candidates",
 ]
 
@@ -115,12 +118,12 @@ async def decide_ordering(
                 ", ".join(known_backends()),
             )
         return None
-    pool = usable_candidates(
+    pool, dropped = filter_router_pool(
         config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
     )
     default_model = spec.default_target
     if not pool:
-        return RouterOrdering([], rationale="no candidate in the pool is usable by this caller")
+        return RouterOrdering([], rationale="no candidate in the pool is usable by this caller", dropped=dropped)
 
     context = RoutingContext(
         user_id=user_id or "",
@@ -144,7 +147,7 @@ async def decide_ordering(
             type(exc).__name__,
             spec.default_target,
         )
-        return RouterOrdering([], rationale=f"router error ({type(exc).__name__})")
+        return RouterOrdering([], rationale=f"router error ({type(exc).__name__})", dropped=dropped)
     # One line per routed request, at info, unless the backend's decision is
     # reconstructable (the weighted split is written in the policy, and the usage
     # row names what served): at load balancer volume this line would be the log.
@@ -161,6 +164,7 @@ async def decide_ordering(
         selectors=list(decision.ordered_models),
         confidence=decision.confidence,
         rationale=decision.rationale,
+        dropped=dropped,
     )
 
 
@@ -252,6 +256,50 @@ def explain_router_ordering(
     return ordering, displayed
 
 
+def filter_router_pool(
+    config: GatewayConfig,
+    candidates: list[str],
+    *,
+    user_id: str | None,
+    allowlist: list[str] | None,
+    workspace_id: uuid.UUID | None = None,
+) -> tuple[list[str], list[DroppedCandidate]]:
+    """The candidates this caller may actually be served, and the ones left out of the pool.
+
+    Selectors are kept in the form the policy wrote them (the compiler resolves
+    them again for dispatch); resolution here is only to test the allow-list,
+    which matches on the canonical ``instance:model``.
+
+    The two refusals here are recorded as :class:`DroppedCandidate` values rather
+    than skipped silently, because they happen *before* the compiler sees the pool:
+    a candidate refused here never enters the plan, so the compiler cannot report
+    it, and a router that then ranks the rest would look like it ignored a
+    candidate the policy declared.
+
+    ``workspace_id`` is passed for the same reason the compiler takes one: a
+    candidate selector can itself name an alias, so resolving it in a workspace
+    other than the one dispatch uses would filter the pool against a canonical
+    key the request never sees.
+
+    ``explain`` uses :func:`usable_candidates` instead: it shows the *declared*
+    pool so the compiler can name every filtered candidate in ``dropped``, which
+    is most of what ``explain`` is for.
+    """
+    usable: list[str] = []
+    dropped: list[DroppedCandidate] = []
+    for selector in candidates:
+        try:
+            resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
+        except (ValueError, AnyLLMError) as exc:
+            dropped.append(DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})"))
+            continue
+        if not is_model_allowed(allowlist, f"{resolved.instance}:{resolved.model}"):
+            dropped.append(DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller"))
+            continue
+        usable.append(selector)
+    return usable, dropped
+
+
 def usable_candidates(
     config: GatewayConfig,
     candidates: list[str],
@@ -262,28 +310,9 @@ def usable_candidates(
 ) -> list[str]:
     """The candidates this caller may actually be served, in declared order.
 
-    Selectors are kept in the form the policy wrote them (the compiler resolves
-    them again for dispatch); resolution here is only to test the allow-list,
-    which matches on the canonical ``instance:model``.
-
-    ``workspace_id`` is passed for the same reason the compiler takes one: a
-    candidate selector can itself name an alias, so resolving it in a workspace
-    other than the one dispatch uses would filter the pool against a canonical
-    key the request never sees.
-
     Public because ``explain`` needs the same pool: a weighted policy's shares are
     normalized over what survived filtering, so computing them from the declared
     pool would report a split that is not the one running.
     """
-    usable: list[str] = []
-    for selector in candidates:
-        try:
-            resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
-        except (ValueError, AnyLLMError):
-            # The compiler records this as a dropped candidate with a reason; here
-            # it just means the router should not rank it.
-            continue
-        if not is_model_allowed(allowlist, f"{resolved.instance}:{resolved.model}"):
-            continue
-        usable.append(selector)
+    usable, _ = filter_router_pool(config, candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
     return usable

@@ -305,11 +305,16 @@ async def test_the_pool_is_filtered_before_the_backend_sees_it(config: GatewayCo
     assert recorder.seen.candidate_pool == ["openai:gpt-5-mini", "openai:gpt-5"]
     assert ordering is not None
     assert "anthropic:claude-haiku-4-5" not in ordering.selectors
+    # Reported with the ordering, because a candidate refused here never reaches
+    # the compiler and would otherwise leave no trace in the plan.
+    assert [(item.selector, item.reason) for item in ordering.dropped] == [
+        ("anthropic:claude-haiku-4-5", "not_allowed")
+    ]
 
 
 @pytest.mark.asyncio
 async def test_an_unresolvable_candidate_is_left_out(config: GatewayConfig, recorder: _Recorder) -> None:
-    await decide_ordering(
+    ordering = await decide_ordering(
         config,
         _spec("openai:gpt-5-mini", "not-a-provider:whatever"),
         policy_name="smart",
@@ -319,6 +324,8 @@ async def test_an_unresolvable_candidate_is_left_out(config: GatewayConfig, reco
     )
     assert recorder.seen is not None
     assert "not-a-provider:whatever" not in recorder.seen.candidate_pool
+    assert ordering is not None
+    assert [(item.selector, item.reason) for item in ordering.dropped] == [("not-a-provider:whatever", "unresolvable")]
 
 
 @pytest.mark.asyncio
@@ -334,6 +341,10 @@ async def test_nothing_usable_declines_rather_than_asking(config: GatewayConfig,
     assert ordering is not None
     assert ordering.selectors == []
     assert recorder.seen is None
+    # A decline keeps the reason it has nothing to rank, which is what the usage
+    # row records as why the policy's default target served.
+    assert ordering.rationale == "no candidate in the pool is usable by this caller"
+    assert {item.reason for item in ordering.dropped} == {"not_allowed"}
 
 
 @pytest.mark.asyncio

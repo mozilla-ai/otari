@@ -228,7 +228,7 @@ from gateway.rate_limit import (
     rate_limit_headers,
 )
 from gateway.schemas.inference import SettledCost
-from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
+from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE, DroppedCandidateRecord, RoutingPlanRecord
 from gateway.services.api_keys import names_end_user, resolve_user_id
 from gateway.services.budgets import (
     ZERO,
@@ -1924,6 +1924,8 @@ class RoutingAttribution:
     attempt_count: int
     request_group_id: str
     absorbed: bool = False
+    routing_plan: dict[str, Any] | None = None
+    """Why the plan looked the way it did, as stored on the row; see :func:`_routing_plan_record`."""
 
 
 def _row_status(*, error: str | None, attribution: RoutingAttribution | None, incomplete: bool = False) -> str:
@@ -4976,6 +4978,7 @@ async def record_usage(
         attempt_position=attribution.position if attribution else None,
         attempt_count=attribution.attempt_count if attribution else None,
         request_group_id=attribution.request_group_id if attribution else request_id,
+        routing_plan=attribution.routing_plan if attribution else None,
         tags=tags,
         deployment_paid=deployment_paid,
         source_label=source_label,
@@ -6940,6 +6943,33 @@ def _sandbox_error(
     return adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API)
 
 
+def _routing_plan_record(plan: CompiledPlan | None) -> dict[str, Any] | None:
+    """Why ``plan`` looked the way it did, or None when it has nothing to say.
+
+    Stored on every row the request writes, so a client holding one attempt still
+    knows what the plan left out. Null for the common case (nothing dropped, no
+    decline), which keeps the payload of an ordinary routed row unchanged.
+
+    The reasons are not reconstructable from the policy after the fact: they depend
+    on the caller's allow-list, its country, and what its providers resolve to.
+    """
+    if plan is None:
+        return None
+    ordering = plan.router_ordering
+    # An empty ordering is a decline, and its rationale is the only record of why
+    # the policy's default target served instead.
+    declined = ordering.rationale if ordering is not None and not ordering.selectors else None
+    if not plan.dropped and declined is None:
+        return None
+    return RoutingPlanRecord(
+        declined=declined,
+        dropped=[
+            DroppedCandidateRecord(selector=item.selector, reason=item.reason, detail=item.detail)
+            for item in plan.dropped
+        ],
+    ).model_dump(exclude_none=True)
+
+
 def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = False) -> RoutingAttribution | None:
     """Attribution for a row produced by ``attempt``, or None when unrouted."""
     if ctx.plan is None or ctx.request_group_id is None:
@@ -6951,6 +6981,7 @@ def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = 
         attempt_count=len(ctx.plan.attempts),
         request_group_id=ctx.request_group_id,
         absorbed=absorbed,
+        routing_plan=_routing_plan_record(ctx.plan),
     )
 
 

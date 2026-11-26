@@ -380,6 +380,9 @@ def test_list_usage_response_shape(
         "attempt_position": None,
         "attempt_count": None,
         "request_group_id": None,
+        # Null because the request was not routed through a policy, so there is no
+        # plan to explain.
+        "routing_plan": None,
         # Null because no stream was cut.
         "stream_cut_by": None,
     }

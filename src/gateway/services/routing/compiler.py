@@ -96,6 +96,17 @@ def _country_fragment(closed: str) -> str:
 
 
 @dataclass(frozen=True)
+class DroppedCandidate:
+    """A candidate that did not make it into the plan."""
+
+    selector: str
+    reason: str
+    """Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``, ``duplicate``, ``over_cap``."""
+    detail: str
+    """Human-readable, for an operator."""
+
+
+@dataclass(frozen=True)
 class RouterOrdering:
     """What a router backend decided for one request.
 
@@ -107,22 +118,17 @@ class RouterOrdering:
     ``selectors`` is the pool in the router's preferred order, best first. Empty
     means the router declined, which is a normal outcome (no usable candidate, no
     weights) and compiles to the policy's default target.
+
+    ``dropped`` is the part of the policy's pool the router never saw: the caller's
+    allow-list or a selector that no longer resolves. Those are left out before
+    ranking, so they are not in ``selectors`` and would otherwise be the only
+    candidates a compiled-down plan could not account for.
     """
 
     selectors: list[str]
     confidence: float = 0.0
     rationale: str = ""
-
-
-@dataclass(frozen=True)
-class DroppedCandidate:
-    """A candidate that did not make it into the plan."""
-
-    selector: str
-    reason: str
-    """Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``, ``duplicate``, ``over_cap``."""
-    detail: str
-    """Human-readable, for an operator."""
+    dropped: list[DroppedCandidate] = field(default_factory=list)
 
 
 # A dropped candidate's detail reads after its selector ("'openai:x' is ..."),
@@ -148,12 +154,13 @@ class CompiledPlan:
     guardrails: list[GuardrailConfig] = field(default_factory=list)
     dropped: list[DroppedCandidate] = field(default_factory=list)
     router_ordering: RouterOrdering | None = None
-    """The router decision this plan used, when a router entry supplied one.
+    """The router decision this plan was built from, when a router was consulted.
 
-    Kept on the plan so the rationale and confidence can be logged and shown in
-    the activity log. A policy with a router that declined has ``None`` here and a
-    ``default`` selection reason, which is how "the router chose the strong model"
-    and "the router did not run" stay distinguishable after the fact.
+    Kept so the decision can reach the usage row. A non-empty ordering is the
+    ranking the plan used, and an empty one is a decline: the router was asked and
+    had nothing to say, and its ``rationale`` is the only record of why the
+    policy's default target served. ``None`` means no router was asked, or one
+    answered and a ``when`` entry ahead of it discarded the answer.
     """
 
     automatic: AutomaticSelection | None = None
@@ -335,10 +342,18 @@ def compile_policy(
         workspace_id=workspace_id,
         country_gate=country_gate,
     )
+    # A router's pool is filtered before it ranks (so it never picks something the
+    # caller may not use), which means those candidates never reach `ordered` and
+    # their reasons would otherwise be lost. Merged in only when the plan keeps the
+    # ordering: a `when` entry that won discarded the whole ranking.
+    declined = router_ordering is not None and not router_ordering.selectors
+    kept_ordering = router_ordering if routed or declined else None
 
     if not attempts:
         raise NoEligibleCandidatesError(policy_name, dropped)
 
+    # Only the candidates in `ordered` are counted and logged here: the router's
+    # pool drops are added below, for the row, and were never part of that list.
     if dropped:
         logger.warning(
             "Routing policy '%s' compiled to %d of %d candidates; dropped %s",
@@ -348,10 +363,13 @@ def compile_policy(
             "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
         )
 
+    if kept_ordering is not None:
+        dropped = _merged_dropped(kept_ordering.dropped, dropped)
+
     return CompiledPlan(
         policy_name=policy_name,
         attempts=attempts,
-        router_ordering=router_ordering if routed else None,
+        router_ordering=kept_ordering,
         guardrails=[
             GuardrailConfig(
                 profile=guardrail.profile,
@@ -412,6 +430,24 @@ def compile_catalog_plan(
     # The first offering that survives the filters is the catalog's choice, and the rest follow it.
     attempts = [attempts[0], *(replace(attempt, selection_reason="on_failure") for attempt in attempts[1:])]
     return CompiledPlan(policy_name=model_selector, attempts=attempts, dropped=dropped)
+
+
+def _merged_dropped(first: list[DroppedCandidate], second: list[DroppedCandidate]) -> list[DroppedCandidate]:
+    """Both lists, once each, in the order they were found.
+
+    A selector can be left out twice: the router's pool and the ``on_failure`` chain
+    are separate lists, so one the allow-list refuses appears in both. The row names
+    it once, with the reason it was refused for.
+    """
+    seen: set[tuple[str, str]] = set()
+    merged: list[DroppedCandidate] = []
+    for item in (*first, *second):
+        key = (item.selector, item.reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
 
 
 def _resolve_candidates(

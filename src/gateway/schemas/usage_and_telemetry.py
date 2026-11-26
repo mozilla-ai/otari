@@ -24,7 +24,7 @@ way out.
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, TypedDict, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from gateway.core.sql import utc_iso
 from gateway.core.usage import output_tokens_per_second
@@ -193,6 +193,50 @@ SummaryDimension = Literal[
 ]
 
 
+class DroppedCandidateRecord(BaseModel):
+    """One candidate a request's plan left out before dispatch, and why."""
+
+    selector: str
+    # Machine-readable: ``unresolvable``, ``not_allowed``, ``country_not_supported``,
+    # ``duplicate``, ``over_cap``. An open set, since a new filter adds a value.
+    reason: str
+    # Human-readable, and phrased to read after the selector.
+    detail: str
+
+
+class RoutingPlanRecord(BaseModel):
+    """Why a request's plan looked the way it did, as its row recorded it.
+
+    Written only when there is something to say, so a routed request whose plan
+    dropped nothing and whose router did not decline carries null instead.
+    """
+
+    declined: str | None = Field(
+        default=None,
+        description="The router's own reason for not choosing, when it was asked and declined.",
+    )
+    dropped: list[DroppedCandidateRecord] = Field(
+        default_factory=list,
+        description="The candidates that never became attempts, each with the reason it was left out.",
+    )
+
+
+def read_routing_plan(stored: dict[str, Any] | None) -> RoutingPlanRecord | None:
+    """The stored plan, or None when there is none or it cannot be read.
+
+    Only this gateway writes the column, so an unreadable value means a hand-edited
+    row or one left by a future shape. Dropping it keeps that row on the page
+    instead of 500ing the whole read, which is the rule the other stored shapes here
+    follow.
+    """
+    if not stored:
+        return None
+    try:
+        return RoutingPlanRecord.model_validate(stored)
+    except ValidationError:
+        return None
+
+
 class UsageEntry(BaseModel):
     """A single usage log entry."""
 
@@ -268,6 +312,9 @@ class UsageEntry(BaseModel):
     attempt_position: int | None = None
     attempt_count: int | None = None
     request_group_id: str | None = None
+    # Why the plan looked the way it did. Null on an unrouted row, and on a routed
+    # one whose plan dropped nothing, which is the common case.
+    routing_plan: RoutingPlanRecord | None = None
     # Who ended a stream before it completed, "provider" or "client"; null for any other row.
     stream_cut_by: StreamCutBy | None = None
 
@@ -322,6 +369,7 @@ class UsageEntry(BaseModel):
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
             request_group_id=log.request_group_id,
+            routing_plan=read_routing_plan(log.routing_plan),
             stream_cut_by=log.stream_cut_by,
         )
 
