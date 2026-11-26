@@ -366,6 +366,7 @@ def test_list_usage_response_shape(
         "source_label": None,
         "tags": None,
         "counts_toward_budget": True,
+        "deployment_paid": False,
         # False on both counts here: this gateway served the row, and it counts toward
         # a budget. The dashboard reads this rather than deriving it, so the checkbox
         # it offers and the rows a bulk delete can reach are one answer.
@@ -373,6 +374,8 @@ def test_list_usage_response_shape(
         # Routing attribution: null for a request that named a plain model, which
         # is what this row is.
         "policy_name": None,
+        # Null because the row was written without the name the caller sent.
+        "requested_model": None,
         "selection_reason": None,
         "attempt_position": None,
         "attempt_count": None,

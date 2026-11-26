@@ -11,6 +11,7 @@ owns the rules.
 import uuid
 
 import pytest
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -44,7 +45,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
+from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
 from .tenancy_helpers import (
@@ -109,6 +110,10 @@ async def _workspace(
             role="owner",
         )
     return workspace
+
+
+def _access(db: AsyncSession) -> WorkspaceAccess:
+    return WorkspaceAccess(db, OrganizationService(db, membership_listener=None))
 
 
 # =============================================================================
@@ -883,6 +888,63 @@ async def test_a_superuser_with_only_a_member_role_gets_the_members_workspace_sc
 
     assert not scope.sees_every_workspace
     assert scope.workspace_ids == [workspace.id]
+
+
+async def test_an_owner_may_read_every_workspace_in_their_organization(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    first = await _workspace(async_db, organization, name="First")
+    second = await _workspace(async_db, organization, name="Second")
+    elsewhere = await _workspace(async_db, await _organization(async_db, slug="other"), name="Elsewhere")
+
+    workspaces = await _access(async_db).readable_workspaces(user=owner, workspace_id=None)
+
+    assert isinstance(workspaces, Select)
+    covered = set((await async_db.execute(workspaces)).scalars())
+    assert {first.id, second.id} <= covered
+    assert elsewhere.id not in covered
+
+
+async def test_a_member_may_read_the_workspaces_they_belong_to(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    theirs = await _workspace(async_db, organization, name="Theirs", owner=member)
+    await _workspace(async_db, organization, name="Not theirs")
+
+    workspaces = await _access(async_db).readable_workspaces(user=member, workspace_id=None)
+
+    assert workspaces == [theirs.id]
+
+
+async def test_a_member_of_no_workspace_may_read_none_rather_than_being_refused(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    await _workspace(async_db, organization, name="Not theirs")
+
+    workspaces = await _access(async_db).readable_workspaces(user=member, workspace_id=None)
+
+    assert workspaces == []
+
+
+async def test_a_readable_workspace_narrows_what_may_be_read(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Narrowed")
+
+    workspaces = await _access(async_db).readable_workspaces(user=owner, workspace_id=workspace.id)
+
+    assert workspaces == [workspace.id]
+
+
+async def test_a_workspace_the_caller_may_not_read_is_not_found(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    not_theirs = await _workspace(async_db, organization, name="Not theirs")
+    other_organization = await _workspace(async_db, await _organization(async_db, slug="other"), name="Elsewhere")
+
+    for workspace in (not_theirs, other_organization):
+        with pytest.raises(WorkspaceNotFoundError):
+            await _access(async_db).readable_workspaces(user=member, workspace_id=workspace.id)
 
 
 # =============================================================================

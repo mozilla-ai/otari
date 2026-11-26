@@ -1,0 +1,8 @@
+{
+  "status": 200,
+  "body": {
+    "query": "python release",
+    "mode": "pro",
+    "results": []
+  }
+}

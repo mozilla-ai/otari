@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import any_fetch
 import any_search
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
@@ -917,6 +918,39 @@ def test_a_fetch_key_without_the_key_its_provider_needs_is_refused(monkeypatch: 
 
     with pytest.raises(WebSearchCredentialRefusedError):
         resolve_fetch(GatewayConfig(), _policy(fetch_credential=credential), requested=None, for_search=None)
+
+
+def _with_an_optional_key(monkeypatch: pytest.MonkeyPatch, provider: type[Any]) -> None:
+    """Make a provider at a public address of its own take a key without requiring one."""
+    monkeypatch.setattr(provider, "METADATA", provider.METADATA.model_copy(update={"requires_api_key": False}))
+
+
+@pytest.mark.parametrize(("provider", "needs_key"), [("exa", True), ("searxng", False), ("fake", False)])
+def test_an_organization_key_brings_an_api_key_or_its_own_server(provider: str, needs_key: bool) -> None:
+    assert _resolve.credential_needs_api_key(any_search.AnySearch.get_provider_metadata(provider)) is needs_key
+
+
+def test_a_provider_with_a_default_address_takes_the_account_whatever_it_requires() -> None:
+    """A required address with a default runs on the default, so the key still brings the account."""
+    metadata = any_search.AnySearch.get_provider_metadata("brave")
+    keyless = metadata.model_copy(update={"requires_api_key": False, "requires_api_base": True})
+    assert _resolve.credential_needs_api_key(keyless) is True
+    assert _resolve.credential_needs_api_key(keyless.model_copy(update={"default_api_base": ""})) is False
+
+
+def test_a_key_on_a_public_address_needs_an_api_key_its_provider_does_not_require(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never run on the deployment's address, under the allowance the provider gives it."""
+    _with_an_optional_key(monkeypatch, any_search.AnySearch.get_provider_class("brave"))
+    _with_an_optional_key(monkeypatch, any_fetch.AnyFetch.get_provider_class("exa"))
+    search = WebSearchCredential(provider="brave", source=_ORG)
+    fetch = WebFetchCredential(provider="exa", source=_ORG)
+
+    with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
+        resolve_search(GatewayConfig(), _policy(credential=search), requested=None, request_options=None)
+    with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
+        resolve_fetch(GatewayConfig(), _policy(fetch_credential=fetch), requested=None, for_search=None)
 
 
 def test_fetch_options_layer_the_instances_and_take_out_the_count(caplog: pytest.LogCaptureFixture) -> None:

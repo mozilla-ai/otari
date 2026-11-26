@@ -113,7 +113,8 @@ providers:
 #   - "https://otari.example.com"
 
 # File and image normalization. See docs/files.md.
-# files_enabled: true
+# Serves the /api/v1/files endpoints; the sweep below runs either way.
+# files_api_enabled: true
 # files_local_dir: "./otari-files"
 # Any fsspec filesystem instead of a local directory or boto3 S3:
 # files_backend: fsspec

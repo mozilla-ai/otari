@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
+from gateway.core.error_codes import ERROR_CODE_HEADER, REQUEST_MCP_SERVERS_DISALLOWED
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
@@ -1185,6 +1186,8 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert switched.json()["request_mcp_servers_allowed"] is False
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
 
 
 def test_a_new_workspace_refuses_servers_a_request_names_until_turned_on(
@@ -1223,6 +1226,8 @@ def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
 
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
     provider.assert_not_called()
 
 
@@ -1252,6 +1257,8 @@ def test_the_switch_also_refuses_mcp_servers_handed_to_gemini(
 
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
     provider.assert_not_called()
 
 

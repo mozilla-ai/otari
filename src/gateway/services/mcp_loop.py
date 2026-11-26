@@ -284,6 +284,7 @@ async def _run_owned_calls(
             yield False, rendering.started(call)
         elif server is not None:
             yield False, [mcp_entry(call, server, "in_progress")]
+        raised = False
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
@@ -297,12 +298,13 @@ async def _run_owned_calls(
             detail = tool_failure_detail(owner, name)
             log_tool_failure(name, detail, exc)
             text = f"[tool error] {detail}"
+            raised = True
         else:
             if capped and budget is not None:
                 budget.record(name, text)
         results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
         if rendering is not None:
-            yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
+            yield True, rendering.ran(replace(call, failed=is_tool_error(text), raised=raised), owner)
         elif server is not None:
             yield True, [mcp_entry(call, server, "failed" if is_tool_error(text) else "completed", text)]
 
@@ -835,7 +837,7 @@ _CHAT_STRATEGY = _ChatToolLoopStrategy()
 def _strategy_for(
     budget: ToolUseBudget | None, native_tools: frozenset[str] = frozenset(), *, emit_activity: bool = False
 ) -> _ChatToolLoopStrategy:
-    """The shared strategy, or a per-request one when the caller capped searches, is owed a report or wants activity.
+    """The shared strategy, or a per-request one when the request has a budget, is owed a report or wants activity.
 
     Only such a request has anything per-request to hold, so every other request
     keeps reusing the single module-level instance.
@@ -889,6 +891,7 @@ async def mcp_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for chunk in inner:
@@ -924,4 +927,5 @@ async def mcp_tool_loop(
         on_first_response=on_first_response,
         check_first_response=require_choices,
         round_gate=round_gate,
+        use_budget=use_budget,
     )

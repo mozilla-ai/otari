@@ -89,6 +89,15 @@ class BootstrapHandoverRefusedError(TenancyValidationError):
     """
 
 
+class MasterKeyRotationRefusedError(TenancyValidationError):
+    """A session-authenticated master-key rotation that did not prove the bootstrap operator's password.
+
+    A 400 rather than a 403 for the reason ``BootstrapHandoverRefusedError`` gives: the
+    dashboard's ``apiFetch`` ends the session on a 403, and the caller is an operator in good
+    standing who has not proved the password this action requires.
+    """
+
+
 class EmptyDeploymentUserUpdateError(TenancyValidationError):
     """A change request that names neither flag.
 
@@ -787,6 +796,7 @@ __all__ = [
     "BlockedEmailEntryNotFoundError",
     "BlockedEmailError",
     "BootstrapHandoverRefusedError",
+    "MasterKeyRotationRefusedError",
     "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",

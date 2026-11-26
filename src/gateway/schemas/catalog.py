@@ -4,8 +4,9 @@ import uuid
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from gateway.core.settings.inference import data_locations
 from gateway.models.pricing import PriceSource
 from gateway.types.model_type import ModelType
 from gateway.types.price_unit import PriceUnit
@@ -64,6 +65,15 @@ class CatalogModelSummary(BaseModel):
         default_factory=list,
         description=(
             "The provider instances offering it that are declared to keep no prompt or completion data, sorted."
+        ),
+    )
+    data_locations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 "
+            "alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may "
+            "serve it from, so a provider with several regions gives several. Providers that declare nothing, and "
+            "every `providers:` instance and organization key, add none."
         ),
     )
     selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
@@ -156,6 +166,15 @@ class CatalogQuery(BaseModel):
         default=False,
         description="Only models at least one provider declared to keep no prompt or completion data offers.",
     )
+    data_location: list[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description=(
+            "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country "
+            "codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches "
+            "each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none."
+        ),
+    )
     released_within_days: int = Field(
         default=0,
         ge=0,
@@ -168,6 +187,11 @@ class CatalogQuery(BaseModel):
         default=False,
         description="Include the filter choices drawn from the whole authorized catalog.",
     )
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: list[str]) -> list[str]:
+        return data_locations(value)
 
 
 class CatalogVendorFacet(BaseModel):
@@ -182,6 +206,10 @@ class CatalogFacets(BaseModel):
     providers: list[str] = Field(description="Every provider instance offering an authorized model, sorted.")
     vendors: list[CatalogVendorFacet]
     types: list[ModelType] = Field(description="Every kind an authorized model has, sorted.")
+    data_locations: list[str] = Field(
+        default_factory=list,
+        description="Every data location a hosted provider declares for an authorized model, as listed, sorted.",
+    )
 
 
 class CatalogPage(BaseModel):

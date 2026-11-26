@@ -23,7 +23,7 @@ test.describe("dashboard addresses", () => {
   }) => {
     await login(page)
     await page.goto("/budgets")
-    await expect(pageHeading(page, "Budgets")).toBeVisible()
+    await expect(pageHeading(page, "Spend & budgets")).toBeVisible()
     // A page load: the script runs ahead of the bundle.
     await page.goto("/#/routing")
     await expect(page).toHaveURL(/:\d+\/routing$/)

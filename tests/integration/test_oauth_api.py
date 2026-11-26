@@ -1089,6 +1089,33 @@ def sign_up(client: TestClient, *, email: str, password: str) -> None:
     assert locked.status_code == 403, locked.text
 
 
+def test_a_provider_sign_in_keeps_the_date_an_address_was_first_verified(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """The first verification is when the address became usable, so proving it later does not move that date."""
+    monkeypatch.setattr(test_config, "open_signup", False)
+    add_member(client, master_key_header, email="ada@example.com")
+    first_verified_at = datetime.now(UTC) - timedelta(days=30)
+    identity = _identity(db_session, "ada@example.com")
+    identity.email_verified_at = first_verified_at
+    identity.email_proven_at = None
+    db_session.add(identity)
+    db_session.commit()
+    stub_exchange(monkeypatch)
+
+    provider_sign_in = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert provider_sign_in.status_code == 200, provider_sign_in.text
+    proved = _identity(db_session, "ada@example.com")
+    assert proved.email_verified_at == first_verified_at
+    assert proved.email_proven_at is not None
+
+
 @pytest.mark.parametrize("open_signup", [True, False], ids=["open-signup", "admin-added"])
 def test_a_provider_sign_in_does_not_unlock_a_password_set_before_it(
     client: TestClient,
@@ -1155,7 +1182,7 @@ def test_a_password_on_an_already_verified_address_survives_linking_a_provider(
     assert password_sign_in.status_code == 200, password_sign_in.text
 
 
-def test_a_linked_sign_in_proves_an_address_an_operator_link_left_vouched(
+def test_a_linked_sign_in_proves_an_address_an_operator_link_left_unproved(
     client: TestClient,
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
@@ -1192,7 +1219,7 @@ def test_a_linked_sign_in_proves_an_address_an_operator_link_left_vouched(
         f"{API_ROOT}/auth/password/reset/confirm", json={"token": shared_token, "new_password": UNPROVEN_PASSWORD}
     )
     assert redeemed.status_code == 204, redeemed.text
-    vouched_cookie = _signed_in_cookie(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    unproved_cookie = _signed_in_cookie(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
     db_session.expire_all()
     _give_a_passkey_and_a_reset_link(db_session, _identity(db_session, "ada@example.com"))
 
@@ -1201,7 +1228,7 @@ def test_a_linked_sign_in_proves_an_address_an_operator_link_left_vouched(
     assert signed_in.json()["password_removed"] is True
     client.cookies.clear()
 
-    client.cookies.set(SESSION_COOKIE_NAME, vouched_cookie)
+    client.cookies.set(SESSION_COOKIE_NAME, unproved_cookie)
     assert client.get(f"{API_ROOT}/organizations/me").status_code == 401
     client.cookies.clear()
     password_sign_in = client.post(
@@ -1210,7 +1237,7 @@ def test_a_linked_sign_in_proves_an_address_an_operator_link_left_vouched(
     assert password_sign_in.status_code == 401
     db_session.expire_all()
     after = _identity(db_session, "ada@example.com")
-    assert after.email_vouched_at is None
+    assert after.email_proven_at is not None
     assert after.hashed_password is None
     assert after.password_reset_token_hash is None
     assert _passkeys(db_session, after) == []
@@ -1519,7 +1546,7 @@ def _passkeys(db_session: Session, identity: User) -> list[WebAuthnCredential]:
     return list(db_session.execute(statement).scalars())
 
 
-def test_a_provider_sign_in_ends_the_access_a_vouched_password_opened(
+def test_a_provider_sign_in_ends_the_access_an_unproved_password_opened(
     client: TestClient,
     master_key_header: dict[str, str],
     oauth_configured: None,
@@ -1532,7 +1559,7 @@ def test_a_provider_sign_in_ends_the_access_a_vouched_password_opened(
     token = invitation["accept_link"].split("token=")[1]
     accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": UNPROVEN_PASSWORD})
     assert accepted.status_code == 200, accepted.text
-    vouched_cookie = _signed_in_cookie(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    unproved_cookie = _signed_in_cookie(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
     identity = _identity(db_session, "ada@example.com")
     _give_a_passkey_and_a_reset_link(db_session, identity)
     stub_exchange(monkeypatch)
@@ -1543,7 +1570,7 @@ def test_a_provider_sign_in_ends_the_access_a_vouched_password_opened(
     assert signed_in.json()["password_removed"] is True
     client.cookies.clear()
 
-    client.cookies.set(SESSION_COOKIE_NAME, vouched_cookie)
+    client.cookies.set(SESSION_COOKIE_NAME, unproved_cookie)
     assert client.get(f"{API_ROOT}/organizations/me").status_code == 401
     assert _passkeys(db_session, identity) == []
     assert _identity(db_session, "ada@example.com").password_reset_token_hash is None

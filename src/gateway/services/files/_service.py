@@ -411,6 +411,14 @@ class FileService:
             filename=filename,
         )
 
+    async def has_reclaimable(self) -> bool:
+        """Whether any file or provider copy row is waiting for the sweep to give it back."""
+        now = datetime.now(UTC)
+        pending_before = now - _PENDING_GRACE
+        async with self._uow:
+            files = await self._files.reclaimable(batch_size=1, pending_before=pending_before, now=now)
+            return bool(files) or await self._copies.has_removable(pending_before=pending_before, expired_before=now)
+
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired, revoked and abandoned bytes between short database transactions."""
         now = datetime.now(UTC)

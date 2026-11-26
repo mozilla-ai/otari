@@ -26,6 +26,7 @@ import {
 } from "@/shared/api/organizations"
 import { useWorkspaces } from "@/shared/api/workspaces"
 import { parseAddresses } from "@/shared/helpers/addresses"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -46,7 +47,7 @@ export function InvitePeopleDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const invite = useBulkInviteOrganizationMembers()
-  const { mail_ready } = useDeployment()
+  const { mail } = useDeployment()
   const context = useOrganizationContext().data
   const organization = context?.organization.name
   const roles = grantableRoleOptions(context?.role)
@@ -178,9 +179,9 @@ export function InvitePeopleDialog({
       }}
       title="Invite people"
       description={
-        mail_ready
+        mailDelivers(mail)
           ? `They get an email with an invitation link to join ${organization ?? "the organization"}.`
-          : "This deployment sends no email, so you get a link to share with each of them."
+          : "Nothing this deployment emails reaches an inbox, so you get a link to share with each of them."
       }
       submitLabel={inviteLabel(addresses.length)}
       isPending={invite.isPending}

@@ -1,5 +1,6 @@
 /**
- * The bootstrap as an older gateway can actually send it, and how to read one.
+ * The bootstrap as an older deployment can actually send it, how to read one,
+ * and the questions its mail state answers.
  *
  * `DeploymentBootstrap` describes the gateway this dashboard was built beside,
  * where every field is present. A gateway built before a field was added does
@@ -15,7 +16,7 @@
  * where the crash was seen leaves the same field unguarded three lines up.
  */
 
-import type { DeploymentBootstrap } from "@/client"
+import type { DeploymentBootstrap, MailReadiness } from "@/client"
 
 /**
  * A bootstrap as received rather than as promised: every field optional.
@@ -31,7 +32,15 @@ import type { DeploymentBootstrap } from "@/client"
  * so. Deriving it instead means a new field arrives here optional and
  * `normalizeBootstrap` stops compiling until it is given a default.
  */
-export type WireBootstrap = Partial<DeploymentBootstrap>
+export type WireBootstrap = Partial<DeploymentBootstrap> & {
+  /**
+   * The field `mail` replaced.
+   *
+   * NOTE: Listed by hand, so nothing fails when it stops being needed. Drop it,
+   * and the mapping below, once no supported deployment predates `mail`.
+   */
+  mail_ready?: boolean
+}
 
 /** Complete a received bootstrap, so nothing below reads an absent field. */
 export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
@@ -55,7 +64,17 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     // that has them.
     passkeys_enabled: wire.passkeys_enabled ?? true,
     passkeys_ready: wire.passkeys_ready ?? false,
-    mail_ready: wire.mail_ready ?? false,
+    // On, for the reason passkeys_enabled is: a gateway old enough to omit this
+    // had no way to turn organization SSO off, so reading absence as off would
+    // hide the option from a deployment that serves it.
+    organization_oidc_enabled: wire.organization_oidc_enabled ?? true,
+    // Not "sends_only", though that is the narrower reading of the retired
+    // flag. A deployment old enough to omit `mail` gated both questions on that
+    // one flag, so this is the mapping under which it behaves exactly as it did
+    // before `mail` existed. Reading it as the weaker state would tell everyone
+    // on a delivering deployment to go and ask for a link already in their
+    // inbox, which is a worse answer than the one being replaced.
+    mail: wire.mail ?? (wire.mail_ready === true ? "delivers" : "none"),
     feedback_enabled: wire.feedback_enabled ?? false,
     platform_connect: wire.platform_connect ?? false,
     federation_member_rules: wire.federation_member_rules ?? false,
@@ -64,4 +83,14 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     public_catalog: wire.public_catalog ?? false,
     open_signup: wire.open_signup ?? false,
   }
+}
+
+/** Whether a flow that only sends a message can run on this deployment. */
+export function mailCanSend(mail: MailReadiness): boolean {
+  return mail !== "none"
+}
+
+/** Whether a recipient's mailbox receives what this deployment sends. */
+export function mailDelivers(mail: MailReadiness): boolean {
+  return mail === "delivers"
 }

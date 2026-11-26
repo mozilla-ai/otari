@@ -79,6 +79,17 @@ const SEARCH_CATALOG: SearchProviderInfo[] = [
     tier: "production",
     options: [],
   },
+  // A provider at a public address of its own whose key is optional.
+  {
+    id: "optional-key",
+    kind: "search",
+    requires_api_key: false,
+    requires_api_base: false,
+    reports_cost: false,
+    default_api_base: "https://api.optional-key.example",
+    tier: "production",
+    options: [],
+  },
   // Listed with no tier, as the catalog lists a provider no library serves.
   {
     id: "legacy",
@@ -331,6 +342,37 @@ describe("OrganizationWebSearchKeysPage", () => {
       api_key: null,
       api_base: "https://searx.acme.example",
       options: null,
+    })
+  })
+
+  it("asks for an API key on a provider whose key is optional, since the key brings the organization's account", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi()
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search provider" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: /Provider/ }))
+    await user.click(screen.getByRole("option", { name: "optional-key" }))
+    await user.type(within(dialog).getByLabelText(/^Name/), "Own account")
+    const add = within(dialog).getByRole("button", {
+      name: "Add search provider",
+    })
+    expect(add).toBeDisabled()
+    expect(
+      within(dialog).getByText(
+        /This provider runs without a key, but a key here brings the organization's own account, so its calls never use the keyless allowance/,
+      ),
+    ).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(/API key/), "own-secret")
+    await user.click(add)
+
+    await waitFor(() => expect(writes(requests, "POST", KEYS)).toHaveLength(1))
+    expect(writes(requests, "POST", KEYS)[0].body).toMatchObject({
+      provider: "optional-key",
+      api_key: "own-secret",
     })
   })
 

@@ -4,6 +4,10 @@ A caller declaring a tool natively can bound how many calls one request makes
 (Anthropic's ``max_uses``). A gateway-run call is billed, so the cap is a spend
 control rather than a formatting detail: it applies in every wire format, and only
 the shape of the refusal differs between them.
+
+The deployment's ``web_search_max_calls`` bounds Search and Fetch together. Its
+backends refuse a call past it; the budget reads it only to tell the tool loop that
+neither tool can run again.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from gateway.services._tool_loop import ToolBackend
+    from gateway.services.tools._web_call_cap import WebToolCallCap
 
 # Refusal text the model sees, in the ``[tool error]`` idiom that already reads as
 # "ran, not billable".
@@ -33,8 +38,18 @@ class ToolUseBudget:
     because a request's rounds run one after another.
     """
 
-    def __init__(self, max_uses: Mapping[str, int]) -> None:
+    def __init__(
+        self,
+        max_uses: Mapping[str, int],
+        *,
+        call_cap: WebToolCallCap | None = None,
+        call_capped: frozenset[str] = frozenset(),
+    ) -> None:
         self._remaining = dict(max_uses)
+        self._call_cap = call_cap
+        # The request's own Search and Fetch, which ``call_cap`` bounds; an MCP tool of
+        # the same name, possible when the request runs only the other one, is not.
+        self._call_capped = call_capped
 
     def caps(self, pool: ToolBackend, name: str) -> bool:
         """Whether ``name`` on ``pool`` is a gateway-run call this budget bounds.
@@ -49,6 +64,16 @@ class ToolUseBudget:
     def exhausted(self, name: str) -> bool:
         """Whether the next call of ``name`` would exceed its cap."""
         return name in self._remaining and self._remaining[name] <= 0
+
+    def used_up(self, name: str) -> bool:
+        """Whether no further call of ``name`` can run this request, which the tool loop then stops offering.
+
+        Either its own cap is spent, or it is the request's own Search or Fetch and the
+        request has reached the ``web_search_max_calls`` they share.
+        """
+        if self.exhausted(name):
+            return True
+        return name in self._call_capped and self._call_cap is not None and self._call_cap.reached
 
     def record(self, name: str, result: str) -> None:
         """Charge ``result``'s call against ``name``'s cap unless it failed.

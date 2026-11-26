@@ -139,7 +139,7 @@ def test_an_account_the_port_could_not_resolve_is_refused_by_a_list_only() -> No
 
     assert closed_provider(_config(), gate, "openai") == "an account country that could not be read"
     assert closed_provider(_config(), gate, "anthropic") is None
-    assert gate.excludes(("US",)) and not gate.excludes(None)
+    assert gate.closed_to(("US",)) is not None and gate.closed_to(None) is None
 
 
 @pytest.mark.parametrize(
@@ -246,7 +246,7 @@ def test_the_lists_are_settable_as_json_in_the_environment(tmp_path: Path, monke
 def test_a_hosted_providers_own_list_excludes_the_countries_it_leaves_out(
     country: str | None, countries: tuple[str, ...] | None, excluded: bool
 ) -> None:
-    assert CountryGate(country).excludes(countries) is excluded
+    assert (CountryGate(country).closed_to(countries) is not None) is excluded
 
 
 @pytest.mark.parametrize(
@@ -257,7 +257,7 @@ def test_a_hosted_providers_own_list_excludes_the_countries_it_leaves_out(
 def test_a_hosted_providers_own_list_also_excludes_the_accounts_country(
     account_country: str | None, countries: tuple[str, ...] | None, excluded: bool
 ) -> None:
-    assert CountryGate("US", account_country=account_country).excludes(countries) is excluded
+    assert (CountryGate("US", account_country=account_country).closed_to(countries) is not None) is excluded
 
 
 def _put_off(account_country: str | None) -> tuple[CountryGate, AsyncMock]:

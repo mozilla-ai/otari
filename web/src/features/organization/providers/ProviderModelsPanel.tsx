@@ -1,10 +1,10 @@
 import { useState } from "react"
 import {
-  FiEdit2,
   FiPlus,
   FiRefreshCw,
   FiRotateCcw,
   FiSlash,
+  FiTag,
 } from "react-icons/fi"
 
 import type { OrgProviderKey, OrgProviderModel } from "@/client"
@@ -204,7 +204,7 @@ export function ProviderModelsPanel({
           <RowActionRow>
             <RowAction
               onPress={() => onEditRate(row)}
-              icon={FiEdit2}
+              icon={FiTag}
               label="Set your rate…"
               ariaLabel={`Set your rate for ${row.model}`}
             />

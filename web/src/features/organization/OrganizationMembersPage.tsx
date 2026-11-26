@@ -85,6 +85,7 @@ import {
   useWorkspaces,
 } from "@/shared/api/workspaces"
 import { parseAddresses } from "@/shared/helpers/addresses"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -293,7 +294,7 @@ function InviteMemberForm({
 }) {
   const invite = useInviteOrganizationMember()
   const bulkInvite = useBulkInviteOrganizationMembers()
-  const { mail_ready } = useDeployment()
+  const { mail } = useDeployment()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
@@ -475,9 +476,9 @@ function InviteMemberForm({
           isRequired
           className="sm:col-span-2"
           description={
-            mail_ready
+            mailDelivers(mail)
               ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
-              : "One or more, separated by commas or new lines. This deployment sends no mail, so the result shows how they join: an accept link to share, or accepting once they sign in with this address."
+              : "One or more, separated by commas or new lines. Nothing this deployment emails reaches an inbox, so the result shows how they join: an accept link to share, or accepting once they sign in with this address."
           }
         />
         <Select

@@ -129,12 +129,14 @@ class CodeExecutionSession(Protocol):
         """
         ...
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
-        """Run ``code`` and return the contract's result block.
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
+        """Run ``code``, written in ``language``, and return the contract's result block.
 
-        A program that fails is a successful execution reported through
-        ``return_code`` and ``stderr``. Only a sandbox that could not run it at
-        all raises :class:`SandboxNotReachableError`.
+        ``language`` is one of :attr:`CodeExecutionPort.languages`; the caller
+        refuses any other before a session is asked. A program that fails is a
+        successful execution reported through ``return_code`` and ``stderr``.
+        Only a sandbox that could not run it at all raises
+        :class:`SandboxNotReachableError`.
         """
         ...
 
@@ -165,6 +167,15 @@ class CodeExecutionPort(Protocol):
     @property
     def label(self) -> str:
         """Where code runs, for a span or a log line. Never a credential."""
+        ...
+
+    @property
+    def languages(self) -> tuple[str, ...]:
+        """The languages a session runs code in, as the code-execution tool's ``language`` values.
+
+        Lowercase names, such as ``python``. The model is offered exactly these,
+        and a call naming any other is refused before it reaches a session.
+        """
         ...
 
     def open_session(

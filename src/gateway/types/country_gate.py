@@ -47,10 +47,6 @@ class CountryGate:
             return f"account country '{self.account_country}'"
         return None
 
-    def excludes(self, countries: Collection[str] | None) -> bool:
-        """Whether a hosted provider's own ``countries`` leave this request out; None serves every country."""
-        return self.closed_to(countries) is not None
-
     def refusal_detail(self, selector: str, *, noun: str = "Model") -> str:
         """The caller-facing reason ``selector`` is refused; ``noun`` says what it names.
 

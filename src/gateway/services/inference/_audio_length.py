@@ -3,13 +3,18 @@
 A transcription priced per minute or per second is billed on the length the
 provider reports. A model that reports tokens instead states no length, so the
 upload is measured here. The format is recognized by the file's own bytes, not
-by its name, and a file that cannot be read measures nothing.
+by its name, and a file that cannot be read measures nothing. tinytag reads
+every format but WebM, which :mod:`._webm_length` reads.
 """
 
 from decimal import Decimal
 from typing import BinaryIO, cast
 
 from tinytag import TinyTag, TinyTagException
+
+from gateway.services.inference._webm_length import webm_seconds
+
+_EBML_MAGIC = b"\x1a\x45\xdf\xa3"
 
 # The most reads and seeks one measurement may make. A real file states its
 # length in far fewer; a crafted one that has the parser hunt for a frame
@@ -54,11 +59,16 @@ def audio_seconds(audio: BinaryIO) -> Decimal | None:
     """
     reader = cast("BinaryIO", _BoundedReader(audio))
     try:
-        # tinytag raises any error its parser meets, the budget's included, as its own.
-        duration = TinyTag.get(file_obj=reader, tags=False, duration=True).duration
-    except TinyTagException:
+        is_webm = reader.read(len(_EBML_MAGIC)) == _EBML_MAGIC
+        reader.seek(0)
+        if is_webm:
+            seconds = webm_seconds(reader)
+        else:
+            # tinytag raises any error its parser meets, the budget's included, as its own.
+            duration = TinyTag.get(file_obj=reader, tags=False, duration=True).duration
+            seconds = None if duration is None else Decimal(str(duration))
+    except (_OverBudgetError, TinyTagException):
         return None
-    if duration is None:
+    if seconds is None:
         return None
-    seconds = Decimal(str(duration))
     return seconds if seconds.is_finite() and seconds > 0 else None

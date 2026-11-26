@@ -117,7 +117,6 @@ MODELS_DEV_CONDITION_KEYS = (
     "style",
     "voice_control",
 )
-CONDITION_OPERATORS = ("equals", "in", "gt", "gte", "lt", "lte", "min_items")
 CONDITION_COMBINATORS = ("all", "any", "not")
 
 # A price as a document gives it: a JSON number, read as ``float`` from models.dev and
@@ -832,7 +831,8 @@ def condition_problem(when: object, path: str = "when") -> str | None:
     """Why ``when`` is not a condition models.dev's schema allows, or ``None`` when it is.
 
     Each key is one of ``MODELS_DEV_CONDITION_KEYS``, holding exactly one of
-    ``CONDITION_OPERATORS`` and an operand it takes, or ``all`` and ``any``
+    the operators models.dev defines (``equals``, ``in``, ``gt``, ``gte``, ``lt``,
+    ``lte``, ``min_items``) and an operand it takes, or ``all`` and ``any``
     holding a list of conditions, or ``not`` holding one.
     """
     if not isinstance(when, Mapping):

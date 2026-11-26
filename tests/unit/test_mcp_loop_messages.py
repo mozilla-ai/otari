@@ -1845,12 +1845,14 @@ async def test_native_blocks_for_each_of_several_searches(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_native_max_uses_stops_further_searches_and_reports_an_error(
+async def test_native_max_uses_refuses_a_search_past_the_cap_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Two searches in one round with one left: the second is answered in Anthropic's vocabulary."""
     responses = [
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
+        _message_response(
+            stop_reason="tool_use", content=[_search_use("tu_1", "first"), _search_use("tu_2", "second")]
+        ),
         _message_response(stop_reason="end_turn", content=[_text_block("done")]),
     ]
     calls: list[list[dict[str, Any]]] = []
@@ -1882,12 +1884,13 @@ async def test_native_max_uses_stops_further_searches_and_reports_an_error(
     error_content = cast(Any, error_result.content)
     assert error_content.type == "web_search_tool_result_error"
     assert error_content.error_code == "max_uses_exceeded"
-    blocked_tool_result = calls[2][-1]["content"][0]
+    # The round after the cap is the last, so its note follows the tool results.
+    blocked_tool_result = calls[1][-2]["content"][1]
     assert blocked_tool_result["content"] == "[tool error] max_uses_exceeded"
 
 
 @pytest.mark.asyncio
-async def test_stream_native_max_uses_stops_further_searches_and_reports_an_error(
+async def test_stream_native_max_uses_refuses_a_search_past_the_cap_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     streams = iter(
@@ -1897,14 +1900,9 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
                 _tool_use_block_start(0, "tu_1", "web_search"),
                 _input_json_delta(0, '{"query": "first"}'),
                 _content_block_stop(0),
-                _msg_delta_event("tool_use"),
-                _msg_stop_event(),
-            ),
-            _async_iter(
-                _msg_start_event(),
-                _tool_use_block_start(0, "tu_2", "web_search"),
-                _input_json_delta(0, '{"query": "second"}'),
-                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_2", "web_search"),
+                _input_json_delta(1, '{"query": "second"}'),
+                _content_block_stop(1),
                 _msg_delta_event("tool_use"),
                 _msg_stop_event(),
             ),
@@ -2010,6 +2008,68 @@ async def test_stream_native_search_whose_input_is_cut_off_reports_invalid_input
     assert error_content.error_code == "invalid_tool_input"
 
 
+def _offers_search(kwargs: dict[str, Any]) -> bool:
+    return any(tool.get("name") == "web_search" for tool in kwargs.get("tools") or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_native_max_uses_withholds_the_search_once_used_up(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """A model that keeps searching past ``max_uses`` gets one more round, without the search (#3183).
+
+    The round ends as the answer, so no ``max_uses_exceeded`` block is minted for the
+    search the model asked for anyway.
+    """
+    sent: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        block_id = f"tu_{len(sent)}"
+        if stream:
+            return _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, block_id, "web_search"),
+                _input_json_delta(0, '{"query": "q"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            )
+        return _message_response(stop_reason="tool_use", content=[_search_use(block_id, "q")])
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100}
+    native = frozenset({WEB_SEARCH_TOOL_NAME})
+
+    if stream:
+        events = [
+            event
+            async for event in anthropic_tool_loop_stream(
+                completion_kwargs=completion_kwargs,
+                pool=cast(Any, pool),
+                max_iterations=10,
+                native_tools=native,
+                use_budget=_use_budget(1),
+            )
+        ]
+        blocks = [event.content_block for event in events if event.type == "content_block_start"]
+    else:
+        result = await anthropic_tool_loop(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            native_tools=native,
+            use_budget=_use_budget(1),
+        )
+        assert result.stop_reason == "end_turn"
+        blocks = list(result.content)
+
+    assert [_offers_search(kwargs) for kwargs in sent] == [True, False]
+    assert sent[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    assert pool.calls == [("web_search", {"query": "q"})]
+    assert [block.type for block in blocks] == ["server_tool_use", "web_search_tool_result"]
+
+
 @pytest.mark.asyncio
 async def test_native_max_uses_error_block_is_anthropic_schema_only(
     monkeypatch: pytest.MonkeyPatch,
@@ -2021,8 +2081,9 @@ async def test_native_max_uses_error_block_is_anthropic_schema_only(
     nothing else.
     """
     responses = [
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
+        _message_response(
+            stop_reason="tool_use", content=[_search_use("tu_1", "first"), _search_use("tu_2", "second")]
+        ),
         _message_response(stop_reason="end_turn", content=[_text_block("done")]),
     ]
 

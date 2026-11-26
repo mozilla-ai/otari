@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import ValidationInfo, field_validator, model_validator
+from pydantic import AwareDatetime, ValidationInfo, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 from gateway.core.link_urls import normalize_link_url
@@ -32,8 +32,100 @@ from gateway.models.providers import (
     ProviderEndpoint,
 )
 from gateway.models.secret_fields import redact_secret_like_values
+from gateway.types.endpoint_auth import (
+    EndpointAuthMethod,
+    EndpointAuthState,
+    UnreadableEndpointAuthError,
+    refused_header_value_reason,
+)
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import AcceptedPriceUnit, PriceUnit
+
+
+class EndpointAuthRequest(SQLModel):
+    """The credential an edge proxy in front of a key's base URL requires.
+
+    ``method`` is a closed set of ways to produce request headers. TLS client
+    authentication is not one of them: it is presented when the connection is
+    made, so it would be a field of its own rather than a method here.
+    """
+
+    method: EndpointAuthMethod = Field(
+        description="How the credential is produced. `static_header` sends one stored value as one header."
+    )
+    header_name: str = Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends "
+            "its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are "
+            "all refused."
+        ),
+    )
+    secret: str | None = Field(
+        default=None,
+        # Twice what a response publishes, so the reported tail identifies the
+        # stored value rather than revealing it. At four or fewer characters
+        # ``last4`` would be the whole credential.
+        min_length=8,
+        max_length=1024,
+        description=(
+            "The value to send, at least 8 characters. Write-only: responses report only its last four "
+            "characters. Required when the credential is first set, and on any change of base URL. Omit it "
+            "to keep the value already stored; an empty string is refused rather than read as keeping it."
+        ),
+    )
+    expires_at: AwareDatetime = Field(
+        description=(
+            "When the organization expects to rotate this credential. Must carry a UTC offset and be in "
+            "the future. It is a rotation date, not a switch: a request is never refused because it "
+            "passed, since the proxy answers that itself on every request."
+        )
+    )
+
+    @field_validator("secret")
+    @classmethod
+    def _value_a_header_can_carry(cls, secret: str | None) -> str | None:
+        """Refuse a value the transport cannot put in a header field."""
+        if secret is not None and (reason := refused_header_value_reason(secret)) is not None:
+            raise ValueError(reason)
+        return secret
+
+
+class EndpointAuthPublic(SQLModel):
+    """What an endpoint credential reports. Never carries the value, only its last four characters."""
+
+    method: EndpointAuthMethod = Field(description="How the credential is produced.")
+    header_name: str
+    last4: str = Field(description="The last four characters of the stored value.")
+    expires_at: datetime
+    state: EndpointAuthState = Field(
+        description=(
+            "How the credential stands against its own expiry. Reported so every reader draws the line in "
+            "the same place. No value of it refuses a request: the proxy answers that on every request."
+        )
+    )
+
+    @classmethod
+    def from_row(cls, key: OrgProviderKey, *, now: datetime) -> EndpointAuthPublic | None:
+        """Read one row's endpoint credential for the API, or None where it carries none.
+
+        Raises:
+            UnreadableEndpointAuthError: The row holds a credential this build
+                cannot read. Every field here is required, so there is no value
+                of this shape that reports one, and answering None would say the
+                row carries no credential when it carries one nobody can send.
+        """
+        auth = key.endpoint_auth
+        if auth is None:
+            return None
+        return cls(
+            method=auth.method,
+            header_name=auth.header_name,
+            last4=auth.last4,
+            expires_at=auth.expires_at,
+            state=auth.state(now=now),
+        )
 
 
 class OrgProviderKeyCreateRequest(SQLModel):
@@ -64,6 +156,10 @@ class OrgProviderKeyCreateRequest(SQLModel):
             "completion data. The catalog shows it and filters on it; nothing is enforced on it."
         ),
     )
+    endpoint_auth: EndpointAuthRequest | None = Field(
+        default=None,
+        description="The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`.",
+    )
 
 
 class OrgProviderKeyUpdateRequest(SQLModel):
@@ -74,6 +170,13 @@ class OrgProviderKeyUpdateRequest(SQLModel):
     api_base: str | None = Field(default=None, max_length=1024)
     client_args: dict[str, Any] | None = None
     zero_data_retention: bool | None = None
+    endpoint_auth: EndpointAuthRequest | None = Field(
+        default=None,
+        description=(
+            "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; "
+            "send an explicit null to remove one. Leave it out to keep what is stored."
+        ),
+    )
 
 
 class OrgProviderKeyPublic(SQLModel):
@@ -93,13 +196,24 @@ class OrgProviderKeyPublic(SQLModel):
     api_base: str | None = None
     client_args: dict[str, Any] | None = None
     last4: str | None = None
+    endpoint_auth: EndpointAuthPublic | None = None
+    endpoint_auth_unreadable: bool = Field(
+        default=False,
+        description=(
+            "True where the key stores an endpoint credential this deployment cannot read, so "
+            "`endpoint_auth` is absent while the key still carries one. Holding one that cannot be read "
+            "is a third state, distinct from holding none: it is what a client needs to report it and "
+            "offer to remove it."
+        ),
+    )
     is_org_default: bool
     zero_data_retention: bool = False
     usable: bool = Field(
         description=(
-            "False when the stored credential cannot be decrypted on this deployment, so the key "
-            "supplies nothing at dispatch and the catalog withholds its provider. A row this deployment "
-            "cannot read is still listed, because deleting or replacing it is what fixes it."
+            "False when the key cannot be served as stored, so it supplies nothing at dispatch and the "
+            "catalog withholds its provider: a credential this deployment cannot decrypt or read, a "
+            "provider that cannot take a custom base URL, or an endpoint credential the key may not "
+            "carry. Such a row is still listed, because deleting or replacing it is what fixes it."
         )
     )
     offered_count: int = Field(
@@ -120,26 +234,40 @@ class OrgProviderKeyPublic(SQLModel):
 
     @classmethod
     def from_row(
-        cls, key: OrgProviderKey, *, usable: bool, offered_count: int = 0, serving_count: int = 0
+        cls,
+        key: OrgProviderKey,
+        *,
+        client_args: dict[str, Any] | None,
+        usable: bool,
+        now: datetime,
+        offered_count: int = 0,
+        serving_count: int = 0,
     ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
 
-        ``usable`` is passed in rather than derived here: answering it means
-        decrypting, which belongs to the service layer that owns the secret box.
-        Required rather than defaulted so a caller cannot report a key as working
+        ``now`` is passed rather than read so a caller holds the clock, as the
+        endpoint credential's own state already requires.
+
+        ``client_args`` and ``usable`` are both passed in rather than derived
+        here: answering either means decrypting, which belongs to the service
+        layer that owns the secret box. Both are required rather than defaulted
+        so a caller cannot report a key as working, or as carrying no settings,
         without having asked. The two counts come from the offered-models table,
         and default to a key that offers nothing, which is the one a row has
         before its first refresh.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
-        ``region_name``, other client kwargs), and a credential-shaped field
-        placed there is never echoed back either: ``redact_secret_like_values``
-        masks it the same way ``encrypted_api_key`` itself already stays off
-        the wire (only ``last4`` comes back). That masking is the whole
-        protection the field gets, and it is enough because it holds for every
-        reader: this surface has one audience, the organization owners and
-        admins each of its routes is gated on.
+        ``region_name``, other client kwargs), and a credential-shaped entry in
+        it is never echoed back: ``redact_secret_like_values`` masks it the same
+        way ``encrypted_api_key`` itself stays off the wire, with only ``last4``
+        coming back.
         """
+        try:
+            endpoint_auth = EndpointAuthPublic.from_row(key, now=now)
+        except UnreadableEndpointAuthError:
+            endpoint_auth, endpoint_auth_unreadable = None, True
+        else:
+            endpoint_auth_unreadable = False
         return cls(
             id=key.id,
             organization_id=key.organization_id,
@@ -147,7 +275,9 @@ class OrgProviderKeyPublic(SQLModel):
             name=key.name,
             slug=key.slug,
             api_base=key.api_base,
-            client_args=redact_secret_like_values(key.client_args),
+            client_args=redact_secret_like_values(client_args),
+            endpoint_auth=endpoint_auth,
+            endpoint_auth_unreadable=endpoint_auth_unreadable,
             last4=key.last4,
             is_org_default=key.is_org_default,
             zero_data_retention=key.zero_data_retention,
@@ -158,6 +288,21 @@ class OrgProviderKeyPublic(SQLModel):
             created_at=key.created_at,
             updated_at=key.updated_at,
         )
+
+
+class OrgProviderKeysReencryptPublic(SQLModel):
+    """What re-encrypting the stored organization provider credentials did.
+
+    Each count is keys, not values, because a key holding one value no
+    configured secret reads has to be re-entered whole: it serves nothing until
+    it is. ``unreadable`` counts those, left exactly as they were;
+    ``skipped`` those edited while the rotation ran, already written under the
+    primary secret.
+    """
+
+    reencrypted: int
+    unreadable: int
+    skipped: int
 
 
 class OrgProviderKeysPublic(SQLModel):
@@ -372,8 +517,13 @@ class ProviderEndpointPublic(SQLModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: ProviderEndpoint) -> ProviderEndpointPublic:
-        """Read one row for the API, masking credential-shaped ``default_params`` entries."""
+    def from_row(cls, row: ProviderEndpoint, *, default_params: dict[str, Any] | None) -> ProviderEndpointPublic:
+        """Read one row for the API, masking credential-shaped ``default_params`` entries.
+
+        ``default_params`` is passed in rather than read off the row: it is held
+        encrypted, and decrypting belongs to the service layer that owns the
+        secret box.
+        """
         return cls(
             id=row.id,
             workspace_id=row.workspace_id,
@@ -382,7 +532,7 @@ class ProviderEndpointPublic(SQLModel):
             provider=row.provider,
             api_base=row.api_base,
             last4=row.last4,
-            default_params=redact_secret_like_values(row.default_params),
+            default_params=redact_secret_like_values(default_params),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1401,6 +1551,8 @@ __all__ = [
     "DeploymentProviderMigrationRequest",
     "DeploymentProviderMigrationReviewedRow",
     "DeploymentProviderMigrationRowPublic",
+    "EndpointAuthPublic",
+    "EndpointAuthRequest",
     "HostedAvailableModelsPublic",
     "HostedCatalogKeptGroupPublic",
     "HostedCatalogProviderRefreshPublic",
@@ -1430,6 +1582,7 @@ __all__ = [
     "OrgProviderKeyPublic",
     "OrgProviderKeyUpdateRequest",
     "OrgProviderKeysPublic",
+    "OrgProviderKeysReencryptPublic",
     "OrgProviderModelsRefreshPublic",
     "ProviderEndpointCreateRequest",
     "ProviderEndpointPublic",

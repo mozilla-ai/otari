@@ -365,8 +365,14 @@ export function CopyField({
   const selectUnlessConcealed = (
     event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
-    // Selecting a stand-in would invite a Ctrl/Cmd-C that copies bullets.
-    if (isConcealed) return
+    // Selecting a stand-in would invite a Ctrl/Cmd-C that copies bullets. The
+    // caret goes to the start instead, so a stand-in wider than a phone shows
+    // the prefix that tells one credential from another.
+    if (isConcealed) {
+      event.currentTarget.setSelectionRange(0, 0)
+      event.currentTarget.scrollLeft = 0
+      return
+    }
     event.currentTarget.select()
   }
 
@@ -445,13 +451,13 @@ export function CopyField({
       readOnly
       value={shown}
       onFocus={selectUnlessConcealed}
-      // Concealed, the right padding clears both controls rather than the value
-      // running under it, and the field grows below `md` so the 44px touch
-      // floor fits between its borders.
+      // Concealed, the right padding clears both controls with 8px to spare
+      // rather than the value running into them, and the field grows below
+      // `md` so the 44px touch floor fits between its borders.
       className={
         concealed === undefined
           ? shared
-          : `${shared} min-h-[2.875rem] pr-24 md:min-h-0 md:pr-20`
+          : `${shared} min-h-[2.875rem] pr-26 md:min-h-0 md:pr-20`
       }
       {...credentialProps}
     />

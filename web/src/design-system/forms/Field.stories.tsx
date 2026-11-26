@@ -113,6 +113,27 @@ export const DecimalKeyboard: Story = {
 }
 
 /**
+ * `describedBy` names text outside the field that explains it, such as an error
+ * a control row says once under all of its controls.
+ */
+export const DescribedElsewhere: Story = {
+  render: () => (
+    <div className="flex w-[28rem] flex-col gap-1">
+      <Field
+        label="Spend limit"
+        value="abc"
+        onChange={() => {}}
+        isInvalid
+        describedBy="field-story-row-error"
+      />
+      <p id="field-story-row-error" className="text-sm text-danger">
+        Enter a number above zero, like 12.50, or leave it empty.
+      </p>
+    </div>
+  ),
+}
+
+/**
  * `isDisabled` for a field the operator may read but not set: a value the
  * deployment fixes, or one that belongs to a plan they are not on. It stays in
  * the tab order's reading path but takes no input, which is why the value is

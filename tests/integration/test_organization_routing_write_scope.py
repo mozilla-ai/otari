@@ -19,8 +19,9 @@ routers must still refuse a tenant, or a change here would have reopened
 otari-ai#1880.
 """
 
+import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,6 +38,7 @@ from gateway.models.provider_keys import (
 )
 from gateway.models.routing import RoutingPolicy
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.services import catalog as selectors
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
@@ -256,6 +258,57 @@ def test_every_static_candidate_is_checked_not_only_the_default(client: TestClie
     body["spec"] = {"select": [{"default": _ALPHA_TARGET}], "on_failure": [_BETA_TARGET]}
     refused = _post(client, world, "alpha_admin", _POLICIES, body)
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+
+
+_ALPHA_CATALOG_ID = "acme/mini"
+_BETA_CATALOG_ID = "acme/haiku"
+
+
+@pytest.fixture
+def _idle_index_refresher(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+
+
+@pytest.fixture
+def catalog_ids(_idle_index_refresher: None, client: TestClient) -> Iterator[None]:
+    """A selector index with one catalog ID on each tenant's provider, not rebuilt under the test."""
+    rows = [
+        selectors.OfferingRow(_ALPHA_TARGET, "openai", "openai", 1.0),
+        selectors.OfferingRow(_BETA_TARGET, "anthropic", "anthropic", 1.0),
+    ]
+    identities = {
+        _ALPHA_CATALOG_ID: (_ALPHA_CATALOG_ID, (_ALPHA_TARGET,)),
+        _BETA_CATALOG_ID: (_BETA_CATALOG_ID, (_BETA_TARGET,)),
+    }
+    selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+    yield
+    selectors.reset_selector_index()
+
+
+def test_a_policy_may_name_a_catalog_id_the_organization_reaches(
+    catalog_ids: None, client: TestClient, world: _World
+) -> None:
+    """A request accepts a catalog ID, so a policy does: it is held to the offering the ID resolves to."""
+    created = _post(
+        client, world, "alpha_admin", _POLICIES, _policy_body(world, name="by-id", target=_ALPHA_CATALOG_ID)
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+    assert created.json()["spec"]["select"] == [{"default": _ALPHA_CATALOG_ID}]
+
+
+def test_a_catalog_id_does_not_widen_what_the_organization_reaches(
+    catalog_ids: None, client: TestClient, world: _World
+) -> None:
+    refused = _post(
+        client, world, "alpha_admin", _POLICIES, _policy_body(world, name="borrowed-id", target=_BETA_CATALOG_ID)
+    )
+
+    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+    assert _BETA_CATALOG_ID in refused.json()["detail"]
 
 
 def _slugged_key(db_session_factory: Callable[[], Session], organization_id: uuid.UUID, slug: str) -> None:

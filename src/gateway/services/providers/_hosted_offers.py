@@ -38,7 +38,6 @@ from gateway.services.pricing_service import default_pricing_enabled, normalize_
 OTARI_IMPLEMENTATION = "otari"
 
 PRICE_SOURCE_DEFAULT: HostedPriceSource = "defaults"
-PRICE_SOURCE_DEPLOYMENT: HostedPriceSource = "deployment"
 PRICE_SOURCE_PROVIDER: HostedPriceSource = "provider"
 
 # The origins a refresh may move: nobody chose a rate that carries one.

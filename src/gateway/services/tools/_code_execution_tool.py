@@ -1,7 +1,7 @@
 """Code execution, as the tool registry lists it."""
 
 from gateway.core.config import GatewayConfig
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, code_execution_tool_definition
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import _code_execution_chat, _code_execution_messages, _code_execution_responses
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._code_execution_declarations import declares_code_execution, provider_runs_code_natively
@@ -10,7 +10,6 @@ from gateway.types.key_scope import KeyScope
 
 TOOL = BuiltinTool(
     name=CODE_EXECUTION_TOOL_NAME,
-    definition=code_execution_tool_definition,
     configured=GatewayConfig.sandbox_configured,
     declares=declares_code_execution,
     key_scope=KeyScope.CODE_EXECUTE,
