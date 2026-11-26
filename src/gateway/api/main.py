@@ -8,6 +8,7 @@ from gateway.api.routes import (
     agent_telemetry,
     aliases,
     audio,
+    auth_access_tokens,
     auth_account,
     auth_oauth,
     auth_password,
@@ -149,6 +150,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     auth_webauthn.router,
     auth_oauth.router,
+    auth_access_tokens.router,
     embeddings.router,
     images.router,
     audio.router,

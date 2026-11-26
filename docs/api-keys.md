@@ -8,6 +8,9 @@ Applications send the key as a bearer token. The base URL to use and the other
 accepted headers are in [Base URL](api-reference.md#base-url) and
 [Authentication](api-reference.md#authentication).
 
+To read the dashboard's data from an agent or a script rather than call models,
+use an access token instead: see [Read Otari from your agent](read-otari-from-your-agent.md).
+
 ## Create a key
 
 1. Open the **API keys** page and click **Create API key**.

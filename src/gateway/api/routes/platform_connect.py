@@ -18,6 +18,7 @@ from gateway.api.deps import (
     CurrentIdentity,
     PlatformConnectServiceDep,
     get_config,
+    refuse_access_tokens,
     require_deployment_operator_or_absent,
     verify_master_key,
 )
@@ -88,7 +89,7 @@ async def start_platform_connect(
         ) from None
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(refuse_access_tokens)])
 async def get_platform_connect(service: PlatformConnectServiceDep) -> PlatformConnectStatusPublic:
     """Where the connection stands: idle, pending, connected, expired or denied.
 
