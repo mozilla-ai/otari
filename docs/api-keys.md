@@ -8,6 +8,9 @@ Applications send the key as a bearer token. The base URL to use and the other
 accepted headers are in [Base URL](api-reference.md#base-url) and
 [Authentication](api-reference.md#authentication).
 
+To read the dashboard's data from an agent or a script rather than call models,
+use an access token instead: see [Read Otari from your agent](read-otari-from-your-agent.md).
+
 ## Create a key
 
 1. Open the **API keys** page and click **Create API key**.
@@ -162,7 +165,10 @@ The key routes are in the [OpenAPI specification](public/openapi.json).
 **Models.** A new key inherits its user's `allowed_models` unless it sets its
 own list. No list allows any model, an empty list allows none, and entries may
 use provider wildcards such as `openai:*`. A key can narrow its user's access,
-never widen it.
+never widen it. An organization's provider key with a custom base URL is named
+by its slug rather than its provider (`openai-proxy:gpt-4o`, `openai-proxy:*`),
+and an entry on a key in that organization names it the same way: `openai:*`
+does not reach it.
 
 An entry may also be a model's catalog id, as `GET /api/v1/models` lists it
 (`mistralai/mistral-small-3`). Otari stores it as the `instance:model` selector

@@ -8,6 +8,7 @@ from gateway.repositories.identity.erased_account_repository import ErasedAccoun
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
 from gateway.repositories.identity.oauth_pending_state_repository import OAuthPendingStateRepository
 from gateway.repositories.identity.oidc_connection_repository import OIDCConnectionRepository
+from gateway.repositories.identity.personal_access_token_repository import PersonalAccessTokenRepository
 from gateway.repositories.identity.webauthn_credential_repository import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 
@@ -16,6 +17,7 @@ from gateway.repositories.tenancy import UserRepository
 class IdentityRepositories:
     """The identity domain's repositories, all on one Unit of Work."""
 
+    access_tokens: PersonalAccessTokenRepository
     blocked_emails: BlockedEmailRepository
     connections: OIDCConnectionRepository
     erased_accounts: ErasedAccountRepository
@@ -29,6 +31,7 @@ class IdentityRepositories:
     def on(cls, uow: UnitOfWork) -> Self:
         """Build every repository on this Unit of Work."""
         return cls(
+            access_tokens=PersonalAccessTokenRepository(uow),
             blocked_emails=BlockedEmailRepository(uow),
             connections=OIDCConnectionRepository(uow),
             erased_accounts=ErasedAccountRepository(uow),

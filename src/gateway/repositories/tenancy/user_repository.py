@@ -9,6 +9,7 @@ from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
@@ -260,6 +261,14 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
             .where(or_(col(User.last_sign_in_at).is_(None), col(User.last_sign_in_at) < at))
             .values(last_sign_in_at=at)
         )
+
+    def act_in(self, user: User, organization_id: uuid.UUID | None) -> None:
+        """Make this loaded identity act in ``organization_id`` for the rest of the request, writing nothing.
+
+        For an access token bound to the organization it was created in, whatever the dashboard
+        has since switched to. Set as the loaded value rather than a change, so no flush stores it.
+        """
+        set_committed_value(user, "active_organization_id", organization_id)
 
     async def get_locked(self, user_id: uuid.UUID) -> User | None:
         """Return the identity read fresh under a row lock, or None.

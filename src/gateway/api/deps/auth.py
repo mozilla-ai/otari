@@ -3,6 +3,9 @@
 import secrets
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -10,12 +13,13 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
+    UnitOfWorkDep,
     get_config,
     get_container,
 )
 from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
-from gateway.auth.models import hash_key
+from gateway.auth.models import MCP_ACCESS_TOKEN_PREFIX, PERSONAL_ACCESS_TOKEN_PREFIX, hash_key
 from gateway.core.config import (
     API_KEY_HEADER,
     X_API_KEY_HEADER,
@@ -28,6 +32,7 @@ from gateway.core.database import (
     get_db,
     release_session,
 )
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -35,6 +40,12 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.repositories.api_keys import ApiKeyRepository, FederationRuleRepository
+from gateway.repositories.identity import (
+    BlockedEmailRepository,
+    DashboardSessionRepository,
+    PersonalAccessTokenRepository,
+)
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.api_keys import (
     FederatedTokenVerifier,
     FederationRefusedError,
@@ -46,6 +57,7 @@ from gateway.services.api_keys import (
     unverified_issuer,
 )
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
+from gateway.services.identity import EmailBlocklist, PersonalAccessTokenService
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.workspace_scope import (
@@ -392,10 +404,88 @@ def cookie_may_authenticate(request: Request, config: GatewayConfig) -> bool:
     return bool(origin) and origin != "*" and origin in config.cors_allow_origins
 
 
+# Methods a personal access token may authenticate: it reads as its owner and never writes.
+_READ_METHODS = frozenset({"GET", "HEAD"})
+# Set while an MCP tool reads the management API, the one place an MCP client's access token is good.
+_through_mcp: ContextVar[bool] = ContextVar("through_mcp", default=False)
+
+
+@contextmanager
+def reading_through_mcp() -> Iterator[None]:
+    """Admit an MCP client's access token on the requests an MCP tool makes inside this block."""
+    reset = _through_mcp.set(True)
+    try:
+        yield
+    finally:
+        _through_mcp.reset(reset)
+
+
+def _presented_access_token(request: Request) -> str | None:
+    """The access token a request carries in a header credential, if that is what it carries.
+
+    A peek that never refuses, so a request carrying any other credential, well-formed or not,
+    reaches the check that owns it exactly as before.
+    """
+    otari_key = (request.headers.get(API_KEY_HEADER) or "").strip()
+    authorization = (request.headers.get("Authorization") or "").strip()
+    if otari_key:
+        token = otari_key.removeprefix("Bearer ").strip()
+    elif authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+    else:
+        return None
+    return token if token.startswith((PERSONAL_ACCESS_TOKEN_PREFIX, MCP_ACCESS_TOKEN_PREFIX)) else None
+
+
+def build_personal_access_token_service(uow: UnitOfWork) -> PersonalAccessTokenService:
+    """Build the personal access token service on a Unit of Work."""
+    return PersonalAccessTokenService(
+        uow,
+        PersonalAccessTokenRepository(uow),
+        UserRepository(uow),
+        DashboardSessionRepository(uow),
+        OrganizationMemberRepository(uow),
+        EmailBlocklist(uow, BlockedEmailRepository(uow)),
+    )
+
+
+def is_personal_access_token_request(request: Request) -> bool:
+    """Whether ``get_session_identity`` resolved this request's identity from a personal access token."""
+    return bool(getattr(request.state, "personal_access_token", False))
+
+
+def refuse_access_tokens(request: Request) -> None:
+    """Refuse an access token on a read that does more than read, such as one that dials a provider."""
+    if _presented_access_token(request) is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access tokens cannot use this endpoint")
+
+
+async def _resolve_personal_access_token(request: Request, uow: UnitOfWork, token: str) -> TenancyUser:
+    """The identity an access token speaks for, in its organization, on a read; refused otherwise."""
+    if token.startswith(MCP_ACCESS_TOKEN_PREFIX) and not _through_mcp.get():
+        record_auth_failure("mcp_access_token_outside_mcp")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="This access token works only through the MCP server"
+        )
+    try:
+        identity = await build_personal_access_token_service(uow).authenticate(token)
+    except DATABASE_ERRORS as exc:
+        raise _authentication_unavailable("db_error") from exc
+    if identity is None:
+        record_auth_failure("invalid_personal_access_token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    if request.method not in _READ_METHODS:
+        record_auth_failure("personal_access_token_write")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access tokens are read-only")
+    request.state.personal_access_token = True
+    return identity
+
+
 async def get_session_identity(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    uow: UnitOfWorkDep,
 ) -> TenancyUser | None:
     """The identity a valid dashboard session cookie authenticates, or None.
 
@@ -411,7 +501,15 @@ async def get_session_identity(
 
     ``SameSite=Strict`` on the cookie is the primary CSRF control; the
     Sec-Fetch-Site check is belt-and-braces for clients that send the header.
+
+    A personal access token in a header credential authenticates the same way, as
+    the person who holds it in the organization it was made for, but only for a read:
+    it is how an agent reads what its owner sees on the dashboard without holding
+    their session. An MCP client's access token does too, only through ``/mcp``.
     """
+    pat = _presented_access_token(request)
+    if pat is not None:
+        return await _resolve_personal_access_token(request, uow, pat)
     if _header_credentials_present(request):
         return None
     token = request.cookies.get(SESSION_COOKIE_NAME)

@@ -9,6 +9,7 @@ import {
 } from "@/features/updateCheck/useOperatorUpdateCheck"
 import { useWorkspaceActivation } from "@/shared/api/activation"
 import { useHostedProviders } from "@/shared/api/hostedProviders"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import { useAnswerUpdateCheck } from "@/shared/api/updateCheck"
 import { docsSourceHref } from "@/shared/helpers/docs"
@@ -67,10 +68,14 @@ function useHadProviderAtLoad(enabled: boolean): boolean {
  * own query. Latched once, so a first request landing during this load (the
  * setup sheet's success face) does not raise the question over it. A failed
  * read is a no, tried again on the next load; no workspace is a yes, since that
- * operator would never be asked.
+ * operator would never be asked, but only once the context answered: a failed
+ * context read also leaves no workspace selected.
  */
 function useActivatedAtLoad(enabled: boolean): boolean {
   const { selected, isSettled } = useSelectedWorkspace()
+  // The operator answer rather than `isUnknown`, which reads false while a
+  // failed context read is being retried.
+  const { answer } = useDeploymentOperator()
   const workspaceId = selected?.workspace_id ?? null
   const [atLoad, setAtLoad] = useState<boolean | undefined>(undefined)
   // Released once latched, so this observer never keeps the guide's poll alive.
@@ -85,8 +90,8 @@ function useActivatedAtLoad(enabled: boolean): boolean {
       )
     } else if (activation.isError) {
       setAtLoad(false)
-    } else if (isSettled && workspaceId === null) {
-      setAtLoad(true)
+    } else if (isSettled && workspaceId === null && answer !== "pending") {
+      setAtLoad(answer === "operator")
     }
   }
   return atLoad === true

@@ -261,21 +261,6 @@ class OAuthNotConfiguredError(TenancyValidationError):
         )
 
     @classmethod
-    def address_carries_credentials(cls, provider: str) -> "OAuthNotConfiguredError":
-        """This deployment's own address embeds a user and password, which a redirect URI may not.
-
-        NOTE: The reason names the condition and never the address, so neither the response nor the
-        log repeats the credential it is refusing.
-        """
-        return cls(
-            provider,
-            reason=(
-                f"{provider} sign-in needs public_base_url to carry no user or password. "
-                "Remove the credentials from it, then restart."
-            ),
-        )
-
-    @classmethod
     def insecure_address(cls, provider: str) -> "OAuthNotConfiguredError":
         """This deployment's own address cannot build a redirect URI for ``provider``."""
         return cls(
@@ -836,6 +821,11 @@ __all__ = [
     "PasswordLinkUnavailableError",
     "PasswordNotSetError",
     "PasswordPolicyError",
+    "PersonalAccessTokenBlockedError",
+    "PersonalAccessTokenLimitReachedError",
+    "PersonalAccessTokenNoOrganizationError",
+    "PersonalAccessTokenNotFoundError",
+    "PersonalAccessTokenSessionEndedError",
     "ResetTokenInvalidError",
     "InvalidBlockedEmailEntryError",
     "SignInAddressRequiredError",
@@ -857,3 +847,43 @@ class OAuthAppGrantError(TenancyValidationError):
     def __init__(self, error: str, description: str) -> None:
         super().__init__(description)
         self.error, self.description = error, description
+
+
+class PersonalAccessTokenNotFoundError(TenancyNotFoundError):
+    def __init__(self, token_id: object):
+        super().__init__(f"Access token {token_id} not found")
+
+
+class PersonalAccessTokenLimitReachedError(TenancyValidationError):
+    """This identity already holds as many access tokens as it may, for the reason passkeys have a ceiling."""
+
+    def __init__(self, limit: int):
+        super().__init__(
+            f"You already have {limit} access tokens, which is the most one account may hold. Delete one first."
+        )
+
+
+class PersonalAccessTokenNoOrganizationError(TenancyValidationError):
+    """The account is acting in no organization, and a token reads exactly one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "An access token reads one organization, and your account is not acting in one. "
+            "Sign in again to pick one, then create the token."
+        )
+
+
+class PersonalAccessTokenBlockedError(TenancyForbiddenError):
+    """The account's address is on the deployment's blocklist, so no token is made for it."""
+
+    def __init__(self) -> None:
+        super().__init__("Your email address is blocked, so no access token can be made for this account.")
+
+
+class PersonalAccessTokenSessionEndedError(TenancyError):
+    """The dashboard session that asked for the token, or its account, ended while it was being made."""
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self) -> None:
+        super().__init__("Your dashboard session has ended. Sign in again.")
