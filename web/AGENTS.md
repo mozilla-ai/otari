@@ -226,7 +226,8 @@ The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
 prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved
 `base` and rewrites the `index.html` link (#857). Do not add a static manifest
 to `public/pwa/`; only the icons live there. The plugin is a standalone module
-so the otari-ai superset build imports it rather than copying it.
+so the otari-ai superset build imports it rather than copying it, and passes
+its own `description` as an option.
 
 Regenerate the icons with `pnpm --dir web run icons:generate`
 (`web/scripts/generate-pwa-icons.mjs`). It rasterizes the mark through
