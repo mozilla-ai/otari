@@ -24,6 +24,9 @@ LISTING_TTL_S = 300.0
 LISTINGS_MAX_BYTES = 32 * 1024 * 1024
 """Ceiling on the serialized size of every kept listing together; the least recently used leave first."""
 
+LISTINGS_MAX_ENTRIES = 4096
+"""Ceiling on how many listings are kept, which bounds the empty ones the byte ceiling does not count."""
+
 
 @dataclass(slots=True)
 class _Entry:
@@ -50,10 +53,12 @@ class McpToolListings:
         *,
         ttl_s: float = LISTING_TTL_S,
         max_bytes: int = LISTINGS_MAX_BYTES,
+        max_entries: int = LISTINGS_MAX_ENTRIES,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self._ttl_s = ttl_s
         self._max_bytes = max_bytes
+        self._max_entries = max_entries
         self._clock = clock
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._bytes = 0
@@ -105,7 +110,7 @@ class McpToolListings:
         size = sum(len(tool.model_dump_json(by_alias=True, exclude_none=True)) for tool in tools)
         if size > self._max_bytes:
             return
-        while self._entries and self._bytes + size > self._max_bytes:
+        while self._entries and (self._bytes + size > self._max_bytes or len(self._entries) >= self._max_entries):
             self._drop(next(iter(self._entries)))
         self._entries[key] = _Entry(tools=tools, size=size, loaded_at=self._clock())
         self._bytes += size

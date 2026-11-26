@@ -31,7 +31,7 @@ from gateway.inflight import InFlightRegistry
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
-from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer
 from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -670,3 +670,41 @@ def test_a_failed_discovery_keeps_nothing(
     assert failed.status_code == 502, failed.text
     assert recovered.status_code == 200, recovered.text
     assert session.pages == 1
+
+
+def test_two_users_of_a_per_user_server_never_see_each_others_listing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-user server's revision is the same for every user, so only the credential tells their listings apart."""
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    tokens = iter(["alice-token", "bob-token", "alice-token"])
+    resolve = mcp_route._resolve_server
+
+    async def as_next_user(*args: Any, **kwargs: Any) -> ResolvedMcpServer:
+        resolved = await resolve(*args, **kwargs)
+        return resolved.model_copy(
+            update={"authorization_token": next(tokens), "credential_revision": McpCredentialMode.PER_USER}
+        )
+
+    @asynccontextmanager
+    async def open_session(server: ResolvedMcpServer, *args: Any, **kwargs: Any) -> Any:
+        fake = _FakeSession()
+        fake.tools = [MCPTool(name=f"{server.authorization_token}_files", input_schema={"type": "object"})]
+        _EVENTS.append("mcp_session_opened")
+        yield fake
+
+    monkeypatch.setattr(mcp_route, "_resolve_server", as_next_user)
+    monkeypatch.setattr(mcp_stateless, "open_session", open_session)
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+
+    alice, bob, alice_again = (client.get(path, headers=api_key_header).json() for _ in range(3))
+
+    assert alice["server_revision"] == bob["server_revision"]
+    assert [tool["name"] for tool in alice["tools"]] == ["alice-token_files"]
+    assert [tool["name"] for tool in bob["tools"]] == ["bob-token_files"]
+    assert alice_again == alice
+    assert _EVENTS.count("mcp_session_opened") == 2

@@ -129,6 +129,19 @@ async def test_a_listing_larger_than_the_ceiling_is_not_kept() -> None:
     assert load.calls == 2
 
 
+@pytest.mark.asyncio
+async def test_empty_listings_are_bounded_by_count() -> None:
+    listings = McpToolListings(max_entries=2)
+    load = _Loader(tools=[])
+
+    for key in ("a", "b", "c"):
+        await listings.get_or_load(key, load)
+    await listings.get_or_load("a", load)
+
+    assert len(listings._entries) == 2
+    assert load.calls == 4
+
+
 def _server(**overrides: object) -> ResolvedMcpServer:
     fields: dict[str, object] = {
         "id": uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e"),
