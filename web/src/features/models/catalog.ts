@@ -325,6 +325,9 @@ export type CatalogUrlKey = keyof typeof CATALOG_URL_DEFAULTS
 // cleared filter.
 const UNKNOWN_VENDOR_PARAM = "-"
 
+/** A data location as the URL may spell it by hand: `de` and ` de ` are `DE`. */
+const dataLocationParam = (value: string) => value.trim().toUpperCase()
+
 /**
  * The list read off its URL. A value the rail does not offer (a hand-edited
  * URL) falls back to the default, so it never reaches the API as a filter it
@@ -363,7 +366,7 @@ export function catalogListFromUrl(
       zeroDataRetention: url.get("zdr") === "1",
       dataLocations: url
         .getAll("data_location")
-        .map((value) => value.trim().toUpperCase())
+        .map(dataLocationParam)
         .filter(known(DATA_LOCATION_OPTIONS.map((option) => option.value))),
       releasedWithinDays: Number(offered(RELEASE_OPTIONS, "released")),
     },
@@ -400,7 +403,13 @@ export function catalogUrlChanges(
       changes[key] = now
       continue
     }
-    const current = [latest[key] ?? []].flat().filter(Boolean)
+    // Read as the parse reads it, or a hand-typed `de` would look like a change nobody made to `DE`.
+    const current = [latest[key] ?? []]
+      .flat()
+      .filter(Boolean)
+      .map((value) =>
+        key === "data_location" ? dataLocationParam(value) : value,
+      )
     changes[key] = [
       ...current.filter((value) => now.includes(value) || !was.includes(value)),
       ...now.filter(

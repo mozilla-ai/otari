@@ -23,7 +23,7 @@ from gateway.services.providers._hosted_credentials import (
     lookup_name,
     region_credential_of,
 )
-from gateway.services.providers._hosted_name_index import serving_data_locations
+from gateway.services.providers._hosted_name_index import serving_data_locations, serving_region_data_locations
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
@@ -260,7 +260,9 @@ class HostedSources:
         )
 
     async def data_locations(self, organization_id: uuid.UUID | None) -> dict[str, tuple[str | None, ...]]:
-        """Where each enabled hosted provider ``organization_id`` may use keeps request data, by name.
+        """Where each enabled hosted provider, and each region of one, ``organization_id`` may use keeps request data.
+
+        Keyed by the provider's name, and by ``name@slug`` for each region a request can be pinned to.
 
         Read from the declarations themselves, as the workspace narrowing
         reads them (:func:`serving_data_locations`), with no key decrypted.
@@ -268,11 +270,15 @@ class HostedSources:
         """
         everything = await self.all()
         names = {source.name for source in everything}
-        return {
-            source.name: serving_data_locations(source.name, source.data_location, source.regions, names)
-            for source in everything
-            if source.enabled and not source.withheld_from(organization_id)
-        }
+        found: dict[str, tuple[str | None, ...]] = {}
+        for source in everything:
+            if not source.enabled or source.withheld_from(organization_id):
+                continue
+            found[source.name] = serving_data_locations(source.name, source.data_location, source.regions, names)
+            # An offering pinned to a region (``tokenhub@sg:gpt-4o``) is on that region's declaration alone.
+            for instance, location in serving_region_data_locations(source.name, source.regions, names).items():
+                found[instance] = (location,)
+        return found
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""

@@ -271,3 +271,43 @@ def test_a_workspace_listing_no_locations_changes_nothing(client: TestClient) ->
     facet, _ = _locations(client, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
 
     assert facet == ["DE", "US"]
+
+
+def _offering_locations(body: Any) -> dict[str, list[str]]:
+    return {offering["selector"]: offering["data_locations"] for offering in body["offerings"]}
+
+
+def test_an_offering_pinned_to_a_region_is_on_that_regions_declaration(client: TestClient) -> None:
+    _create(client, "berlin", data_location="DE")
+    _region(client, "berlin", "virginia", data_location="US")
+    _region(client, "berlin", "tokyo", data_location="JP")
+    _ok(client.patch(f"{_PROVIDERS}/berlin/regions/tokyo", json={"enabled": False}, headers=_MASTER))
+    _price(client, _MASTER, "berlin@virginia:glm-5.3", 0.5, 2.0)
+    _price(client, _MASTER, "berlin@tokyo:glm-5.3", 0.5, 2.0)
+
+    detail = _get(client, f"{_CATALOG}/z-ai/glm-5.3", headers=_MASTER)
+    listed = _get(client, _CATALOG, headers=_MASTER, params={"data_location": ["US"]})
+
+    assert _offering_locations(detail) == {
+        # The provider's own selector is on every region that serves, the pinned one on its region alone.
+        "berlin:glm-5.3": ["DE", "US"],
+        "berlin@virginia:glm-5.3": ["US"],
+        "berlin@tokyo:glm-5.3": [],
+        "nebius:zai-org/GLM-5.3": [],
+        "nowhere:glm-5.3": [],
+        "oregon:glm-5.3": [],
+    }
+    assert [model["id"] for model in listed["models"]] == ["z-ai/glm-5.3"]
+
+
+def test_a_pinned_region_outside_the_workspaces_locations_is_not_shown(client: TestClient) -> None:
+    _create(client, "berlin", data_location="DE")
+    _region(client, "berlin", "virginia", data_location="US")
+    _price(client, _MASTER, "berlin@virginia:glm-5.3", 0.5, 2.0)
+    _, _, key_header = _workspace_accepting(client, ["EU"])
+
+    detail = _get(client, f"{_CATALOG}/z-ai/glm-5.3", headers=key_header)
+
+    shown = _offering_locations(detail)
+    assert shown["berlin:glm-5.3"] == ["DE"]
+    assert "US" not in {location for locations in shown.values() for location in locations}

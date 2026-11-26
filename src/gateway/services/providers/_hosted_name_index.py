@@ -119,11 +119,27 @@ def serving_data_locations(
     """
     if not regions:
         return (provider_location,)
-    return tuple(
-        region.data_location
+    return tuple(location for _, location in _serving_regions(name, regions, provider_names))
+
+
+def serving_region_data_locations(
+    name: str, regions: Sequence[HostedProviderRegion], provider_names: Collection[str]
+) -> dict[str, str | None]:
+    """The declared location of each region of ``name`` a request may be pinned to, by its name (``tokenhub@sg``).
+
+    The regions :func:`serving_data_locations` counts: enabled, and not shadowed by a provider of that whole name.
+    """
+    return dict(_serving_regions(name, regions, provider_names))
+
+
+def _serving_regions(
+    name: str, regions: Sequence[HostedProviderRegion], provider_names: Collection[str]
+) -> list[tuple[str, str | None]]:
+    return [
+        (region_instance(name, region.slug), region.data_location)
         for region in regions
         if region.enabled and region_instance(name, region.slug) not in provider_names
-    )
+    ]
 
 
 class HostedRegionIndex:

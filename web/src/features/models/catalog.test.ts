@@ -216,6 +216,23 @@ describe("the list's URL", () => {
     expect(list.filters.dataLocations).toEqual(["DE", "EU"])
   })
 
+  it("removes a hand-typed data location from the URL when it is cleared", () => {
+    const seen = {
+      ...EMPTY_CATALOG_LIST,
+      filters: { ...EMPTY_FILTERS, dataLocations: ["DE", "SG"] },
+    }
+    const cleared = {
+      ...seen,
+      filters: { ...seen.filters, dataLocations: ["SG"] },
+    }
+    // The URL spells the pick `de`, with padding, and a location added elsewhere.
+    expect(
+      catalogUrlChanges(seen, cleared, {
+        data_location: [" de ", "SG", "fr"],
+      }),
+    ).toEqual({ data_location: ["SG", "FR"] })
+  })
+
   it("counts each picked data location as a narrowing choice", () => {
     expect(
       activeFilterCount({ ...EMPTY_FILTERS, dataLocations: ["DE", "US"] }),

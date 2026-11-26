@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import REGION_SEPARATOR, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
@@ -1226,9 +1226,13 @@ class DataLocations:
     def of(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> list[str]:
         """The declared locations of an offering on ``instance``, distinct and sorted, where ``served_on`` is hosted.
 
-        A ``config.yml`` instance and an organization's own key declare none.
+        A ``config.yml`` instance and an organization's own key declare none. A name holding the region
+        separator (``tokenhub@sg``) is a hosted region's, which a hosted provider's own name may never hold,
+        whatever whose key the catalog labels the offering on, so it is read as hosted.
         """
-        return sorted(set(self.hosted.get(instance, ()))) if served_on == "hosted" else []
+        if served_on != "hosted" and REGION_SEPARATOR not in instance:
+            return []
+        return sorted(set(self.hosted.get(instance, ())))
 
 
 async def viewer_data_locations(
