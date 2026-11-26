@@ -131,12 +131,13 @@ async def test_a_signup_is_refused_where_no_link_can_be_mailed(
         await _signup(async_db, invites=invites, config=_config(sends_links=False))
 
 
-async def test_the_entitlement_is_decided_inside_the_transaction_that_writes_the_account(
+async def test_the_entitlement_is_read_while_the_writing_block_is_open(
     async_db: AsyncSession,
 ) -> None:
-    """The answer is read where the account is written, so a cancel in between is not honored.
+    """The reader is asked inside the block that writes the account, so the two commit together.
 
-    This reader opens no block of its own, which is what makes the placement observable.
+    This reader opens no block of its own, which is what makes the placement observable. It says
+    nothing about a cancellation, which the read does not lock against.
     """
     await _seed_unclaimed_identity(async_db)
     claimed = await _signup(async_db, invites=_ReadsThroughTheUnitOfWork)
@@ -153,24 +154,19 @@ async def test_an_entitled_signup_creates_an_account_where_signup_is_closed(asyn
     assert claimed.email_verified_at is not None
 
 
-@pytest.mark.parametrize(
-    "still_wanted",
-    [None, True, False],
-    ids=["unknown address", "an address an admin added", "an address nobody still wants"],
-)
-async def test_an_entitled_signup_founds_no_organization(async_db: AsyncSession, still_wanted: bool | None) -> None:
-    """The membership is the invitation's to grant when it is accepted, so this writes the account alone.
+async def test_an_entitled_signup_founds_no_organization(async_db: AsyncSession) -> None:
+    """Registering an unknown address founds one, and an invitation for the same address must not.
 
-    Each case reaches a different provisioning call, and the last is the one that would found an
-    organization for an identity no membership still wants.
+    The membership is the invitation's to grant when it is accepted. An address an admin already
+    added is covered by the open-deployment case below, because a closed one founds nothing for it
+    either way.
     """
-    if still_wanted is not None:
-        await _seed_unclaimed_identity(async_db, still_wanted=still_wanted)
     before = await _organization_count(async_db)
 
     claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite())
 
     assert claimed is not None
+    assert claimed.active_organization_id is None
     assert await _organization_count(async_db) == before
 
 

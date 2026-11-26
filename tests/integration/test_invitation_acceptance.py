@@ -637,9 +637,11 @@ async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_del
     hand_carried = generate_shared_token()
     await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
 
-    entitled = await _link(async_db).allows_an_account(hand_carried, claimed_address="ada@example.com")
+    uow = UnitOfWork(async_db)
+    async with uow:
+        opened = await _link(async_db, uow=uow).open(hand_carried)
 
-    assert entitled is False
+    assert opened is None
 
 
 async def test_a_token_entitles_no_account_on_an_address_it_was_not_sent_to(async_db: AsyncSession) -> None:
@@ -650,10 +652,10 @@ async def test_a_token_entitles_no_account_on_an_address_it_was_not_sent_to(asyn
     assert await _link(async_db).allows_an_account(_TOKEN, claimed_address="bob@example.com") is False
 
 
-async def test_a_hand_carried_link_entitles_no_account_where_an_emailed_one_does(
+async def test_a_hand_carried_link_allows_no_account_where_an_emailed_one_does(
     async_db: AsyncSession,
 ) -> None:
-    """Nobody delivered it, so it reached no mailbox, and an account on that address is still verified."""
+    """Nobody delivered it, so it reached no mailbox, and an account on it would be recorded as proved."""
     organization = await create_organization(async_db, slug="proof-strength")
     hand_carried = generate_shared_token()
     emailed = generate_token()

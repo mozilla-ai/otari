@@ -71,6 +71,9 @@ class InvitationLink(SignupInvitePort):
             # Taken before the enforcement is read, because turning it on takes the same lock.
             await self._organizations.lock_settings(invitation.organization_id)
             settings = await self._organizations.sso_settings(invitation.organization_id)
+        # The requirement alone, which is all ``_sso_would_block`` can weigh here: an account this
+        # allows holds no link to the connection and claims no exemption. Where one already exists
+        # this answers stricter, and acceptance asks the full rule again.
         return settings is None or not settings.required
 
     async def _refuses_the_address(
