@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "124a7328c1b3"
-_BEFORE = "b4d6f8a0c2e5"
+_BEFORE = "7c4b45a55970"
 
 
 def _alembic_config(database_url: str) -> Config:

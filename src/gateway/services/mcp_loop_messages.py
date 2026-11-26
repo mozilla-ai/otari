@@ -944,8 +944,8 @@ def _strategy_for(
 ) -> _MessagesToolLoopStrategy:
     """The shared strategy, or a per-request one when any of the options is set.
 
-    A capped request carries a per-request search budget, so it never reuses the
-    module-level instance; a request wanting neither native emission nor a cap
+    A request with a budget carries it per request, so it never reuses the
+    module-level instance; a request wanting neither native emission nor a budget
     nor a container has nothing per-request to hold and keeps reusing it.
     """
     if not native_tools and not emit_native_mcp and budget is None and container is None:
@@ -1000,6 +1000,7 @@ async def anthropic_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -1057,6 +1058,7 @@ async def anthropic_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

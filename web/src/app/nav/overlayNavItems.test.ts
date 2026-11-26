@@ -77,6 +77,7 @@ describe("a build that replaces the nav-item module", () => {
       "Accounts",
       "Hosted providers",
       "Subagent router",
+      "Deployment budgets",
       "Web search",
       "Code execution pricing",
       "Health",

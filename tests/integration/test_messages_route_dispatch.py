@@ -540,7 +540,12 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
     seen: dict[str, Any] = {}
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
@@ -608,7 +613,12 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
     captured: dict[str, Any] = {}
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         captured.update(completion_kwargs)
         return _text_response("ok")
@@ -651,7 +661,12 @@ def test_code_execution_dispatches_through_sandbox_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-sandbox-loop")
@@ -701,7 +716,12 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-web-search-loop")
@@ -882,7 +902,12 @@ def test_code_execution_allows_an_unrelated_caller_function(
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         return _text_response()
 
@@ -932,7 +957,12 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
     from gateway.services.mcp_loop_messages import MaxToolIterationsExceeded
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
@@ -1359,7 +1389,12 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -1559,7 +1594,12 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         pool_seen.append(pool)
         yield _stream_message_stop()
@@ -1703,7 +1743,10 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
     cap = tool_entry.get("max_uses")
     budget = budgets_seen[0]
     if cap is None:
-        assert budget is None
+        # With no max_uses, the budget carries only the search and fetch calls the request shares.
+        for _ in range(20):
+            budget.record(WEB_SEARCH_TOOL_NAME, "results")
+        assert not budget.exhausted(WEB_SEARCH_TOOL_NAME), "an uncapped declaration got a max_uses"
     else:
         # The cap arrived by value, not just as "some budget": spending it exactly
         # ``max_uses`` times is what exhausts it.
@@ -1727,7 +1770,12 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
     seen: list[frozenset[str]] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen.append(native_tools)
         return _text_response("ok")
@@ -2004,7 +2052,12 @@ def test_intercept_retargets_a_forced_tool_choice(
     seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen.append(completion_kwargs.get("tool_choice"))
         return _text_response("ok")

@@ -26,6 +26,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services._tool_loop import FINAL_ROUND_NOTE
 from gateway.services.tools import WEB_FETCH_HEADER, WEB_SEARCH_HEADER
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
@@ -215,24 +216,27 @@ def test_a_caller_function_named_web_search_is_never_intercepted(
     assert search.await_count == 0
 
 
-def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
+def _offers_search(kwargs: dict[str, Any]) -> bool:
+    return any((tool.get("function") or {}).get("name") == "web_search" for tool in kwargs.get("tools") or [])
+
+
+def test_a_model_that_keeps_searching_past_max_uses_answers_one_round_later(
     client: TestClient,
     api_key_header: dict[str, str],
     serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The cap is billing, not formatting, so it holds where there is no native error shape.
 
-    The model asks twice with ``max_uses: 1``; the second call never reaches the
-    backend and comes back as a tool error the model can answer around.
+    The model asks for a search on every round, with ``max_uses: 1`` and ten rounds
+    allowed. The round after the one search is the last: it no longer offers the
+    search, and the search the model asks for anyway is dropped from the answer (#3183).
     """
     serve_search_on_fake(extract=False)
     captured: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         captured.append(kwargs)
-        return [_completion(tool_call=True), _completion(tool_call=True), _completion(tool_call=False)][
-            len(captured) - 1
-        ]
+        return _completion(tool_call=True)
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
@@ -245,31 +249,75 @@ def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
                 "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}],
+                "max_tool_iterations": 10,
             },
             headers=api_key_header,
         )
 
     assert response.status_code == 200, response.text
     assert search.await_count == 1, "the cap did not stop the second search"
-    assert captured[2]["messages"][-1] == {
-        "role": "tool",
-        "tool_call_id": "call_1",
-        "content": "[tool error] max_uses_exceeded",
-    }
+    assert [_offers_search(kwargs) for kwargs in captured] == [True, False]
+    assert captured[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    [choice] = response.json()["choices"]
+    assert choice["finish_reason"] == "stop"
+    assert not choice["message"].get("tool_calls")
 
 
-def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
+def test_a_model_that_keeps_searching_past_web_search_max_calls_answers_one_round_later(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deployment's shared call limit withholds the search as ``max_uses`` does.
+
+    With ``web_search_max_calls: 1`` and no ``max_uses``, the round after the one
+    search no longer offers it, and is the last since no other tool is left.
+    """
+    serve_search_on_fake(extract=False)
+    monkeypatch.setattr(cast(Any, client.app).state.config, "web_search_max_calls", 1)
+    captured: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.append(kwargs)
+        return _completion(tool_call=True)
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
+        admitted_search_spy() as search,
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "otari_web_search"}],
+                "max_tool_iterations": 10,
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    assert search.await_count == 1, "the call limit did not stop the second search"
+    assert [_offers_search(kwargs) for kwargs in captured] == [True, False]
+    assert captured[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    [choice] = response.json()["choices"]
+    assert choice["finish_reason"] == "stop"
+    assert not choice["message"].get("tool_calls")
+
+
+def test_max_uses_zero_offers_no_search_rather_than_uncapping_it(
     client: TestClient,
     api_key_header: dict[str, str],
     serve_search_on_fake: Callable[..., None],
 ) -> None:
-    """A cap of zero is a cap, so the backend is never reached."""
+    """A cap of zero is a cap: the only round offers no search, and the backend is never reached."""
     serve_search_on_fake(extract=False)
     captured: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         captured.append(kwargs)
-        return [_completion(tool_call=True), _completion(tool_call=False)][len(captured) - 1]
+        return _completion(tool_call=False)
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
@@ -288,7 +336,7 @@ def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
 
     assert response.status_code == 200, response.text
     assert search.await_count == 0, "a cap of zero was read as no cap"
-    assert captured[1]["messages"][-1]["content"] == "[tool error] max_uses_exceeded"
+    assert [_offers_search(kwargs) for kwargs in captured] == [False]
 
 
 @pytest.mark.parametrize("invalid_max_uses", [-1, True, False, "2", 1.5])

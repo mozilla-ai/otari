@@ -35,6 +35,16 @@ import { kindFilterOf } from "@/features/models/offeredKinds"
 import { PricingOverrideDialog } from "@/features/organization/PricingOverrideDialog"
 import { canManage } from "@/features/organization/roles"
 import {
+  EMPTY_ENDPOINT_AUTH,
+  type EndpointAuthDraft,
+  EndpointAuthFields,
+  endpointAuthAddressError,
+  endpointAuthDraftFrom,
+  endpointAuthExpiresAt,
+  isEndpointAuthComplete,
+} from "@/features/providers/EndpointAuthFields"
+import { EndpointAuthMark } from "@/features/providers/EndpointAuthMark"
+import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
   credentialFieldsFor,
@@ -121,6 +131,8 @@ interface KeyDraft {
   credentials: CredentialFieldValues
   /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
   redacted: string[]
+  /** The credential the address's own proxy wants, if it has one. */
+  endpointAuth: EndpointAuthDraft
   zeroDataRetention: boolean
 }
 
@@ -133,6 +145,7 @@ const EMPTY_DRAFT: KeyDraft = {
   clientArgs: "",
   credentials: {},
   redacted: [],
+  endpointAuth: EMPTY_ENDPOINT_AUTH,
   zeroDataRetention: false,
 }
 
@@ -154,6 +167,7 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     clientArgs: formatClientArgs(rest),
     credentials: typed,
     redacted,
+    endpointAuth: endpointAuthDraftFrom(key.endpoint_auth),
     zeroDataRetention: key.zero_data_retention,
   }
 }
@@ -197,12 +211,47 @@ function KeyForm({
   // The whole draft against what the form was seeded with, so a guard cannot
   // miss a field the form grows later.
   const { isDirty } = useDirtySnapshot(draft)
+  // A credential belongs to a base URL the organization chose. With no base
+  // URL the fields are not shown, and a field that is not shown decides
+  // nothing: neither whether the form saves nor what it sends.
+  const endpointAuth =
+    draft.apiBase.trim() === "" ? EMPTY_ENDPOINT_AUTH : draft.endpointAuth
+  // The credential as it would be sent, not the draft field: clearing the base
+  // URL takes the credential with it, and that is a change the save must carry.
+  const { isDirty: endpointAuthChanged } = useDirtySnapshot(endpointAuth)
+
+  // A move is a new address, as the gateway reads it: clearing the address
+  // takes the credentials with it rather than carrying them anywhere. Named
+  // once because every stored credential the key holds is held to it.
+  const addressMoved =
+    editing !== null &&
+    draft.apiBase.trim() !== "" &&
+    draft.apiBase.trim() !== (editing.api_base ?? "")
+
+  // The gateway refuses a credential the key cannot carry to this address, so
+  // the field that has to change is where it is said.
+  const addressError = endpointAuthAddressError(draft.apiBase, endpointAuth)
+  // A stored API key does not travel to an address nobody proved they hold.
+  const apiKeyNeededAgain = addressMoved && Boolean(editing?.last4)
+
   const canSubmit =
+    addressError === undefined &&
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "") &&
-    !(editing?.slug && draft.apiBase.trim() === "")
+    !(editing?.slug && draft.apiBase.trim() === "") &&
+    // The gateway refuses to carry any stored credential to an address the
+    // person saving never proved they hold, and it names each one that is
+    // missing. A hidden `client_args` credential is deliberately not checked
+    // here: whether a stored one survives turns on masking rules the gateway
+    // owns, and a copy of those would drift from them, so its refusal is what
+    // reports that case.
+    !(addressMoved && Boolean(editing?.last4) && draft.apiKey === "") &&
+    isEndpointAuthComplete(endpointAuth, {
+      hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
+      addressMoved,
+    })
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
@@ -215,6 +264,23 @@ function KeyForm({
       draft.redacted,
     )
     const slug = draft.slug.trim()
+    const headerName = endpointAuth.headerName.trim()
+    // Null rather than omitted, so clearing the header clears the credential.
+    // The secret is sent only when retyped, as the API key is.
+    const endpointAuthBody =
+      headerName === ""
+        ? null
+        : {
+            method: "static_header" as const,
+            header_name: headerName,
+            expires_at: endpointAuthExpiresAt(
+              endpointAuth,
+              editing?.endpoint_auth ?? null,
+            ),
+            ...(endpointAuth.secret !== ""
+              ? { secret: endpointAuth.secret }
+              : {}),
+          }
     if (editing) {
       const body: UpdateOrgProviderKeyRequest = {
         name: draft.name.trim(),
@@ -226,6 +292,17 @@ function KeyForm({
       // null clears the stored credential, and "I did not retype the secret" is
       // not a request to delete it.
       if (draft.apiKey !== "") body.api_key = draft.apiKey
+      // Sent only where the credential changed, for the same reason. The date
+      // field holds minutes, so resending an untouched credential would rewrite
+      // a stored rotation date that carried seconds.
+      //
+      // A stored credential this deployment cannot read is not in the draft, so
+      // the draft never differs from it and nothing would be sent. Such a save
+      // carries the credential whether or not the fields were touched, which is
+      // what lets one be removed at all.
+      if (endpointAuthChanged || editing.endpoint_auth_unreadable) {
+        body.endpoint_auth = endpointAuthBody
+      }
       update.mutate({ keyId: editing.id, body }, { onSuccess: onClose })
       return
     }
@@ -236,6 +313,7 @@ function KeyForm({
       api_base: apiBase === "" ? null : apiBase,
       slug: apiBase !== "" && slug !== "" ? slug : null,
       client_args: clientArgs,
+      endpoint_auth: endpointAuthBody,
       zero_data_retention: draft.zeroDataRetention,
     }
     create.mutate(body, { onSuccess: onClose })
@@ -297,10 +375,18 @@ function KeyForm({
         label={spec?.apiKeyLabel ?? "API key"}
         value={draft.apiKey}
         onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+        isRequired={apiKeyNeededAgain}
+        placeholder={
+          editing?.last4 && !apiKeyNeededAgain
+            ? `Keep ••••${editing.last4}`
+            : undefined
+        }
         description={[
-          editing
-            ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-            : "Encrypted at rest and never shown again; only the last 4 characters come back.",
+          apiKeyNeededAgain
+            ? "Enter it again: it goes to the new address."
+            : editing
+              ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
+              : "Encrypted at rest and never shown again; only the last 4 characters come back.",
           spec?.apiKeyHelpText,
         ]
           .filter(Boolean)
@@ -318,9 +404,11 @@ function KeyForm({
           placeholder="https://api.example.com/v1"
           description={
             editing
-              ? "A new URL needs the API key, and any hidden credential below, entered again, because the key will be sent there."
+              ? "A new URL needs every credential on this key entered again, because they will be sent there."
               : "Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
           }
+          isInvalid={addressError !== undefined}
+          errorMessage={addressError}
         />
       )}
 
@@ -341,6 +429,18 @@ function KeyForm({
           description="Requests reach this key's models as prefix:model. It cannot change later."
         />
       ) : null}
+
+      {/* A proxy sits in front of an address the organization chose, so the
+          credential for it is asked for only where there is one. */}
+      {draft.apiBase.trim() === "" ? null : (
+        <EndpointAuthFields
+          value={endpointAuth}
+          onChange={(endpointAuth) => setDraft({ ...draft, endpointAuth })}
+          stored={editing?.endpoint_auth ?? null}
+          storedIsUnreadable={editing?.endpoint_auth_unreadable ?? false}
+          addressMoved={addressMoved}
+        />
+      )}
 
       <ZeroDataRetentionField
         isSelected={draft.zeroDataRetention}
@@ -483,10 +583,12 @@ export function OrganizationProvidersPage() {
             </span>
           ) : null}
           {/* The exception to the rule above, because this one *is* a problem:
-              the credential is stored but this deployment cannot decrypt it, so
-              the key serves nothing and its models are absent from the catalog.
-              Nothing else on the page says so, and the row is otherwise
-              indistinguishable from a working one. */}
+              the key cannot be served as it stands, so it serves nothing and
+              its models are absent from the catalog. Nothing else on the page
+              says so, and the row is otherwise indistinguishable from a working
+              one. Not named for one cause: a credential that will not decrypt
+              is the common one, and a row whose own fields make it unservable
+              lands here too. */}
           {row.usable ? null : (
             <span className="flex items-center gap-2 text-mono-caption text-danger">
               <Dot className="bg-danger" />
@@ -542,8 +644,18 @@ export function OrganizationProvidersPage() {
     {
       id: "api_base",
       header: "API base",
+      // The credential its proxy wants sits under the address it fronts, rather
+      // than in a column of its own that most keys would leave blank.
       cell: (row) => (
-        <span className="text-muted">{row.api_base ?? "provider default"}</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-muted">
+            {row.api_base ?? "provider default"}
+          </span>
+          <EndpointAuthMark
+            auth={row.endpoint_auth}
+            isUnreadable={row.endpoint_auth_unreadable}
+          />
+        </div>
       ),
     },
     {
@@ -709,11 +821,14 @@ export function OrganizationProvidersPage() {
       {canEdit && secretKeyConfigured && unreadableCount > 0 ? (
         <InfoBanner tone="warning">
           {unreadableCount === 1
-            ? "One provider key can't be decrypted on this deployment, so it serves nothing and its models are absent from the catalog."
-            : `${unreadableCount} provider keys can't be decrypted on this deployment, so they serve nothing and their models are absent from the catalog.`}{" "}
-          This happens when <code>OTARI_SECRET_KEY</code> changed since they
-          were stored. Re-enter the API key on each to store it under the
-          current one.
+            ? "One provider key cannot be served as it stands, so it serves nothing and its models are absent from the catalog."
+            : `${unreadableCount} provider keys cannot be served as they stand, so they serve nothing and their models are absent from the catalog.`}{" "}
+          The usual cause is <code>OTARI_SECRET_KEY</code> changing since they
+          were stored. One key seals every stored credential, so re-enter both
+          the API key and the endpoint credential on each that carries one. A
+          key the row itself makes unservable, such as one whose address the
+          credential it holds may not be sent to, is fixed by editing the key
+          rather than by re-entering it.
         </InfoBanner>
       ) : null}
 
@@ -834,7 +949,7 @@ export function OrganizationProvidersPage() {
       />
 
       {/* The organization's own rate for one model, opened from a model row or
-          from the Models detail page's "Set your rate" link. Mounted here
+          from the Models detail page's "Set your rate…" action. Mounted here
           rather than inside the panel because the panel lives in a table cell,
           and a dialog rendered from one closes with the row that opened it.
 

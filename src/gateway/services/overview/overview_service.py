@@ -18,7 +18,7 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.models.tenancy import Organization
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.overview.overview_repository import Allocation, CeilingRollup, OverviewRepository
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 

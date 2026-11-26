@@ -29,8 +29,10 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OverviewIndexRouteImport } from './routes/_overview.index'
 import { Route as OverviewRequestsRouteImport } from './routes/_overview.requests'
+import { Route as OverviewRouterSavingsRouteImport } from './routes/_overview.router-savings'
 import { Route as OverviewSessionsRouteImport } from './routes/_overview.sessions'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminBudgetsRouteImport } from './routes/admin.budgets'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
@@ -167,6 +169,11 @@ const OverviewRequestsRoute = OverviewRequestsRouteImport.update({
   path: '/requests',
   getParentRoute: () => OverviewRoute,
 } as any)
+const OverviewRouterSavingsRoute = OverviewRouterSavingsRouteImport.update({
+  id: '/router-savings',
+  path: '/router-savings',
+  getParentRoute: () => OverviewRoute,
+} as any)
 const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
   id: '/sessions',
   path: '/sessions',
@@ -175,6 +182,11 @@ const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
   id: '/admin/accounts',
   path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminBudgetsRoute = AdminBudgetsRouteImport.update({
+  id: '/admin/budgets',
+  path: '/admin/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCodeExecutionRoute = AdminCodeExecutionRouteImport.update({
@@ -384,8 +396,10 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -437,8 +451,10 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
@@ -495,8 +511,10 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/_overview/requests': typeof OverviewRequestsRoute
+  '/_overview/router-savings': typeof OverviewRouterSavingsRoute
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -557,8 +575,10 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -610,8 +630,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/recommender'
     | '/admin/web-search'
@@ -667,8 +689,10 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/_overview/requests'
+    | '/_overview/router-savings'
     | '/_overview/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -728,6 +752,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminBudgetsRoute: typeof AdminBudgetsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRouteWithChildren
   AdminRecommenderRoute: typeof AdminRecommenderRoute
@@ -881,6 +906,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OverviewRequestsRouteImport
       parentRoute: typeof OverviewRoute
     }
+    '/_overview/router-savings': {
+      id: '/_overview/router-savings'
+      path: '/router-savings'
+      fullPath: '/router-savings'
+      preLoaderRoute: typeof OverviewRouterSavingsRouteImport
+      parentRoute: typeof OverviewRoute
+    }
     '/_overview/sessions': {
       id: '/_overview/sessions'
       path: '/sessions'
@@ -893,6 +925,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/budgets': {
+      id: '/admin/budgets'
+      path: '/admin/budgets'
+      fullPath: '/admin/budgets'
+      preLoaderRoute: typeof AdminBudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/code-execution': {
@@ -1152,12 +1191,14 @@ declare module '@tanstack/react-router' {
 
 interface OverviewRouteChildren {
   OverviewRequestsRoute: typeof OverviewRequestsRoute
+  OverviewRouterSavingsRoute: typeof OverviewRouterSavingsRoute
   OverviewSessionsRoute: typeof OverviewSessionsRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
 }
 
 const OverviewRouteChildren: OverviewRouteChildren = {
   OverviewRequestsRoute: OverviewRequestsRoute,
+  OverviewRouterSavingsRoute: OverviewRouterSavingsRoute,
   OverviewSessionsRoute: OverviewSessionsRoute,
   OverviewIndexRoute: OverviewIndexRoute,
 }
@@ -1317,6 +1358,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminBudgetsRoute: AdminBudgetsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRouteWithChildren,
   AdminRecommenderRoute: AdminRecommenderRoute,

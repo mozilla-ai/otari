@@ -46,6 +46,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.services.providers import OwnedEndpointTransport
 from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.types.traces import is_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -88,14 +89,40 @@ def withheld_tool_result(profile: str, *, unchecked: bool = False) -> str:
     )
 
 
-UnavailableReason = Literal["not_configured", "evaluation_failed"]
+UnavailableReason = str
 """Why a guardrail could not run, in words safe to send back to the caller.
 
 ``not_configured`` means no guardrails service was named for the profile.
-``evaluation_failed`` covers every other failure, and the log holds the detail.
+``http_<status>`` means the service answered ``/validate`` with that error
+status. ``evaluation_failed`` covers every other failure, and the log holds
+the detail.
 """
 
 GuardrailStatus = Literal["evaluated", "inconclusive", "unavailable"]
+
+# Enough to name what fired, too few and too short for a vendor's prose to fit.
+_MAX_CATEGORIES = 8
+_MAX_CATEGORY_LENGTH = 64
+
+
+def reported_categories(raw: object) -> tuple[str, ...]:
+    """What a check says fired, such as ``prompt_attack`` or ``pii/phone_number``, as a caller may see it.
+
+    They come from a vendor, or from a service the caller chose, so only short
+    identifier-shaped names are kept, each once, and at most a few; anything
+    else is dropped rather than shown. An item is a name, or any-guardrail's own
+    category object, which counts only when ``triggered`` is true.
+    """
+    if not isinstance(raw, list | tuple):
+        return ()
+    kept: list[str] = []
+    for item in raw:
+        name = item.get("name") if isinstance(item, dict) and item.get("triggered") is True else item
+        if isinstance(name, str) and len(name) <= _MAX_CATEGORY_LENGTH and is_identifier(name) and name not in kept:
+            kept.append(name)
+            if len(kept) == _MAX_CATEGORIES:
+                break
+    return tuple(kept)
 
 
 def _unevaluated_detail(profile: str) -> str:
@@ -107,22 +134,45 @@ def _unevaluated_detail(profile: str) -> str:
     return f"guardrail profile {profile!r} could not be evaluated"
 
 
+def _not_configured_detail(profile: str, *, mandated: bool) -> str:
+    """What a caller is told when no guardrails service serves a profile that enforces.
+
+    Worded for whoever can fix it, which depends on who named the profile. A
+    caller who named it can change the request. One subject to a mandate cannot,
+    and is not sent to a request field the mandate would override. Neither is
+    told to set a deployment setting, which a tenant of a hosted deployment has
+    no way to reach.
+    """
+    if mandated:
+        return (
+            f"guardrail profile {profile!r} is required for this request, but no guardrails service is "
+            "configured for it, so the request was refused. An administrator of your organization or of "
+            "this deployment has to configure it."
+        )
+    return (
+        f"guardrail profile {profile!r} was requested in block mode, but no guardrails service is "
+        "configured for it, so the request was refused. Name a guardrails service with `url` on the "
+        "guardrail entry, or remove the entry. A guardrail your organization defined from the catalog "
+        "runs only through an organization mandate."
+    )
+
+
 class GuardrailsNotReachableError(RuntimeError):
     """Raised when the guardrails service can't be reached or returns malformed data.
 
     Carries two messages, because the two audiences are different. ``str(exc)``
     is for the log and names the endpoint and the underlying failure;
-    :attr:`public_detail` is what reaches the caller in the 502 body and
+    :attr:`public_detail` is what reaches the caller in the error body and
     deliberately does not. Since otari#654 that endpoint may be one an
     organization configured, which the caller was never told about and cannot
     act on, and the root ``AGENTS.md`` rule against leaking internals in a
-    public error response covers exactly that. The one message that stays whole
-    is the no-URL-configured case: it names an environment variable rather than
-    an address, and it is the only one a reader can actually act on.
+    public error response covers exactly that. The no-URL-configured case says
+    what to change instead, worded for whoever named the profile.
 
     Neither message quotes what the endpoint sent back, because an answer can
     echo the prompt. A bad answer is named by its HTTP status, its exception
-    class, or the type of the bad value.
+    class, or the type of the bad value. The status alone also reaches the
+    caller, as :attr:`reason`: it says nothing about where the endpoint is.
     """
 
     def __init__(
@@ -150,6 +200,8 @@ class GuardrailResult:
     score: object | None = None
     unavailable: UnavailableReason | None = None
     """Set when the check could not run and the request was served anyway."""
+    categories: tuple[str, ...] = ()
+    """What fired, as :func:`reported_categories` keeps it. Empty when the guardrail names nothing."""
 
     @property
     def status(self) -> GuardrailStatus:
@@ -188,7 +240,7 @@ class GuardrailVerdict:
 class InProcessVerdict(Protocol):
     """What a guardrail this process runs answers with.
 
-    The same three fields the guardrails service reports, so both backends reach
+    The same fields the guardrails service reports, so both backends reach
     :class:`GuardrailResult` the same way. Read-only properties rather than
     attributes, so a frozen value type satisfies this by shape.
     """
@@ -201,6 +253,9 @@ class InProcessVerdict(Protocol):
 
     @property
     def score(self) -> float | None: ...
+
+    @property
+    def categories(self) -> tuple[str, ...]: ...
 
 
 class InProcessGuardrail(Protocol):
@@ -255,6 +310,7 @@ async def _validate_one(
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: HTTP {exc.response.status_code}",
             public_detail=_unevaluated_detail(cfg.profile),
+            reason=f"http_{exc.response.status_code}",
         ) from exc
     except (httpx.ProtocolError, httpx.DecodingError) as exc:
         raise GuardrailsNotReachableError(
@@ -306,6 +362,7 @@ async def _validate_one(
         valid=valid,
         explanation=result.get("explanation"),
         score=result.get("score"),
+        categories=reported_categories(result.get("categories")),
     )
 
 
@@ -346,7 +403,28 @@ async def _check_in_process(
         valid=verdict.valid,
         explanation=verdict.explanation,
         score=verdict.score,
+        categories=reported_categories(verdict.categories),
     )
+
+
+def require_base_url(url: str) -> None:
+    """Refuse a guardrail ``url`` that ``/validate`` cannot be added to.
+
+    The path goes on the end, so on a URL with a query string or a fragment it
+    would land inside that component and the service would be called at the
+    wrong path.
+
+    Raises:
+        UnsafeURLError: ``url`` carries a query string or a fragment.
+    """
+    if "?" in url or "#" in url:
+        msg = "guardrail URL is a base that '/validate' is added to, so it cannot carry a query string or a fragment"
+        raise UnsafeURLError(msg)
+
+
+async def _check_url(url: str, *, has_credential: bool) -> None:
+    require_base_url(url)
+    await validate_mcp_url(url, has_authorization_token=has_credential)
 
 
 async def check_guardrail_urls(
@@ -369,11 +447,10 @@ async def check_guardrail_urls(
     mandated = frozenset(mandated or ())
     unsafe: dict[str, UnsafeURLError] = {}
     # Paired with its URL rather than filtered in place, so what reaches
-    # `validate_mcp_url` is a `str` and not a `str | None` narrowed by
-    # inspection.
+    # `_check_url` is a `str` and not a `str | None` narrowed by inspection.
     checked = [(g.profile, g.url) for g in guardrails if g.url is not None]
     outcomes = await asyncio.gather(
-        *(validate_mcp_url(url, has_authorization_token=bool(credentials.get(profile))) for profile, url in checked),
+        *(_check_url(url, has_credential=bool(credentials.get(profile))) for profile, url in checked),
         return_exceptions=True,
     )
     for (profile, _), outcome in zip(checked, outcomes, strict=True):
@@ -440,8 +517,8 @@ async def run_input_guardrails(
     * ``block`` guardrails with ``on_unavailable="block"`` (the
       default) **fail closed** — if one can't be evaluated (service unreachable, no URL
       configured, malformed response) we raise
-      :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502)
-      rather than let an unchecked request through.
+      :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502, or
+      a 424 when no URL is configured) rather than let an unchecked request through.
     * ``block`` guardrails with ``on_unavailable="monitor"`` trade enforcement for
       availability: the check is recorded as inconclusive and the request
       proceeds, the same as a ``monitor`` guardrail. Only reachability is affected;
@@ -484,6 +561,7 @@ async def run_input_guardrails(
     # Either way the unsafe endpoint is never actually called.
     credentials = credentials or {}
     in_process = in_process or {}
+    mandated_profiles = frozenset(mandated or ())
     if unsafe is None:
         unsafe = await check_guardrail_urls(guardrails, credentials=credentials, mandated=mandated)
 
@@ -510,9 +588,9 @@ async def run_input_guardrails(
                     result = await _check_in_process(in_process[cfg.profile], cfg=cfg, input_text=input_text)
                 elif not base_url:
                     raise GuardrailsNotReachableError(
-                        f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
-                        "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
-                        "guardrail entry.",
+                        f"guardrail profile {cfg.profile!r} has no guardrails service: set "
+                        "OTARI_GUARDRAILS_URL, or give the entry a `url`",
+                        public_detail=_not_configured_detail(cfg.profile, mandated=cfg.profile in mandated_profiles),
                         reason="not_configured",
                     )
                 else:
@@ -582,6 +660,7 @@ class _CachedVerdict:
     valid: bool | None
     explanation: object | None
     score: object | None
+    categories: tuple[str, ...]
     expires_at: float
 
 
@@ -627,6 +706,7 @@ def cached_result(identity: str, text: str, cfg: GuardrailConfig) -> GuardrailRe
         valid=entry.valid,
         explanation=entry.explanation,
         score=entry.score,
+        categories=entry.categories,
     )
 
 
@@ -639,6 +719,7 @@ def remember_result(identity: str, text: str, result: GuardrailResult) -> None:
         valid=result.valid,
         explanation=result.explanation,
         score=result.score,
+        categories=result.categories,
         expires_at=time.monotonic() + _VERDICT_CACHE_TTL_S,
     )
     _verdicts.move_to_end(key)

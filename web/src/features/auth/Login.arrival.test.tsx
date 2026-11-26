@@ -38,7 +38,7 @@ function Mounted({
       <DeploymentProvider
         value={bootstrap({
           sign_in_methods: ["password"],
-          mail_ready: true,
+          mail: "delivers",
           oauth_providers: oauthProviders,
         })}
       >

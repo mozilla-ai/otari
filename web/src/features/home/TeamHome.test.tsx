@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { TeamHome } from "@/features/home/TeamHome"
 import { API_ROOT } from "@/shared/api/client"
+import { formatUsd } from "@/shared/helpers/format"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -601,7 +602,16 @@ describe("Home, the window", () => {
   })
 
   /** Every read answered with some spend; returns every URL the page asked. */
-  function mockApi({ errors = 0 }: { errors?: number } = {}) {
+  function mockApi({
+    errors = 0,
+    hosted = 0,
+    cached = 0,
+  }: {
+    errors?: number
+    hosted?: number
+    /** Input tokens read from cache, of 1,000 over two buckets. */
+    cached?: number
+  } = {}) {
     const asked: URL[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = new URL(String(input), "http://test")
@@ -624,8 +634,21 @@ describe("Home, the window", () => {
             cost: 4,
             request_count: 6,
             error_count: errors,
+            deployment_paid_cost: hosted,
           }),
-          series: [],
+          series: cached
+            ? [0, 1].map((day) => ({
+                bucket_start: new Date(Date.now() - day * 3600e3).toISOString(),
+                cache_read_tokens: cached / 2,
+                cache_write_tokens: 0,
+                cost: 2,
+                errors: 0,
+                input_tokens: 500,
+                output_tokens: 100,
+                requests: 3,
+                tokens: 600,
+              }))
+            : [],
           by_user: [spent("u-ada", "Ada"), spent("u-wei", "Wei")],
           by_api_key: [spent("k-1", "laptop")],
           by_model: [spent("gpt-5", "gpt-5")],
@@ -674,6 +697,24 @@ describe("Home, the window", () => {
       (url) =>
         url.searchParams.has("start_date") || url.searchParams.has("start"),
     )
+
+  it("splits the spend by who paid once a hosted provider served some", async () => {
+    mockApi({ hosted: 1 })
+    await renderHome("/?period=today")
+    expect(
+      await screen.findByText(
+        `${formatUsd(1)} hosted · ${formatUsd(3)} own keys`,
+      ),
+    ).toBeVisible()
+  })
+
+  it("keeps the request count on Tokens once the split and the cache share both take a subline", async () => {
+    mockApi({ hosted: 1, cached: 250 })
+    await renderHome("/?period=today")
+    expect(
+      await screen.findByText("6 requests · 25.0% of input from cache"),
+    ).toBeVisible()
+  })
 
   it("counts one failed request in the singular", async () => {
     mockApi({ errors: 1 })

@@ -47,8 +47,6 @@ import uuid
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BootstrapOperatorProtectedError,
@@ -67,21 +65,33 @@ from gateway.models.tenancy import (
     OrganizationMember,
     User,
 )
+from gateway.repositories.identity.dashboard_session_repository import DashboardSessionRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
-from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
+from gateway.services.organizations import BootstrapOperatorMarker
 
 if TYPE_CHECKING:
-    from gateway.services.identity import SelfServiceKeyDeactivationListener
+    from gateway.services.identity._deactivation import SelfServiceKeyDeactivationListener
 
 
 class DeploymentAdministrationAccess:
-    """Reads identities and administration authority across the whole deployment."""
+    """Reads identities and administration authority across the whole deployment.
 
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.users = UserRepository(db)
-        self.members = OrganizationMemberRepository(db)
+    An authentication gate asks this before a request opens a business transaction, so
+    every read it makes runs outside a unit of work block.
+
+    NOTE: Callers must build its collaborators on an ``AsyncSession``. One built on a
+    ``UnitOfWork`` raises ``OutsideUnitOfWorkError`` at the first read, because no block is open.
+    """
+
+    def __init__(
+        self,
+        users: UserRepository,
+        members: OrganizationMemberRepository,
+        bootstrap_operator: BootstrapOperatorMarker,
+    ) -> None:
+        self.users = users
+        self.members = members
+        self._bootstrap_operator = bootstrap_operator
 
     async def has_administration_access(self, actor: User) -> bool:
         """Whether this caller may reach the surface at all.
@@ -102,8 +112,8 @@ class DeploymentAdministrationAccess:
 
     async def is_bootstrap_operator(self, actor: User) -> bool:
         """Whether this caller is the identity the bootstrap marker names, read fresh from the database."""
-        bootstrap = await load_bootstrap_identity(self.db)
-        return bootstrap is not None and bootstrap.id == actor.id
+        bootstrap_id = await self._bootstrap_operator.user_id()
+        return bootstrap_id is not None and bootstrap_id == actor.id
 
     async def administration_access_ids(self, actors: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``actors`` may reach the surface, in one lookup rather than one each.
@@ -115,10 +125,10 @@ class DeploymentAdministrationAccess:
         superusers = {actor.id for actor in candidates if actor.is_superuser}
         if len(superusers) == len(candidates):
             return superusers
-        bootstrap = await load_bootstrap_identity(self.db)
-        if bootstrap is None:
+        bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id is None:
             return superusers
-        return superusers | {actor.id for actor in candidates if actor.id == bootstrap.id}
+        return superusers | {actor.id for actor in candidates if actor.id == bootstrap_id}
 
     async def list_users(
         self,
@@ -135,8 +145,7 @@ class DeploymentAdministrationAccess:
         # One query for the page's memberships rather than one per row, the same
         # shape the organization roster uses to resolve its own joins.
         organizations = await self.members.get_by_users_with_organizations(user.id for user in rows)
-        bootstrap = await load_bootstrap_identity(self.db)
-        bootstrap_id = bootstrap.id if bootstrap is not None else None
+        bootstrap_id = await self._bootstrap_operator.user_id()
         return DeploymentUsersPublic(
             data=[
                 _to_public(
@@ -157,11 +166,25 @@ class DeploymentAdministrationAccess:
 
 
 class DeploymentUserService(DeploymentAdministrationAccess):
-    """Administer identities, notifying credential owners in the same transaction."""
+    """Administer identities, notifying credential owners in the same transaction.
 
-    def __init__(self, db: AsyncSession, *, uow: UnitOfWork, keys: SelfServiceKeyDeactivationListener) -> None:
-        super().__init__(db)
+    NOTE: Its collaborators carry the same restriction as the base class. The guards that run
+    before the write block, and the reload that runs after it, are outside one.
+    """
+
+    def __init__(
+        self,
+        users: UserRepository,
+        members: OrganizationMemberRepository,
+        bootstrap_operator: BootstrapOperatorMarker,
+        *,
+        uow: UnitOfWork,
+        sessions: DashboardSessionRepository,
+        keys: SelfServiceKeyDeactivationListener,
+    ) -> None:
+        super().__init__(users, members, bootstrap_operator)
         self.uow, self.keys = uow, keys
+        self._sessions = sessions
 
     async def update_user(
         self,
@@ -220,11 +243,11 @@ class DeploymentUserService(DeploymentAdministrationAccess):
                 target.password_reset_token_expires_at = None
             if request.is_superuser is not None:
                 target.is_superuser = request.is_superuser
-            self.db.add(target)
+            self.users.stage(target)
             if request.is_active is False:
-                await revoke_user_dashboard_sessions(self.db, target.id)
+                await self._sessions.delete_for_user(target.id)
                 await self.keys.deactivate_self_service_keys(target.id)
-        await self.db.refresh(target)
+        target = await self.users.reload(target)
         # Operator access opens shared session content and, where enabled, break-glass,
         # so who granted or removed it, and who deactivated whom, is on the record.
         logger.warning(
@@ -236,11 +259,10 @@ class DeploymentUserService(DeploymentAdministrationAccess):
         )
 
         memberships = await self.members.get_by_users_with_organizations([target.id])
-        bootstrap = await load_bootstrap_identity(self.db)
         return _to_public(
             target,
             memberships.get(target.id, []),
-            bootstrap_id=bootstrap.id if bootstrap is not None else None,
+            bootstrap_id=await self._bootstrap_operator.user_id(),
             actor_id=actor.id,
         )
 

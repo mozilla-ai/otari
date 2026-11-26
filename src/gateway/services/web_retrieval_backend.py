@@ -516,7 +516,3 @@ def _format_results_for_model(query: str, results: list[dict[str, Any]]) -> str:
         header = f"[{i}] {title}" + (f" ({published_date})" if published_date else "")
         parts.append(f"{header}\n{url}\n{body}".rstrip())
     return "\n\n".join(parts)
-
-
-# Compatibility for overlays and integrations that imported the old class name.
-WebSearchBackend = WebRetrievalBackend

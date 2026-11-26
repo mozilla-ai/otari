@@ -28,7 +28,8 @@ class BuiltinTool:
 
     ``name`` is the function name the model calls.
     It is also the name a call is metered and priced under, so renaming a tool orphans its pricing and usage history.
-    ``definition`` returns a new function definition in the Chat Completions shape on every call.
+    The function definition the model is given is its backend's (``openai_tools``), since what it offers can
+    depend on the deployment: code execution offers the languages the deployment's sandbox runs.
     ``configured`` answers whether this deployment has a backend that can run the tool.
     ``runs_natively`` answers, for one attempt's provider, model and dialect, whether that provider runs a
     declaration of the tool itself. ``None`` for the provider reads as not native.
@@ -40,7 +41,6 @@ class BuiltinTool:
     """
 
     name: str
-    definition: Callable[[], dict[str, Any]]
     configured: Callable[[GatewayConfig], bool]
     declares: Callable[[list[dict[str, Any]] | None], bool] = field(compare=False)
     key_scope: KeyScope

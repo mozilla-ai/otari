@@ -279,14 +279,14 @@ def test_a_shared_link_lets_the_invitee_set_a_password_and_sign_in_without_mail(
     token = _token_from(result["accept_link"])
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
-    assert preview.json()["needs_password"] is True
+    assert preview.json()["next_step"] == "set_password"
 
     accept = client.post(
         f"{API_ROOT}/invitations/accept",
         json={"token": token, "password": PASSWORD, "full_name": "Grace Hopper"},
     )
     assert accept.status_code == 200, accept.text
-    assert accept.json()["password_set"] is True
+    assert accept.json()["next_step"] == "sign_in"
 
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": PASSWORD})
     assert signed_in.status_code == 200, signed_in.text
@@ -328,8 +328,7 @@ def test_accepting_without_a_password_still_works_and_sets_none(
     accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
 
     assert accept.status_code == 200, accept.text
-    assert accept.json()["password_set"] is False
-    assert accept.json()["verification_pending"] is False
+    assert accept.json()["next_step"] == "use_another_way_in"
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_in.status_code == 401
 
@@ -349,9 +348,50 @@ def test_accepting_after_an_unverified_signup_says_the_address_still_needs_verif
     accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
 
     assert accept.status_code == 200, accept.text
-    assert accept.json()["verification_pending"] is True
+    assert accept.json()["next_step"] == "verify_email"
+    assert accept.json()["ways_in"] == ["password_reset"]
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_in.status_code == 403
+
+
+def test_the_preview_does_not_tell_an_unverified_signup_it_can_sign_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A password on an address nobody has verified opens no session, so the page has to offer a way in."""
+    result = _invite(client, master_key_header, email="hedy@example.com")
+    _mail_on(test_config, monkeypatch)
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_up.status_code == 200, signed_up.text
+
+    token = _token_from(result["accept_link"])
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+
+    assert (preview["next_step"], preview["ways_in"]) == ("verify_email", ["password_reset"])
+
+
+def test_an_unverified_signup_is_not_sent_to_a_verification_link_no_mailbox_received(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The console transport shows the signup's link to the operator, so naming it would strand the invitee."""
+    result = _invite(client, master_key_header, email="hedy@example.com")
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_up.status_code == 200, signed_up.text
+
+    token = _token_from(result["accept_link"])
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+
+    assert (preview["next_step"], preview["ways_in"]) == ("use_another_way_in", [])
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+    assert accepted.status_code == 200, accepted.text
+    assert (accepted.json()["next_step"], accepted.json()["ways_in"]) == ("use_another_way_in", [])
 
 
 def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_sign_in(
@@ -369,7 +409,7 @@ def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_s
     db_session.commit()
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
-    assert preview.json()["needs_password"] is False
+    assert preview.json()["next_step"] == "sign_in"
 
     refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
     assert refused.status_code == 400, refused.text
@@ -379,9 +419,10 @@ def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_s
     assert _roster_row(client, master_key_header, "ida@example.com")["status"] == "invited"
     accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
     assert accept.status_code == 200, accept.text
+    assert (accept.json()["next_step"], accept.json()["ways_in"]) == ("sign_in", [])
 
 
-def test_a_link_claim_is_recorded_as_vouched_rather_than_proven(
+def test_a_link_claim_is_verified_rather_than_proved(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session: Session,
@@ -398,7 +439,7 @@ def test_a_link_claim_is_recorded_as_vouched_rather_than_proven(
     assert invitee is not None
     db_session.refresh(invitee)
     assert invitee.email_verified_at is not None
-    assert invitee.email_vouched_at is not None
+    assert invitee.email_proven_at is None
 
 
 def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_roster(
@@ -424,7 +465,7 @@ def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_r
     token = _token_from(_invite(client, master_key_header, email="kay@example.com")["accept_link"])
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
-    assert preview.json()["needs_password"] is False
+    assert preview.json()["next_step"] == "use_another_way_in"
     refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
     assert refused.status_code == 400, refused.text
 
@@ -440,12 +481,12 @@ def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_r
     assert accept.status_code == 200, accept.text
 
 
-def test_an_address_another_organization_vouched_for_cannot_be_added_until_it_is_proven(
+def test_an_address_another_organization_only_recorded_cannot_be_added_until_it_is_proved(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session: Session,
 ) -> None:
-    """Pre-claiming: vouch for an address nobody holds yet, then wait for a real organization to add it.
+    """Pre-claiming: record an address nobody holds yet, then wait for a real organization to add it.
 
     Mallory invites a fresh address and chooses its password through her own
     link. The deployment's organization adding or inviting that address later
@@ -474,9 +515,9 @@ def test_an_address_another_organization_vouched_for_cannot_be_added_until_it_is
     )
     assert invited.status_code == 409, invited.text
 
-    # Once the address is proven (a reset by email, a provider sign-in), it is an ordinary identity.
+    # Once the address is proved (a reset by email, a provider sign-in), it is an ordinary identity.
     identity = db_session.query(User).filter(col(User.email) == "lin@example.com").one()
-    identity.email_vouched_at = None
+    identity.email_proven_at = identity.email_verified_at
     db_session.add(identity)
     db_session.commit()
     added = client.post(
@@ -796,14 +837,7 @@ def test_accepting_from_the_inbox_activates_the_membership(
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {
-        "organization_name": "Second",
-        "role": "member",
-        "password_set": False,
-        "verification_pending": False,
-        "can_sign_in": True,
-        "ways_in": [],
-    }
+    assert response.json() == {"organization_name": "Second", "role": "member"}
 
     db_session.refresh(membership)
     db_session.refresh(invitation)
@@ -1031,7 +1065,7 @@ def test_revoking_a_stale_invitation_leaves_an_active_member_active(
 def test_a_revoked_invitation_elsewhere_does_not_stop_a_link_setting_a_first_password(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """Only a live membership in another organization vouches for the address."""
+    """Only a live membership in another organization counts for the address."""
     first = _invite(client, master_key_header, email="ada@example.com")
     revoked = client.delete(
         f"{API_ROOT}/organizations/me/member-invitations/{first['invitation_id']}", headers=master_key_header
@@ -1042,7 +1076,7 @@ def test_a_revoked_invitation_elsewhere_does_not_stop_a_link_setting_a_first_pas
     _switch(client, master_key_header, created.json()["id"])
     token = _token_from(_invite(client, master_key_header, email="ada@example.com")["accept_link"])
 
-    assert client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()["needs_password"] is True
+    assert client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()["next_step"] == "set_password"
     accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
     assert accept.status_code == 200, accept.text
 
@@ -1412,7 +1446,7 @@ def test_a_console_transport_offers_no_password_reset_as_a_way_in(
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
 
-    assert preview["ways_in"] == ["provider"]
+    assert (preview["next_step"], preview["ways_in"]) == ("use_another_way_in", ["provider"])
 
 
 def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
@@ -1428,7 +1462,7 @@ def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
     token = _token_from(_invite(client, master_key_header, email="new@example.com")["accept_link"])
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
-    assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, False, [])
+    assert (preview["next_step"], preview["ways_in"]) == ("use_another_way_in", [])
 
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
@@ -1438,7 +1472,7 @@ def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(
 
     accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
     assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["can_sign_in"] is False
+    assert accepted.json()["next_step"] == "use_another_way_in"
     assert accepted.json()["ways_in"] == ["provider", "password_reset"]
 
 
@@ -1449,10 +1483,10 @@ def test_an_invitee_who_can_already_sign_in_is_told_so(
     claimed = client.post(
         f"{API_ROOT}/invitations/accept", json={"token": _token_from(first["accept_link"]), "password": PASSWORD}
     )
-    assert claimed.json()["can_sign_in"] is True
-    # Proven since, as a reset by email would, so another organization may invite it.
+    assert claimed.json()["next_step"] == "sign_in"
+    # Proved since, as a reset by email would, so another organization may invite it.
     identity = db_session.execute(select(User).where(col(User.email) == "kim@example.com")).scalar_one()
-    identity.email_vouched_at = None
+    identity.email_proven_at = identity.email_verified_at
     db_session.commit()
     created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
     _switch(client, master_key_header, created.json()["id"])
@@ -1460,10 +1494,10 @@ def test_an_invitee_who_can_already_sign_in_is_told_so(
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
 
-    assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, True, [])
+    assert (preview["next_step"], preview["ways_in"]) == ("sign_in", [])
 
 
-def test_the_refusal_for_an_address_vouched_elsewhere_does_not_mention_the_other_organization(
+def test_the_refusal_for_an_address_recorded_elsewhere_does_not_mention_the_other_organization(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     home = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()["organization"]["id"]

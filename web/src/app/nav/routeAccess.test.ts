@@ -158,6 +158,7 @@ const TABLE: readonly [string, readonly Access[]][] = [
   ["/admin/accounts", [o, x, x, x, x, x]],
   ["/admin/hosted-providers", [o, x, x, x, x, x]],
   ["/admin/recommender", [o, x, x, x, x, x]],
+  ["/admin/budgets", [o, x, x, x, x, x]],
   ["/admin/web-search", [o, x, x, x, x, x]],
   ["/admin/code-execution", [o, x, x, x, x, x]],
   // Redirects that stay.
@@ -294,8 +295,11 @@ describe("an operator who does not manage the organization", () => {
     )
   })
 
-  it("opens Budgets, which serves an operator the deployment's budgets", () => {
-    expect(routeAccess(at("/budgets"), operatorMember)).toBe("open")
+  it("opens the deployment's budgets, not the organization's", () => {
+    // Spend & budgets is the organization's own page, whoever opens it
+    // (otari#2099); the deployment's budgets are a deployment page.
+    expect(routeAccess(at("/admin/budgets"), operatorMember)).toBe("open")
+    expect(routeAccess(at("/budgets"), operatorMember)).toBe("blocked")
   })
 })
 

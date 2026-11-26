@@ -12,11 +12,14 @@ identities at whatever role a case needs).
 
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
@@ -26,6 +29,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
@@ -46,6 +50,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.providers import (
+    EndpointAuthRequest,
     OrgProviderKeyCreateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeyUpdateRequest,
@@ -59,6 +64,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     refresh_org_provider_cache,
     reset_org_provider_cache,
 )
+from gateway.types.endpoint_auth import EndpointAuthMethod
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("public_dns")]
 
@@ -167,6 +173,198 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
     with pytest.raises(OrgProviderKeyInvalidSlugError):
         # A key named by its own prefix keeps an endpoint for that prefix to name.
         await update(api_base=None)
+
+
+async def _key_with_endpoint_auth(service: OrgProviderKeyService, owner: User) -> OrgProviderKeyPublic:
+    """A key carrying a whole endpoint credential."""
+    created = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai",
+            name="primary",
+            api_key="sk-live-1234",
+            api_base="https://proxy/v1",
+            endpoint_auth=EndpointAuthRequest(
+                method=EndpointAuthMethod.STATIC_HEADER,
+                header_name="Fastly-Key",
+                secret="edge-secret",
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+            ),
+        ),
+    )
+    assert created.endpoint_auth is not None
+    return created
+
+
+async def _key_with_unreadable_endpoint_auth(
+    async_db: AsyncSession, service: OrgProviderKeyService, owner: User
+) -> OrgProviderKeyPublic:
+    """A key whose stored method this build cannot read, as a later build then a rollback leaves it."""
+    created = await _key_with_endpoint_auth(service, owner)
+    await async_db.execute(
+        update(OrgProviderKey).where(col(OrgProviderKey.id) == created.id).values(endpoint_auth_method="mtls")
+    )
+    return created
+
+
+async def test_moving_the_address_asks_for_an_unreadable_endpoint_credential_again(
+    async_db: AsyncSession,
+) -> None:
+    """A value is stored whether or not this build can read it, so the refusal names resending it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    with pytest.raises(OrgProviderKeyCredentialRequiredError):
+        await service.update_key_for_user(
+            user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base="https://proxy/v2")
+        )
+
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.encrypted_endpoint_auth_secret is not None
+    assert row.endpoint_auth_header_name == "Fastly-Key"
+
+
+async def test_moving_a_key_to_a_plain_http_address_with_its_credential_resent_is_refused(
+    async_db: AsyncSession,
+) -> None:
+    """The address gate admits http, so this is the only thing between the credential and the clear.
+
+    The credentials are resent because a move refuses without them first, so an
+    address-only move never reaches the rule under test.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_endpoint_auth(service, owner)
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        await service.update_key_for_user(
+            user=owner,
+            key_id=created.id,
+            request=OrgProviderKeyUpdateRequest(
+                api_base="http://proxy/v1",
+                api_key="sk-live-5678",
+                endpoint_auth=EndpointAuthRequest(
+                    method=EndpointAuthMethod.STATIC_HEADER,
+                    header_name="Fastly-Key",
+                    secret="edge-secret-2",
+                    expires_at=datetime.now(UTC) + timedelta(days=30),
+                ),
+            ),
+        )
+
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.api_base == "https://proxy/v1"
+
+
+async def test_a_key_with_no_credential_may_still_use_a_plain_http_address(async_db: AsyncSession) -> None:
+    """The rule is about the credential travelling, so a key carrying none is not held to it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai", name="plain", api_key="sk-live-1234", api_base="http://proxy/v1"
+        ),
+    )
+
+    assert created.api_base == "http://proxy/v1"
+    assert created.endpoint_auth is None
+
+
+async def test_an_unreadable_endpoint_credential_can_be_removed(async_db: AsyncSession) -> None:
+    """Removing it reads nothing, so a row this build cannot read is not stuck carrying one."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    updated = await service.update_key_for_user(
+        user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(name="renamed", endpoint_auth=None)
+    )
+
+    assert (updated.name, updated.endpoint_auth) == ("renamed", None)
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.encrypted_endpoint_auth_secret is None
+    assert row.endpoint_auth_method is None
+
+
+async def test_an_unreadable_endpoint_credential_can_be_replaced_whole(async_db: AsyncSession) -> None:
+    """A credential sent with its own value keeps nothing, so replacing it reads nothing either."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_unreadable_endpoint_auth(async_db, service, owner)
+
+    updated = await service.update_key_for_user(
+        user=owner,
+        key_id=created.id,
+        request=OrgProviderKeyUpdateRequest(
+            endpoint_auth=EndpointAuthRequest(
+                method=EndpointAuthMethod.STATIC_HEADER,
+                header_name="CF-Access-Client-Id",
+                secret="replaced-9f2a",
+                expires_at=datetime.now(UTC) + timedelta(days=30),
+            )
+        ),
+    )
+
+    assert updated.endpoint_auth is not None
+    assert (updated.endpoint_auth.header_name, updated.endpoint_auth.last4) == ("CF-Access-Client-Id", "9f2a")
+
+
+_ENDPOINT_AUTH_COLUMNS = (
+    "encrypted_endpoint_auth_secret",
+    "endpoint_auth_expires_at",
+    "endpoint_auth_header_name",
+    "endpoint_auth_last4",
+    "endpoint_auth_method",
+)
+
+
+@pytest.mark.parametrize("column", _ENDPOINT_AUTH_COLUMNS)
+async def test_the_database_refuses_an_endpoint_credential_missing_one_column(
+    async_db: AsyncSession, column: str
+) -> None:
+    """The five columns carry one credential, so a row holding four of them is refused.
+
+    The service writes all five together, so this reaches past it to the
+    database, which holds the rule for every writer.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_endpoint_auth(service, owner)
+
+    with pytest.raises(IntegrityError):
+        await async_db.execute(
+            update(OrgProviderKey).where(col(OrgProviderKey.id) == created.id).values(**{column: None})
+        )
+    await async_db.rollback()
+
+
+async def test_clearing_every_endpoint_credential_column_is_allowed(async_db: AsyncSession) -> None:
+    """A key that carries no endpoint credential is the ordinary case, so all five NULL must store."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await _key_with_endpoint_auth(service, owner)
+
+    await async_db.execute(
+        update(OrgProviderKey)
+        .where(col(OrgProviderKey.id) == created.id)
+        .values(**dict.fromkeys(_ENDPOINT_AUTH_COLUMNS))
+    )
+
+    row = await async_db.get(OrgProviderKey, created.id)
+    assert row is not None
+    assert row.endpoint_auth is None
 
 
 async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(
@@ -1023,7 +1221,7 @@ async def test_get_byo_providers(
             encrypted_api_key=_stored_api_key(key_state),
             last4=None,
             api_base=None,
-            client_args=None,
+            encrypted_client_args=None,
         )
         if disabled_in_last_workspace:
             await WorkspaceProviderKeyOverrideRepository(async_db).create(

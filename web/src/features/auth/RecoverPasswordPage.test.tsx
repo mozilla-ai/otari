@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { MailReadiness } from "@/client"
 import { RecoverPasswordPage } from "@/features/auth/RecoverPasswordPage"
 import {
   readSignInAddress,
@@ -19,12 +20,12 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
   return { ...actual, apiFetch: vi.fn() }
 })
 
-function renderPage() {
+function renderPage(mail: MailReadiness = "delivers") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap()}>
+    <DeploymentProvider value={bootstrap({ mail })}>
       <ThemeProvider>
         <QueryClientProvider client={client}>
           <RecoverPasswordPage />
@@ -70,7 +71,7 @@ describe("RecoverPasswordPage", () => {
 
     expect(
       await screen.findByText(
-        /If that address has an account on this gateway, a link to set or reset its password/,
+        /If that address has an account on this deployment, a link to set or reset its password/,
       ),
     ).toBeInTheDocument()
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe("/auth/password/reset")
@@ -112,5 +113,22 @@ describe("RecoverPasswordPage", () => {
     expect(
       screen.queryByText("Too many attempts. Try again in a minute."),
     ).toBeNull()
+  })
+
+  it("promises no inbox where this deployment cannot email a working link", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(undefined)
+    renderPage("sends_only")
+
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.click(screen.getByRole("button", { name: "Create link" }))
+
+    expect(
+      await screen.findByText(/cannot email you a link that works/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/on its way/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Check your email" }),
+    ).not.toBeInTheDocument()
   })
 })

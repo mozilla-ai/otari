@@ -639,7 +639,11 @@ def _upstream_stream_error_type(exc: BaseException) -> str | None:
 
 
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
-_USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
+_USER_FORBIDDEN = (
+    "'metadata.user_id' does not match the authenticated API key's user. "
+    "To bill each end user separately, use a service key; to accept it and bill the key's own user, "
+    "set the key's mismatched user field option to Always accept (reject_user_mismatch: false)."
+)
 _PROVIDER_ERROR = "The request could not be completed by the provider"
 
 

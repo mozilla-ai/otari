@@ -90,6 +90,7 @@ class AgentModelRecommendation(BaseModel):
                 "model": "sonnet",
                 "reason": "sonnet with 72%",
                 "probabilities": {"haiku": 0.21, "sonnet": 0.72, "opus": 0.07},
+                "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
             }
         }
     )
@@ -99,6 +100,117 @@ class AgentModelRecommendation(BaseModel):
     probabilities: dict[str, float] | None = Field(
         default=None, description="The decision model's probability for each candidate, when it reports them."
     )
+    decision_id: uuid.UUID | None = Field(
+        default=None,
+        description="The gateway's record of this recommendation. Absent where the record could not be kept.",
+    )
+
+
+TokenCount = Annotated[int, Field(ge=0, le=10**10)]
+
+
+class SubagentUsageLine(BaseModel):
+    """What a subagent consumed on one model, as its harness counted it.
+
+    The cache counts are beside `input_tokens`, not inside it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1, max_length=256, description="The model, as the harness names it.")
+    input_tokens: TokenCount = Field(description="Input tokens that were neither read from nor written to a cache.")
+    output_tokens: TokenCount
+    cache_read_tokens: TokenCount = 0
+    cache_write_tokens: TokenCount = 0
+
+
+class SubagentOutcomeReport(BaseModel):
+    """What the subagent a recommendation started has consumed so far, in total.
+
+    Each report replaces the one before it, so a harness sends running totals
+    and may send them more than once.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "usage": [
+                    {
+                        "model": "claude-haiku-5-5",
+                        "input_tokens": 1200,
+                        "output_tokens": 800,
+                        "cache_read_tokens": 42000,
+                        "cache_write_tokens": 9000,
+                    }
+                ]
+            }
+        },
+    )
+
+    usage: list[SubagentUsageLine] = Field(
+        min_length=1, max_length=16, description="One line per model the subagent ran on."
+    )
+
+
+class SavingsAmounts(BaseModel):
+    """What a group of subagent decisions comes to, in USD.
+
+    The two costs sum only the decisions whose outcome is priced on both
+    sides, which `measured` and `estimated` count. `router_cost` sums every
+    decision in the group, so `net_saved` can be negative.
+    """
+
+    decisions: int = Field(description="Recommendations answered.")
+    with_outcome: int = Field(description="Decisions whose subagent's consumption was reported.")
+    measured: int = Field(description="Priced outcomes read from metered usage.")
+    estimated: int = Field(description="Priced outcomes read from the harness's own token counts.")
+    baseline_cost: float = Field(description="The subagents' tokens priced at the models they would have started on.")
+    actual_cost: float = Field(description="The same tokens priced at the models they ran on.")
+    router_cost: float = Field(description="What the recommendations themselves were charged.")
+    gross_saved: float = Field(description="`baseline_cost` less `actual_cost`.")
+    net_saved: float = Field(description="`gross_saved` less `router_cost`.")
+
+
+class SubagentSavingsTotals(SavingsAmounts):
+    """The whole window."""
+
+    no_outcome: int = Field(description="Decisions with no consumption reported. Their router cost still counts.")
+    unpriced: int = Field(description="Reported outcomes left out of the costs because a side has no price.")
+    router_unanswered: int = Field(description="Recommendation requests the router failed to answer.")
+
+
+class SubagentSavingsPoint(SavingsAmounts):
+    """One time bucket, by when the recommendation was made."""
+
+    bucket_start: str = Field(description="Canonical ISO-8601 UTC.")
+
+
+class SavingsByAgentType(SavingsAmounts):
+    """One subagent type."""
+
+    agent_type: str
+
+
+class SavingsBySwap(SavingsAmounts):
+    """Reported outcomes with one baseline model and one model run on."""
+
+    baseline_model: str = Field(
+        description="The priced model the baseline was read as, or the harness's name for it where it was read as none."
+    )
+    ran_on: str = Field(description="The model the subagent ran on, as the harness named it.")
+
+
+class SubagentSavingsPublic(BaseModel):
+    """What the subagent router saved in a window, within the caller's scope."""
+
+    recommender_available: bool = Field(description="Whether anything answers a recommendation on this deployment.")
+    totals: SubagentSavingsTotals
+    measured: SavingsAmounts = Field(description="The decisions whose outcome is metered.")
+    estimated: SavingsAmounts = Field(description="The decisions whose outcome is the harness's own count.")
+    series: list[SubagentSavingsPoint]
+    by_agent_type: list[SavingsByAgentType] = Field(description="Largest saving first, at most 20.")
+    by_swap: list[SavingsBySwap] = Field(description="Largest saving first, at most 20.")
 
 
 class RecommendationRefusal(BaseModel):

@@ -83,6 +83,7 @@ from gateway.services.merged_catalog_service import (
     ModelPricingInfo,
     build_real_model_catalog,
     served_on_deployment_key,
+    viewer_data_locations,
     viewer_organization,
     viewer_price,
     viewer_reads_usage,
@@ -247,6 +248,13 @@ class CatalogOffering(BaseModel):
             "Whether whoever holds the serving key declared that the provider keeps no prompt or completion data: "
             "the operator for a `hosted` offering, the organization for one on its own keys, where every usable "
             "key of the provider must declare it. A declaration, not something the gateway can verify."
+        ),
+    )
+    data_locations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, "
+            "distinct and sorted; empty where it declares none and for every other offering."
         ),
     )
     context_window: int | None = None
@@ -452,8 +460,12 @@ async def _group(
     session_identity: TenancyUser | None,
     hosted_providers: HostedProviderService,
     org_provider_keys: OrgProviderKeyService,
+    workspace_id: uuid.UUID | None = None,
 ) -> _Grouped:
-    """The merged catalog's offerings grouped into models, each priced at the viewer's rate."""
+    """The merged catalog's offerings grouped into models, each priced at the viewer's rate.
+
+    ``workspace_id`` is the one a session asked the catalog to be narrowed to; an API key's own workspace narrows it.
+    """
     catalog = merged.models_dev
     now = normalize_effective_at(None)
     real = real_offerings(merged)
@@ -468,6 +480,12 @@ async def _group(
     )
     configured_types = {models_dev_provider_id(config.provider_instance_type(i)) for i in config.providers}
     zero_retention = await viewer_zero_data_retention(hosted_providers, org_provider_keys, organization_id)
+    # The workspace the merged catalog was narrowed to, which is the one whose accepted locations bound
+    # where a listed model is served from.
+    narrowing_workspace = (
+        workspace_id if session_identity is not None else (caller[0].workspace_id if caller and caller[0] else None)
+    )
+    hosted_locations = await viewer_data_locations(hosted_providers, organization_id, narrowing_workspace)
     slug_providers = await org_provider_keys.slug_providers(organization_id) if organization_id is not None else {}
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
@@ -492,6 +510,7 @@ async def _group(
                 credential=credential,
                 discovered=obj.id in merged.discovered_keys,
                 zero_data_retention=declared,
+                data_locations=hosted_locations.of(instance, credential.value),
                 # From the merged catalog, so the flat listing reports the same limits.
                 context_window=obj.context_window,
                 max_output_tokens=obj.max_output_tokens,
@@ -640,6 +659,7 @@ def _summary(
         zero_data_retention_providers=sorted(
             {member.wire.provider for member in members if member.wire.zero_data_retention}
         ),
+        data_locations=sorted({location for member in members for location in member.wire.data_locations}),
         selectors=sorted(member.wire.selector for member in members),
         price_sources=sorted({member.wire.price_source for member in members if member.wire.price_source}),
         unpriced_count=sum(1 for member in members if member.wire.pricing is None),
@@ -725,6 +745,7 @@ async def list_catalog(
         session_identity=session_identity,
         hosted_providers=hosted_providers,
         org_provider_keys=org_provider_keys,
+        workspace_id=query.workspace_id,
     )
     models = [
         _summary(
@@ -786,6 +807,7 @@ async def get_catalog_model(
         session_identity=session_identity,
         hosted_providers=hosted_providers,
         org_provider_keys=org_provider_keys,
+        workspace_id=workspace_id,
     )
     identity = next((identity for identity in grouped.identities.values() if identity.id == model_id), None)
     if identity is None:
@@ -890,6 +912,7 @@ async def list_catalog_providers(
         session_identity=session_identity,
         hosted_providers=hosted_providers,
         org_provider_keys=org_provider_keys,
+        workspace_id=workspace_id,
     )
     summaries = sorted(
         (summary for summary, _ in (await _provider_summaries(grouped, hosted_providers)).values()),
@@ -929,6 +952,7 @@ async def get_catalog_provider(
         session_identity=session_identity,
         hosted_providers=hosted_providers,
         org_provider_keys=org_provider_keys,
+        workspace_id=workspace_id,
     )
     found = (await _provider_summaries(grouped, hosted_providers)).get(name)
     if found is None:

@@ -163,8 +163,9 @@ async def list_all_search_tools(
 async def reencrypt_stored_search_tool_keys(service: SearchToolServiceDep) -> ReencryptSearchToolsResponse:
     """Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
 
-    The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-    alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
+    Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+    ``POST /api/v1/hosted-providers/reencrypt`` and
+    ``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be
     decrypted are left untouched and must be recovered by replacing the affected
     tool's key.
     """

@@ -750,3 +750,81 @@ def test_a_command_gate_in_a_composed_directory_still_widens_the_matcher(repo: P
     result = _invoke()
     assert result.exit_code == 0, result.output
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in directory.iterdir()}
+
+
+@pytest.mark.parametrize(
+    ("harness", "settings_dir", "settings_name"),
+    [("claude-code", ".claude", "settings.local.json"), ("codex", ".codex", "hooks.json")],
+)
+@pytest.mark.parametrize("link", ["an-existing-file", "a-missing-file", "the-directory"])
+def test_setup_refuses_a_settings_file_a_symlink_takes_out_of_the_repo(
+    repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    harness: str,
+    settings_dir: str,
+    settings_name: str,
+    link: str,
+) -> None:
+    """A cloned repository must not be able to point the registration at the user's own settings."""
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    outside = tmp_path_factory.mktemp("outside")
+    if link == "the-directory":
+        (repo / settings_dir).symlink_to(outside, target_is_directory=True)
+    else:
+        if link == "an-existing-file":
+            (outside / settings_name).write_text('{"theme": "dark"}\n', encoding="utf-8")
+        (repo / settings_dir).mkdir()
+        (repo / settings_dir / settings_name).symlink_to(outside / settings_name)
+    before = _snapshot(outside)
+
+    result = _invoke("--harness", harness)
+
+    assert result.exit_code != 0
+    assert "outside this repository, so it was not written" in result.output
+    assert _snapshot(outside) == before
+
+
+@pytest.mark.parametrize("link", ["the-file", "the-directory"])
+def test_setup_refuses_a_starter_guardrail_a_symlink_takes_out_of_the_repo(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, link: str
+) -> None:
+    outside = tmp_path_factory.mktemp("outside")
+    if link == "the-directory":
+        (repo / ".otari").symlink_to(outside, target_is_directory=True)
+    else:
+        _guardrail_path(repo).symlink_to(outside / "guardrails.yml")
+
+    result = _invoke(input="y\n")
+
+    assert result.exit_code != 0
+    assert "outside this repository, so it was not written" in result.output
+    assert list(outside.iterdir()) == []
+
+
+def test_setup_writes_through_a_symlink_that_stays_inside_the_repo(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / "config" / "claude").mkdir(parents=True)
+    (repo / ".claude").symlink_to(Path("config") / "claude", target_is_directory=True)
+
+    result = _invoke()
+
+    assert result.exit_code == 0, result.output
+    assert "PreToolUse" in _read_settings(repo)["hooks"]
+    assert (repo / "config" / "claude" / "settings.local.json").is_file()
+
+
+def test_declining_the_starter_still_registers_when_the_guardrail_dir_leads_out_of_the_repo(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside")
+    (repo / ".otari").symlink_to(outside, target_is_directory=True)
+
+    result = _invoke(input="n\n")
+
+    assert result.exit_code == 0, result.output
+    assert "PreToolUse" in _read_settings(repo)["hooks"]
+    assert list(outside.iterdir()) == []

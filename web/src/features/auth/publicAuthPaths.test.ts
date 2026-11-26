@@ -108,7 +108,7 @@ describe("resolveSignInReturnRoute", () => {
 })
 
 /** A deployment with mail off and no OAuth provider, which each test narrows. */
-const NOTHING_CONFIGURED = { mailReady: false, oauthProviders: [] } as const
+const NOTHING_CONFIGURED = { mailCanSend: false, oauthProviders: [] } as const
 
 describe("publicAuthPath", () => {
   it("matches on the path alone, so a query string does not hide a known page", () => {
@@ -158,7 +158,7 @@ describe("isPublicAuthPageAvailable", () => {
       expect(
         isPublicAuthPageAvailable(path, {
           ...NOTHING_CONFIGURED,
-          mailReady: true,
+          mailCanSend: true,
         }),
       ).toBe(true)
     }
@@ -177,7 +177,7 @@ describe("isPublicAuthPageAvailable", () => {
     // Per provider, not per flow: a gateway with Google configured and GitHub
     // not must answer the GitHub callback with the panel, or a bookmark reaches
     // a page whose only outcome is the gateway's 503.
-    const googleOnly = { mailReady: false, oauthProviders: ["google"] }
+    const googleOnly = { mailCanSend: false, oauthProviders: ["google"] }
     expect(
       isPublicAuthPageAvailable("/sign-in/google/callback", googleOnly),
     ).toBe(true)
@@ -192,7 +192,7 @@ describe("isPublicAuthPageAvailable", () => {
   it("does not gate an OAuth callback on mail, which it never sends", () => {
     expect(
       isPublicAuthPageAvailable("/sign-in/google/callback", {
-        mailReady: false,
+        mailCanSend: false,
         oauthProviders: ["google"],
       }),
     ).toBe(true)

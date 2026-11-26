@@ -36,7 +36,10 @@ import type {
   OrgProviderModel,
   PendingOrganizationInvitation,
   PricingResponse,
+  SavingsAmounts,
   ScopedBudget,
+  SubagentSavings,
+  SubagentSavingsTotals,
   UpdateCheckStatus,
   UsageTotals,
   User,
@@ -112,6 +115,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     reasoning_tokens: 0,
     billed_input_tokens: 0,
     billed_output_tokens: 0,
+    deployment_paid_cost: 0,
     request_count: 0,
     error_count: 0,
     unpriced_requests: 0,
@@ -154,12 +158,14 @@ export const SURFACES = [
   "models",
   "organization_guardrails",
   "organization_providers",
+  "organization_sso",
   "organization_usage",
   "organizations",
   "playground",
   "pricing",
   "routing",
   "settings",
+  "subagent_savings",
   "tools",
   "update_check",
   "usage",
@@ -191,6 +197,10 @@ export function bootstrap(
     // On, the setting default: the tests about a deployment that switched
     // passkeys off say so.
     passkeys_enabled: true,
+    // On, the setting default, and it matches the organization_sso surface
+    // this fixture publishes: the tests about a deployment that switched
+    // organization SSO off set both.
+    organization_oidc_enabled: true,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
@@ -198,7 +208,7 @@ export function bootstrap(
     // the OAuth tests name the providers they need rather than every other test
     // clearing a list it does not care about.
     oauth_providers: [],
-    mail_ready: false,
+    mail: "none",
     feedback_enabled: true,
     // Off, so a page test sends no connect read: the connect tests turn it on.
     platform_connect: false,
@@ -868,6 +878,7 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    endpoint_auth_unreadable: false,
     // Never refreshed: the key offers no rows and is unnarrowed.
     offered_count: 0,
     serving_count: 0,
@@ -1135,5 +1146,141 @@ export function updateCheckStatus(
     update_available: false,
     advisories: [],
     ...overrides,
+  }
+}
+
+/** A group of subagent decisions with no money in it. */
+export function savingsAmounts(
+  overrides: Partial<SavingsAmounts> = {},
+): SavingsAmounts {
+  return {
+    decisions: 0,
+    with_outcome: 0,
+    measured: 0,
+    estimated: 0,
+    baseline_cost: 0,
+    actual_cost: 0,
+    router_cost: 0,
+    gross_saved: 0,
+    net_saved: 0,
+    ...overrides,
+  }
+}
+
+/**
+ * What the subagent router saved: six recommendations, four priced, one never
+ * reported and one that could not be priced.
+ */
+export function subagentSavings(
+  overrides: Omit<Partial<SubagentSavings>, "totals"> & {
+    totals?: Partial<SubagentSavingsTotals>
+  } = {},
+): SubagentSavings {
+  const { totals, ...rest } = overrides
+  return {
+    recommender_available: true,
+    totals: {
+      ...savingsAmounts({
+        decisions: 6,
+        with_outcome: 5,
+        measured: 1,
+        estimated: 3,
+        baseline_cost: 8.1,
+        actual_cost: 2.5,
+        router_cost: 0.1,
+        gross_saved: 5.6,
+        net_saved: 5.5,
+      }),
+      no_outcome: 1,
+      unpriced: 1,
+      router_unanswered: 0,
+      ...totals,
+    },
+    measured: savingsAmounts({
+      decisions: 1,
+      with_outcome: 1,
+      measured: 1,
+      baseline_cost: 2,
+      actual_cost: 1,
+      gross_saved: 1,
+      net_saved: 1,
+    }),
+    estimated: savingsAmounts({
+      decisions: 4,
+      with_outcome: 4,
+      estimated: 3,
+      baseline_cost: 6.1,
+      actual_cost: 1.5,
+      router_cost: 0.08,
+      gross_saved: 4.6,
+      net_saved: 4.52,
+    }),
+    series: [
+      {
+        ...savingsAmounts({
+          decisions: 6,
+          with_outcome: 5,
+          measured: 1,
+          estimated: 3,
+          baseline_cost: 8.1,
+          actual_cost: 2.5,
+          router_cost: 0.1,
+          gross_saved: 5.6,
+          net_saved: 5.5,
+        }),
+        bucket_start: "2026-11-20T00:00:00Z",
+      },
+    ],
+    by_agent_type: [
+      {
+        ...savingsAmounts({
+          decisions: 4,
+          with_outcome: 3,
+          measured: 1,
+          estimated: 1,
+          baseline_cost: 3,
+          actual_cost: 1.2,
+          router_cost: 0.04,
+          gross_saved: 1.8,
+          net_saved: 1.76,
+        }),
+        agent_type: "Explore",
+      },
+      {
+        ...savingsAmounts({
+          decisions: 1,
+          with_outcome: 1,
+          estimated: 1,
+          baseline_cost: 0.1,
+          actual_cost: 0.3,
+          router_cost: 0.01,
+          gross_saved: -0.2,
+          net_saved: -0.21,
+        }),
+        agent_type: "Plan",
+      },
+    ],
+    by_swap: [
+      {
+        ...savingsAmounts({
+          decisions: 3,
+          with_outcome: 3,
+          estimated: 3,
+          baseline_cost: 6.1,
+          actual_cost: 1.5,
+          router_cost: 0.07,
+          gross_saved: 4.6,
+          net_saved: 4.53,
+        }),
+        baseline_model: "anthropic:claude-opus-5",
+        ran_on: "claude-haiku-5",
+      },
+      {
+        ...savingsAmounts({ decisions: 1, with_outcome: 1, router_cost: 0.01 }),
+        baseline_model: "opus",
+        ran_on: "claude-haiku-5",
+      },
+    ],
+    ...rest,
   }
 }

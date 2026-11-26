@@ -35,7 +35,7 @@ from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import encrypt_mapping, generate_secret_key
 from gateway.services.tools import reset_search_tool_cache
 from gateway.services.tools._web_search import in_loop_default
 from gateway.services.web_fetch_service import WebFetchHTTPStatusError, WebFetchResult, WebFetchService
@@ -87,9 +87,12 @@ def _create(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
     return client.post(f"{API_ROOT}/search-tools", json=payload, headers=headers)
 
 
-def _store_row(db_session: Session, **fields: Any) -> None:
-    """Store a row as a release before the write rules could have, bypassing the route."""
-    db_session.add(SearchToolCredential(**{"options": {}, **fields}))
+def _store_row(db_session: Session, *, options: dict[str, Any] | None = None, **fields: Any) -> None:
+    """Store a row as a release before the write rules could have, bypassing the route.
+
+    The options are sealed here, as the database holds them.
+    """
+    db_session.add(SearchToolCredential(encrypted_options=encrypt_mapping(options), **fields))
     db_session.commit()
 
 
@@ -457,6 +460,7 @@ def test_search_catalog_serves_the_library_metadata(
         "brave",
         "deepseek",
         "exa",
+        "keenable",
         "mojeek",
         "perplexity",
         "searxng",
@@ -500,6 +504,28 @@ def test_a_cost_tier_the_provider_reports_no_cost_for_is_set_only_by_a_tools_con
         True,
     )
     assert not any(option["operator_only"] for option in perplexity["options"] if not option["cost_tier"])
+
+
+def test_keenable_is_listed_with_an_optional_key_and_an_operator_only_title(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    keenable = _catalog(catalog_client, headers=master_key_header)["keenable"]
+    assert (keenable["requires_api_key"], keenable["requires_api_base"]) == (False, False)
+    assert keenable["default_api_base"] == "https://api.keenable.ai"
+    operator_only = {option["name"] for option in keenable["options"] if option["operator_only"]}
+    assert operator_only == {"X-Keenable-Title"}
+
+
+def test_a_keenable_tool_needs_no_key(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = _create(client, master_key_header, name="keenable", provider="keenable", api_base=None)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["last4"] is None
+
+
+def test_an_empty_key_on_a_keenable_tool_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = _create(client, master_key_header, name="keenable", provider="keenable", api_base=None, api_key=" ")
+    assert resp.status_code == 422
+    assert "leave api_key out" in resp.json()["detail"]
 
 
 def test_searxng_is_listed_from_its_adapter(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -696,6 +722,28 @@ def test_reencrypt_allows_secret_key_retirement(
     monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
     listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert listed["stored"][0]["decryptable"] is True
+
+
+def test_reencrypt_reseals_the_options_of_a_keyless_tool(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A keyless backend holds no API key, so a rotation keyed on one would strand its sealed options."""
+    old_key, new_key = generate_secret_key(), generate_secret_key()
+    monkeypatch.setenv("OTARI_SECRET_KEY", old_key)
+    _store_row(db_session, name="old", provider="fake", options={"bogus": 1})
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
+    resp = client.post(f"{API_ROOT}/search-tools/reencrypt", headers=master_key_header)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"reencrypted": 1, "unreadable": 0, "skipped": 0}
+
+    # The retired key is dropped, which is the step a rotation ends with.
+    monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
+    stored = {
+        row["name"]: row for row in client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()["stored"]
+    }
+    assert stored["old"]["decryptable"] is True
+    assert stored["old"]["options"] == {"bogus": 1}
 
 
 def test_list_flags_a_key_that_can_no_longer_be_decrypted(

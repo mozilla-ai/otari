@@ -89,15 +89,14 @@ if (typeof window.matchMedia !== "function") {
 }
 
 // jsdom's `getContext` returns null, which is a faithful "no canvas here" and is
-// also not what a canvas library expects: `canvas-confetti` calls `clearRect` on
-// the result inside a `requestAnimationFrame`, so the null lands as an unhandled
-// exception in a later tick rather than as a failed assertion in the test that
-// caused it. The setup guide draws two canvases (the orb and the success
-// burst), and neither is provable here: what a component test can show is that
-// they mount and that the screen around them is right.
+// also not what a canvas library expects: one that draws inside a
+// `requestAnimationFrame` turns the null into an unhandled exception in a later
+// tick rather than a failed assertion in the test that caused it. The setup
+// guide's orb is a canvas and is not provable here: what a component test can
+// show is that it mounts and that the screen around it is right.
 //
-// A proxy rather than a hand-written context: the two libraries between them
-// reach for a few dozen methods and properties, and a list of them would be a
+// A proxy rather than a hand-written context: the orb reaches for a few dozen
+// methods and properties, and a list of them would be a
 // list to keep updating. Every method is a no-op, every property reads as
 // undefined and accepts a write, and the handful that must return an object
 // (the gradient and pattern factories, `measureText`) return one shaped enough

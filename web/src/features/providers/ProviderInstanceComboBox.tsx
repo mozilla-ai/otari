@@ -25,9 +25,9 @@ const MAX_VISIBLE = 50
  * Read off the model catalog rather than `useProviders()`, which is the list
  * this is really about: the whole `/v1/providers` router is
  * `require_deployment_operator`, and the one form that asks this question is
- * shown only to an organization admin who does not operate the deployment
- * (`BudgetsPage` routes an operator to the deployment page instead), so that
- * read would be refused every time it was made. `GET /v1/models` answers any
+ * on the organization's Spend & budgets, shown to an owner or admin who mostly
+ * does not operate the deployment, so that read would be refused nearly every
+ * time it was made. `GET /v1/models` answers any
  * signed-in caller and is already narrowed to what that caller could route to,
  * and the prefix of a catalog id is the resolved instance a budget scope is
  * matched on (`BudgetScopeRequest.provider_instance`), so it is both readable

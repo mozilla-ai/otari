@@ -286,7 +286,7 @@ LEFTOVER = "groq"
 
 def _seed_leftover(session_factory: Callable[[], Session]) -> None:
     with session_factory() as db:
-        db.add(ProviderCredential(instance=LEFTOVER, provider_type="openai", client_args={}))
+        db.add(ProviderCredential(instance=LEFTOVER, provider_type="openai"))
         db.commit()
 
 

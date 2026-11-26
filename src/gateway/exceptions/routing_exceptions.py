@@ -50,6 +50,13 @@ class AgentRecommenderNotFoundError(TenancyNotFoundError):
         super().__init__("No subagent router has this id")
 
 
+class SubagentDecisionNotFoundError(TenancyNotFoundError):
+    """No recorded decision has this id, or it is another caller's."""
+
+    def __init__(self) -> None:
+        super().__init__("No subagent decision has this id")
+
+
 class AgentRecommenderSwitchConflictError(TenancyConflictError):
     """Another recommender was switched on at the same moment."""
 

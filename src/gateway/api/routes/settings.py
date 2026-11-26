@@ -152,6 +152,20 @@ class RotateMasterKeyResponse(BaseModel):
     master_key: str = Field(description="The new plaintext master key. Store it now; it is never returned again.")
 
 
+class RotateMasterKeyRequest(BaseModel):
+    """The proof a session-authenticated master-key rotation has to supply.
+
+    Only read when the caller authenticated with the dashboard session cookie. A request
+    carrying the master key is the deployment credential already, so it needs no further proof.
+    """
+
+    current_password: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="The caller's current password. Required for a session-authenticated rotation.",
+    )
+
+
 def _scalar_type_name(annotation: Any) -> Literal["bool", "int", "float", "str", "list"]:
     """Map a config field's annotation to a display type, unwrapping Optional."""
     origin = typing.get_origin(annotation)
@@ -278,6 +292,7 @@ async def rotate_master_key(
     authenticated_key: Annotated[str | None, Depends(verify_master_key)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     identities: IdentityServiceDep,
+    body: RotateMasterKeyRequest | None = None,
 ) -> RotateMasterKeyResponse:
     """Regenerate the database-backed master key and invalidate the old one.
 
@@ -296,6 +311,19 @@ async def rotate_master_key(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This gateway uses a configured master key; change OTARI_MASTER_KEY or config.yml and restart.",
+        )
+    if authenticated_key is None:
+        # A session must not mint itself the deployment credential: the rotated key passes the
+        # ``by_master_key`` step-up on the bootstrap handover and on the bootstrap operator's
+        # password link, so a session is held to the proof the handover asks for.
+        if session_identity is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the bootstrap operator may rotate the master key.",
+            )
+        await identities.confirm_master_key_rotation(
+            actor=session_identity,
+            current_password=body.current_password if body is not None else None,
         )
     # A cookie-authenticated caller has no raw key to hash; the stored hash is
     # the same value, so the rotation CAS still rejects a concurrent rotation.

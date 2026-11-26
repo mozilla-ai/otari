@@ -45,11 +45,11 @@ export const MODEL_COLUMN: RequestColumn = {
   id: "model",
   header: "Model",
   isRowHeader: true,
-  // The tool marker lives here rather than in a column of its own, which would
+  // The markers live here rather than in columns of their own, which would
   // push the failure-forward Status pill off a narrow viewport.
   cell: (entry) => {
     const tools = listToolUsage(entry)
-    if (!tools.length) {
+    if (!tools.length && !entry.deployment_paid) {
       return (
         <span className="block truncate" title={entry.model}>
           {entry.model}
@@ -62,28 +62,48 @@ export const MODEL_COLUMN: RequestColumn = {
     )
     const detail = tools.map(formatToolUsage).join(" · ")
     return (
-      // The model keeps its width first; a narrow lane shortens the marker,
-      // whose label still says it all.
+      // The model keeps its width first and a narrow lane shortens the tools
+      // marker, whose title still says it all. "hosted" is the whole of its
+      // marker, so on a hosted row the model shortens instead.
       <span className="flex items-center gap-1.5">
-        <span className="max-w-full shrink-0 truncate" title={entry.model}>
+        <span
+          className={
+            entry.deployment_paid
+              ? "min-w-0 truncate"
+              : "max-w-full shrink-0 truncate"
+          }
+          title={entry.model}
+        >
           {entry.model}
         </span>
-        {/* A marker, not a badge: an accent dot and the count in mono
-            uppercase, on the same terms as every other marker in the product.
-            A generic span does not reliably expose aria-label, so it takes the
-            img role; the label is the whole meaning and the count inside is a
-            summary of it. */}
-        <span
-          role="img"
-          className="inline-flex min-w-0 items-center gap-1.5 text-mono-overline text-muted"
-          title={detail}
-          aria-label={`Gateway tools: ${detail}`}
-        >
-          <Dot className="bg-accent" />
-          <span className="truncate">
-            {calls} {calls === 1 ? "tool" : "tools"}
+        {/* Markers, not badges: an accent dot and a label in mono uppercase,
+            on the same terms as every other marker in the product. A generic
+            span does not reliably expose aria-label, so each takes the img
+            role; the label is the whole meaning. */}
+        {entry.deployment_paid ? (
+          <span
+            role="img"
+            className="inline-flex shrink-0 items-center gap-1.5 text-mono-overline text-muted"
+            title="Served on a hosted provider"
+            aria-label="Paid by: hosted provider"
+          >
+            <Dot className="bg-info" />
+            <span>hosted</span>
           </span>
-        </span>
+        ) : null}
+        {tools.length ? (
+          <span
+            role="img"
+            className="inline-flex min-w-0 items-center gap-1.5 text-mono-overline text-muted"
+            title={detail}
+            aria-label={`Gateway tools: ${detail}`}
+          >
+            <Dot className="bg-accent" />
+            <span className="truncate">
+              {calls} {calls === 1 ? "tool" : "tools"}
+            </span>
+          </span>
+        ) : null}
       </span>
     )
   },

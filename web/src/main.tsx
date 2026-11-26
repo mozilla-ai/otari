@@ -3,15 +3,13 @@ import "@/app/legacyHashRouteOnLoad"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
-import App from "@/app/App"
 import { reloadOnStaleChunk } from "@/app/AutoUpdate"
-import { loadDeployment } from "@/app/boot"
+import { createBootLoader, firstSettled, readBootstrap } from "@/app/boot"
+import { DeploymentGate } from "@/app/DeploymentGate"
 import { Provider } from "@/app/provider"
 import { captureSetupKey } from "@/features/auth/setupKey"
-import { apiFetch } from "@/shared/api/client"
 import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
 import { currentRoute } from "@/shared/helpers/appLocation"
-import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
 reloadOnStaleChunk()
@@ -25,38 +23,23 @@ if (!container) {
   throw new Error("Root element #root not found")
 }
 
-// Read before the first render rather than during it. The answer decides
-// whether this URL is a management dashboard or a sign-in screen, and painting
-// one only to swap it for the other is worse than waiting one same-origin round
-// trip. A failure hands App null, which says the gateway is unreachable instead
-// of guessing a deployment.
-// Shorter than apiFetch's 30s default, because nothing at all is on screen until
-// this settles: a stalled gateway or proxy would otherwise hold a blank page for
-// half a minute before the error state appears. A refused connection fails fast
-// and never reaches this deadline; a healthy gateway answers immediately, since
-// the route reads configuration plus two primary-key lookups for whether the
-// bootstrap operator holds a password (which credential the sign-in screen
-// should ask for). A database the gateway cannot reach answers "no sign-in
-// methods" instead of hanging, but a merely slow or pool-starved one does not: with
-// `db_pool_timeout` defaulting to 30s, waiting for a connection can outlast
-// this deadline, and then it is this timeout rather than the gateway that
-// decides. Both land on the same screen, which says the gateway is unreachable.
-const BOOTSTRAP_TIMEOUT_MS = 8_000
+// Mounted once the first bootstrap attempt settles rather than at once. The
+// answer decides whether this URL is a management dashboard or a sign-in
+// screen, and painting one only to swap it for the other is worse than waiting
+// one same-origin round trip. A failed first attempt mounts the failure screen,
+// which keeps retrying and becomes the app when an attempt answers
+// (`app/boot.ts`). The request policy is settled before the bootstrap is asked
+// for, because the answer can change where that request goes.
+const loader = createBootLoader({
+  prepare: prepareRequests,
+  load: readBootstrap,
+})
 
-function loadBootstrap(): Promise<WireBootstrap | null> {
-  return apiFetch<WireBootstrap>("/bootstrap", {
-    signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
-  }).catch(() => null)
-}
-
-// Settled before the bootstrap is asked for, because the answer can change
-// where that request goes; a preparation that fails lands on the same screen
-// as a bootstrap that never arrived (see `app/boot.ts`).
-void loadDeployment(prepareRequests, loadBootstrap).then((bootstrap) => {
+void firstSettled(loader).then(() => {
   createRoot(container).render(
     <StrictMode>
       <Provider>
-        <App bootstrap={bootstrap} />
+        <DeploymentGate loader={loader} />
       </Provider>
     </StrictMode>,
   )

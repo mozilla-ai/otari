@@ -71,6 +71,10 @@ class ProviderDiscovery:
     # provider still serves completions, so the dashboard warns that discovery is
     # unavailable instead of calling the provider unreachable (issue #447).
     discovery_unsupported: bool = False
+    # True when the address refused what it was sent rather than failing some
+    # other way. A caller that dialed with more than one credential cannot tell
+    # from the message which of them was refused, so it says so itself.
+    credentials_rejected: bool = False
     # How an SGLang server says it was started; ``None`` from any other provider.
     engine_settings: EngineSettings | None = None
 
@@ -87,6 +91,7 @@ def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
         models=list(discovery.models),
         error=discovery.error,
         discovery_unsupported=discovery.discovery_unsupported,
+        credentials_rejected=discovery.credentials_rejected,
         engine_settings=discovery.engine_settings,
     )
 
@@ -449,8 +454,68 @@ def _warn_about_undiscovered_declared_models(config: GatewayConfig, instance: st
 _ERROR_MAX_CHARS = 300
 
 
-def _short_error(exc: BaseException, provider: str | None = None) -> str:
+# Below this length a value is too short to cut out of a message without
+# mangling it, and its last four characters are published as ``last4`` anyway,
+# so cutting it out protects nothing. It matches the floor a tenant's endpoint
+# credential is held to at the boundary.
+_SCRUBBABLE_LENGTH = 8
+
+_REDACTED = "[redacted]"
+
+
+def _merged_spans(text: str, values: Sequence[str | None]) -> list[tuple[int, int]]:
+    """Where each of ``values`` sits in ``text``, with places that overlap merged into one.
+
+    Merged rather than replaced one value at a time, because replacing one
+    changes the text the next has to match: a value sharing characters with
+    another would leave the rest of that other value behind.
+    """
+    spans: list[tuple[int, int]] = []
+    for value in values:
+        if value is None or len(value) < _SCRUBBABLE_LENGTH:
+            continue
+        start = text.find(value)
+        while start != -1:
+            spans.append((start, start + len(value)))
+            start = text.find(value, start + 1)
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _without_sent_values(text: str, values: Sequence[str | None]) -> str:
+    """``text`` with every credential this call put on the wire cut out of it.
+
+    :func:`redact_upstream_message` masks the credential shapes it knows, and a
+    value a tenant chose has no shape to know, so the only reader that can
+    remove it is the one that knows what it sent.
+    """
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in _merged_spans(text, values):
+        pieces.append(text[cursor:start])
+        pieces.append(_REDACTED)
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def _short_error(exc: BaseException, provider: str | None = None, *, sent_values: Sequence[str | None] = ()) -> str:
+    """One line describing ``exc``, with nothing in it that the call put on the wire.
+
+    ``sent_values`` are the credentials this call sent, which a caller that
+    chose them passes in. An upstream that echoes the request it refused can
+    put one in its own error text.
+    """
     message = str(exc).strip() or exc.__class__.__name__
+    # First, because every step below rewrites the text and a value only matches
+    # the text it was sent in: the tag strip removes a prefix a value may itself
+    # begin with, and the cap can cut one in half.
+    message = _without_sent_values(message, sent_values)
     # any-llm prefixes a provider error with a "[provider]" tag (e.g.
     # "[anthropic] No anthropic API key provided…"). Every surface that shows this
     # is already provider-specific, so the tag is redundant noise; drop it when it
@@ -467,6 +532,11 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"
     return message
+
+
+# Statuses that mean the address refused the credentials it was sent, as opposed
+# to serving no model-listing endpoint there or not answering at all.
+_CREDENTIAL_REJECTION_STATUSES = frozenset({401, 403})
 
 
 # Statuses that mean the backend serves no model-listing endpoint at this URL,
@@ -515,6 +585,11 @@ def _status_code(exc: BaseException) -> int | None:
 def _is_missing_models_endpoint(exc: BaseException) -> bool:
     """Whether ``exc`` says the provider has no model-listing endpoint."""
     return _status_code(exc) in _MISSING_ENDPOINT_STATUSES
+
+
+def _is_credential_rejection(exc: BaseException) -> bool:
+    """Whether ``exc`` says the address refused the credentials it was sent."""
+    return _status_code(exc) in _CREDENTIAL_REJECTION_STATUSES
 
 
 async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDiscovery:
@@ -597,6 +672,12 @@ async def discover_provider_models(
     )
 
 
+def _default_headers(client_args: Mapping[str, object] | None) -> dict[str, str] | None:
+    """The default headers in ``client_args``, where it names any."""
+    headers = (client_args or {}).get("default_headers")
+    return {str(k): str(v) for k, v in headers.items()} if isinstance(headers, Mapping) else None
+
+
 async def test_provider_credentials(
     impl_name: str,
     *,
@@ -606,6 +687,7 @@ async def test_provider_credentials(
     declared: bool,
     timeout: float = _ADHOC_DISCOVERY_TIMEOUT_SECONDS,
     engine_client: httpx.AsyncClient | None = None,
+    sent_values: Sequence[str | None] = (),
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
@@ -618,7 +700,9 @@ async def test_provider_credentials(
     ``declared`` is whether the credentials will back a ``providers:`` entry, which
     a keyless or ambient-credential provider needs in place of a key.
     ``engine_client`` is what reads an SGLang server's settings where the
-    caller pinned the address; ``client_args`` then carries the SDK's own.
+    caller pinned the address; ``client_args`` then carries the SDK's own, and
+    any default headers in it go on that read as well, so a server behind a
+    proxy answers it.
     """
     if not _supports_list_models(impl_name):
         return ProviderDiscovery(
@@ -670,8 +754,9 @@ async def test_provider_credentials(
         return ProviderDiscovery(
             provider=impl_name,
             models=[],
-            error=_short_error(exc, provider=impl_name),
+            error=_short_error(exc, provider=impl_name, sent_values=sent_values),
             discovery_unsupported=_is_missing_models_endpoint(exc),
+            credentials_rejected=_is_credential_rejection(exc),
         )
     models = await _serverless_only(
         provider_enum, models, timeout=timeout, api_key=api_key, api_base=api_base, client_args=client_args
@@ -679,7 +764,13 @@ async def test_provider_credentials(
     return ProviderDiscovery(
         provider=impl_name,
         models=models,
-        engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key, client=engine_client),
+        engine_settings=await read_engine_settings(
+            models,
+            api_base=api_base,
+            api_key=api_key,
+            client=engine_client,
+            extra_headers=_default_headers(client_args),
+        ),
     )
 
 

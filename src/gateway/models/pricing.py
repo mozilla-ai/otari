@@ -228,24 +228,6 @@ class ModelPricing(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        return {
-            "kind": self.kind,
-            "model_key": self.model_key,
-            "effective_at": self.effective_at.isoformat() if self.effective_at else None,
-            "input_price_per_million": self.input_price_per_million,
-            "output_price_per_million": self.output_price_per_million,
-            "cache_read_price_per_million": self.cache_read_price_per_million,
-            "cache_write_price_per_million": self.cache_write_price_per_million,
-            "pricing_tiers": self.pricing_tiers,
-            "unit": self.unit,
-            "rates": self.rates,
-            "origin": self.origin,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
 
 class OrganizationModelPricing(Base):
     """One organization's rate for a model, sitting above the deployment price list.

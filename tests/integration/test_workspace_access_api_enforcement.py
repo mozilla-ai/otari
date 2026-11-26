@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.trace import INVALID_SPAN_CONTEXT, NonRecordingSpan
+from opentelemetry.util.types import Attributes
 
+from gateway.core.change_audit import SETTING_CHANGED_EVENT
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.providers import reset_workspace_hosted_access_cache
@@ -411,6 +415,44 @@ def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_hea
     policy = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/provider-policy", headers=master_key_header))
 
     assert policy == {"require_zero_data_retention": False, "allowed_data_locations": None}
+
+
+class _RecordingSpan(NonRecordingSpan):
+    def __init__(self) -> None:
+        super().__init__(INVALID_SPAN_CONTEXT)
+        self.attributes: dict[str, Any] = {}
+        self.events: list[tuple[str, Attributes]] = []
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+    def add_event(self, name: str, attributes: Attributes = None, timestamp: int | None = None) -> None:
+        self.events.append((name, attributes))
+
+
+def test_a_policy_change_is_recorded_on_the_span_with_who_made_it(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_id, _ = _workspace_and_key(client, master_key_header)
+    url = f"{API_ROOT}/workspaces/{workspace_id}/provider-policy"
+    _ok(client.put(url, json={"require_zero_data_retention": True}, headers=master_key_header))
+    span = _RecordingSpan()
+    monkeypatch.setattr(trace, "get_current_span", lambda *_args: span)
+
+    _ok(client.put(url, json={"require_zero_data_retention": False}, headers=master_key_header))
+
+    assert span.attributes["enduser.id"]
+    assert span.events == [
+        (
+            SETTING_CHANGED_EVENT,
+            {
+                "change.table": "workspace_provider_policies",
+                "change.operation": "update",
+                "change.row": workspace_id,
+                "change.require_zero_data_retention": "True -> False",
+            },
+        )
+    ]
 
 
 def test_an_alias_to_a_hosted_model_the_workspace_refuses_is_not_listed(

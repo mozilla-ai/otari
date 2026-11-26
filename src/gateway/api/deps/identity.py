@@ -4,12 +4,14 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
+from opentelemetry import trace
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     UnitOfWorkDep,
     get_config,
 )
+from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.deps.api_keys import (
     ApiKeyFormatPortDep,
     get_api_key_service,
@@ -36,15 +38,26 @@ from gateway.core.database import get_db
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity import (
+    DashboardSessionRepository,
+    IdentityRepositories,
+    OAuthPendingStateRepository,
+)
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
-from gateway.repositories.organizations import OrganizationRepositories
+from gateway.repositories.organizations import BootstrapMarkerRepository, OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
+    UserRepository,
 )
 from gateway.services.api_keys import ApiKeyDeactivationListener
-from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import (
+    DeploymentAdministrationAccess,
+    DeploymentUserService,
+    IdentityService,
+    OAuthAppService,
+    OIDCConnectionService,
+)
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import redirect_uri
 from gateway.services.organizations import BootstrapOperatorMarker, OrganizationClaimedDomains
@@ -53,7 +66,6 @@ from gateway.services.tenancy import (
     OrganizationService,
     VerifiedDomainLookup,
 )
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 
@@ -83,13 +95,16 @@ async def get_current_identity(
     the rest of the management API has it, and keeps a request with no credential
     at all from provisioning anything.
     """
-    if session_identity is not None:
-        return session_identity
-    return await ensure_bootstrap_identity(
-        db,
-        uow=uow,
-        membership_listener=membership_listener,
-    )
+    identity = session_identity
+    if identity is None:
+        identity = await ensure_bootstrap_identity(
+            db,
+            uow=uow,
+            membership_listener=membership_listener,
+        )
+    # Who made each change the request's span records (core/change_audit.py).
+    trace.get_current_span().set_attribute("enduser.id", str(identity.id))
+    return identity
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
@@ -109,7 +124,7 @@ async def require_deployment_operator_or_absent(
     passes. Declared on a router rather than per route, for the reason the 403
     gate gives.
     """
-    if not await DeploymentAdministrationAccess(db).has_administration_access(identity):
+    if not await deployment_administration_access(db).has_administration_access(identity):
         record_auth_failure("not_deployment_operator")
         raise DeploymentAdministrationUnavailableError
 
@@ -118,7 +133,14 @@ def get_deployment_user_service(
     db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep
 ) -> DeploymentUserService:
     """Wire account changes and self-service key deactivation to the request's single transaction."""
-    return DeploymentUserService(db, uow=uow, keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)))
+    return DeploymentUserService(
+        UserRepository(db),
+        OrganizationMemberRepository(db),
+        BootstrapOperatorMarker(BootstrapMarkerRepository(db)),
+        uow=uow,
+        sessions=DashboardSessionRepository(db),
+        keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)),
+    )
 
 
 DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
@@ -128,7 +150,7 @@ def get_deployment_administration_access(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DeploymentAdministrationAccess:
     """Read deployment administration authority without constructing mutation collaborators."""
-    return DeploymentAdministrationAccess(db)
+    return deployment_administration_access(db)
 
 
 DeploymentAdministrationAccessDep = Annotated[
@@ -157,7 +179,7 @@ def get_identity_service(
         identity_provider=identity_provider,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow).bootstrap_marker),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),

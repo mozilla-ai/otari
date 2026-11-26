@@ -76,6 +76,13 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario({"error": "rate_limit", "error_status": 429}),
         "in_body_error": Scenario({"in_body_error": "engine_unavailable"}),
     },
+    # Recorded without a key. The fixture sets KEENABLE_API_KEY, so these replay on the keyed endpoint,
+    # whose answer has the same shape plus a usage object the adapter does not read.
+    "keenable": {
+        "normal": Scenario(handler=_replay("keenable", "normal")),
+        "empty": Scenario(handler=_replay("keenable", "empty")),
+        "error": Scenario(handler=_replay("keenable", "error")),
+    },
     "mojeek": {
         "normal": Scenario(handler=_replay("mojeek", "normal")),
         "empty": Scenario(handler=_replay("mojeek", "empty")),

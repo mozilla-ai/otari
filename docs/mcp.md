@@ -633,11 +633,12 @@ server, the key or the user deletes them.
 #### Servers named in a request
 
 `mcp_servers` in a completion request names a server by URL, which no ACL covers.
-A workspace refuses such a request with a `400` unless
-`request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around. A new
-workspace starts with it off; one that existed before ACLs, including the default
-workspace an install migrates into, keeps it on. Change it with
-`PATCH /api/v1/workspaces/{workspace_id}`.
+A workspace refuses such a request with a `400` (`request_mcp_servers_disallowed`)
+unless `request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around.
+A new workspace starts with it off; one that existed before ACLs, including the
+default workspace an install migrates into, keeps it on. Change it with the
+**Allow servers outside this list** switch on the workspace's **MCP servers**
+card, or with `PATCH /api/v1/workspaces/{workspace_id}`.
 
 The switch also covers asking a provider to dial a server itself: a Responses tool
 of `type: "mcp"`, or a Gemini tool with a non-empty `mcp_servers`
