@@ -12,6 +12,7 @@ at the any-llm boundary and never made.
 from collections.abc import Callable, Iterator
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.model import Model
@@ -19,7 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, DEPLOYMENT_PAID_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, DEPLOYMENT_PAID_HEADER, FALLBACK_HEADER, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
@@ -155,6 +156,54 @@ def test_a_request_a_hosted_provider_served_is_recorded_as_deployment_paid(
     with db_session_factory() as db:
         flags = list(db.scalars(select(UsageLog.deployment_paid).where(UsageLog.user_id == "u1")))
     assert flags == [True]
+
+
+def test_a_hosted_fallover_says_the_deployment_paid_for_the_attempt_that_served(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """On a policy the header follows the candidate that served, not the plan's head."""
+    _create_user(client, master_key_header)
+    for model in ("openai:gpt-4o", "openai:gpt-4o-mini"):
+        _price(client, master_key_header, model)
+    _hosted_openai(client, master_key_header)
+    created = client.post(
+        f"{API_ROOT}/routing/policies",
+        json={
+            "name": "hosted",
+            "spec": {"select": [{"default": "openai:gpt-4o"}], "on_failure": ["openai:gpt-4o-mini"]},
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    calls: list[object] = []
+
+    async def flaky(**kwargs: object) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-4o":
+            request = httpx.Request("POST", "https://hosted.test/v1")
+            raise httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+        return ChatCompletion(
+            id="chatcmpl-fallover",
+            object="chat.completion",
+            created=0,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "hosted", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers=master_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    assert calls == ["openai:gpt-4o", "openai:gpt-4o-mini"]
+    assert response.headers[FALLBACK_HEADER] == "true"
+    assert response.headers[DEPLOYMENT_PAID_HEADER] == "true"
 
 
 def test_with_no_hosted_provider_an_undeclared_candidate_is_refused(
