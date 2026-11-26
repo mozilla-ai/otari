@@ -1,4 +1,4 @@
-"""What a signup records about how its address was proved."""
+"""What a signup records about the address it claims."""
 
 import pytest
 from fastapi import BackgroundTasks
@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.mail import MailNotConfiguredError
@@ -30,10 +29,8 @@ def _config(*, sends_links: bool = True) -> GatewayConfig:
     )
 
 
-async def _signup(
-    session: AsyncSession, *, proof: AddressAuthority | None, config: GatewayConfig | None = None
-) -> User | None:
-    organization = await create_organization(session, slug=f"signup-{proof or 'none'}")
+async def _signup(session: AsyncSession, *, entitled: bool, config: GatewayConfig | None = None) -> User | None:
+    organization = await create_organization(session, slug=f"signup-{entitled}")
     identity = await UserRepository(session).create_local_identity(
         full_name="Ada", active_organization_id=organization.id, email=_EMAIL
     )
@@ -52,36 +49,28 @@ async def _signup(
         uow=uow,
         organizations=OrganizationService(session, membership_listener=membership_listener_on(uow), uow=uow),
         blocked_addresses=NO_BLOCKED_ADDRESSES,
-        proof=proof,
+        entitled=entitled,
     )
 
 
-async def test_a_mailbox_proof_proves_the_address(async_db: AsyncSession) -> None:
-    claimed = await _signup(async_db, proof=AddressAuthority.MAILBOX)
+async def test_an_entitled_signup_proves_the_address(async_db: AsyncSession) -> None:
+    """An invitation entitles an account only where its link reached the mailbox."""
+    claimed = await _signup(async_db, entitled=True)
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
     assert claimed.email_proven_at is not None
 
 
-async def test_a_shared_proof_verifies_the_address_without_proving_it(async_db: AsyncSession) -> None:
-    """Domain auto-join refuses an unproved address, so the stamp is what keeps that rule working."""
-    claimed = await _signup(async_db, proof=AddressAuthority.ORGANIZATION)
-
-    assert claimed is not None
-    assert claimed.email_verified_at is not None
-    assert claimed.email_proven_at is None
-
-
-async def test_a_proved_address_signs_up_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
-    """The proof stands in for the verification link, so no deployment setting gates it."""
-    claimed = await _signup(async_db, proof=AddressAuthority.MAILBOX, config=_config(sends_links=False))
+async def test_an_entitled_signup_proceeds_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
+    """The link already reached the mailbox, so no deployment setting gates it."""
+    claimed = await _signup(async_db, entitled=True, config=_config(sends_links=False))
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
 
 
-async def test_an_unproved_address_is_refused_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
-    """Without a proof the verification link is the only way out of the unverified state."""
+async def test_an_unentitled_signup_is_refused_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
+    """Without an invitation the verification link is the only way out of the unverified state."""
     with pytest.raises(MailNotConfiguredError):
-        await _signup(async_db, proof=None, config=_config(sends_links=False))
+        await _signup(async_db, entitled=False, config=_config(sends_links=False))

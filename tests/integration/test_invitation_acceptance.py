@@ -13,7 +13,6 @@ from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError, MembershipUpdateError
-from gateway.models.identity import AddressAuthority
 from gateway.models.organizations import OrganizationInvitation
 from gateway.models.tenancy import Organization, OrganizationDomain, User, Workspace, WorkspaceMember
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest
@@ -501,15 +500,17 @@ async def test_an_accept_that_would_leave_no_active_owner_is_refused_and_keeps_t
     assert role == "owner"
 
 
-async def test_signup_is_told_the_address_an_invitation_was_sent_to(async_db: AsyncSession) -> None:
+async def test_an_emailed_link_entitles_an_account_for_the_address_it_was_sent_to(
+    async_db: AsyncSession,
+) -> None:
     organization = await create_organization(async_db, slug="lookup-live")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).proof_for(_TOKEN, claimed_address="ada@example.com") is AddressAuthority.MAILBOX
+    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="ada@example.com") is True
 
 
-async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async_db: AsyncSession) -> None:
-    """An expired invitation, a declined one and an unknown token each prove nothing."""
+async def test_a_token_no_invitation_still_opens_entitles_no_account(async_db: AsyncSession) -> None:
+    """An expired invitation, a declined one and an unknown token each entitle nothing."""
     organization = await create_organization(async_db, slug="lookup-dead")
     await _invite(async_db, organization, email="expired@example.com", token="expired-token")
     await _invite(async_db, organization, email="declined@example.com", token="declined-token")
@@ -523,12 +524,12 @@ async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async
     lookup = _link(async_db)
 
     answers = [
-        await lookup.proof_for("expired-token", claimed_address="expired@example.com"),
-        await lookup.proof_for("declined-token", claimed_address="declined@example.com"),
-        await lookup.proof_for("a-token-nobody-was-sent", claimed_address="ada@example.com"),
+        await lookup.entitles_an_account("expired-token", claimed_address="expired@example.com"),
+        await lookup.entitles_an_account("declined-token", claimed_address="declined@example.com"),
+        await lookup.entitles_an_account("a-token-nobody-was-sent", claimed_address="ada@example.com"),
     ]
 
-    assert answers == [None, None, None]
+    assert answers == [False, False, False]
 
 
 async def _domain_proven_elsewhere(session: AsyncSession, *, slug: str) -> Organization:
@@ -561,9 +562,9 @@ async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: Asyn
 
     async with uow:
         opened = await link.open(hand_carried)
-    proof = await link.proof_for(hand_carried, claimed_address="ada@example.com")
+    entitled = await link.entitles_an_account(hand_carried, claimed_address="ada@example.com")
 
-    assert (opened, proof) == (None, None)
+    assert (opened, entitled) == (None, False)
 
 
 async def test_a_link_that_was_emailed_is_not_held_to_another_organization_proven_domain(
@@ -575,9 +576,9 @@ async def test_a_link_that_was_emailed_is_not_held_to_another_organization_prove
     emailed = generate_token()
     await _invite(async_db, inviter, email="ada@example.com", token=emailed)
 
-    proof = await _link(async_db, mail_transport="console").proof_for(emailed, claimed_address="ada@example.com")
+    link = _link(async_db, mail_transport="console")
 
-    assert proof is AddressAuthority.MAILBOX
+    assert await link.entitles_an_account(emailed, claimed_address="ada@example.com") is True
 
 
 async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_deliver(
@@ -593,23 +594,23 @@ async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_del
     hand_carried = generate_shared_token()
     await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
 
-    proof = await _link(async_db).proof_for(hand_carried, claimed_address="ada@example.com")
+    entitled = await _link(async_db).entitles_an_account(hand_carried, claimed_address="ada@example.com")
 
-    assert proof is None
+    assert entitled is False
 
 
-async def test_a_token_proves_nothing_about_an_address_it_was_not_sent_to(async_db: AsyncSession) -> None:
-    """The token alone is not the proof: it proves the address it was sent to, and no other."""
+async def test_a_token_entitles_no_account_on_an_address_it_was_not_sent_to(async_db: AsyncSession) -> None:
+    """The token alone entitles nothing: it entitles the address it was sent to, and no other."""
     organization = await create_organization(async_db, slug="proof-other-address")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).proof_for(_TOKEN, claimed_address="bob@example.com") is None
+    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="bob@example.com") is False
 
 
-async def test_a_shared_link_does_not_prove_the_address_an_emailed_one_proves(
+async def test_a_hand_carried_link_entitles_no_account_where_an_emailed_one_does(
     async_db: AsyncSession,
 ) -> None:
-    """A link nobody delivered proves the inviting organization's word, which auto-join does not take."""
+    """Nobody delivered it, so it reached no mailbox, and an account on that address is still verified."""
     organization = await create_organization(async_db, slug="proof-strength")
     hand_carried = generate_shared_token()
     emailed = generate_token()
@@ -617,9 +618,24 @@ async def test_a_shared_link_does_not_prove_the_address_an_emailed_one_proves(
     await _invite(async_db, organization, email="mailed@example.com", token=emailed)
     lookup = _link(async_db)
 
-    proofs = (
-        await lookup.proof_for(hand_carried, claimed_address="carried@example.com"),
-        await lookup.proof_for(emailed, claimed_address="mailed@example.com"),
+    answers = (
+        await lookup.entitles_an_account(hand_carried, claimed_address="carried@example.com"),
+        await lookup.entitles_an_account(emailed, claimed_address="mailed@example.com"),
     )
 
-    assert proofs == (AddressAuthority.ORGANIZATION, AddressAuthority.MAILBOX)
+    assert answers == (False, True)
+
+
+async def test_a_link_entitles_no_account_where_the_organization_requires_its_own_connection(
+    async_db: AsyncSession,
+) -> None:
+    """A new account holds no link to that connection, so joining would refuse it.
+
+    Minting one would leave somebody an account the organization that invited them turns away.
+    """
+    organization = await create_organization(async_db, slug="requires-its-connection")
+    organization.sso_required = True
+    await _invite(async_db, organization, email="ada@example.com")
+    await async_db.flush()
+
+    assert await _link(async_db).entitles_an_account(_TOKEN, claimed_address="ada@example.com") is False

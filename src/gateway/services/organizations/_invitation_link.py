@@ -1,4 +1,4 @@
-"""What an invitation link still opens, and what it proves about the address it names."""
+"""What an invitation link still opens, and whether it entitles an account."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from gateway.core.addresses import same_address
 from gateway.core.tokens import hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.identity import AddressAuthority
 from gateway.models.organizations import OrganizationInvitation
 from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.repositories.organizations import OrganizationRepositories
@@ -34,6 +33,7 @@ class InvitationLink(SignupInvitePort):
     ) -> None:
         self._uow = uow
         self._invitations = repositories.invitations
+        self._organizations = repositories.organizations
         self._blocked = blocked
         self._delivery = delivery
         self._mailer = mailer
@@ -55,17 +55,23 @@ class InvitationLink(SignupInvitePort):
             return None
         return invitation
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressAuthority | None:
-        """Which proof of ``claimed_address`` this token carries, or None where it carries none.
+    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+        """Whether this token entitles an account for ``claimed_address``.
 
-        A link this deployment would refuse proves nothing, which is what keeps a signup from
-        recording an address that acceptance then turns away.
+        A link carried by hand reached no mailbox, so it entitles nothing and an account on that
+        address is still reached by verifying it. A link this deployment would refuse entitles
+        nothing either, and neither does one naming an organization whose members arrive through
+        its own connection, which is what keeps a signup from minting an account that joining
+        would then turn away.
         """
+        if is_shared_token(token):
+            return False
         async with self._uow:
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
-                return None
-        return AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX
+                return False
+            settings = await self._organizations.sso_settings(invitation.organization_id)
+        return settings is None or not settings.required
 
     async def _refuses_the_address(
         self, invitation: OrganizationInvitation, *, hand_carried: bool, now: datetime

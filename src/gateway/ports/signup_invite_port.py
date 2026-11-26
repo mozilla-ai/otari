@@ -1,31 +1,24 @@
-"""Invitations a deployment sends that prove which address they reached.
+"""Invitations a deployment sends, and whether one entitles an account.
 
-A link emailed to somebody already proves the mailbox answers, so signup can take it instead of
-sending a verification email of its own. A link shared with an admin proves less, and says so.
-The vocabulary for how much is the identity domain's ``AddressAuthority``.
+A link that reached a mailbox proves the address answers, so signup can take it instead of
+sending a verification email of its own. Whether a token entitles an account is one question
+with one answer, and the implementation is the only thing that decides it.
 """
 
 from typing import Protocol
 
-from gateway.models.identity import AddressAuthority
-
 
 class SignupInvitePort(Protocol):
-    """What an invitation token proves about the address somebody claims."""
+    """Whether an invitation token entitles an account for the address somebody claims."""
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressAuthority | None:
-        """Which proof of ``claimed_address`` this token carries, or None where it carries none.
+    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+        """Whether this token entitles an account for ``claimed_address``.
 
-        An emailed link answers ``MAILBOX`` and a hand-carried one ``ORGANIZATION``. Answering
-        ``MAILBOX`` for a link a mailbox never saw lets domain auto-join take the account,
-        which is the cost of getting this answer wrong.
-
-        NOTE: An implementation must answer one of those two or None. Signup ignores any other
-        member and verifies the address itself, because an invitation is not evidence of
-        deployment or provider authority.
+        An entitled signup is verified as it is created and sends no verification email, so an
+        implementation must answer true only for a link that reached the claimed mailbox.
 
         NOTE: An implementation must compare addresses by ``gateway.core.addresses.same_address``
         and must not normalize further. Signup picks the account by that same rule, so a looser
-        comparison proves one address and claims another.
+        comparison entitles one address and claims another.
         """
         ...
