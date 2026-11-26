@@ -247,7 +247,9 @@ async def test_an_upload_past_the_ceiling_is_refused_and_gives_its_reservation_b
 async def test_no_workspace_allowance_reads_no_usage() -> None:
     files = _StubFiles()
 
-    await _service(_MemoryStore(), files).store(_upload(b"a,b\n"))
+    await _service(_MemoryStore(), files, files_workspace_max_bytes=None, files_workspace_max_files=None).store(
+        _upload(b"a,b\n")
+    )
 
     assert files.usage_reads == []
 
@@ -263,6 +265,14 @@ async def test_an_upload_within_the_workspace_allowance_is_stored() -> None:
 
     assert files.usage_reads == [_WORKSPACE]
     assert store.blobs == {record.storage_ref: b"a,b\n"}
+
+
+@pytest.mark.asyncio
+async def test_the_default_allowance_is_five_gigabytes_and_a_thousand_files() -> None:
+    config = GatewayConfig()
+
+    assert config.files_workspace_max_bytes == 5 * 1024**3
+    assert config.files_workspace_max_files == 1000
 
 
 @pytest.mark.asyncio
@@ -293,7 +303,7 @@ async def test_an_upload_past_the_workspace_bytes_is_refused_and_keeps_nothing()
 async def test_a_master_key_upload_is_checked_against_the_default_workspace() -> None:
     files = _StubFiles()
 
-    await _service(_MemoryStore(), files, files_workspace_max_files=5).store(_upload(b"a,b\n", workspace_id=None))
+    await _service(_MemoryStore(), files).store(_upload(b"a,b\n", workspace_id=None))
 
     assert files.usage_reads == [_DEFAULT_WORKSPACE]
 

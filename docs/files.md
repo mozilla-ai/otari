@@ -374,12 +374,13 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
   `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
 - `files_workspace_max_bytes`, `files_workspace_max_files`: the most bytes and
   uploads one workspace may hold at once, counting files not yet deleted or
-  expired. Unset by default, which sets no limit. An upload past either is
-  refused with 413 and nothing stored is deleted, so a workspace makes room by
-  deleting files or waiting for them to expire. Usage is read before the bytes
-  flow, so uploads running at the same time can each take the room that was
-  left: N of them can together store up to N times that room. Treat the limits
-  as a bound on steady-state storage, not an exact quota.
+  expired: 5 GB and 1000 files by default, and `null` in the config file sets
+  no limit. An upload past either is refused with 413 and nothing stored is
+  deleted, so a workspace makes room by deleting files or waiting for them to
+  expire. Usage is read before the bytes flow, so uploads running at the same
+  time can each take the room that was left: N of them can together store up
+  to N times that room. Treat the limits as a bound on steady-state storage,
+  not an exact quota.
   `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
   below keeps reclaiming expired and deleted files. With it off, a backend that
   cannot be built (an `s3` backend with no bucket, say) is logged at startup
