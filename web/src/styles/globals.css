@@ -37,7 +37,8 @@
 
 /* =============================================================
  * Brand fonts — self-hosted woff2 (no runtime CDN request).
- *   Mozilla Text — UI / body (variable)
+ *   Inter        — UI / body (variable)
+ *   Mozilla Text — fallback for body (variable)
  *   Mozilla Headline — display / headings (variable)
  *   Fira Code    — mono / keys / IDs / code (variable)
  *
@@ -56,6 +57,20 @@
   font-family: "Mozilla Text";
   src: url("/fonts/MozillaTextItalic-Variable.woff2") format("woff2");
   font-weight: 200 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+  font-weight: 100 900;
   font-style: italic;
   font-display: swap;
 }
@@ -734,7 +749,7 @@
 @theme {
   /* Brand font stacks — generate font-sans / font-mono / font-display
    * utilities and back the typography roles + base resets below. */
-  --font-sans: "Mozilla Text", Arial, sans-serif;
+  --font-sans: "Inter", "Mozilla Text", Arial, sans-serif;
   --font-mono: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
   --font-display: "Mozilla Headline", "Mozilla Text", Arial, sans-serif;
   --color-background-alt: var(--color-background-muted);

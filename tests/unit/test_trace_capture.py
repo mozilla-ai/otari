@@ -197,6 +197,44 @@ def test_an_mcp_tool_call_names_the_server_that_owns_the_tool() -> None:
     assert [span.attributes.get("otari.mcp.server") for span in trace.spans] == ["github", None, None]
 
 
+def test_a_failed_tool_call_records_why_and_a_working_one_records_nothing() -> None:
+    trace = _trace()
+
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=False,
+        arguments=None,
+        error_type="http_status",
+        error_status=403,
+        error_provider="exa",
+    )
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=False,
+        arguments=None,
+        error_type="not safe!",
+    )
+    trace.record_tool_call(tool_name="web_fetch", tool_type="otari_web_fetch", started=_T0, ok=False, arguments=None)
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=True,
+        arguments=None,
+        error_type="timeout",
+        error_status=504,
+        error_provider="exa",
+    )
+
+    assert [span.error_class for span in trace.spans] == ["http_status", "tool_error", "tool_error", None]
+    assert trace.spans[0].attributes == {"http.response.status_code": 403, "otari.tool.provider": "exa"}
+    assert trace.spans[3].attributes == {}
+
+
 def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
     trace = _trace()
     trace.record_guardrail(

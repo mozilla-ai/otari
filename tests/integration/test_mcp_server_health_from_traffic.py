@@ -86,6 +86,12 @@ def _discover(client: TestClient, headers: dict[str, str], server_id: uuid.UUID)
     return client.get(f"{API_ROOT}/mcp/servers/{server_id}/tools", headers=headers).status_code
 
 
+def _revalidate(client: TestClient, headers: dict[str, str], server_id: uuid.UUID) -> int:
+    return client.get(
+        f"{API_ROOT}/mcp/servers/{server_id}/tools", headers={**headers, "Cache-Control": "no-cache"}
+    ).status_code
+
+
 def _health(client: TestClient, contacts: McpServerContacts, test_db: Session, row: WorkspaceMcpServer) -> Any:
     assert client.portal is not None
     client.portal.call(contacts.drain)
@@ -121,6 +127,29 @@ def test_a_server_that_answers_between_failures_reads_degraded_with_its_last_fai
         text = json.dumps(stored)
         for secret in ("sk-live-secret", "Internal error", "93.184.216.34", "apify_api_token"):
             assert secret not in text, secret
+
+
+def test_a_kept_listing_records_nothing_and_a_failed_revalidation_records_the_failure(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    contacts: McpServerContacts,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _store_server(test_db, api_key_obj["id"])
+    outcomes = ["ok", "error"]
+    _answers(monkeypatch, outcomes)
+
+    assert _discover(client, api_key_header, row.id) == 200
+    assert _discover(client, api_key_header, row.id) == 200
+    assert outcomes == ["error"], "the second discovery should be served from the kept listing"
+    assert _health(client, contacts, test_db, row)["status"] == "healthy"
+
+    assert _revalidate(client, api_key_header, row.id) == 502
+
+    health = _health(client, contacts, test_db, row)
+    assert health["status"] == "failing" and health["last_failure"]["error"] == "not_mcp"
 
 
 def test_discovery_of_another_workspace_s_server_records_nothing_on_it(
