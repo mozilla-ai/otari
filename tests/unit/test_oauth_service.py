@@ -151,34 +151,6 @@ class TestHalfConfiguredOAuthIsAnnounced:
         finally:
             gateway_logger.removeHandler(caplog.handler)
 
-    def test_an_address_too_malformed_to_parse_still_refuses_rather_than_raising(self) -> None:
-        """The refusal is the answer for it either way, and a raise here would answer 500 instead."""
-        config = GatewayConfig(
-            public_base_url="https://[bad",
-            oauth_google_client_id="google-id",
-            oauth_google_client_secret="google-secret",  # noqa: S106
-        )
-
-        with pytest.raises(OAuthNotConfiguredError):
-            oauth_service.require_configured(config, "google")
-
-    def test_an_address_carrying_credentials_is_refused_for_what_is_wrong_with_it(self) -> None:
-        """An https address the library still refuses must not be reported as needing https."""
-        config = GatewayConfig(
-            public_base_url="https://operator:secret@otari.example.com",
-            oauth_google_client_id="google-id",
-            oauth_google_client_secret="google-secret",  # noqa: S106
-        )
-
-        with pytest.raises(OAuthNotConfiguredError) as refusal:
-            oauth_service.require_configured(config, "google")
-
-        reason = str(refusal.value)
-        assert "user or password" in reason
-        assert "https address" not in reason
-        assert "secret" not in reason
-        assert "operator" not in reason
-
     def test_a_missing_public_base_url_is_named(self, caplog: pytest.LogCaptureFixture) -> None:
         config = GatewayConfig(
             oauth_google_client_id="google-id",
@@ -332,6 +304,35 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         with pytest.raises(ValidationError, match="ui_base_url"):
             GatewayConfig(ui_base_url=value)
 
+    @pytest.mark.parametrize("value", ["https://:8080", "https://:8080/ui", "https://"])
+    def test_an_authority_with_no_host_is_refused(self, value: str) -> None:
+        # A port or a bare delimiter is an authority, so a check on the authority passes it.
+        # Every link built from such a value names no server at all.
+        with pytest.raises(ValidationError, match="ui_base_url must be an absolute"):
+            GatewayConfig(ui_base_url=value)
+
+    @pytest.mark.parametrize("value", ["https://app.example.com:bad", "https://app.example.com:99999/ui"])
+    def test_a_port_that_is_not_a_number_is_refused(self, value: str) -> None:
+        # urlsplit defers port parsing until the attribute is read, so a host is
+        # returned for an authority no browser can dial.
+        with pytest.raises(ValidationError, match="ui_base_url must be an absolute"):
+            GatewayConfig(ui_base_url=value)
+
+    @pytest.mark.parametrize("value", ["https://app .example.com/ui", "https://app\n.example.com"])
+    def test_whitespace_inside_the_address_is_refused(self, value: str) -> None:
+        # Parsing drops it and storing keeps it, so the address that was checked
+        # and the address every link is built from would differ.
+        with pytest.raises(ValidationError, match="ui_base_url must carry no whitespace"):
+            GatewayConfig(ui_base_url=value)
+
+    def test_a_refusal_names_the_setting_and_not_the_value(self) -> None:
+        # This value travels in a redirect and into an inbox, so a credential
+        # written here must not reach a startup log through the refusal.
+        with pytest.raises(ValidationError) as refused:
+            GatewayConfig(ui_base_url="https://operator:hunter2@:8080")
+
+        assert "hunter2" not in refused.value.errors()[0]["msg"]
+
     @pytest.mark.parametrize("value", ["https://app.example.com/#", "https://app.example.com/#/x"])
     def test_a_fragment_is_refused(self, value: str) -> None:
         # Every link's path is appended to this value, so a fragment here would
@@ -350,9 +351,6 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         assert config.effective_ui_base_url == "https://app.example.com/ui?edge=team/"
         assert oauth_service.callback_landing_target(config, "google", "code=x") == (
             "https://app.example.com/ui/sign-in/google/callback?code=x&edge=team/"
-        )
-        assert GatewayConfig(public_base_url="https://otari.example.com/?edge=team/").effective_ui_base_url == (
-            "https://otari.example.com?edge=team/"
         )
 
     def test_a_query_string_is_kept(self) -> None:

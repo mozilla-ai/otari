@@ -1922,12 +1922,21 @@ ui_base_url: "https://app.example.com/dashboard"
 
 Unset, `public_base_url` is used.
 
-- Supply an absolute http(s) URL with no trailing slash.
-- Credentials and fragments are refused, since the value goes into redirects
-  and mail.
-- A query string is kept and joined to every link's own query, ahead of its
-  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
-  for an edge that serves one interface for several deployments.
+Supply an absolute http(s) URL with no trailing slash for either setting. A
+username or password in one is refused, because the value goes into redirects
+and into everybody's inbox. What may follow the host differs, because the two
+are joined to a path in different ways:
+
+- `public_base_url` refuses a query string and a fragment. Every URL naming this
+  deployment is built by appending to it, so either one would land in the middle
+  of the result instead of at its end.
+- `ui_base_url` refuses a fragment and keeps a query string, which is joined to
+  every link's own query ahead of its fragment
+  (`https://app.example.com/dashboard/verify-email?edge=a#token=…`), for an edge
+  that serves one interface for several deployments.
+
+An edge that tags its links therefore sets `ui_base_url` for the query, and
+leaves `public_base_url` as the plain address this process answers on.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is

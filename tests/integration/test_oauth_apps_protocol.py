@@ -72,6 +72,7 @@ def test_client_metadata_accepts_registered_ids_with_slashes(client: TestClient,
         "scopes": ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"],
         "verified": True,
         "spend_limits": True,
+        "credential": "api_key",
     }
 
 

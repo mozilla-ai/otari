@@ -200,6 +200,9 @@ export const PLAYGROUND = "playground"
 // happen to be acting in, and switching organizations does not change the list.
 export const PASSKEYS = "passkeys"
 
+// The signed-in identity's own access tokens, a person's like its passkeys.
+export const ACCESS_TOKENS = "access-tokens"
+
 // Whether a mailed reset or verification link can still be used, read once on
 // arrival. Keyed by the link's kind and token, and never invalidated: using the
 // link moves the page to its success state rather than back to this check.

@@ -53,6 +53,14 @@ class IdentitySettings(BaseModel):
         ),
     )
 
+    mcp_server_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Serve Otari's own MCP server at /mcp, where an agent holding a person's access token reads "
+            "what that person sees on the dashboard. Read only. Asked once at startup."
+        ),
+    )
+
     oidc_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(

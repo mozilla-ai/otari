@@ -111,6 +111,7 @@ _SETTING_NAMES = frozenset(
         "mcp_private_hosts",
         "mcp_catalog_sync",
         "mcp_catalog_sync_interval_hours",
+        "mcp_server_enabled",
         "model_cache_ttl_seconds",
         "model_capabilities",
         "model_discovery",

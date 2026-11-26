@@ -101,6 +101,13 @@ export type Passkey = Schemas["WebAuthnCredentialPublic"]
 export type PasskeysResponse = Schemas["WebAuthnCredentialsPublic"]
 export type RenamePasskeyRequest = Schemas["WebAuthnCredentialUpdate"]
 
+// Personal access tokens: a person's own read-only credential for the
+// management API and the MCP server.
+export type AccessToken = Schemas["AccessTokenPublic"]
+export type AccessTokensResponse = Schemas["AccessTokensPublic"]
+export type CreateAccessTokenRequest = Schemas["AccessTokenCreate"]
+export type CreatedAccessToken = Schemas["AccessTokenCreated"]
+
 // ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------

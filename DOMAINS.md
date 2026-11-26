@@ -86,8 +86,14 @@ credentials and the model catalog, so it is **providers** and **catalog**.
 ### identity
 
 Who a person is and how they sign in: passwords, passkeys, OAuth, dashboard
-sessions, email verification and reset, the profile, and deployment-wide
-account administration.
+sessions, personal access tokens, email verification and reset, the profile,
+and deployment-wide account administration.
+
+A personal access token authenticates a read of the management API as its
+owner, in the organization it was made for, as a session would; an MCP client's
+sign-in is one too, renewed by a rotating refresh token and good only through `/mcp`. The MCP server at `/mcp` (`api/mcp_server.py`)
+reads with one: each of its tools is one such read through the app, so it is
+an adapter in the API layer and decides nothing about who sees what.
 
 Its tables sit in `models/tenancy.py` today, which organizations holds, except
 `oauth_identity_link` and `oidc_connection` in `models/identity.py`. The

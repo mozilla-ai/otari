@@ -22,6 +22,7 @@ from gateway.api.deps import (
     OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
     PersonGrowthSignalPortDep,
+    refuse_access_tokens,
     require_deployment_operator,
     verify_master_key,
 )
@@ -344,7 +345,7 @@ async def refresh_org_provider_key_model_pricing(
     return await service.refresh_pricing(user=current_identity, key_id=key_id)
 
 
-@org_router.get("/{key_id}/available-models")
+@org_router.get("/{key_id}/available-models", dependencies=[Depends(refuse_access_tokens)])
 async def list_org_provider_key_available_models(
     service: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
