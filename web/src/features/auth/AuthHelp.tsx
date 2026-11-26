@@ -41,12 +41,12 @@ export function AuthHelp({
     >
       <div className="flex max-w-xs flex-col gap-2">
         {offersRecovery && credential === "master-key" ? (
-          <PublicAuthLink to="#/recover-password">
+          <PublicAuthLink to="/recover-password">
             Forgot your password?
           </PublicAuthLink>
         ) : null}
         {offersRecovery ? (
-          <PublicAuthLink to="#/resend-verification">
+          <PublicAuthLink to="/resend-verification">
             Send a new verification link
           </PublicAuthLink>
         ) : null}

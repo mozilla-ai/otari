@@ -18,11 +18,8 @@ from any_llm.exceptions import UnsupportedParameterError
 from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._pipeline import (
-    PROVIDER_CREDENTIALS_DETAIL,
-    PROVIDER_RATE_LIMITED_DETAIL,
-)
 from gateway.core.config import API_ROOT
+from gateway.core.error_details import ProviderDetail
 
 _RAW = "raw upstream message SECRET-9f3a"
 
@@ -61,8 +58,8 @@ _CASES = [
     (404, 404, _RAW),
     (413, 413, _RAW),
     (429, 429, _RAW),
-    (401, 424, PROVIDER_CREDENTIALS_DETAIL),
-    (403, 424, PROVIDER_CREDENTIALS_DETAIL),
+    (401, 424, ProviderDetail.CREDENTIALS),
+    (403, 424, ProviderDetail.CREDENTIALS),
 ]
 
 
@@ -116,7 +113,7 @@ def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
         )
 
     assert response.status_code == 429
-    assert response.json()["detail"] == PROVIDER_RATE_LIMITED_DETAIL
+    assert response.json()["detail"] == ProviderDetail.RATE_LIMITED
 
 
 def test_chat_forwards_the_upstream_retry_after(
@@ -295,7 +292,7 @@ _MESSAGES_CASES = [
     (404, 404, _RAW, "not_found_error"),
     (413, 413, _RAW, "request_too_large"),
     (429, 429, _RAW, "rate_limit_error"),
-    (401, 424, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
+    (401, 424, ProviderDetail.CREDENTIALS, "api_error"),
 ]
 
 
@@ -380,10 +377,10 @@ def _openai_bad_request() -> openai.BadRequestError:
         "param": "temperature",
         "code": "unsupported_value",
     }
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     return openai.BadRequestError(
         f"Error code: 400 - {{'error': {error}}}",
-        response=httpx.Response(400, request=request, json={"error": error}),
+        response=httpx2.Response(400, request=request, json={"error": error}),
         body=error,
     )
 
@@ -456,7 +453,7 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
 
 
 def _dropped_connection() -> openai.APIConnectionError:
-    request = httpx.Request("POST", "https://internal-proxy.example/v1/chat/completions")
+    request = httpx2.Request("POST", "https://internal-proxy.example/v1/chat/completions")
     try:
         raise openai.APIConnectionError(request=request) from httpx.RemoteProtocolError(
             "Server disconnected without sending a response."
@@ -505,10 +502,10 @@ _IMAGE_DETAIL_TAIL = (
 def _fireworks_image_rejection() -> openai.BadRequestError:
     """Fireworks' 400, through its OpenAI-compatible SDK, for an image sent to a text-only model."""
     error = {"message": "Unsupported ChatMessageContent type: image_url", "type": "invalid_request_error"}
-    request = httpx.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions")
     return openai.BadRequestError(
         f"Error code: 400 - {{'error': {error}}}",
-        response=httpx.Response(400, request=request, json={"error": error}),
+        response=httpx2.Response(400, request=request, json={"error": error}),
         body=error,
     )
 

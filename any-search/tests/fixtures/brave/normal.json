@@ -1,0 +1,235 @@
+{
+  "status": 200,
+  "body": {
+    "type": "search",
+    "query": {
+      "original": "rust release notes",
+      "show_strict_warning": false,
+      "is_navigational": true,
+      "is_news_breaking": false,
+      "spellcheck_off": false,
+      "country": "us",
+      "bad_results": false,
+      "should_fallback": false,
+      "postal_code": "",
+      "city": "",
+      "header_country": "",
+      "more_results_available": true,
+      "state": "",
+      "related_queries": [
+        "rust release date",
+        "rust versions",
+        "latest rust edition",
+        "rust version check",
+        "rust release build",
+        "rust 1.80 release date",
+        "rust release notes pdf",
+        "rust release history",
+        "rust version 2024",
+        "rust release notes github"
+      ]
+    },
+    "mixed": {
+      "type": "mixed",
+      "main": [
+        {
+          "type": "web",
+          "index": 0,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 1,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 2,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 3,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 4,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 5,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 6,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 7,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 8,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 9,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 10,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 11,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 12,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 13,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 14,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 15,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 16,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 17,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 18,
+          "all": false
+        },
+        {
+          "type": "web",
+          "index": 19,
+          "all": false
+        }
+      ],
+      "top": [],
+      "side": []
+    },
+    "web": {
+      "type": "search",
+      "results": [
+        {
+          "title": "Rust Release Notes",
+          "url": "https://doc.rust-lang.org/beta/releases.html",
+          "is_source_local": false,
+          "is_source_both": false,
+          "description": "On Emscripten, the unwinding ABI used when compiling with panic=unwind was changed from the JS exception handling ABI to the wasm exception handling ABI. If linking C/C++ object files with Rust objects, -fwasm-exceptions must be passed to the linker now. On nightly Rust, it is possible to get the old behavior with -Zwasm-emscripten-eh=false -Zbuild-std, but it will be removed in a future release.",
+          "page_age": "2026-09-03T00:00:00",
+          "profile": {
+            "name": "Rust Documentation",
+            "url": "https://doc.rust-lang.org/beta/releases.html",
+            "long_name": "doc.rust-lang.org",
+            "img": "https://imgs.search.brave.com/X0kUIulv-1nkhvBRXl50t5KCcrDldegWvFmljckJQ6c/rs:fit:32:32:1:0/g:ce/aHR0cDovL2Zhdmlj/b25zLnNlYXJjaC5i/cmF2ZS5jb20vaWNv/bnMvZjQ4YzkxYmZm/YTgxMDQ2Yjc0MGFl/MjE4ODgyZGU3MTY5/ZWUyZDNiNjVmNzE4/MjZhM2RiODhkZmU5/Nzg0NTJmOC9kb2Mu/cnVzdC1sYW5nLm9y/Zy8"
+          },
+          "language": "en",
+          "family_friendly": true,
+          "type": "search_result",
+          "subtype": "generic",
+          "is_live": false,
+          "meta_url": {
+            "scheme": "https",
+            "netloc": "doc.rust-lang.org",
+            "hostname": "doc.rust-lang.org",
+            "favicon": "https://imgs.search.brave.com/X0kUIulv-1nkhvBRXl50t5KCcrDldegWvFmljckJQ6c/rs:fit:32:32:1:0/g:ce/aHR0cDovL2Zhdmlj/b25zLnNlYXJjaC5i/cmF2ZS5jb20vaWNv/bnMvZjQ4YzkxYmZm/YTgxMDQ2Yjc0MGFl/MjE4ODgyZGU3MTY5/ZWUyZDNiNjVmNzE4/MjZhM2RiODhkZmU5/Nzg0NTJmOC9kb2Mu/cnVzdC1sYW5nLm9y/Zy8",
+            "path": "› beta  › releases.html"
+          },
+          "age": "September 3, 2026",
+          "cluster_type": "generic",
+          "cluster": [
+            {
+              "title": "The Rust Programming Language",
+              "url": "https://doc.rust-lang.org/book/",
+              "is_source_local": false,
+              "is_source_both": false,
+              "description": "This version of the text assumes you’re using <strong>Rust</strong> 1.98.0 (<strong>released</strong> 2026-08-20) or later with edition = &quot;2024&quot; in the Cargo.toml file of all projects to configure them to use <strong>Rust</strong> 2024 Edition idioms.",
+              "family_friendly": true
+            },
+            {
+              "title": "Hello, World!",
+              "url": "https://doc.rust-lang.org/book/ch01-02-hello-world.html",
+              "is_source_local": false,
+              "is_source_both": false,
+              "description": "Now that you’ve installed <strong>Rust</strong>, it’s time to write your first <strong>Rust</strong> program. It’s traditional when learning a new language to write a little program that prints the text Hello, world! to the screen, so we’ll do the same here! <strong>Note</strong>: This book assumes basic familiarity with the command line.",
+              "family_friendly": true
+            },
+            {
+              "title": "Installation",
+              "url": "https://doc.rust-lang.org/book/ch01-01-installation.html",
+              "is_source_local": false,
+              "is_source_both": false,
+              "description": "We’ll download <strong>Rust</strong> through rustup, a command line tool for managing <strong>Rust</strong> versions and associated tools. You’ll need an internet connection for the download. <strong>Note</strong>: If you prefer not to use rustup for some reason, please see the Other <strong>Rust</strong> Installation Methods page for more options.",
+              "family_friendly": true
+            },
+            {
+              "title": "Programming a Guessing Game",
+              "url": "https://doc.rust-lang.org/book/ch02-00-guessing-game-tutorial.html",
+              "is_source_local": false,
+              "is_source_both": false,
+              "description": "This line creates a new variable ... 5. In <strong>Rust</strong>, variables are immutable by default, meaning once we give the variable a value, the value won’t change. We’ll be discussing this concept in detail in the “Variables and Mutability” section in Chapter 3. To make a variable mutable, we add mut before the variable name: let apples = 5; // immutable let mut bananas = 5; // mutable · <strong>Note</strong>: The // syntax ...",
+              "family_friendly": true
+            }
+          ]
+        },
+        {
+          "title": "Rust Versions | Rust Changelogs",
+          "url": "https://releases.rs/",
+          "is_source_local": false,
+          "is_source_both": false,
+          "description": "Rust Versions # <strong>Stable: 1.100.0 Beta: 1.101.0 (24 December, 2026, 41 days left) Nightly: 1.102.0 (4 February, 2027, 83 days left)</strong> Ongoing Stabilization PRs # Stabilize stack-protector (try 2) (4 days old) A-LLVM - Area: Code generation parts specific to LLVM.",
+          "page_age": "2026-11-12T22:37:39",
+          "profile": {
+            "name": "Rust",
+            "url": "https://releases.rs/",
+            "long_name": "releases.rs",
+            "img": "https://imgs.search.brave.com/iKHGDXjsFiSaP0NcA7wppFWZdxLyZIBPZpjMgAyIJ6w/rs:fit:32:32:1:0/g:ce/aHR0cDovL2Zhdmlj/b25zLnNlYXJjaC5i/cmF2ZS5jb20vaWNv/bnMvNmJlOTYzMmMy/ZTU1MmVkZDRjM2Nk/OTZlYzQyZmYzYTI2/YmVkYzVmZmZjNDdl/NjBiNzkwYmVjZjM0/OWFlZDhmMS9yZWxl/YXNlcy5ycy8"
+          },
+          "language": "en",
+          "family_friendly": true,
+          "type": "search_result",
+          "subtype": "generic",
+          "is_live": false,
+          "meta_url": {
+            "scheme": "https",
+            "netloc": "releases.rs",
+            "hostname": "releases.rs",
+            "favicon": "https://imgs.search.brave.com/iKHGDXjsFiSaP0NcA7wppFWZdxLyZIBPZpjMgAyIJ6w/rs:fit:32:32:1:0/g:ce/aHR0cDovL2Zhdmlj/b25zLnNlYXJjaC5i/cmF2ZS5jb20vaWNv/bnMvNmJlOTYzMmMy/ZTU1MmVkZDRjM2Nk/OTZlYzQyZmYzYTI2/YmVkYzVmZmZjNDdl/NjBiNzkwYmVjZjM0/OWFlZDhmMS9yZWxl/YXNlcy5ycy8",
+            "path": ""
+          },
+          "age": "2 days ago"
+        }
+      ],
+      "family_friendly": true
+    }
+  }
+}

@@ -155,7 +155,7 @@ def resolve_direct_fetch(
 def unpriced_direct_fetch_detail(fetch: DirectFetch) -> str:
     """The 402's message for a fetch ``require_pricing`` cannot bill: the row to add, and where."""
     return direct_unpriced_detail(
-        "fetch", fetch.instance.name, fetch.resolved.rate_keys[0], organization_key=fetch.resolved.on_credential
+        "fetch", fetch.instance.name, fetch.resolved.rate_keys[0], gateway_tool_row=fetch.resolved.on_credential
     )
 
 

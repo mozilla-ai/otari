@@ -3,7 +3,7 @@
 import uuid
 from collections.abc import Collection
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from gateway.core.metered_pricing import quantize_cost
 from gateway.core.unit_of_work import UnitOfWork
@@ -23,6 +23,13 @@ from gateway.schemas.usage_and_telemetry import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.organizations import UserAccess
+from gateway.services.usage_and_telemetry._model_groups import grouped_models
+from gateway.services.usage_and_telemetry._speed import (
+    SPEED_SAMPLE_CAP,
+    SPEED_WINDOW,
+    OfferingSpeed,
+    speed_by_selector,
+)
 from gateway.services.usage_and_telemetry._window import (
     MAX_SERIES_POINTS,
     SERIES_TOP_N,
@@ -82,10 +89,32 @@ class UsageService:
         self._keys = keys
         self._users = users
 
+    async def reassign_owner(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Move these users' usage onto ``to_user_id``, clearing the caller-supplied fields that could name a person."""
+        async with self._uow:
+            await self._usage_logs.reassign_owner(user_ids, to_user_id)
+
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key."""
         async with self._uow:
             return await self._usage_logs.served_traffic(workspace_ids=workspace_ids, since=since)
+
+    async def offering_speed(
+        self, *, workspace_ids: Collection[uuid.UUID], offerings: Collection[tuple[str, str, str]]
+    ) -> dict[str, OfferingSpeed]:
+        """How fast each offering answered these workspaces' requests lately, keyed by selector.
+
+        ``offerings`` holds ``(selector, instance, model id)``. An offering with too
+        few measured requests is absent.
+        """
+        async with self._uow:
+            samples = await self._usage_logs.speed_samples(
+                workspace_ids=workspace_ids,
+                offerings=offerings,
+                since=datetime.now(UTC) - SPEED_WINDOW,
+                per_offering=SPEED_SAMPLE_CAP,
+            )
+        return speed_by_selector(samples, offerings)
 
     async def page(self, filters: UsageFilters, scope: UsageScope, *, skip: int, limit: int) -> list[UsageEntry]:
         """The rows matching these filters inside this scope, most recent first, each labeled with its user and key.
@@ -169,10 +198,18 @@ class UsageService:
         # an empty selection, and it never contributes a dimension of its own.
         requested = _ALL_SUMMARY_DIMENSIONS if dimensions is None else {d for d in dimensions if d != "none"}
         async with self._uow:
-            totals = await self._usage_logs.totals(filters, scope)
+            # The totals and every requested breakdown come back from one read, so
+            # a summary that names several dimensions scans the window once rather
+            # than once per dimension (see UsageLogRepository.summary_aggregates).
+            aggregates = await self._usage_logs.summary_aggregates(
+                filters,
+                scope,
+                dimensions={name: cap for name, cap in _SUMMARY_DIMENSIONS.items() if name in requested},
+            )
+            totals = aggregates.totals
             breakdowns = {
-                name: await self._breakdown(filters, scope, totals, dimension=name, limit=cap)
-                for name, cap in _SUMMARY_DIMENSIONS.items()
+                name: await self._labeled(aggregates.groups.get(name, []), totals, dimension=name)
+                for name in _SUMMARY_DIMENSIONS
                 if name in requested
             }
             # The failure taxonomy is a GROUP BY pass like the others, so it answers to the
@@ -256,13 +293,26 @@ class UsageService:
     async def _breakdown(
         self, filters: UsageFilters, scope: UsageScope, totals: UsageTotals, *, dimension: str, limit: int
     ) -> list[UsageGroupRow]:
-        """One dimension's top groups, labeled where the key is an opaque id, with the remainder folded.
+        """One dimension's top groups, read on its own and labeled.
 
-        Only the user and key dimensions need a label: a model, source or endpoint
-        already reads as its own name. Resolving it here is what lets a client
-        offer a user or key filter without holding those whole tables.
+        Used where the caller needs a single dimension rather than a whole
+        summary (:meth:`grouped_series`); the summary itself reads every
+        dimension it needs in one pass and labels those rows with :meth:`_labeled`.
         """
         rows = await self._usage_logs.groups(filters, scope, dimension=dimension, limit=limit)
+        return await self._labeled(rows, totals, dimension=dimension)
+
+    async def _labeled(self, rows: list[UsageGroupRow], totals: UsageTotals, *, dimension: str) -> list[UsageGroupRow]:
+        """One dimension's top groups, labeled where the key is an opaque id, with the remainder folded.
+
+        The user and key dimensions are labeled because their keys are ids:
+        resolving the label here is what lets a client offer a user or key filter
+        without holding those whole tables. A model is labeled and grouped with
+        its other spellings (:func:`grouped_models`); a source or endpoint
+        already reads as its own name.
+        """
+        if dimension == "model":
+            return _with_fold(grouped_models(rows), totals)
         keys = {row.key for row in rows if row.key is not None}
         if dimension == "user":
             labels = await self._users.aliases(keys)

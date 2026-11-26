@@ -8,6 +8,7 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+import { getRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 
 const PASSKEY = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -87,7 +88,7 @@ function renderCardWithProbe(methods: DeploymentBootstrap["sign_in_methods"]) {
 }
 
 async function deleteFirstPasskey(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getAllByRole("button", { name: "Delete" })[0])
+  await pressRowAction(user, "Delete…")
   await user.click(
     within(screen.getByRole("alertdialog")).getByRole("button", {
       name: "Delete",
@@ -162,28 +163,31 @@ describe("PasskeysCard", () => {
       [LIST]: () =>
         jsonResponse({ data: [{ ...PASSKEY, is_usable: false }], count: 1 }),
     })
+    const user = userEvent.setup()
     renderCard()
 
     expect(await screen.findByText("Work laptop")).toBeInTheDocument()
     expect(screen.getByText(/can no longer sign you in/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Delete…")).toBeInTheDocument()
   })
 
-  it("gives each row action the lane's 44px target, not a small button's box", async () => {
+  it("keeps the row's actions behind one three-dot trigger, with a 44px target", async () => {
     // The layout exception in testing.md: jsdom computes no layout, so the
-    // reachable area of a 32px glyph is observable only as the classes that
-    // create it. `size-8` is the visual and `before:-inset-1.5` is the 6px each
-    // way that takes it to 44, which is what `design/actions.md` specifies for
-    // a row lane and what the deprecated cluster this replaced did not have.
+    // trigger's size is observable only as the class that carries it
+    // (`otari-row-menu-trigger`, sized in design-system.css). Rename and Delete
+    // are items of its menu, not buttons of their own.
     mockApi({ [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }) })
+    const user = userEvent.setup()
     renderCard()
 
     await screen.findByText("Work laptop")
-    for (const name of ["Rename", "Delete"]) {
-      expect(screen.getByRole("button", { name })).toHaveClass(
-        "size-8",
-        "before:-inset-1.5",
-      )
+    expect(screen.getByRole("button", { name: /^Row actions/ })).toHaveClass(
+      "otari-row-menu-trigger",
+    )
+    for (const name of ["Rename…", "Delete…"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument()
+      expect(await getRowMenuItem(user, name)).toBeInTheDocument()
+      await user.keyboard("{Escape}")
     }
   })
 
@@ -210,10 +214,11 @@ describe("PasskeysCard", () => {
       [LIST]: () =>
         jsonResponse({ data: [{ ...PASSKEY, is_usable: false }], count: 1 }),
     })
+    const user = userEvent.setup()
     renderCard(false)
 
     expect(await screen.findByText("Work laptop")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Delete…")).toBeInTheDocument()
   })
 
   it("registers a passkey through the browser ceremony", async () => {
@@ -326,7 +331,7 @@ describe("PasskeysCard", () => {
     renderCard()
 
     await screen.findByText("Work laptop")
-    await user.click(screen.getByRole("button", { name: "Rename" }))
+    await pressRowAction(user, "Rename…")
     // Scoped to the dialog: the register form below carries a "Name" field of
     // its own, and an unscoped query would match both.
     const dialog = within(await screen.findByRole("alertdialog"))
@@ -356,7 +361,7 @@ describe("PasskeysCard", () => {
     renderCard()
 
     await screen.findByText("Work laptop")
-    await user.click(screen.getByRole("button", { name: "Rename" }))
+    await pressRowAction(user, "Rename…")
     const dialog = within(await screen.findByRole("alertdialog"))
     await user.clear(dialog.getByLabelText("Name"))
     await user.click(dialog.getByRole("button", { name: "Save" }))
@@ -381,14 +386,14 @@ describe("PasskeysCard", () => {
     renderCard()
 
     await screen.findByText("Work laptop")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete…")
 
     // Removing the last passkey is not a lockout, and the dialog says why.
     expect(
       await screen.findByText(/You can still sign in with your password/),
     ).toBeInTheDocument()
     // Scoped for the same reason the rename is: the row behind the dialog has
-    // its own Delete button.
+    // its own Delete item.
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
         name: "Delete",

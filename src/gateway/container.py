@@ -30,6 +30,7 @@ from typing import Any, TypeVar, cast, get_protocol_members
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.account_country_adapter import NullAccountCountryAdapter
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
@@ -50,6 +51,7 @@ from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
@@ -68,9 +70,9 @@ from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.repositories.tenancy import UserRepository
+from gateway.services.organizations import MembershipListener
 from gateway.services.providers import HostedProviderService
 from gateway.services.tenancy import forget_unproven_access
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import sandbox_api_key
 
@@ -224,15 +226,32 @@ def _verify_port_shape(container: Container, port: type[Any]) -> None:
 
     """
     adapter = container.resolve(port, None)
-    missing = sorted(name for name in get_protocol_members(port) if not hasattr(adapter, name))
+    missing = sorted(name for name in get_protocol_members(port) if not _carries_its_own(adapter, port, name))
     if missing:
         msg = f"{type(adapter).__name__}, bound to {_port_name(port)}, lacks {', '.join(missing)}"
         raise PortShapeError(msg)
 
 
+def _carries_its_own(adapter: object, port: type[Any], name: str) -> bool:
+    """Whether ``adapter`` brings its own ``name``, rather than the stub ``port`` declares.
+
+    An adapter written against an older shape of the port, and subclassing it, inherits that stub.
+    The stub is a method like any other, so it answers every call with ``None``.
+    """
+    if not hasattr(adapter, name):
+        return False
+    declared = inspect.getattr_static(port, name, None)
+    return declared is None or inspect.getattr_static(adapter, name, None) is not declared
+
+
 def _api_key_format_adapter(session: AsyncSession | None) -> ApiKeyFormatPort:
     """Build the core ``ApiKeyFormatPort`` adapter for one request."""
     return DefaultApiKeyFormatAdapter(session)
+
+
+def _account_country_adapter(session: AsyncSession | None) -> AccountCountryPort:
+    """Build the core ``AccountCountryPort`` adapter for one request."""
+    return NullAccountCountryAdapter(session)
 
 
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
@@ -532,6 +551,9 @@ def build_container(
     # Billing has no core implementation, so the default is the Null Object:
     # this deployment runs billing-free, holding and charging nothing.
     container.bind(BillingPort, _billing_adapter)
+    # Where an account is: the base keeps no record, so the provider country
+    # gate reads the request's country alone.
+    container.bind(AccountCountryPort, _account_country_adapter)
     # Entitlement: the base grants the capability set it ships, which is
     # currently empty, and reports every overlay-only capability as absent.
     container.bind(EntitlementPort, _entitlement_adapter)
@@ -638,6 +660,7 @@ def build_container(
     _verify_port_shape(container, UsageSignalPort)
     _verify_port_shape(container, FeedbackDeliveryPort)
     _verify_port_shape(container, GrowthSignalPort)
+    _verify_port_shape(container, SignupInvitePort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:

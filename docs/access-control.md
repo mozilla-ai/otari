@@ -41,8 +41,10 @@ deployment.
 ## What a page shows depends on who is signed in
 
 - **Spend & budgets.** An organization owner or admin manages their
-  organization's budgets and ceilings. A deployment operator also sees the
-  deployment's own budgets and the gateway users assigned to them.
+  organization's budgets and ceilings, whether or not they also operate the
+  deployment. A deployment operator manages the deployment's own budgets, and
+  the gateway users assigned to them, under **Deployment budgets** on the
+  deployment's pages.
 - **API keys.** An operator manages every key in the organization and picks each
   key's owner. A member sees only their own keys, always billed to themselves and
   never budget-exempt. An operator, or an organization owner or admin, can cap a
@@ -50,9 +52,15 @@ deployment.
   key's spend against its limit. Where the deployment enables it, a key's actions
   menu offers **Workload identity…**; see
   [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key).
-- **Overview and Routing** show an operator their active organization only. What
-  the Overview flags for each role is in
-  [What needs attention](review-usage-and-requests.md#what-needs-attention).
+- **Home, Sessions and Routing** show an operator their active organization
+  only. What Home shows each role is in
+  [Home](review-usage-and-requests.md#home).
+- **Pages someone may not use** are left out of their menus, and opening one
+  by its address goes to Home: the organization's pages for anyone but an
+  owner or admin, the deployment's pages for anyone but its operator, the
+  workspace's guardrails for anyone but an organization owner or admin, and the
+  Playground for a viewer. A workspace's own page under **Workspaces** also
+  opens to that workspace's owner or admin.
 
 ## How a request is attributed
 

@@ -1,5 +1,7 @@
 import { Link } from "@heroui/react"
 import type { ReactNode } from "react"
+import { RouterProvider } from "react-aria-components"
+import { navigateTo, routeHref } from "@/shared/helpers/appLocation"
 
 import { LoginPageShell } from "./LoginPageShell"
 
@@ -43,15 +45,16 @@ export function PublicAuthLayout({
 /**
  * A link between two pages that both live in front of the router.
  *
- * The `href` is a hash path, not TanStack Router's `<Link to>`, which the
- * house style otherwise requires for an internal destination. These pages are
- * rendered by `DeploymentRoot` *ahead* of `RouterProvider` (see `App.tsx`), so
- * there is no router context to link through; and a hash change is not the
- * full page reload that rule exists to prevent, because `App`'s `useHashPath`
- * picks it up and swaps the page in place. The guide link on `AuthHelp`
- * is a HeroUI `Link` of its own rather than this, and stays that way: it is a
- * path the gateway serves (`/welcome`) or the deployment's documentation on
- * another origin, so it is the one link down here that *is* a page load.
+ * `to` is a route (`/recover-password`), not TanStack Router's `<Link to>`,
+ * which the house style otherwise requires for an internal destination. These
+ * pages are rendered by `DeploymentRoot` *ahead* of `RouterProvider` (see
+ * `App.tsx`), so there is no TanStack context to link through. A react-aria
+ * router scoped to this one link stands in: the anchor carries the real href,
+ * so it opens in a new tab like any other, and a plain click moves the tab with
+ * `navigateTo`, which `App` picks up and swaps the page in place rather than
+ * reloading it. Scoped to the link rather than the page because the guide link
+ * on `AuthHelp` is a HeroUI `Link` too, and it names a path the gateway serves
+ * (`/welcome`) or another origin: the one link down here that *is* a page load.
  *
  * Sized to the 44px touch target the phone viewport asks for, which `text-sm`
  * alone is about half of, and these stack several deep in a card's footer.
@@ -64,7 +67,7 @@ export function PublicAuthLink({
 }: {
   to: string
   children: ReactNode
-  /** Runs before the hash changes, to hand something to the next page. */
+  /** Runs before the route changes, to hand something to the next page. */
   onPress?: () => void
   /**
    * For a link that shares a row with a label, where a 44px box would make the
@@ -74,23 +77,30 @@ export function PublicAuthLink({
   isInline?: boolean
 }) {
   return (
-    <Link
-      href={to}
-      onPress={onPress}
-      className={`inline-flex items-center text-sm font-medium text-link hover:text-link-hover ${
-        isInline
-          ? "relative before:absolute before:inset-x-0 before:-top-4 before:-bottom-2"
-          : "min-h-11"
-      }`}
-    >
-      {children}
-    </Link>
+    <RouterProvider navigate={followPublicAuthLink} useHref={routeHref}>
+      <Link
+        href={to}
+        onPress={onPress}
+        className={`inline-flex items-center text-sm font-medium text-link hover:text-link-hover ${
+          isInline
+            ? "relative before:absolute before:inset-x-0 before:-top-4 before:-bottom-2"
+            : "min-h-11"
+        }`}
+      >
+        {children}
+      </Link>
+    </RouterProvider>
   )
+}
+
+/** What a public auth link does when followed: move this tab to its route. */
+function followPublicAuthLink(route: string): void {
+  navigateTo(route)
 }
 
 /** Send this tab to another page in front of the session, from a handler. */
 export function goToPublicAuthPage(to: string): void {
-  window.location.hash = to
+  navigateTo(to)
 }
 
 /**
@@ -98,5 +108,5 @@ export function goToPublicAuthPage(to: string): void {
  * Back skips it rather than replaying it.
  */
 export function replacePublicAuthPage(to: string): void {
-  window.location.replace(to)
+  navigateTo(to, { replace: true })
 }

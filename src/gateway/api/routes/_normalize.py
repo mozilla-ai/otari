@@ -26,8 +26,8 @@ from fastapi import HTTPException
 from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.files_exceptions import (
-    AttachedFilesNotReadError,
     InlineAttachmentsTooLargeError,
     NoCandidateHoldsCopiesError,
     ProviderAttachmentError,
@@ -58,6 +58,7 @@ from gateway.services.tools import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
+from gateway.types.country_gate import CountryGate
 from gateway.types.provider_account import ResolvedCredential
 
 
@@ -191,10 +192,11 @@ async def normalize_request_messages(
     model: str,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
-    client_country: str | None = None,
+    country_gate: CountryGate | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     candidates: Sequence[LLMProvider | None] = (),
@@ -217,22 +219,22 @@ async def normalize_request_messages(
     decide whether attachments past the provider's inline limit are moved to its
     own storage (see ``inline_limit_for``).
 
-    An attachment the model reads never fails the request, because this runs
-    after the budget reservation and a refusal here would lose it.
-    The input is returned untouched instead, which is also the answer where file
-    understanding is off or the provider could not be parsed.
+    An attachment the model reads does not fail the request when it cannot be
+    rendered: the input is returned untouched instead, which is also the answer
+    where the provider could not be parsed. A ``file_id`` the caller cannot reach
+    is refused, as the provider could not read it either.
     The exception is an attachment past an inline limit that could not be moved,
     which the provider would refuse anyway, so the request is refused here first.
 
+    ``may_read_files`` is whether the caller may resolve a stored file at all.
+
     Raises:
-        ProviderAttachmentError: only where ``provider_container`` is set.
+        AttachedFileUnavailableError: a ``file_id`` the caller cannot reach.
+        KeyScopeMissingError: a message names a stored file and ``may_read_files`` is false.
+        ProviderAttachmentError: otherwise only where ``provider_container`` is set.
         InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
-    if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
-        # Nothing below would examine the blocks, so a `container_upload` would
-        # reach the provider naming a file of the caller's choosing.
-        raise AttachedFilesNotReadError
-    if provider is None or not config.file_understanding_enabled:
+    if provider is None:
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)
@@ -253,14 +255,15 @@ async def normalize_request_messages(
             fmt=fmt,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
-            client_country=client_country,
+            country_gate=country_gate,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
             inline_limit=inline_limit,
         )
-    except (ProviderAttachmentError, InlineAttachmentsTooLargeError):
+    except (KeyScopeMissingError, ProviderAttachmentError, InlineAttachmentsTooLargeError):
         raise
     except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
         if provider_container:

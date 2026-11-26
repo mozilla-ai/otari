@@ -8,9 +8,9 @@
 #   * otari_web_search   → the gateway's own web_search backend runs it
 #   * web_search / web_search_<date>  → NOT intercepted; forwarded to the
 #     provider as-is. Whether the provider runs a native search depends on the
-#     provider AND endpoint — this script always calls /v1/chat/completions,
+#     provider AND endpoint — this script always calls /api/v1/chat/completions,
 #     where e.g. Anthropic's server-side web_search does NOT fire (it expects
-#     /v1/messages), so the model may just answer from memory. Use
+#     /api/v1/messages), so the model may just answer from memory. Use
 #     otari_web_search for the reliable gateway-run path.
 #
 # Env vars:
@@ -73,7 +73,7 @@ query="${1:?usage: ./ask.sh [--model MODEL] [--tool-type TYPE] [--no-stream] \"y
 # the request's `user` to be a registered user (budget enforcement reads its
 # spend record); first-boot the demo user doesn't exist yet. Idempotent —
 # 409 on subsequent calls is fine.
-curl -sf -X POST "$OTARI_URL/v1/users" \
+curl -sf -X POST "$OTARI_URL/api/v1/users" \
   -H "Authorization: Bearer $OTARI_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"user_id\": \"$OTARI_USER\"}" >/dev/null 2>&1 || true
@@ -119,7 +119,7 @@ _gw_before=$(docker logs $OTARI_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 _sx_before=$(docker logs $SEARXNG_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 if [[ "$stream" == "1" ]]; then
-  curl -sN -X POST "$OTARI_URL/v1/chat/completions" \
+  curl -sN -X POST "$OTARI_URL/api/v1/chat/completions" \
     -H "Authorization: Bearer $OTARI_KEY" \
     -H "Content-Type: application/json" \
     -d "$body" -D /tmp/.ask-headers | python3 -u -c '
@@ -192,7 +192,7 @@ if is_error:
 print()
 '
 else
-  curl -sS -X POST "$OTARI_URL/v1/chat/completions" \
+  curl -sS -X POST "$OTARI_URL/api/v1/chat/completions" \
     -H "Authorization: Bearer $OTARI_KEY" \
     -H "Content-Type: application/json" \
     -d "$body" | python3 -c '

@@ -2,12 +2,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
+import { routeLocation } from "@/tests/location"
 import { AppProviders } from "@/tests/providers"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
@@ -26,27 +28,30 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 function Mounted({
   children,
   signInMethods = ["master_key"],
-  mailReady = false,
+  mail = "none",
   maintenanceMode = false,
   oauthProviders = [],
   openSignup = false,
+  organizationOidcEnabled = true,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
-  mailReady?: boolean
+  mail?: MailReadiness
   maintenanceMode?: boolean
   oauthProviders?: string[]
   openSignup?: boolean
+  organizationOidcEnabled?: boolean
 }) {
   return (
     <AppProviders>
       <DeploymentProvider
         value={bootstrap({
           sign_in_methods: signInMethods,
-          mail_ready: mailReady,
+          mail,
           maintenance_mode: maintenanceMode,
           oauth_providers: oauthProviders,
           open_signup: openSignup,
+          organization_oidc_enabled: organizationOidcEnabled,
         })}
       >
         {children}
@@ -168,26 +173,26 @@ describe("Login", () => {
 
   it("links to signup, recovery and a fresh verification link once mail works", async () => {
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
 
     expect(
       screen.getByRole("link", { name: /Set your password/ }),
-    ).toHaveAttribute("href", "#/signup")
+    ).toHaveAttribute("href", "/signup")
     expect(
       screen.getByRole("link", { name: /Forgot your password/ }),
-    ).toHaveAttribute("href", "#/recover-password")
+    ).toHaveAttribute("href", "/recover-password")
     await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(
       screen.getByRole("link", { name: /verification link/ }),
-    ).toHaveAttribute("href", "#/resend-verification")
+    ).toHaveAttribute("href", "/resend-verification")
   })
 
   it("hides recovery on an unclaimed deployment, where no password exists to reset", async () => {
     render(
-      <Mounted mailReady>
+      <Mounted mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -286,7 +291,7 @@ describe("Login", () => {
 
   it("offers recovery to a member holding a password on an unclaimed deployment", () => {
     render(
-      <Mounted mailReady signInMethods={["master_key", "password"]}>
+      <Mounted mail="delivers" signInMethods={["master_key", "password"]}>
         <Harness />
       </Mounted>,
     )
@@ -298,7 +303,7 @@ describe("Login", () => {
 
   it("invites registration rather than a claim where signup is open", () => {
     render(
-      <Mounted mailReady openSignup>
+      <Mounted mail="delivers" openSignup>
         <Harness />
       </Mounted>,
     )
@@ -307,6 +312,28 @@ describe("Login", () => {
       screen.getByRole("link", { name: /Create an account/ }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
+  })
+
+  it("keeps the mail-only ways in where a send reaches no recipient", () => {
+    // Signup, recovery and a verification resend each only send a message, and
+    // the endpoints behind them accept one on this deployment, so taking the
+    // links away would hide a flow that works.
+    render(
+      <Mounted
+        mail="sends_only"
+        openSignup
+        signInMethods={["master_key", "password"]}
+      >
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Create an account/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: /Forgot your password/ }),
+    ).toBeInTheDocument()
   })
 
   it("links to the auth-free welcome page", async () => {
@@ -635,7 +662,7 @@ describe("Login", () => {
       jsonResponse({ detail: "Verify your email before signing in" }, 403),
     )
     const first = render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -697,7 +724,7 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -709,7 +736,7 @@ describe("Login", () => {
     expect(await screen.findByText(refusal)).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "Send a new verification link" }),
-    ).toHaveAttribute("href", "#/resend-verification")
+    ).toHaveAttribute("href", "/resend-verification")
 
     // The link describes the refusal, not the page, so typing takes both away.
     await user.type(screen.getByLabelText("Password"), "x")
@@ -722,7 +749,7 @@ describe("Login", () => {
   it("renders the unverified refusal without a link on a gateway that cannot mail one", async () => {
     // The resend page starts by sending a message, so on a mailless gateway
     // the link would lead to a flow that can only 503. The refusal still
-    // renders; hiding the action is the same call `mail_ready` already makes
+    // renders; hiding the action is the same call the mail state already makes
     // for signup and recovery.
     const refusal =
       "Verify your email before signing in; request a new verification email if yours expired"
@@ -1432,11 +1459,11 @@ describe("Login with a passkey", () => {
     // `window.location.assign` is not implemented in jsdom, and the whole point
     // of the success path is that it leaves the page, so it is stubbed and
     // asserted on rather than allowed to run.
-    function stubNavigation(hash = "") {
+    function stubNavigation(route = "/") {
       const assign = vi.fn()
       Object.defineProperty(window, "location", {
         configurable: true,
-        value: { ...window.location, assign, hash },
+        value: { ...window.location, ...routeLocation(route), assign },
       })
       return assign
     }
@@ -1537,8 +1564,8 @@ describe("Login with a passkey", () => {
 
     it("remembers the link the sign-in screen stood in for, to return to it", async () => {
       // `DeploymentRoot` renders this screen in place of the page a signed-out
-      // visitor asked for, so the hash here is that page.
-      const assign = stubNavigation("#/organization/billing")
+      // visitor asked for, so the route here is that page.
+      const assign = stubNavigation("/organization/billing")
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         jsonResponse({
           authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1",
@@ -1557,8 +1584,8 @@ describe("Login with a passkey", () => {
       )
 
       await waitFor(() => expect(assign).toHaveBeenCalled())
-      expect(window.sessionStorage.getItem("otari.oauth.return-hash")).toBe(
-        "#/organization/billing",
+      expect(window.sessionStorage.getItem("otari.oauth.return-route")).toBe(
+        "/organization/billing",
       )
     })
 
@@ -1638,7 +1665,7 @@ describe("Login with a passkey", () => {
       expect(assign).not.toHaveBeenCalled()
       expect(window.sessionStorage.getItem("otari.oauth.state")).toBeNull()
       expect(
-        window.sessionStorage.getItem("otari.oauth.return-hash"),
+        window.sessionStorage.getItem("otari.oauth.return-route"),
       ).toBeNull()
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
@@ -1799,5 +1826,31 @@ describe("Login, provider first", () => {
     expect(pressed).not.toBeDisabled()
     expect(pressed).toHaveClass("pointer-events-none")
     expect(pressed.parentElement).toHaveAttribute("aria-busy", "true")
+  })
+  it("offers the company row where the deployment serves organization SSO", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).toBeInTheDocument()
+  })
+
+  it("draws no company row where the deployment has organization SSO off", () => {
+    // The routes behind the row are not mounted there, so pressing it could
+    // only produce a 404. The sign-in screen renders before any surface gate,
+    // which is why it reads `organization_oidc_enabled` rather than the surface list.
+    render(
+      <Mounted signInMethods={["password"]} organizationOidcEnabled={false}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).not.toBeInTheDocument()
   })
 })

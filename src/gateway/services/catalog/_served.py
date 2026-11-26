@@ -181,30 +181,47 @@ def _server_root(api_base: str) -> str:
 
 
 async def read_engine_settings(
-    models: Sequence[Model], *, api_base: str | None, api_key: str | None
+    models: Sequence[Model],
+    *,
+    api_base: str | None,
+    api_key: str | None,
+    client: httpx.AsyncClient | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> EngineSettings | None:
     """Ask the SGLang server behind ``models`` how it was started, or ``None`` when it is not one or will not say.
 
     Called only after the listing from the same ``api_base`` succeeded, so the
-    address has passed the same checks. Redirects are not followed, and a body
-    over ``_MAX_MODEL_INFO_BYTES`` is not read.
+    address has passed the same checks. ``client`` is the one to dial through,
+    left open, where the address is a tenant's; otherwise a client of its own.
+    Redirects are not followed, and a body over ``_MAX_MODEL_INFO_BYTES`` is not read.
     """
     if not api_base or not any(_engine(model) == "sglang" for model in models):
         return None
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    root = _server_root(api_base)
     try:
-        async with httpx.AsyncClient(timeout=_MODEL_INFO_TIMEOUT_SECONDS, follow_redirects=False) as client:
-            for path in _MODEL_INFO_PATHS:
-                async with client.stream("GET", root + path, headers=headers) as response:
-                    if response.status_code == httpx.codes.NOT_FOUND:
-                        continue
-                    response.raise_for_status()
-                    body = await _bounded_body(response)
-                info = json.loads(body) if body is not None else None
-                return _settings_from(info) if isinstance(info, dict) else None
+        if client is not None:
+            return await _read_engine_settings(client, api_base=api_base, api_key=api_key, extra_headers=extra_headers)
+        async with httpx.AsyncClient(timeout=_MODEL_INFO_TIMEOUT_SECONDS, follow_redirects=False) as own:
+            return await _read_engine_settings(own, api_base=api_base, api_key=api_key, extra_headers=extra_headers)
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("Could not read the SGLang server's model info (%s)", type(exc).__name__)
+    return None
+
+
+async def _read_engine_settings(
+    client: httpx.AsyncClient, *, api_base: str, api_key: str | None, extra_headers: Mapping[str, str] | None
+) -> EngineSettings | None:
+    headers = dict(extra_headers or {})
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    root = _server_root(api_base)
+    for path in _MODEL_INFO_PATHS:
+        async with client.stream("GET", root + path, headers=headers, timeout=_MODEL_INFO_TIMEOUT_SECONDS) as response:
+            if response.status_code == httpx.codes.NOT_FOUND:
+                continue
+            response.raise_for_status()
+            body = await _bounded_body(response)
+        info = json.loads(body) if body is not None else None
+        return _settings_from(info) if isinstance(info, dict) else None
     return None
 
 

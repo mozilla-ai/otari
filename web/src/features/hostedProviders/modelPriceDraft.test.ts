@@ -7,6 +7,7 @@ import {
   draftFrom,
   EMPTY_DRAFT,
   parsePrice,
+  regionRatesOf,
   repriceBody,
 } from "./modelPriceDraft"
 
@@ -243,5 +244,21 @@ describe("draftFrom", () => {
       updated_at: null,
     }
     expect(draftFrom(row)).toMatchObject({ cacheRead: "", cacheWrite: "" })
+  })
+})
+
+describe("regionRatesOf", () => {
+  const rates = {
+    input_price_per_million: 0,
+    output_price_per_million: 0,
+    unit: "token",
+    source: "deployment" as const,
+  }
+
+  it("reads only a rate stored under the slug", () => {
+    expect(regionRatesOf({ region_rates: {} }, "constructor")).toBeUndefined()
+    expect(regionRatesOf({}, "sg")).toBeUndefined()
+    // A zero price is a price of its own.
+    expect(regionRatesOf({ region_rates: { sg: rates } }, "sg")).toBe(rates)
   })
 })

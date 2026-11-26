@@ -158,11 +158,10 @@ def redirect_uri(config: GatewayConfig, provider: str) -> str:
     for the client, so a mismatch is caught at the provider either way; deriving
     it just means a browser cannot choose what this server sends.
 
-    **It carries no fragment, which is why it is not a dashboard hash path.**
-    Every page the dashboard serves in front of a session is a hash route, and
-    RFC 6749 forbids a fragment in a redirection URI (Google rejects one
-    outright). So this names an ordinary path, which ``gateway.main`` serves
-    with a redirect into the hash route that finishes the sign-in.
+    **It is not the dashboard page that finishes the sign-in.** The dashboard
+    may live on another origin or under another path than this process, so this
+    names a path the gateway itself always answers, and ``gateway.main``
+    redirects it to that page (:func:`callback_landing_target`).
     """
     return f"{base_url(config)}/auth/{provider}/callback"
 
@@ -183,16 +182,18 @@ def base_url(config: GatewayConfig) -> str:
 def callback_landing_target(config: GatewayConfig, provider: str, query: str) -> str:
     """Where ``/auth/{provider}/callback`` sends the browser to finish signing in.
 
-    The interface's own hash route, carrying whatever query the provider
-    appended. Built from ``effective_ui_base_url`` and not the redirect URI's
-    base: the ``state`` in that query is checked against a value scoped to the
-    origin that minted it, so a browser landed elsewhere cannot finish.
+    The interface's own page, carrying whatever query the provider appended.
+    Named apart from ``/auth/{provider}/callback`` so a dashboard served by this
+    same process is not redirected back into the route that sent it. Built from
+    ``effective_ui_base_url`` and not the redirect URI's base: the ``state`` in
+    that query is checked against a value scoped to the origin that minted it,
+    so a browser landed elsewhere cannot finish.
 
     Relative to that base rather than to the request, because the request's path
     is what a reverse proxy may already have rewritten, and this has to name a
     URL in the browser's address bar rather than in this process.
     """
-    route = f"/#/auth/{quote(provider, safe='')}/callback"
+    route = f"/sign-in/{quote(provider, safe='')}/callback"
     return config.ui_link(f"{route}?{query}" if query else route)
 
 

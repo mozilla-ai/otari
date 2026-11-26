@@ -1,15 +1,26 @@
 """Data access for organizations."""
 
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import Organization, OrganizationCreate, OrganizationUpdate
 from gateway.repositories.base_repository import BaseRepository
+
+DELETED_ORGANIZATION_NAME = "Deleted organization"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SsoSettings:
+    """An organization's single sign-on settings, as its row holds them."""
+
+    required: bool
+    break_glass_user_id: uuid.UUID | None
 
 
 class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, OrganizationUpdate]):
@@ -48,6 +59,15 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
             select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update()
         )
 
+    async def anonymize(self, organization_id: uuid.UUID) -> None:
+        """Stage replacing the organization's name and slug, which a signup derives from its founder's."""
+        await self.db.execute(
+            update(Organization)
+            .where(col(Organization.id) == organization_id)
+            .values(name=DELETED_ORGANIZATION_NAME, slug=f"deleted-{organization_id.hex}")
+            .execution_options(synchronize_session=False)
+        )
+
     async def lock_settings(self, organization_id: uuid.UUID) -> None:
         """Serialize a read-then-write of this organization's own settings against another.
 
@@ -63,6 +83,21 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
         await self.db.execute(
             select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update(key_share=True)
         )
+
+    async def sso_settings(self, organization_id: uuid.UUID) -> SsoSettings | None:
+        """This organization's single sign-on settings as the row holds them, or None where no row does.
+
+        Read for the same reason :meth:`is_sso_enforced` is, and in one statement because the
+        break-glass exception is part of the same decision.
+        """
+        row = (
+            await self.db.execute(
+                select(col(Organization.sso_required), col(Organization.sso_break_glass_user_id)).where(
+                    col(Organization.id) == organization_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None else SsoSettings(required=bool(row[0]), break_glass_user_id=row[1])
 
     async def is_sso_enforced(self, organization_id: uuid.UUID) -> bool:
         """Whether this organization requires sign-in through its own connection, read from the row.

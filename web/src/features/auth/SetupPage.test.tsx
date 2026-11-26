@@ -9,6 +9,7 @@ import {
   readSignInNotice,
 } from "@/features/auth/signInNotice"
 import { ApiError, apiFetch, createSession } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
@@ -21,17 +22,17 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 const auth = { isAuthenticated: false, login: vi.fn() }
 vi.mock("@/features/auth/AuthContext", () => ({ useAuth: () => auth }))
 
-const LINK = "#/setup?key=otari-mk-first-run"
+const LINK = "/setup?key=otari-mk-first-run"
 
 function SignInMethods() {
   return <output>{useDeployment().sign_in_methods.join(",")}</output>
 }
 
 function renderPage(
-  hash: string,
+  route: string,
   signInMethods: ("master_key" | "password")[] = ["master_key"],
 ) {
-  window.location.hash = hash
+  window.history.replaceState(null, "", route)
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
@@ -39,7 +40,7 @@ function renderPage(
     <DeploymentProvider value={bootstrap({ sign_in_methods: signInMethods })}>
       <ThemeProvider>
         <QueryClientProvider client={client}>
-          <SetupPage hash={hash} />
+          <SetupPage route={route} />
           <SignInMethods />
         </QueryClientProvider>
       </ThemeProvider>
@@ -67,24 +68,22 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 describe("captureSetupKey", () => {
   it("takes the key out of the address bar and keeps it for the page", () => {
-    window.location.hash = LINK
-
-    expect(captureSetupKey(window.location.hash)).toBe("otari-mk-first-run")
-    expect(window.location.hash).toBe("#/setup")
+    window.history.replaceState(null, "", LINK)
+    expect(captureSetupKey(currentRoute())).toBe("otari-mk-first-run")
+    expect(currentRoute()).toBe("/setup")
     expect(window.location.href).not.toContain("otari-mk-first-run")
-    expect(captureSetupKey(window.location.hash)).toBe("otari-mk-first-run")
+    expect(captureSetupKey(currentRoute())).toBe("otari-mk-first-run")
   })
 
   it("ignores a key on any other page", () => {
-    window.location.hash = "#/keys?key=otari-mk-first-run"
-
-    expect(captureSetupKey(window.location.hash)).toBeNull()
-    expect(window.location.hash).toBe("#/keys?key=otari-mk-first-run")
+    window.history.replaceState(null, "", "/keys?key=otari-mk-first-run")
+    expect(captureSetupKey(currentRoute())).toBeNull()
+    expect(currentRoute()).toBe("/keys?key=otari-mk-first-run")
   })
 })
 
@@ -93,7 +92,7 @@ describe("SetupPage", () => {
     renderPage(LINK)
 
     expect(window.location.href).not.toContain("otari-mk-first-run")
-    expect(window.location.hash).toBe("#/setup")
+    expect(currentRoute()).toBe("/setup")
     expect(
       screen.getByRole("heading", { name: "Set up Otari" }),
     ).toBeInTheDocument()
@@ -119,14 +118,14 @@ describe("SetupPage", () => {
     })
     // The claim retired the master key as a sign-in, in this tab too.
     expect(screen.getByRole("status")).toHaveTextContent("password")
-    expect(window.location.hash).toBe("#/")
+    expect(currentRoute()).toBe("/")
     expect(readSignInNotice()).toBeNull()
   })
 
   it("falls back to sign-in with an explanation on a gateway that is already claimed", async () => {
     renderPage(LINK, ["password"])
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(readSignInNotice()).toMatch(/already set up/)
     expect(screen.queryByRole("heading", { name: "Set up Otari" })).toBeNull()
     expect(createSession).not.toHaveBeenCalled()
@@ -137,14 +136,14 @@ describe("SetupPage", () => {
     auth.isAuthenticated = true
     renderPage(LINK, ["password"])
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(readSignInNotice()).toBeNull()
   })
 
   it("falls back to sign-in when the link carries no key", async () => {
-    renderPage("#/setup")
+    renderPage("/setup")
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(readSignInNotice()).toMatch(/incomplete/)
   })
 
@@ -158,7 +157,7 @@ describe("SetupPage", () => {
 
     await fillAndSubmit()
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(readSignInNotice()).toMatch(/did not accept/)
     expect(apiFetch).not.toHaveBeenCalled()
     expect(auth.login).not.toHaveBeenCalled()

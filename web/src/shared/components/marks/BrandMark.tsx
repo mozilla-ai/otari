@@ -1,17 +1,21 @@
 import { lazy, Suspense } from "react"
 
 import { ProductMark } from "@/design-system/ProductMark"
+import type { MarkKind } from "@/shared/components/marks/BrandMarkGlyph"
 import {
+  hasHarnessMark,
+  hasLanguageMark,
   hasMakerMark,
   hasProviderMark,
   isProductMarkProvider,
+  languageLabel,
 } from "@/shared/helpers/brandMarkKeys"
 import { providerDisplayName } from "@/shared/helpers/providers"
 
 /**
  * The geometry, fetched after paint.
  *
- * The path data for every mark is 70 kB, against ~3 kB for the list of which
+ * The path data for every mark is about 130 kB, against ~3 kB for the list of which
  * companies have one. Statically imported, every visitor to a page with a mark
  * on it downloaded all of the art before the page painted, for the handful of
  * providers a deployment actually has. So the question "is there a mark" stays
@@ -51,7 +55,7 @@ function Glyph({
   box,
 }: {
   markKey: string
-  kind: "provider" | "maker"
+  kind: MarkKind
   box: string
 }) {
   return (
@@ -69,7 +73,7 @@ function Glyph({
  * anyone would recognize.
  *
  * Stays in this module rather than the deferred one: a deployment with no
- * marked providers should not fetch 70 kB of geometry to draw a letter.
+ * marked providers should not fetch 130 kB of geometry to draw a letter.
  */
 function Lettermark({ label, box }: { label: string; box: string }) {
   return (
@@ -183,4 +187,57 @@ export function anyProviderMark(providerIds: readonly string[]): boolean {
 /** The same question for a list of makers. */
 export function anyMakerMark(vendorSlugs: readonly string[]): boolean {
   return vendorSlugs.some(hasMakerMark)
+}
+
+/**
+ * The mark of the client that sent a session: an agent harness's own mark, else
+ * the language the client was written in, else a lettermark tile of its name.
+ *
+ * An SDK or an HTTP library (`openai`, `python-httpx`) is no harness, and what
+ * tells two of them apart at a glance is their language, so the list draws that.
+ * A session with neither a harness nor a known language keeps an empty slot.
+ */
+export function HarnessMark({
+  harness,
+  language,
+  step = 16,
+}: {
+  harness: string | null
+  /** The session's `client_language`, drawn when the harness has no mark. */
+  language?: string | null
+  step?: BrandMarkStep
+}) {
+  const box = BOX[step]
+  if (harness && hasHarnessMark(harness)) {
+    return <Glyph markKey={harness} kind="harness" box={box} />
+  }
+  if (language && hasLanguageMark(language)) {
+    // Unlike an agent's mark, the language is not in the name beside it, so it is
+    // read out. The text is out of flow, so the slot keeps the mark's width.
+    return (
+      <>
+        <Glyph markKey={language} kind="language" box={box} />
+        <span className="sr-only">{`Client language: ${languageLabel(language)}`}</span>
+      </>
+    )
+  }
+  return harness ? (
+    <Lettermark label={harness} box={box} />
+  ) : (
+    <Reserved box={box} />
+  )
+}
+
+/** Whether any of these sessions' clients has a mark, which decides if a list reserves the slot. */
+export function anyHarnessMark(
+  sessions: readonly {
+    harness: string | null
+    client_language?: string | null
+  }[],
+): boolean {
+  return sessions.some(
+    ({ harness, client_language }) =>
+      (harness !== null && hasHarnessMark(harness)) ||
+      (client_language != null && hasLanguageMark(client_language)),
+  )
 }

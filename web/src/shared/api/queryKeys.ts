@@ -19,7 +19,6 @@ export const MODELS = "models"
 // own key so the two reads can be cached apart, and every pricing mutation
 // invalidates both: a rate change moves a row in each.
 export const CATALOG = "catalog"
-export const OVERVIEW = "overview"
 export const PRICING = "pricing"
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
@@ -65,8 +64,19 @@ export const HEALTH_CHECKS = "health-checks"
 // A run is started by a worker that polls every 15 seconds, so the page polls
 // at the same pace while it is open.
 export const HEALTH_CHECKS_POLL_MS = 15_000
+// The catalog of remote MCP servers: its search, its Popular shelf and its sync
+// status, under one head, since a sync changes them all.
+export const MCP_CATALOG = "mcp-catalog"
+// A sync is started by a worker that polls once a minute and stores a page at
+// a time, so the status is worth re-reading this often only while one is
+// running or waiting to start.
+export const MCP_CATALOG_SYNC_POLL_MS = 5_000
+// Members' requests for a catalog server, the segment after a workspace's own
+// key: `[WORKSPACES, id, MCP_SERVER_REQUESTS, "mine" | "pending", ...page]`.
+export const MCP_SERVER_REQUESTS = "mcp-server-requests"
 export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
+export const GATEWAY_LIVENESS = "gateway-liveness"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key
 // edit invalidates KEYS, and that changes nothing about which identities may
@@ -106,9 +116,14 @@ export const PLATFORM_CONNECT = "platform-connect"
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
 export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
+// A price sync's dry run, apart for a like reason: the apply invalidates
+// HOSTED_PROVIDERS, which would ask for the preview again under the open dialog.
+export const HOSTED_PRICE_RESET_PREVIEW = "hosted-price-reset-preview"
 // The decision models that pick a subagent's model. One root: switching one on
 // switches the others off on the server, so every write refetches the list.
 export const AGENT_RECOMMENDERS = "agent-recommenders"
+// What the subagent router saved, read per window and scope.
+export const SUBAGENT_SAVINGS = "subagent-savings"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.
@@ -191,6 +206,10 @@ export const MAILED_LINK_STATUS = "mailed-link-status"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
+// How often the liveness probe behind `useGatewayUnreachable` asks again while
+// the gateway is not answering: often enough that the alarm clears within a few
+// seconds of it coming back.
+export const GATEWAY_LIVENESS_RECHECK_MS = 5_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

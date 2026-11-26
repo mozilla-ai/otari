@@ -1,8 +1,9 @@
 import type { ReactNode } from "react"
 
+import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
+
 /**
- * Where a build that has a post-sign-in step mounts it, and in this build there
- * is none.
+ * Where a build that has a post-sign-in step mounts it.
  *
  * The composition seam for anything that has to sit in front of the whole app
  * once a session exists and before the dashboard behind it: otari.ai's signup
@@ -14,9 +15,9 @@ import type { ReactNode } from "react"
  * composition with no surface of their own, so a step that had to precede the
  * dashboard had nowhere to go.
  *
- * The base default renders its children unchanged, and that is the whole of it.
- * An OSS deployment sees the dashboard it saw before, with no step in front of
- * it and nothing asking its operator anything.
+ * The base default mounts `WelcomeDialog` here rather than in the chrome so
+ * that the build replacing this module, otari.ai's own, can never show its
+ * offer to connect to otari.ai.
  *
  * One export, and its shape is the contract: a component named `PostSignInGate`
  * taking `{ children }`.
@@ -51,7 +52,8 @@ import type { ReactNode } from "react"
  * the layout (`TelemetryIdentity`, `AutoUpdate`, `ConnectionStatus`) live
  * inside `AppShellChrome`, so a replacement rendering a step *instead of* its
  * children unmounts all three. Only `ConnectionStatus` renders anything, a
- * `role="alert"` toast, and its condition can hold while a step is up.
+ * band pinned to the top of the content pane, and its condition can hold
+ * while a step is up.
  *
  * Two of the three cost something. `TelemetryIdentity`'s own docstring stops
  * being true for as long as it is unmounted: it is no longer mounted exactly
@@ -59,7 +61,7 @@ import type { ReactNode } from "react"
  * funnel the telemetry seam exists to carry, so they would land with no actor
  * named. And `ConnectionStatus` is the app-level "the gateway is not answering",
  * which is precisely what someone posting a step's answers needs to be told, so
- * a replacement owns its own submit-failure feedback for as long as the toast is
+ * a replacement owns its own submit-failure feedback for as long as the band is
  * unmounted. `AutoUpdate` is the one that can wait: a step is short, the stale
  * tab keeps working, and the next page change after it picks the build up.
  *
@@ -89,5 +91,10 @@ import type { ReactNode } from "react"
  * composition and not a hook or a piece of chrome.
  */
 export function PostSignInGate({ children }: { children: ReactNode }) {
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      <WelcomeDialog />
+    </>
+  )
 }

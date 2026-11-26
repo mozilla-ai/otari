@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    BatchResultsServiceDep,
     billing_port_on,
     get_config,
     get_db,
@@ -24,6 +26,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import (
     country_gate_for,
     country_not_supported,
@@ -36,22 +39,20 @@ from gateway.api.routes._passthrough import (
 )
 from gateway.api.routes._pipeline import (
     _raise_for_unresolvable_model,
-    failure_status_code,
 )
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
-from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
+from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, USER_MISMATCH, error_headers
+from gateway.core.metered_pricing import allocate_rounded_total, calculate_token_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.inference import BatchRecord
 from gateway.models.usage import UsageLog
-from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, InsufficientFundsError
+from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
-from gateway.services.api_keys import resolve_user_id
+from gateway.services.api_keys import USER_MISMATCH_DETAIL, resolve_user_id
 from gateway.services.batch_service import (
-    claim_batch_accounting,
     get_batch_record,
     get_batch_records,
     record_batch,
@@ -59,11 +60,12 @@ from gateway.services.batch_service import (
 from gateway.services.budgets import (
     BudgetScopeRequest,
     reconcile_reservation,
-    record_external_spend,
     refund_reservation,
     reserve_budget,
 )
 from gateway.services.inference import (
+    BatchLineError,
+    UpstreamFailure,
     admit_deployment_paid,
     billed_model,
     deferred_charge,
@@ -75,16 +77,19 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
+    unresolvable_selector_detail,
 )
 from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
+    ResolvedProvider,
     require_declared_credential,
     resolve_provider_selector,
 )
 from gateway.services.providers import (
     CountryNotServedError,
+    HostedRegionIndex,
     ensure_provider_country,
     serve_on_hosted_provider,
 )
@@ -93,6 +98,7 @@ from gateway.services.workspace_scope import (
     resolve_workspace_id,
     workspace_for_key_id,
 )
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
@@ -104,6 +110,17 @@ USAGE_ENDPOINT_RESULTS = "/v1/batches/results"
 # checked on retrieve/cancel/results. The gateway stores no batch table, so the
 # provider-side metadata is the ownership anchor.
 _OWNER_METADATA_KEY = "otari_user_id"
+
+
+@dataclass(frozen=True)
+class _BatchResultLine:
+    model: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    cache_read_tokens: int | None
+    has_usage: bool
+    error: BatchLineError | None
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +146,13 @@ class CreateBatchRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _served_location(resolved: ResolvedProvider) -> str | None:
+    """Where the hosted credential serving ``resolved`` declared it keeps data, or None off the deployment's own."""
+    return HostedRegionIndex.data_location_of(resolved.instance) if resolved.deployment_paid else None
+
+
 async def log_batch_usage(
     db: AsyncSession,
-    log_writer: LogWriter,
     api_key_id: str | None,
     model: str,
     provider: str,
@@ -149,8 +170,12 @@ async def log_batch_usage(
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
-) -> None:
+    data_location: str | None = None,
+) -> UsageLog:
     """Log batch API usage, including token counts and cost when derivable.
+
+    ``data_location`` is what the batch recorded at submission, never a later
+    declaration: a batch without one records none.
 
     ``workspace_id`` overrides the workspace derived from ``api_key_id``. A batch
     is retrieved by a key that need not be the one that created it, and the
@@ -182,8 +207,9 @@ async def log_batch_usage(
         status_code=status_code,
         counts_toward_budget=counts_toward_budget,
         deployment_paid=deployment_paid,
+        data_location=data_location,
     )
-    await log_writer.put(usage_log)
+    return usage_log
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +339,7 @@ async def _retrieve_batch_or_502(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=None)
+@router.post("", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_WRITE))
 async def create_batch(
     raw_request: Request,
     response: Response,
@@ -352,7 +378,8 @@ async def create_batch(
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
+            detail=USER_MISMATCH_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=config.reject_user_mismatch,
     )
@@ -365,7 +392,8 @@ async def create_batch(
     try:
         resolved = resolve_provider_selector(config, request.model, user_id, workspace_id=workspace_id)
     except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(request.model, exc)
+        detail = unresolvable_selector_detail(config, request.model, user_id, workspace_id=workspace_id)
+        _raise_for_unresolvable_model(request.model, exc, detail=detail)
     provider, model = resolved.provider, resolved.model
 
     # Model access control (per-key). Runs before the reservation, so nothing to
@@ -396,7 +424,8 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
     try:
         ensure_provider_country(config, country_gate, resolved.instance)
     except CountryNotServedError as exc:
@@ -410,7 +439,6 @@ async def create_batch(
             detail=f"Provider '{provider.value}' does not support batch operations",
         )
 
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     # The last rung of the credential ladder. Nothing is reserved yet.
     try:
         served = await serve_on_hosted_provider(
@@ -448,7 +476,7 @@ async def create_batch(
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=exc.public_message,
-                headers=error_headers(INSUFFICIENT_FUNDS),
+                headers=error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
             ) from exc
         except Exception as exc:
             logger.error(
@@ -519,17 +547,20 @@ async def create_batch(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
-        await log_batch_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=resolved.instance,
-            endpoint=USAGE_ENDPOINT,
-            user_id=user_id,
-            error=str(e),
-            status_code=failure_status_code(e),
-            counts_toward_budget=not budget_exempt,
+        await log_writer.put(
+            await log_batch_usage(
+                db=db,
+                api_key_id=api_key_id,
+                model=model,
+                provider=resolved.instance,
+                endpoint=USAGE_ENDPOINT,
+                user_id=user_id,
+                error=str(e),
+                status_code=UpstreamFailure(e).logged_status,
+                counts_toward_budget=not budget_exempt,
+                deployment_paid=resolved.deployment_paid,
+                data_location=_served_location(resolved),
+            )
         )
         await refund_reservation(db, reservation)
         logger.error("Batch create failed for %s: %s", provider, e)
@@ -540,18 +571,24 @@ async def create_batch(
         except OSError:
             logger.warning("Failed to remove temp file %s", tmp_path)
 
-    await log_batch_usage(
-        db=db,
-        log_writer=log_writer,
-        api_key_id=api_key_id,
-        model=model,
-        provider=resolved.instance,
-        endpoint=USAGE_ENDPOINT,
-        user_id=user_id,
-        prompt_tokens=0,
-        completion_tokens=0,
-        total_tokens=0,
-        counts_toward_budget=not budget_exempt,
+    # Read once, as the credential that took the batch declared it, for the
+    # submission's row now and the result rows the record keeps it for.
+    served_location = _served_location(resolved)
+    await log_writer.put(
+        await log_batch_usage(
+            db=db,
+            api_key_id=api_key_id,
+            model=model,
+            provider=resolved.instance,
+            endpoint=USAGE_ENDPOINT,
+            user_id=user_id,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            counts_toward_budget=not budget_exempt,
+            deployment_paid=resolved.deployment_paid,
+            data_location=served_location,
+        )
     )
     await reconcile_reservation(db, reservation, 0.0)
 
@@ -567,6 +604,7 @@ async def create_batch(
         api_key_id=api_key_id,
         model=model,
         workspace_id=workspace_id,
+        data_location=served_location,
     )
 
     if rate_limit_info:
@@ -578,7 +616,7 @@ async def create_batch(
     return response_data
 
 
-@router.get("/{batch_id}", response_model=None)
+@router.get("/{batch_id}", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_READ))
 async def retrieve_batch(
     batch_id: str,
     provider: str,
@@ -593,12 +631,13 @@ async def retrieve_batch(
     if record is not None:
         _authorize_record(record, batch_id, api_key, is_master_key)
     workspace_id = await _lifecycle_workspace_id(db, record, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -611,7 +650,7 @@ async def retrieve_batch(
     return response_data
 
 
-@router.post("/{batch_id}/cancel", response_model=None)
+@router.post("/{batch_id}/cancel", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_WRITE))
 async def cancel_batch(
     batch_id: str,
     provider: str,
@@ -626,12 +665,13 @@ async def cancel_batch(
     if record is not None:
         _authorize_record(record, batch_id, api_key, is_master_key)
     workspace_id = await _lifecycle_workspace_id(db, record, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -656,7 +696,7 @@ async def cancel_batch(
     return response_data
 
 
-@router.get("", response_model=None)
+@router.get("", response_model=None, openapi_extra=key_scope(KeyScope.BATCHES_READ))
 async def list_batches(
     provider: str,
     raw_request: Request,
@@ -675,12 +715,13 @@ async def list_batches(
     """
     api_key, is_master_key = auth_result
     workspace_id = await resolve_workspace_id(db, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -728,6 +769,7 @@ async def list_batches(
         status.HTTP_409_CONFLICT: {"description": "Batch is not yet complete"},
         status.HTTP_502_BAD_GATEWAY: {"description": "LLM provider error"},
     },
+    openapi_extra=key_scope(KeyScope.BATCHES_READ),
 )
 async def retrieve_batch_results(
     batch_id: str,
@@ -737,6 +779,7 @@ async def retrieve_batch_results(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    batch_results: BatchResultsServiceDep,
 ) -> dict[str, Any]:
     """Retrieve the results of a completed batch."""
     api_key, is_master_key = auth_result
@@ -755,7 +798,7 @@ async def retrieve_batch_results(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
+        country_gate=await country_gate_for(config, raw_request, db, origin_organization_id, api_key=api_key),
         organization_id=origin_organization_id,
         workspace_id=origin_workspace_id,
     )
@@ -798,40 +841,52 @@ async def retrieve_batch_results(
         logger.error("Batch results retrieve failed for %s: %s", provider, e)
         raise provider_call_failure(e) from e
 
-    # Extract model from the first successful result if available
-    batch_model = "batch"
+    # Extract model from the first successful result if available. Recorded
+    # error-only batches still have the submitted model on their local record.
+    batch_model = record.model if record is not None else "batch"
     for item in result.results:
         if item.result is not None:
             batch_model = item.result.model
             break
 
-    # Sum per-request token usage so batch spend is visible in usage reporting.
-    # The per-line counts are kept as well as summed: the row reports the batch's
-    # totals, but pricing has to happen a line at a time (see below).
-    #
-    # A line's cached prompt tokens are carried too. A batch result is a
-    # ``ChatCompletion``, so it reports them the OpenAI way, inside
-    # ``prompt_tokens_details``; dropping them would bill cached input at the
-    # full input rate and settle a batch above what the identical request costs
-    # on the live path.
+    # Keep provider-reported usage on each item for the usage rows, while also
+    # summing it for batch-level pricing and spend reconciliation.
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
     cache_read_tokens = 0
-    line_tokens: list[tuple[int, int, int]] = []
+    result_lines: list[_BatchResultLine] = []
     for item in result.results:
         usage = item.result.usage if item.result is not None else None
         if usage is not None:
-            line_prompt = usage.prompt_tokens or 0
-            line_completion = usage.completion_tokens or 0
+            line_prompt = usage.prompt_tokens
+            line_completion = usage.completion_tokens
+            line_total = usage.total_tokens
             line_cache_read = cache_read_tokens_of(usage)
-            prompt_tokens += line_prompt
-            completion_tokens += line_completion
+            prompt_tokens += line_prompt or 0
+            completion_tokens += line_completion or 0
             cache_read_tokens += line_cache_read
-            total_tokens += usage.total_tokens or 0
-            line_tokens.append((line_prompt, line_completion, line_cache_read))
+            total_tokens += line_total or 0
+        else:
+            line_prompt = None
+            line_completion = None
+            line_total = None
+            line_cache_read = None
+
+        result_lines.append(
+            _BatchResultLine(
+                model=item.result.model if item.result is not None else batch_model,
+                prompt_tokens=line_prompt,
+                completion_tokens=line_completion,
+                total_tokens=line_total,
+                cache_read_tokens=line_cache_read,
+                has_usage=usage is not None,
+                error=BatchLineError.of(item.error) if item.error is not None else None,
+            )
+        )
 
     cost: Decimal | None = None
+    line_costs: list[Decimal | None] = [None] * len(result_lines)
     if total_tokens:
         # Rates follow the batch's originating workspace (`origin_workspace_id`,
         # resolved above), for the same reason the budget exemption above and
@@ -873,66 +928,76 @@ async def retrieve_batch_results(
             # each one would round the row once per line, which on a batch of
             # many identical short requests is a systematic shortfall rather
             # than a wash.
-            cost = quantize_cost(
-                sum(
-                    (
-                        calculate_token_cost(
-                            apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
-                            input_tokens=line_prompt,
-                            output_tokens=line_completion,
-                            cache_read_tokens=line_cache_read,
-                            cache_tokens_included=True,
-                            quantize=False,
-                        )
-                        for line_prompt, line_completion, line_cache_read in line_tokens
-                    ),
-                    Decimal(0),
+            for index, line in enumerate(result_lines):
+                if not line.has_usage:
+                    continue
+                line_prompt = line.prompt_tokens or 0
+                line_completion = line.completion_tokens or 0
+                line_cache_read = line.cache_read_tokens or 0
+                line_costs[index] = calculate_token_cost(
+                    apply_rules(pricing, PriceFacts(context=line_prompt, at=started)).rate,
+                    input_tokens=line_prompt,
+                    output_tokens=line_completion,
+                    cache_read_tokens=line_cache_read,
+                    cache_tokens_included=True,
+                    quantize=False,
                 )
-            )
+            cost, line_costs = allocate_rounded_total(line_costs)
 
-    # Recorded batches are accounted exactly once: the first completed retrieval
-    # claims the accounting slot, logs usage, and folds the cost into the owner's
-    # spend; later retrievals (retries, polling clients) return results without
-    # re-billing. The claim and the spend fold commit together (below), so if the
-    # spend fold fails or the process dies mid-flight the claim rolls back and a
-    # later retrieval re-accounts, rather than marking the batch accounted but
-    # never billing it.
-    #
     # A retrieval that finds billable tokens but no pricing row (cost is None)
     # does not claim the slot, so once pricing exists a later retrieval still
-    # folds the spend once. Legacy batches with no record keep the prior behavior
-    # (log every retrieval, no spend fold), since they cannot be deduplicated.
-    # Exempt batches never fold spend, so there is nothing to defer for: they
-    # claim and log immediately with cost null, like every other exempt path.
+    # accounts it. Legacy batches with no record keep the prior behavior (one
+    # aggregate row on every retrieval, no spend fold), since they cannot be
+    # deduplicated and a row per line would multiply with every poll.
     pricing_missing = record is not None and bool(total_tokens) and cost is None and not batch_exempt
-    if pricing_missing:
-        should_account = False
-    elif record is not None:
-        should_account = await claim_batch_accounting(db, batch_id)
-    else:
-        should_account = True
-
-    if should_account:
-        await log_batch_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=batch_model,
-            provider=provider,
-            endpoint=USAGE_ENDPOINT_RESULTS,
-            user_id=user_id,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            cache_read_tokens=cache_read_tokens,
-            cost=cost,
-            counts_toward_budget=not batch_exempt,
-            # The creator's workspace, matching the user and the rates this row
-            # was priced at; see the note on ``log_batch_usage``.
-            workspace_id=origin_workspace_id,
-            deployment_paid=deployment_paid,
-        )
-        # Charged once, with the claim that accounts a recorded batch once.
+    if not pricing_missing:
+        batch_usage_logs: list[UsageLog] = []
+        if result_lines and record is not None:
+            for line, line_cost in zip(result_lines, line_costs, strict=True):
+                batch_usage_logs.append(
+                    await log_batch_usage(
+                        db=db,
+                        api_key_id=api_key_id,
+                        model=line.model,
+                        provider=provider,
+                        endpoint=USAGE_ENDPOINT_RESULTS,
+                        user_id=user_id,
+                        error=line.error.public["message"] if line.error is not None else None,
+                        status_code=line.error.logged_status if line.error is not None else None,
+                        prompt_tokens=line.prompt_tokens,
+                        completion_tokens=line.completion_tokens,
+                        total_tokens=line.total_tokens,
+                        cache_read_tokens=line.cache_read_tokens,
+                        cost=line_cost,
+                        counts_toward_budget=not batch_exempt,
+                        workspace_id=origin_workspace_id,
+                        deployment_paid=deployment_paid,
+                        data_location=record.data_location if record is not None else None,
+                    )
+                )
+        else:
+            # One aggregate row: a legacy batch, or a completed batch with no
+            # result lines to account for individually.
+            batch_usage_logs.append(
+                await log_batch_usage(
+                    db=db,
+                    api_key_id=api_key_id,
+                    model=batch_model,
+                    provider=provider,
+                    endpoint=USAGE_ENDPOINT_RESULTS,
+                    user_id=user_id,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cost=cost,
+                    counts_toward_budget=not batch_exempt,
+                    workspace_id=origin_workspace_id,
+                    deployment_paid=deployment_paid,
+                    data_location=record.data_location if record is not None else None,
+                )
+            )
+        charge = None
         if deployment_paid and record is not None and origin_organization_id is not None:
             charge = deferred_charge(
                 billing_port_on(raw_request, db),
@@ -942,30 +1007,27 @@ async def retrieve_batch_results(
                 provider=provider_enum,
                 model=record.model,
             )
-            await charge.settle(
-                cost,
-                tools=NO_TOOLS,
-                model=batch_model,
-                description=f"{provider}:{batch_model}",
-                expects_cost=bool(total_tokens),
-                savepoint=db.begin_nested,
-            )
-        if record is not None:
-            if cost and user_id and not batch_exempt:
-                # Folds the spend and commits the claim in one transaction.
-                await record_external_spend(db, user_id, cost)
-            else:
-                # Nothing to fold (no cost/owner, or the originating key is
-                # budget-exempt); still persist the one-time accounting claim.
-                await db.commit()
+        await batch_results.account(
+            batch_id=batch_id,
+            recorded=record is not None,
+            logs=batch_usage_logs,
+            writer=log_writer,
+            cost=cost,
+            total_tokens=total_tokens,
+            user_id=user_id,
+            batch_exempt=batch_exempt,
+            charge=charge,
+            model=batch_model,
+            description=f"{provider}:{batch_model}",
+        )
 
     return {
         "results": [
             {
                 "custom_id": item.custom_id,
                 "result": item.result.model_dump() if item.result else None,
-                "error": {"code": item.error.code, "message": item.error.message} if item.error else None,
+                "error": line.error.public if line.error is not None else None,
             }
-            for item in result.results
+            for item, line in zip(result.results, result_lines, strict=True)
         ]
     }

@@ -22,6 +22,12 @@ import {
   UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+  rowMenuItemNames,
+} from "@/tests/rowMenu"
 
 // The list. Creating a policy is in RoutingPage.create.test.tsx, and a
 // policy's own page in PolicyDetailPage.test.tsx.
@@ -31,15 +37,12 @@ afterEach(() => {
 })
 
 /**
- * The page's own create action, scoped to the heading's header: once the
- * dialog is open its submit says "Create policy" too.
+ * The page's own create action, the first of its name: it leads the view,
+ * above the empty state's, and once the dialog is open its submit says
+ * "Create policy" too.
  */
-const createTrigger = async () => {
-  const heading = await screen.findByRole("heading", { name: "Routing" })
-  const header = heading.closest("header")
-  if (!header) throw new Error("PageIntro's header is gone")
-  return within(header).findByRole("button", { name: "Create policy" })
-}
+const createTrigger = async () =>
+  (await screen.findAllByRole("button", { name: "Create policy" }))[0]
 
 /** Where a row's Edit or View lands: the policy's page, with its scope. */
 function PolicyProbe() {
@@ -98,21 +101,16 @@ describe("RoutingPage", () => {
   })
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
+    const user = userEvent.setup()
     mockApi()
     renderPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
-    expect(
-      within(autoRow).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(autoRow).queryByRole("button", { name: /^Delete(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, autoRow)).toBeNull()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/, autoRow)).toBeNull()
     // Its page still opens, read-only.
-    expect(
-      within(autoRow).getByRole("button", { name: "View auto" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "View auto", autoRow)).toBeInTheDocument()
   })
 
   it("keeps the page's create action visible while the dialog is open", async () => {
@@ -154,7 +152,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit fast" }))
+    await pressRowAction(user, "Edit fast", row)
     expect(await screen.findByText("Policy page for fast")).toBeInTheDocument()
   })
 
@@ -166,13 +164,14 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("cheap")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit cheap" }))
+    await pressRowAction(user, "Edit cheap", row)
     expect(
       await screen.findByText("Policy page for cheap as u-bob"),
     ).toBeInTheDocument()
   })
 
   it("does not offer Edit for a policy the form would silently truncate", async () => {
+    const user = userEvent.setup()
     // The editor models only a `budget_used_pct.gte` condition. Offering Edit on a
     // policy built through the API with anything else would drop it on save, which
     // is worse than not offering the button.
@@ -187,19 +186,15 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "View api-authored" }),
-    ).toBeInTheDocument()
+    const names = await rowMenuItemNames(user, row)
+    expect(names.some((name) => /^Edit(?: |$)/.test(name))).toBe(false)
+    expect(names).toContain("View api-authored")
     // Delete stays available: removing a policy is never lossy.
-    expect(
-      within(row).getByRole("button", { name: "Delete api-authored" }),
-    ).toBeInTheDocument()
+    expect(names).toContain("Delete api-authored")
   })
 
   it("lists stored aliases alongside policies, so nothing is unmanageable", async () => {
+    const user = userEvent.setup()
     // Aliases were folded into this page. If they were not listed here they would
     // be invisible and undeletable from the dashboard, since the Aliases tab is gone.
     mockApi([], "http://guardrails:8000", [
@@ -215,9 +210,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("legacy")).closest("tr")!
     expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
     expect(within(row).getByText("alias")).toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "Delete legacy" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Delete legacy", row)).toBeInTheDocument()
   })
 
   it("names the policy in a confirm dialog before deleting it", async () => {
@@ -230,7 +223,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete fast" }))
+    await pressRowAction(user, "Delete fast", row)
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
@@ -252,7 +245,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete fast" }))
+    await pressRowAction(user, "Delete fast", row)
     const dialog = await screen.findByRole("alertdialog")
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
@@ -270,7 +263,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete fast" }))
+    await pressRowAction(user, "Delete fast", row)
     const dialog = await screen.findByRole("alertdialog")
     await user.click(
       within(dialog).getByRole("button", { name: "Delete policy" }),
@@ -301,7 +294,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const fast = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(fast).getByRole("button", { name: "Delete fast" }))
+    await pressRowAction(user, "Delete fast", fast)
     const first = await screen.findByRole("alertdialog")
     await user.click(
       within(first).getByRole("button", { name: "Delete policy" }),
@@ -310,9 +303,7 @@ describe("RoutingPage", () => {
     await user.click(within(first).getByRole("button", { name: "Cancel" }))
 
     const smart = screen.getByText("smart").closest("tr")!
-    await user.click(
-      within(smart).getByRole("button", { name: "Delete smart" }),
-    )
+    await pressRowAction(user, "Delete smart", smart)
 
     const second = await screen.findByRole("alertdialog")
     expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
@@ -332,7 +323,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete legacy" }))
+    await pressRowAction(user, "Delete legacy", row)
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -390,16 +381,16 @@ describe("RoutingPage", () => {
   })
 
   it("offers Edit for a weighted policy", async () => {
+    const user = userEvent.setup()
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(
-      within(row).getByRole("button", { name: "Edit balanced" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Edit balanced", row)).toBeInTheDocument()
   })
 
   it("does not offer Edit for a weighted policy with no split to show", async () => {
+    const user = userEvent.setup()
     // The form would have to invent the shares, and the API refuses such a spec
     // anyway, so this one is only reachable as an older or hand-written document.
     mockApi([
@@ -416,12 +407,11 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
   })
 
   it("does not offer Edit for a router backend the form cannot write", async () => {
+    const user = userEvent.setup()
     mockApi([
       policy("future", {
         select: [
@@ -436,28 +426,24 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
   })
 
   it.each(["stored", "config"] as const)(
     "shows an unknown router's policy from %s read-only",
     async (source) => {
+      const user = userEvent.setup()
       mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true, source })])
       renderPage(<RoutingPage />)
 
       const row = (await screen.findByText("smart")).closest("tr")!
-      expect(
-        within(row).getByRole("button", { name: "View smart" }),
-      ).toBeInTheDocument()
-      expect(
-        within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-      ).not.toBeInTheDocument()
+      expect(await getRowMenuItem(user, "View smart", row)).toBeInTheDocument()
+      expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
     },
   )
 
   it("refuses to edit a policy whose router sits before its conditions", async () => {
+    const user = userEvent.setup()
     // Selection is order-sensitive server-side and the form always re-emits
     // conditions first, so editing this spec would silently change what it does.
     mockApi([
@@ -478,15 +464,14 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
     expect(
-      within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "View api-authored" }),
+      await getRowMenuItem(user, "View api-authored", row),
     ).toBeInTheDocument()
   })
 
   it("lists the tenant-scoped policies read-only for a non-operator", async () => {
+    const user = userEvent.setup()
     // The member half of otari-ai#1942: the page reads
     // /v1/organizations/me/routing-policies and offers nothing that writes.
     mockApi([], null, [], {
@@ -503,12 +488,8 @@ describe("RoutingPage", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: /^Edit(?: |$)/ }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: /^Delete(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/, row)).toBeNull()
   })
 
   it("keeps cached operator rows out of a member's table", async () => {
@@ -678,7 +659,7 @@ describe("RoutingPage scoped to the selected workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete doomed" }))
+    await pressRowAction(user, "Delete doomed")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -704,7 +685,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete doomed" }))
+    await pressRowAction(user, "Delete doomed")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -756,9 +737,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed-alias")
-    await user.click(
-      screen.getByRole("button", { name: "Delete doomed-alias" }),
-    )
+    await pressRowAction(user, "Delete doomed-alias")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -771,6 +750,7 @@ describe("RoutingPage for an organization admin", () => {
   })
 
   it("withholds the write affordances from an admin in no workspace", async () => {
+    const user = userEvent.setup()
     // The switcher is seeded from the caller's own memberships, so an admin who
     // joined none has no workspace to scope a write to and gets the read-only
     // page rather than a form whose only outcome is a 422.
@@ -787,12 +767,11 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /^Delete(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/)).toBeNull()
   })
 
   it("still withholds the write affordances from a member", async () => {
+    const user = userEvent.setup()
     mockApi([], null, [], {
       context: organizationContext({
         deployment_operator: false,
@@ -809,9 +788,7 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /^Delete(?: |$)/ }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/)).toBeNull()
   })
 
   it("lists the automatic fallbacks the gateway reports, in its order", async () => {

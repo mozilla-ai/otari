@@ -3,13 +3,16 @@
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base, UtcDateTime
+from gateway.models.base import Base, KeyScopeColumn, UtcDateTime
+from gateway.models.money import UsdCost
+from gateway.types.key_scope import KeyScopeSet
 
 MAX_EMAIL_LENGTH = 255
 MAX_PROVIDER_LENGTH = 255
@@ -39,6 +42,41 @@ class EmailAssertion(StrEnum):
         if email_verified is None:
             return cls.UNASSERTED
         return cls.VERIFIED if email_verified else cls.UNVERIFIED
+
+
+class AddressAuthority(StrEnum):
+    """What established an identity's sign-in address.
+
+    ``proves_the_holder`` is what ``email_proven_at`` records. An authority that could assert
+    any address answers false, because its word is not evidence that the holder controls it.
+    """
+
+    MAILBOX = ("mailbox", True)
+    """A link that reached the inbox, so whoever opened it receives mail at the address."""
+
+    OPERATOR = ("operator", True)
+    """Deployment authority supplied it, which sits above every organization here."""
+
+    ORGANIZATION = ("organization", False)
+    """One organization's word for an address any organization could have claimed."""
+
+    SESSION = ("session", False)
+    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
+
+    TRUSTED_PROVIDER = ("trusted_provider", True)
+    """A provider no tenant can configure, reporting this address verified.
+
+    NOTE: An organization's own connection is a provider too and is never this. A caller
+    must establish that no tenant sets what the provider says before naming this member.
+    """
+
+    proves_the_holder: bool
+
+    def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.proves_the_holder = proves_the_holder
+        return member
 
 
 class MailedLinkStatus(StrEnum):
@@ -136,6 +174,20 @@ class BlockedEmail(Base):
     def is_domain(self) -> bool:
         """Whether the entry blocks a whole domain rather than one address."""
         return "@" not in self.pattern
+
+
+class ErasedAccount(Base):
+    """An account deleted at its own request: its old id and when, and nothing that names the person.
+
+    The record of the erasure, and what to erase again after restoring a backup taken before it.
+    """
+
+    __tablename__ = "erased_account"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    erased_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
 
 
 def is_organization_connection_provider(provider: str | None) -> bool:
@@ -243,4 +295,12 @@ class OAuthAppGrant(Base):
     challenge: Mapped[str] = mapped_column(String(43))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    # The scopes the app's registration held when the person approved it. No
+    # default, so a grant cannot be written without them and redeem to a key
+    # that reaches nothing.
+    scopes: Mapped[KeyScopeSet] = mapped_column(KeyScopeColumn, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
+    # What the person approved for the key itself: a lifetime spending limit, and
+    # how long it lives from the moment it is minted. Null is no limit, no expiry.
+    spend_limit: Mapped[Decimal | None] = mapped_column(UsdCost(), default=None)
+    key_lifetime_sec: Mapped[int | None] = mapped_column(default=None)

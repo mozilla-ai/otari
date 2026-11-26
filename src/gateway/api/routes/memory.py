@@ -32,6 +32,7 @@ from gateway.api.deps import (
     verify_master_key,
     verify_memory_service_token,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
@@ -71,6 +72,7 @@ from gateway.services.memory import (
     mcp_tool_definitions,
     run_consolidator,
 )
+from gateway.types.key_scope import KeyScope
 from gateway.version import __version__
 
 # Agents reach memory with an API key, and its workspace and member are the ones that key names.
@@ -116,6 +118,8 @@ async def _call_tool(service: MemoryService, caller: MemoryCaller, params: objec
         413: {"description": "The message exceeds 64 KiB."},
         415: {"description": "Only application/json is accepted."},
     },
+    # Memory is an MCP server whose tools a key calls, so it takes the scope every MCP tool call takes.
+    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
 )
 async def memory_mcp(request: Request, service: MemoryServiceDep, caller: MemoryCallerDep) -> Response:
     """Answer one MCP JSON-RPC message: initialize, ping, tools/list or tools/call."""
@@ -156,7 +160,12 @@ async def memory_mcp(request: Request, service: MemoryServiceDep, caller: Memory
     return _rpc_error(message_id, _METHOD_NOT_FOUND, "Method not found.")
 
 
-@router.get("/mcp", status_code=status.HTTP_405_METHOD_NOT_ALLOWED, responses={405: {"description": "No stream."}})
+@router.get(
+    "/mcp",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    responses={405: {"description": "No stream."}},
+    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
+)
 async def memory_mcp_stream() -> Response:
     """No server-to-client stream: every answer comes back on the POST that asked."""
     return Response(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, headers={"Allow": "POST"})

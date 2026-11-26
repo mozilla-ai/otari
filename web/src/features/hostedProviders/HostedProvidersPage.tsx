@@ -1,21 +1,15 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
-import {
-  FiActivity,
-  FiEdit2,
-  FiList,
-  FiRefreshCw,
-  FiTrash2,
-} from "react-icons/fi"
+import { FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
 import type {
   HostedCatalogRefresh,
   HostedProvider,
+  HostedProviderModelSummary,
   ProviderHealth,
   ProviderInfo,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
@@ -27,7 +21,6 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { ConnectionTestRowResult } from "@/features/providers/ConnectionTest"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { HealthSummary } from "@/features/providers/HealthSummary"
 import { OnboardingPanel } from "@/features/providers/OnboardingPanel"
@@ -45,19 +38,20 @@ import {
   useHostedCatalogUpdatePreview,
   useHostedProviders,
   usePlatformConnectStatus,
-  useTestHostedProvider,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
-import { EditHostedProviderForm } from "./EditHostedProviderForm"
-import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
+import {
+  dataLocationLabel,
+  providerDataLocations,
+  servingRegions,
+} from "./dataLocations"
 import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
@@ -65,7 +59,6 @@ import {
   modelsPreviewOutcome,
   pricePreviewOutcome,
 } from "./refreshOutcome"
-import { formatCountries } from "./supportedCountries"
 
 // The providers this deployment serves inference on with its own keys, for a
 // request that brings no credential of its own. Deployment-scoped, which is
@@ -77,15 +70,16 @@ import { formatCountries } from "./supportedCountries"
 // the surface at all is the shell's question, answered from the bootstrap; the
 // page reads the same answer, so it says so itself wherever it is rendered.
 //
-// A provider kept to one organization shows which; the restriction is set and
-// lifted through the API, since this build has no deployment-wide list of
-// organizations to pick one from.
+// The list says which providers there are, whether each is healthy and how
+// much of its catalog it serves; a provider's name opens its own page
+// (`HostedProviderPage`), where its key, endpoint, scope and models are.
 //
 // A provider defined in the configuration's `hosted_providers:` block is listed
 // with a `config.yml` badge and changed only there: its key, endpoint and switch
-// are read-only here, while its models are administered as any other's. A
-// `providers:` instance is listed beside them, wholly read-only: it serves
-// every model a request names on it, ahead of every hosted provider.
+// are read-only, while its models are administered as any other's. A
+// `providers:` instance is listed beside them, wholly read-only and opening no
+// page: it serves every model a request names on it, ahead of every hosted
+// provider.
 
 /** A row of the table: a hosted provider, or a `providers:` instance from config.yml. */
 type ProviderRow =
@@ -240,72 +234,52 @@ function CatalogUpdatePreview({
   )
 }
 
-/**
- * A row's actions, with the stored provider's test verdict beneath them.
- *
- * A component of its own so each row holds its own test: one mutation shared
- * by every row would drop a row's answer the moment another row is tested.
- */
-function HostedProviderRowActions({
-  provider,
-  onModels,
-  onEdit,
-  onRemove,
+/** "12 of 18 serving", with what holds back the rest when anything does. */
+function ModelsSummaryCell({
+  summary,
 }: {
-  provider: HostedProvider
-  onModels: () => void
-  onEdit: () => void
-  onRemove: () => void
+  summary: HostedProviderModelSummary
 }) {
-  const test = useTestHostedProvider()
+  if (summary.total === 0) return <span className="text-muted">None yet</span>
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <RowActionRow>
-        <RowAction
-          icon={FiList}
-          label="Models"
-          ariaLabel={`Models on ${provider.name}`}
-          onPress={onModels}
-        />
-        {provider.source === "config" ? null : (
-          <>
-            <RowAction
-              icon={FiActivity}
-              label="Test"
-              ariaLabel={`Test ${provider.name}`}
-              // A key no secret reads cannot be tested; Edit replaces it.
-              isDisabled={test.isPending || !provider.decryptable}
-              // The name alone stands for what is stored: the test route falls
-              // back to the stored key, endpoint and options for each field
-              // left out.
-              onPress={() =>
-                test.mutate({
-                  provider: provider.provider,
-                  name: provider.name,
-                })
-              }
-            />
-            <RowAction
-              icon={FiEdit2}
-              label="Edit"
-              ariaLabel={`Edit ${provider.name}`}
-              onPress={onEdit}
-            />
-            <RowAction
-              icon={FiTrash2}
-              label="Remove"
-              ariaLabel={`Remove ${provider.name}`}
-              onPress={onRemove}
-            />
-          </>
-        )}
-      </RowActionRow>
-      <ConnectionTestRowResult
-        isPending={test.isPending}
-        data={test.data}
-        error={test.error}
-      />
-    </div>
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="tabular-nums">
+        {summary.serving} of {summary.total} serving
+      </span>
+      {summary.vendors_off > 0 ? (
+        <Badge tone="warn">
+          {`${summary.vendors_off} ${summary.vendors_off === 1 ? "vendor off" : "vendors off"}`}
+        </Badge>
+      ) : null}
+      {summary.unpriced > 0 ? (
+        <Badge tone="warn">{`${summary.unpriced} unpriced`}</Badge>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * How many regions a provider serves from, where it has several, and every
+ * place they keep data, each region's own. A switched-off region serves
+ * nothing, so it counts toward neither. Nothing declared says so, since a
+ * workspace limited to certain locations refuses such a provider.
+ */
+function DataLocationBadges({ provider }: { provider: HostedProvider }) {
+  const regionCount = servingRegions(provider).length
+  const locations = providerDataLocations(provider)
+  const names = [
+    ...locations.filter((location) => location !== null).map(dataLocationLabel),
+    ...(locations.includes(null) ? ["not declared"] : []),
+  ]
+  return (
+    <>
+      {regionCount >= 2 ? (
+        <Badge tone="muted">{`${regionCount} regions`}</Badge>
+      ) : null}
+      {names.length > 0 ? (
+        <Badge tone="muted">{`Data: ${names.join(", ")}`}</Badge>
+      ) : null}
+    </>
   )
 }
 
@@ -349,19 +323,11 @@ export function HostedProvidersPage() {
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
-  const [editingProvider, setEditingProvider] = useState("")
-  const [modelsFor, setModelsFor] = useState("")
   // A name rather than a row: the update report's own remove offer can name a
   // provider this page has not loaded.
   const [pendingDelete, setPendingDelete] = useState("")
-  // Above the access gates below: a hook cannot follow an early return.
-  const editingTarget = useHeldDialogTarget(
-    providers.data?.data.find((row) => row.name === editingProvider),
-  )
-  const editing = editingTarget.held
 
   const openAdd = () => {
-    setEditingProvider("")
     setAddOpenCount((n) => n + 1)
     setIsAdding(true)
   }
@@ -398,7 +364,6 @@ export function HostedProvidersPage() {
 
   const rows = providers.data?.data ?? []
   const deleting = rows.find((row) => row.name === pendingDelete)
-  const expanded = rows.find((row) => row.name === modelsFor)
   // Health is keyed by name, and a configured instance of the same name is the
   // one dialed under it, so its status would read as this row's. Such a row,
   // and every row while the configured names are unknown, shows none.
@@ -437,8 +402,8 @@ export function HostedProvidersPage() {
       cell: (row) => (
         <span className="flex flex-wrap items-center gap-2">
           <Link
-            to="/models"
-            search={{ provider: row.name }}
+            to="/admin/hosted-providers/$name"
+            params={{ name: row.name }}
             className="font-medium text-foreground hover:text-link hover:underline"
           >
             {row.name}
@@ -455,22 +420,10 @@ export function HostedProvidersPage() {
           {row.zero_data_retention ? (
             <Badge tone="muted">Zero data retention</Badge>
           ) : null}
+          <DataLocationBadges provider={row} />
+          {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
         </span>
       ),
-    },
-    {
-      id: "key",
-      header: "API key",
-      cell: (row) =>
-        !row.decryptable ? (
-          <Badge tone="warn">Key unreadable</Badge>
-        ) : row.api_key_last4 ? (
-          <code className="text-muted">••••{row.api_key_last4}</code>
-        ) : row.has_api_key ? (
-          <code className="text-muted">••••</code>
-        ) : (
-          <span className="text-muted">None needed</span>
-        ),
     },
     {
       id: "health",
@@ -483,42 +436,13 @@ export function HostedProvidersPage() {
         ),
     },
     {
-      id: "api_base",
-      header: "Endpoint",
-      cell: (row) => (
-        <span className="text-muted">{row.api_base ?? "provider default"}</span>
-      ),
-    },
-    {
-      id: "scope",
-      header: "Serves",
+      id: "models",
+      header: "Models",
       cell: (row) =>
-        row.restricted_to_organization_id ? (
-          <span
-            className="flex flex-col gap-0.5"
-            title={row.restricted_to_organization_id}
-          >
-            <span className="text-body">One organization</span>
-            <code className="truncate text-caption">
-              {row.restricted_to_organization_id}
-            </code>
-          </span>
+        row.models ? (
+          <ModelsSummaryCell summary={row.models} />
         ) : (
-          <span className="text-muted">Every organization</span>
-        ),
-    },
-    {
-      id: "countries",
-      header: "Countries",
-      cell: (row) =>
-        row.supported_countries == null ? (
-          <span className="text-muted">Every country</span>
-        ) : row.supported_countries.length === 0 ? (
-          <span className="text-body">None</span>
-        ) : (
-          <span className="text-body">
-            {formatCountries(row.supported_countries)}
-          </span>
+          <span className="text-muted">—</span>
         ),
     },
     {
@@ -539,56 +463,22 @@ export function HostedProvidersPage() {
         />
       ),
     },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "end",
-      cell: (row) => (
-        <HostedProviderRowActions
-          // Remounted when the provider changes, so a verdict on what it
-          // stored before does not outlive the edit.
-          key={row.updated_at ?? ""}
-          provider={row}
-          onModels={() =>
-            setModelsFor((current) => (current === row.name ? "" : row.name))
-          }
-          onEdit={() => {
-            setIsAdding(false)
-            setEditingProvider(row.name)
-          }}
-          onRemove={() => setPendingDelete(row.name)}
-        />
-      ),
-    },
   ]
   const instanceCells: Record<string, (row: ProviderInfo) => ReactNode> = {
     provider: (row) => (
       <span className="flex flex-wrap items-center gap-2">
-        <Link
-          to="/models"
-          search={{ provider: row.instance }}
-          className="font-medium text-foreground hover:text-link hover:underline"
-        >
-          {row.instance}
-        </Link>
+        <span className="font-medium text-foreground">{row.instance}</span>
         {row.instance === row.provider_type ? null : (
           <span className="text-caption">{row.provider_type}</span>
         )}
         <Badge tone="muted">config.yml</Badge>
       </span>
     ),
-    key: (row) =>
-      row.env_key ? (
-        <span className="text-muted">From config.yml</span>
-      ) : (
-        <span className="text-muted">None needed</span>
-      ),
     health: (row) => <HealthPill health={healthByName.get(row.instance)} />,
-    api_base: () => <span className="text-muted">Set in config.yml</span>,
-    scope: () => <span className="text-muted">Every organization</span>,
-    countries: () => <span className="text-muted">Set in config.yml</span>,
+    models: () => (
+      <span className="text-muted">Every model a request names</span>
+    ),
     enabled: () => <span className="text-caption">Always</span>,
-    actions: () => <span className="text-caption">Edit in config.yml</span>,
   }
   const columns: DataTableColumn<ProviderRow>[] = hostedColumns.map(
     (column) => ({
@@ -638,13 +528,7 @@ export function HostedProvidersPage() {
             </Button>
           </div>
         }
-      >
-        The providers this deployment serves inference on, and the keys it
-        serves them with. Those marked config.yml are declared in the
-        configuration and changed there; a <code>providers:</code> instance
-        serves first, and the others only requests that bring no credential of
-        their own, after an organization's own keys.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={
@@ -719,37 +603,22 @@ export function HostedProvidersPage() {
         </>
       )}
 
-      {/* Below the table rather than a detail row inside it, as on the
-          organization Providers page: the provider table scrolls sideways on a
-          narrow screen, and a row inside it would scroll and clip with it. */}
-      {expanded ? (
-        <section
-          key={expanded.name}
-          aria-label={`Models on ${expanded.name}`}
-          className="mt-4 rounded-lg border border-border bg-surface"
-        >
-          <HostedProviderModelsPanel provider={expanded} />
-        </section>
-      ) : null}
-
       <AddHostedProviderForm
         key={addOpenCount}
         // Retracted too if the context reports the key unset after it opened.
         isOpen={isAdding && !isKeyEncryptionMissing}
         onClose={() => setIsAdding(false)}
+        // On to the new provider's page, where its models are the next step.
+        onCreated={(created) =>
+          void navigate({
+            to: "/admin/hosted-providers/$name",
+            params: { name: created.name },
+          })
+        }
         configuredProviders={rows
           .filter((row) => row.source === "config")
           .map((row) => row.name)}
       />
-      {editing ? (
-        <EditHostedProviderForm
-          key={`${editing.name}:${editingTarget.generation}`}
-          provider={editing}
-          isOpen={editingTarget.isOpen}
-          onClose={() => setEditingProvider("")}
-        />
-      ) : null}
-
       <ConfirmDialog
         isOpen={isUpdateOpen}
         onOpenChange={(open) => {
@@ -814,7 +683,6 @@ export function HostedProvidersPage() {
         onConfirm={() => {
           remove.mutate(pendingDelete, {
             onSuccess: () => {
-              if (modelsFor === pendingDelete) setModelsFor("")
               setPendingDelete("")
               // Its counts and remove offers described a deployment that has
               // since changed.

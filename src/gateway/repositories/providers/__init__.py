@@ -1,8 +1,13 @@
+from gateway.repositories.providers.hosted_provider_region_repository import (
+    HostedProviderRegionRepository,
+    HostedRegionConflict,
+)
 from gateway.repositories.providers.hosted_provider_repository import (
     HostedModelConflict,
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
 )
 from gateway.repositories.providers.org_provider_key_model_repository import (
     OfferedModelConflict,
@@ -23,7 +28,10 @@ __all__ = [
     "HostedModelConflict",
     "HostedProviderConflict",
     "HostedProviderModelRepository",
+    "HostedProviderRegionRepository",
     "HostedProviderRepository",
+    "HostedProviderVendorRepository",
+    "HostedRegionConflict",
     "OfferedModelConflict",
     "OrgProviderKeyModelRepository",
     "PlatformConnectRepository",

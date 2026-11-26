@@ -25,23 +25,28 @@ certain, as otari's domain policy, checks the results itself.
 
 1. **Read the provider's documentation**, its OpenAPI spec when it has one, since that is usually
    the source of truth. Fill `METADATA`: the endpoint and method, where the key travels, whether
-   a key or a base URL is required, the default base URL and the variable the provider's SDK
-   reads it from, if any, the limits, and the native options under the provider's own names and
+   a key is required, optional or not taken, whether a base URL is required, the default base URL
+   and the variable the provider's SDK reads each from, if any, the limits, and the native options under the provider's own names and
    enums. Note the pricing, with the date you read it, in the module's docstring. When the
    provider charges a call one of a few prices chosen by an option, mark that option `cost_tier`,
-   with the tiers as its `enum` and the provider's own as its `default`; set `reports_cost` when
-   its answer says what each call cost. Record no amount in the metadata.
+   with the tiers as its `enum` and, as its `default`, the tier a call is billed at when the
+   option is not passed: the provider's own, unless the adapter sends another (step 2). Set
+   `reports_cost` when its answer says what each call cost. Record no amount in the metadata.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
    - Send with `self._http.request`, which uses the host's client and the provider's timeout,
-     names the library in the request's `User-Agent` (`any-search/<version>` or
-     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
-     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
-     itself: that header is the one exception to the next rule.
+     follows no redirect from the provider's API (a fetched page's redirects are the provider's
+     to follow), names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`), turns a transport failure into a `ProviderError` without its text,
+     and raises `http_error` for any answer below 400 that is not a success. An adapter sets no
+     `User-Agent` of its own, even where the provider's SDK names itself: that header is one of
+     two exceptions to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
+     The other exception is a default tier that adds a charge per page: send the cheaper tier
+     unless the option is passed (You.com, any-fetch, in the learnings).
    - A shared parameter wins over the native option it maps to.
    - Refuse a reserved key: the query and the key. A native option that a shared parameter also
      sets stays offered, so its whole range stays reachable (Perplexity's `search_recency_filter`
@@ -386,3 +391,161 @@ The first provider whose price per call depends on an option.
 - Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
   `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
   `pplx-` key.
+
+### 2026-11-14, Brave (any-search)
+
+The first provider that replaced old gateway code for a provider otari's own settings still name.
+
+- A refused key need not be a 401: Brave answers it with a 422 and `error.code`
+  `SUBSCRIPTION_TOKEN_INVALID`, the same status as a count out of range (`VALIDATION`). Take the
+  tag from the code, so the two stay apart; `detail` and `meta` can quote the request (a missing
+  header's `input`), so neither is read.
+- A provider can ignore a value it does not validate: Brave answers `freshness=zz` with results,
+  as if no filter was set. Map the shared parameters to values the provider documents, since
+  nothing will say a wrong one was dropped.
+- "Found nothing" can be a missing section: a Brave search with no web results has no `web` at
+  all, not an empty list. Treat the section's absence as no hits, and a section of the wrong type
+  as `unexpected_response`.
+- A provider's answer can hold more than the envelope reads: Brave's default answer adds videos,
+  news and a `mixed` ranking beside `web`. Leave them in `raw`, keep the provider's default, and
+  offer its own filter (`result_filter`).
+- A key's plan can be slower than the provider's published rate: the recording key allowed one
+  request a second (`x-ratelimit-limit: 1, 2000`), so back-to-back live tests got 429s. `EXPECTED`
+  takes a `wait` for such a provider, and the live tests sleep that long before each of its calls.
+- httpx writes a boolean parameter as `true` or `false`, which is Brave's spelling, so the adapter
+  passes booleans as they are. A `None` goes out as an empty value, so leave it out.
+- The gateway refuses an option value outside its `enum` when a tool or a key is saved. Give an
+  option an `enum` only for a short list the provider is unlikely to extend (`safesearch`), and
+  leave a long one that it validates itself (`country`) to the provider.
+- Fixture recipes: `normal` with `--max-results 2` and `result_filter=web` keeps it small; `empty`
+  with `site:` set to a domain that does not exist; `error` with a made-up key.
+
+### 2026-11-16, Tavily (any-search)
+
+The first provider whose old gateway client sent an option the provider leaves off by default.
+
+- When the host's old client sent an option the provider's own default leaves out, the adapter
+  sends the provider's default, and the host keeps the option where its callers rely on it.
+  otari's old client always asked Tavily for page text (`include_raw_content`). The adapter does
+  not: otari's legacy settings add the option themselves, and a data migration wrote it into each
+  stored key's options, where the key's owner sees it and can turn it off.
+- An error body can hold only a sentence: Tavily answers `{"detail": {"error": "Unauthorized:
+  ..."}}`, a 422 with pydantic's list that quotes the input, or its own statuses 432 and 433 for
+  plan limits. With no code to read, tag by the status the provider documents.
+- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, sent when
+  `include_usage` asks, counts credits, whose dollar price depends on the plan. That is not a
+  reported cost: `reports_cost` stays false, and the host prices each tier (`search_depth`).
+- An option can raise the price by choosing a tier itself: `auto_parameters` costs 2 credits and
+  may pick `advanced`. Leave such an option out until the host can lock it.
+- Page text can be very large: one `raw_content` was 946,000 characters. The host cuts what
+  reaches a model; the adapter passes it as it came.
+- Dates can be RFC 1123 (`Thu, 15 Oct 2026 00:00:00 GMT`); `email.utils.parsedate_to_datetime`
+  reads them.
+- Fixture recipes: `normal` with `--max-results 2 -o topic=news`, which dates every hit; `empty`
+  with `include_domains=["example.com"]` and words no page there holds (a domain that does not
+  exist is a 400); `error` with a made-up `tvly-` key.
+
+### 2026-11-11, You.com (any-search)
+
+The first provider that sends defaults on options that have a list of values.
+
+- A default the adapter sends must be one a host can turn off. You.com's SDK sends `language`
+  `EN` and `knowledge` `core`, and null turns each off, as it does `extraction`. otari refuses a
+  value an option's `enum` does not list, and null is in none, so those two name their values in
+  the description instead, like Exa's `contents` and Mojeek's `date`, which have no enum either.
+- The status a provider documents may not be the one it sends. You.com lists a 401 for a bad key,
+  but a made-up or empty key gets a 403 `{"message": "Forbidden"}` from the gateway in front of
+  the API, and no key at all a 402 `payment_required`. Tag by status, and take a code from the
+  body only where it is one, the 402's `error`; a 422's `error` is a sentence that quotes the
+  request (`highlights supports count up to 50, got 60`).
+- A budget shared across results makes snippets long when there are few: highlights share 8,192
+  tokens, so two results came back at 10,000 to 13,500 characters each. otari cuts them;
+  `extraction.highlights.total_max_tokens`, from 1,024, asks for less.
+- A mode can lower the result cap. Under highlights a `count` above 50 is a 422, while one above
+  100 is answered with no results, so the adapter caps the count by mode.
+- An empty answer can drop the list rather than empty it: a search with no results answered
+  `results: {}`, with no `web`. Both `results` and `web` are optional in the API contract.
+- You.com accepts values it does not apply: a `freshness` of `decade`, a `country` or `language`
+  of `XX`, and an `offset` of 10, past the documented 9, are each answered 200.
+- Fixture recipes: `normal` with `--max-results 2` and `extraction` set to
+  `{"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}}` keeps it small;
+  `empty` with `include_domains` naming a domain that does not exist; `error` with a made-up key,
+  a 403.
+
+### 2026-11-11, You.com (any-fetch)
+
+The first fetch provider with a cost tier.
+
+- When a provider's default tier adds a charge per page on top of the call, the adapter sends the
+  cheaper tier unless the option is passed. It marks the option `cost_tier` with that tier as its
+  `default`, since that is what a call without it is billed at, and says so in the option's
+  description. A host that bills a flat price per call cannot see how many pages a call read, so
+  the provider's default would bill it for pages its price never covered. You.com's
+  `parse_effort` defaults to `standard`, which adds $0.50 per 1,000 PDF pages; `lite` adds none.
+- An empty response can be a cache miss rather than an empty page: under
+  `extraction_source: cache`, You.com returns `{}` for a page it has no copy of, which its
+  documentation calls "nothing extracted". It is a `FetchError` (`not_cached`), not an empty page
+  and not `unexpected_response`; an empty page is `markdown: ""`, which a site's 500 and HTML with
+  an empty body both returned. Tag the same shape by what it can mean in each mode
+  (`nothing_extracted` outside the cache).
+- A provider's cached copy can differ from the page: `blend`, the default, answered
+  `python.org/downloads/` with 3,154 characters titled `Release schedules`, and `fetch` with
+  7,753 titled `Download Python | Python.org`, and `example.com` from the cache with no title.
+- A native option can share a name with the library's own argument: You.com's `timeout` caps its
+  side of the call, but `afetch(timeout=)` is the fetcher's, so the native option reaches the
+  provider only through `fetch`. Say so in the option's description rather than renaming it, and
+  say which of the two must be the longer.
+- A provider can document error codes as stable. You.com's `error.code` (`invalid_url`,
+  `site_unreachable`) is one, so it is the tag at any status that carries it, while its
+  `details.reason` can name the host and is not read. The gateway in front of the API still
+  returns 401, 403 and a key-less 402 with bodies of its own, so those are tagged by status as
+  the search adapter does.
+- Fixture recipes: `normal` with `https://example.com/` and `extraction_source=fetch`; `empty`
+  with an httpbin `base64` URL holding HTML whose body is empty; `in_body_error` with
+  `extraction_source=cache` and a path nobody has fetched; `error` with a made-up key, a 403.
+
+### 2026-11-18, redirects and 3xx answers (both libraries)
+
+Found in CodeRabbit's review of You.com. No adapter turned redirects off, and each took any
+status below 400 as a success; what that cost depended on the provider.
+
+- A key in a header other than `Authorization` follows a redirect to another host. httpx drops
+  `Authorization` on such a redirect but keeps every other header, so the key of Exa
+  (`x-api-key`), Serply (`X-Api-Key`), Brave (`X-Subscription-Token`) or You.com (`X-API-Key`)
+  would reach that host through a host's client set to follow redirects. A Bearer key
+  (DeepSeek, Perplexity, Synthetic, Tavily, Tabstack) was dropped. `self._http.request` turns
+  redirects off per request, whatever the client says, so an adapter needs nothing for it.
+- An answer below 400 is not always a success. A 3xx that is not followed reaches the adapter.
+  Where the result list is optional, its JSON body read as an empty answer (Brave's `web`,
+  You.com search's `results`) or as a page error (You.com fetch's `contents`); where it is
+  required, the adapter already raised `unexpected_response`. `self._http.request` raises
+  `http_error` for it, so an adapter's own check stays `status >= 400`. The conformance suite
+  sends every provider a 302 with a JSON object, through a client set to follow redirects.
+
+### 2026-11-24, Keenable (any-search)
+
+The first provider whose key is optional: with one it calls `/v1/search`, without one
+`/v1/search/public`, limited per IP address.
+
+- An optional key is `requires_api_key=False` with `env_key` still naming the SDK's variable, so a
+  key in the environment is used and a missing one is not an error. The adapter picks the
+  endpoint by whether a key resolved (`self._api_key`). An explicit empty key means none and never
+  falls back to the environment, which is how otari passes a tool without one. Test the keyless
+  path in the provider's own tests: the conformance suite sets every `env_key`, so it covers only
+  the keyed one, and a keyless recording can stand for a keyed answer of the same shape, said
+  beside the scenarios.
+- In otari, a deployment tool on such a provider may run without a key, while an organization key
+  on any provider with an address of its own must carry one, so an organization's calls never run
+  keyless from the gateway's address. Both read the metadata, so the adapter needs nothing for it.
+- A keyless endpoint can require a header naming the calling app, which the provider logs with
+  each query (`X-Keenable-Title`). Send the library's name by default, not the SDK's own
+  (`Keenable SDK`) or the host's, and offer the header as an operator-only option: its value can
+  name the deployment. Send it on keyed calls too when the SDK does.
+- A limit per IP address is shared with every other caller from that address, a CI runner's other
+  jobs included. `EXPECTED`'s `shared_limits` names the tags of such a 429, which skip a live
+  test, and `_require_key` skips a provider only for a key it requires.
+- A field the provider documents as deprecated can still be sent, empty: Keenable's
+  `description` is always `""`, so the snippet reads `snippet` first and falls back to it.
+- Fixture recipes, all keyless but the error: `normal` with `--max-results 3` and
+  `snippet_max_length=180`, since snippets run to thousands of characters; `empty` with `site`
+  set to a domain that does not exist; `error` with a made-up key, a 401 `invalid_api_key`.

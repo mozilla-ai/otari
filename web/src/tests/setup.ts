@@ -54,10 +54,9 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = () => undefined
 }
 
-// jsdom has no canvas 2D context, no toBlob, no object URLs, no ClipboardItem and
-// no document.fonts, so nothing in lib/shareImage.ts can run for real here. These
-// stubs let the share panel mount and its wiring be asserted; the claim that the
-// PNG itself is correct is only provable in Playwright (see web/e2e).
+// jsdom has no object URLs, so an image the dashboard prepares in the browser
+// (an MCP server's logo) cannot be previewed here. These stubs let its dialog
+// mount and its wiring be asserted.
 if (typeof URL.createObjectURL !== "function") {
   URL.createObjectURL = () => "blob:stub"
 }

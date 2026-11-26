@@ -9,7 +9,9 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
+import { HarnessMark } from "@/shared/components/marks/BrandMark"
 import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
+import { hasHarnessMark, hasLanguageMark } from "@/shared/helpers/brandMarkKeys"
 import {
   formatCost,
   formatNumber,
@@ -32,7 +34,7 @@ import { type Format, hasFormattedForm, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
 import { NoInputNote } from "./NoInputNote"
-import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
+import { OBSERVATION_TYPES, type TypeKey, TypeMark } from "./observationTypes"
 import type { SessionStats } from "./sessionStats"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
@@ -203,6 +205,21 @@ function Attributes({
         ))}
     </dl>
   )
+}
+
+/**
+ * What a session's header draws: the mark the Sessions list gives it (its
+ * agent's, else its client's language), and otherwise the trace glyph.
+ */
+function ClientIcon({ trace, type }: { trace: Trace; type: TypeKey }) {
+  const { harness, clientLanguage } = trace
+  if (
+    (harness && hasHarnessMark(harness)) ||
+    (clientLanguage && hasLanguageMark(clientLanguage))
+  ) {
+    return <HarnessMark harness={harness ?? null} language={clientLanguage} />
+  }
+  return <TypeMark type={type} className="size-5" />
 }
 
 // The session's tool calls and gate runs, each with its breakdown on hover.
@@ -531,7 +548,11 @@ export function TracePeek({
       <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center">
-            <TypeMark type={shown.type} className="size-5" />
+            {observation ? (
+              <TypeMark type={shown.type} className="size-5" />
+            ) : (
+              <ClientIcon trace={trace} type={shown.type} />
+            )}
           </span>
           {/* Focused only by the panel opening, as ListDetail's landing column
               is, so it draws no ring: it is not a control. */}
@@ -545,6 +566,13 @@ export function TracePeek({
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-mono-caption text-muted">
           <span>{formatTraceTimestamp(shown.timestamp, true)}</span>
+          {!observation && trace.harness ? (
+            <span>
+              {trace.clientVersion
+                ? `${trace.harness} ${trace.clientVersion}`
+                : trace.harness}
+            </span>
+          ) : null}
           {/* Until the spans arrive there is nothing to measure. */}
           {loaded ? <span>{formatDuration(shown.latencyMs)}</span> : null}
           {shown.totalCost > 0 ? (

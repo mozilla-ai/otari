@@ -10,7 +10,6 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { usePricesInEffect } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
-import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatDateTimeMinutes } from "@/shared/helpers/format"
 
 import { ToolRateCell } from "./ToolRateCell"
@@ -35,11 +34,6 @@ import {
 
 const TITLES: Readonly<Record<ToolPricingService, string>> = {
   code_execution: "Code execution pricing",
-}
-
-const INTROS: Readonly<Record<ToolPricingService, string>> = {
-  code_execution:
-    "What this deployment charges for each successful call the gateway runs on its sandbox. A tool a model's provider runs itself is billed by that provider, not here.",
 }
 
 export function ToolPricingPage({ service }: { service: ToolPricingService }) {
@@ -109,7 +103,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
         <RowActionRow>
           <RowAction
             icon={FiEdit2}
-            label="Edit"
+            label="Edit…"
             ariaLabel={`Edit the price of ${entry.row.label}`}
             // An unread rate would be overwritten by a price nobody saw.
             isDisabled={entry.price.isPending || entry.price.isError}
@@ -122,12 +116,7 @@ export function ToolPricingPage({ service }: { service: ToolPricingService }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageIntro
-        title={TITLES[service]}
-        docsHref={docsSourceHref("tools.md", "pricing-a-gateway-run-tool")}
-      >
-        {INTROS[service]}
-      </PageIntro>
+      <PageIntro title={TITLES[service]} />
 
       {hasUnpricedRow(entries) && settings.data?.require_pricing === true ? (
         <InfoBanner tone="warning">

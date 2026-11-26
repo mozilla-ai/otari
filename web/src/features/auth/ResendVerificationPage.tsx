@@ -3,6 +3,8 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useResendVerification } from "@/shared/api/auth"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -15,19 +17,21 @@ import {
 import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
- * `#/resend-verification`: mail a fresh verification link.
+ * `/resend-verification`: mail a fresh verification link.
  *
  * Reached from the check-email page, from a verification link that had already
  * expired, and from the sign-in screen, because the gateway's own refusal for
  * an unverified identity tells the caller to request a new one and would
  * otherwise be a dead end.
  *
- * Enumeration-safe like signup, so success goes to `#/check-email?type=resend`
+ * Enumeration-safe like signup, so success goes to `/check-email?type=resend`
  * without reading the response: the server sends the same sentence whether the
  * address is unknown, already verified, or genuinely just re-sent. The address
  * typed on the page before is filled in, and goes on to the check-email page.
  */
 export function ResendVerificationPage() {
+  const { mail } = useDeployment()
+  const delivers = mailDelivers(mail)
   const resend = useResendVerification()
   const { recordEvent } = useTelemetry()
   const [email, setEmail] = useState(readSignInAddress)
@@ -54,7 +58,7 @@ export function ResendVerificationPage() {
         // like signup, so there is nothing in the response to read.
         recordEvent(TELEMETRY_EVENTS.RESEND_VERIFICATION_CLICKED)
         rememberSignInAddress(email.trim())
-        goToPublicAuthPage("#/check-email?type=resend")
+        goToPublicAuthPage("/check-email?type=resend")
       },
     })
   }
@@ -62,9 +66,17 @@ export function ResendVerificationPage() {
   return (
     <PublicAuthLayout
       isBusy={resend.isPending}
-      title="Send a new verification link"
-      description="Enter the address you signed up with and we will mail a fresh link."
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      title={
+        delivers
+          ? "Send a new verification link"
+          : "Create a new verification link"
+      }
+      description={
+        delivers
+          ? "Enter the address you signed up with and we will mail a fresh link."
+          : "Enter the address you signed up with to create a fresh link. This deployment cannot email it, so ask whoever runs it for the link."
+      }
+      footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <form
         className="flex flex-col gap-4"
@@ -92,7 +104,7 @@ export function ResendVerificationPage() {
           isPending={resend.isPending}
           isDisabled={email.trim() === ""}
         >
-          Send link
+          {delivers ? "Send link" : "Create link"}
         </Button>
       </form>
     </PublicAuthLayout>

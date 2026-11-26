@@ -29,8 +29,8 @@ Where an organization holds several keys for one provider, a workspace uses,
 in order, skipping keys it turned off:
 
 1. the key it set to "Always use this key"
-2. the organization's default for the provider (the star on the Providers
-   page; click a filled star to remove it)
+2. the organization's default for the provider (**Make default provider** in
+   a key's menu on the Providers page; the default's own menu takes it off)
 3. the organization's oldest key
 
 A key with its own API base URL is not in this list: requests name it by its
@@ -59,6 +59,44 @@ Whose declaration counts depends on whose key serves the offering:
   may serve a request.
 - A `providers:` instance from `config.yml` is never declared.
 
+### Terms and privacy links
+
+A hosted provider can link the upstream's own terms of service (`terms_url`)
+and privacy policy (`privacy_url`). The public Providers pages show both beside
+the provider's models (see [A public catalog](configuration.md#a-public-catalog)).
+Each is an absolute `http` or `https` address with no username or password, and
+anything else is refused with 422. On an update, an omitted link is kept, and
+`null` or an empty string removes it.
+
+### Data location
+
+A hosted provider, and each of its [regions](#regions), can declare where its
+upstream keeps request data (`data_location`): a two-letter country code, `EU`
+or `GLOBAL` (an upstream that may process a request in any region). Otari
+cannot verify this; it records the declaration and shows it on the Hosted
+providers page. Leaving it unset declares nothing.
+
+A region's location is its own. A new region copies its provider's location
+unless it is given one, and the first region takes the provider's, but a later
+change to the provider's location moves no region. Each usage row a hosted
+provider serves records the location of the provider or region that served
+it, as it was declared at the time (`data_location` on `/api/v1/usage`), so
+where a past request went is never rewritten.
+
+It is not the same as [supported countries](configuration.md#supported-countries),
+which says where requests may come *from*. A workspace can list the data
+locations it accepts (**Allowed data locations** on its Providers tab, or
+`allowed_data_locations` on `/api/v1/workspaces/{workspace_id}/provider-policy`):
+
+- A region is used only when its location is on the list. `EU` admits each
+  EU member state as well as `EU` itself; `GLOBAL` admits only `GLOBAL`.
+- A provider or region that declares no location never matches a list, so a
+  workspace with a list refuses it. The dialog lists the providers a list
+  would refuse before it is saved.
+- A hosted provider with no region left is refused with `403` and left out of
+  the workspace's model lists.
+- Leaving the list unset accepts every location.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -80,6 +118,57 @@ The name is what pricing, budgets and usage are keyed on. A name may not
 contain `:` or `/`, may not be `otari` or `hosted`, and may not be another
 implementation's name. An `otari` provider therefore always takes a name of its
 own.
+
+### Regions
+
+A provider that serves from more than one region, often with a key and an
+endpoint for each, is one hosted provider with several **regions** rather than
+one hosted provider per region. A region gives only what differs from its
+provider: its own endpoint, key, SDK `client_args`, supported countries and
+data location. On the provider's own origin, its `client_args` are merged over
+the provider's, so a Bedrock region names its `region_name` alone; a region on
+another origin takes none of the provider's and gives every one it needs. Everything else stays the provider's: the name,
+the roster and its switches, workspace access, zero data retention, and the
+policy links.
+
+A provider with no regions serves from its own connection, as before. Adding
+its first region keeps that connection as a region of its own, first in order,
+named after the provider's data location (or `primary`), so nothing that was
+served changes.
+
+- `tokenhub:model` is served by the first enabled region, in order, whose
+  supported countries admit the request and whose data location the
+  workspace accepts. There is no failover between regions: an upstream error
+  is returned as any other upstream error is, without trying another region.
+- `tokenhub@sg:model` pins the region `sg` and is served by it alone.
+- Usage records the region that served a request (`tokenhub@sg`), and its
+  price is the region's own where one is set under `tokenhub@sg:model`, and
+  the provider's `tokenhub:model` price otherwise.
+- A region that points the provider's key at another endpoint is refused; give
+  it its own key, as repointing a provider's endpoint requires. A region that
+  holds a key needs an `https` endpoint (or `http` on this machine), and
+  moving its endpoint to another origin needs its key again. Moving the
+  provider's endpoint is refused while a region would be sent a key for an
+  endpoint it was not entered for.
+- A stored provider may not be named with `@`, which would read as a region; one
+  configured in `config.yml` under such a name keeps working under it.
+- Removing every region returns the provider to its own connection.
+
+Regions are managed on the provider's page or through
+`/api/v1/hosted-providers/{provider}/regions`. A provider defined in
+`config.yml` has none, and model discovery and the health check use the first
+enabled region.
+
+Not supported yet, and planned to fit this model rather than replace it:
+
+- A region that changes only the model id, as Bedrock's `us.` and `global.`
+  inference profiles do on one key. Until then, offer each profile as a model
+  of its own on the provider.
+- Failover from one region to the next, and preferring a region from the
+  `Otari-Region` header. Both would be a policy on the provider whose default
+  stays the first region that admits the request, in order. A region's id is
+  only a name to pin it by and never a location.
+- Regions for a provider declared in `config.yml`.
 
 ## Who manages hosted providers
 
@@ -111,6 +200,13 @@ The API returns only the key's last four characters, and masks credentials in
 providers. It is a paid service, and a request served on it leaves this gateway
 for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
 the `otari` implementation.
+
+The first time a deployment operator opens the dashboard in a browser, on a
+gateway not yet connected, a **Welcome to Otari** dialog offers otari.ai, with a
+link to its plans. It is remembered per browser, not per account: skip it or
+close it and that browser does not show it again, while a new browser, or an
+existing operator after upgrading, sees it once. It is not shown where
+`platform_url` is empty or the gateway cannot encrypt a provider key.
 
 On the Hosted providers page, **Connect otari.ai** is offered beside adding a
 provider of your own:
@@ -208,11 +304,75 @@ Adding a provider offers every model its key lists:
 Refreshing a provider's models:
 
 - moves an unchanged seeded rate to the current default, and leaves an
-  operator-set rate alone
+  operator-set rate alone (to put one back on the default, see
+  [Going back to the default price](#going-back-to-the-default-price))
 - never switches on a model the operator switched off
 - keeps on a model switched on without a price on purpose (one a moved or
   copied provider lists, one an operator switched on unpriced, and every model
   of a provider that serves unlisted models)
+
+### Vendors
+
+A provider that routes to others (Together, OpenRouter, otari.ai) serves models
+from many vendors. Each model on the roster is listed under its vendor, taken
+from, in order:
+
+1. the maker models.dev names for the model
+2. the part of the model's id before `/` (`black-forest-labs` for
+   `black-forest-labs/FLUX.1-schnell`)
+3. the vendor whose own provider this is (OpenAI for `openai`)
+
+A model none of these names is listed under **Other**.
+
+Each vendor has a switch of its own, per hosted provider:
+
+- Off withholds every model of that vendor on that provider, at dispatch
+  (`424`) and in the catalog, including models a later refresh offers.
+- Each model keeps its own switch, which applies again once the vendor is
+  switched back on.
+- A model's price can still be set while its vendor is off.
+
+Through the API:
+
+| Route | Does |
+| --- | --- |
+| `GET /api/v1/hosted-providers/{provider}/models` | Lists each model's `vendor`, and in `vendors` counts each vendor's models across the whole provider with the vendor's switch. Takes `vendor` to list one vendor's models; `search` matches a model's name or its vendor. |
+| `PATCH /api/v1/hosted-providers/{provider}/vendors` | Switches one vendor on or off: `{"vendor": "Alibaba", "enabled": false}`. |
+| `POST /api/v1/hosted-providers/{provider}/models/switch` | Sets every model's own switch for one vendor at once. Switching on serves the models that have a price and leaves the rest off, as it does a model the provider refused to serve (`skipped_unavailable`); `only_unpriced` with switching off withholds only the models served without a price. |
+
+A vendor switched off is stored under its name. If no offered model goes by
+that name any more (models.dev renamed the vendor, or its models were
+removed), the vendor is still listed, with no models, so it can be switched
+back on.
+
+### Going back to the default price
+
+A rate an operator set stays until someone changes it, so a model priced by
+hand while models.dev had no price for it keeps that price after models.dev
+lists one. To put it back on the default:
+
+- The model list shows the default beside an operator's rate wherever the two
+  differ (`default_rates`), and each vendor counts those models
+  (`custom_differs`).
+- `POST /api/v1/hosted-providers/{provider}/models/reset-prices` puts the
+  models named in `models`, or every operator-priced model (of one `vendor`,
+  when given), back on the default. With `dry_run` it returns what it would
+  change and writes nothing.
+
+The default is the models.dev rate, or for a provider of the `otari`
+implementation the price its listing names (see
+[Connecting otari.ai](#connecting-otariai)). A reset stores it as a new
+version, so later refreshes keep it current and requests already billed keep
+the cost they were billed at. A model the default does not price keeps its
+rate and is listed in `skipped_no_default`. Two kinds of rate are never reset:
+one the `pricing:` block of `config.yml` stored, since the next start writes it
+again, and a tiered rate, which a default would flatten. For an `otari`
+provider, the reset asks the provider for its listing, so the default is the
+price it lists, never the models.dev estimate: a model the listing does not
+price, or every model while the listing cannot be read, keeps its rate. Its
+model list does not show that default beside each rate; only the reset's
+preview does. With `default_pricing` off, only an
+`otari` provider has a default to go back to.
 
 ### Workspace access
 
@@ -279,9 +439,9 @@ Some limits of the form:
 - The hosted model form stores per-million fields only, so it does not offer
   seconds of video and cannot reprice a per-second model.
 
-**Price this model** on a request in the Requests tab opens the same form, in the
-unit the request's endpoint bills. It is offered on a served request that carried
-no cost.
+**Price this model** on a request in the Requests view of Sessions opens the
+same form, in the unit the request's endpoint bills. It is offered on a served
+request that carried no cost.
 
 ## Catalog and discovery
 
@@ -348,7 +508,9 @@ hosted_providers:
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
+| `data_location` | Where the provider keeps request data: a two-letter country code, `EU` or `GLOBAL`. See [Data location](#data-location). |
 | `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
+| `terms_url`, `privacy_url` | The provider's terms of service and privacy policy, shown on the public Providers pages. See [Terms and privacy links](#terms-and-privacy-links). |
 
 `api_key` may be left out for:
 
@@ -436,48 +598,32 @@ steps of moving a deployment, see [Upgrading](#upgrading).
 ## The Hosted providers page
 
 The Hosted providers page is in the deployment view, opened from the account
-menu, and is listed only for a deployment operator.
+menu, and is listed only for a deployment operator. It lists the providers;
+each provider's settings and models are on a page of its own.
 
+### The list
+
+- Each row shows the provider, where it keeps data, how many regions it
+  serves from when it has several, its **Status**, its **Models** ("12 of 18
+  serving", with a badge for vendors switched off and models without a price)
+  and its **Serving** switch, which stops the provider without opening it.
+  Select a provider's name to open its page.
 - **Adding a provider** takes an optional name, which defaults to its
   implementation. The key is optional for a provider that needs none and for
   one pointed at an endpoint of its own. Adding is disabled, with a banner
   saying why, while the server has no `OTARI_SECRET_KEY`. Adding a provider of
   the same name as a `config.yml` one overrides it, which the form warns about.
-- **Test connection**, in the add and edit dialogs, asks the provider what it
-  lists on the dialog's values without saving them, the stored key standing in
-  for a blank key box. **Test** on a provider's row asks the same of what it
-  stores.
-- **Serve models not on its list**, in both dialogs, sets
-  `serves_unlisted_models`.
-- **Zero data retention**, in both dialogs, sets `zero_data_retention`, and a
-  provider declared so carries a badge saying it. The same box is on each
-  key's dialog on the organization's Providers page. See
-  [Zero data retention](#zero-data-retention).
-- **Models** carry a serving switch and a price, set in any unit on
-  [Entering a rate](#entering-a-rate) (a per-second video price
-  goes through `POST /api/v1/pricing` instead); an unpriced model arrives
-  switched off. Tabs show one kind of model at a time (the kind comes from
-  models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as
-  `type`), and the search box beside them finds models by name (`search`).
-  See [Who is shown which models](models.md#who-is-shown-which-models).
-- **Refresh models** asks one provider again. **Update catalog** fetches the
-  latest models.dev prices and every provider's listing, and shows the price
-  changes and new models before applying them (see
-  [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
+  Once added, the provider's page opens.
+- **Update catalog** fetches the latest models.dev prices and every provider's
+  listing, and shows the price changes and new models before applying them
+  (see [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
   Its optional cleanup removes priced models nothing serves and the model
   lists of providers no longer configured, listing them first.
-- A provider kept to one organization shows which. That restriction is set
-  through `/api/v1/hosted-providers`.
-- The **Countries** column shows the countries a provider serves: two-letter
-  codes, typed in the dialogs or loaded from a JSON file (a list, or one under
-  `supported_countries`); blank serves every country (see
-  [Supported countries](configuration.md#supported-countries)).
-- A provider's name opens Models filtered to it. Above the table, a summary
-  counts the providers reachable, with **Re-check all** to ask them again.
+- Above the table, a summary counts the providers reachable, with
+  **Re-check all** to ask them again.
 - The table also lists the `providers:` instances of `config.yml`, marked
-  config.yml and read-only, with their reachability. A `hosted_providers:` entry
-  carries a `config.yml` badge and cannot be edited, switched or removed here,
-  while its models can.
+  config.yml and read-only, with their reachability. They have no page of
+  their own.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
 - **Connect otari.ai** is offered beside adding a provider, on the first-run
@@ -486,6 +632,71 @@ menu, and is listed only for a deployment operator.
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).
+
+### A provider's page
+
+- The header carries the provider's **Serving** switch, **Test**, which asks
+  the provider what it lists on what it stores, **Edit** and **Remove**.
+- **Test connection**, in the add and edit dialogs, asks the provider what it
+  lists on the dialog's values without saving them, the stored key standing in
+  for a blank key box.
+- **Serve models not on its list**, in both dialogs, sets
+  `serves_unlisted_models`.
+- **Zero data retention**, in both dialogs, sets `zero_data_retention`. The
+  same box is on each key's dialog on the organization's Providers page. See
+  [Zero data retention](#zero-data-retention).
+- Below the header, the provider's settings: **API key**, **Endpoint**,
+  **Serves** (every organization, or the one it is kept to, which is set
+  through `/api/v1/hosted-providers`), **Requests from** (two-letter codes, typed
+  in the dialogs or loaded from a JSON file, a list or one under
+  `supported_countries`; blank serves every country, see
+  [Supported countries](configuration.md#supported-countries)), **Data hosted
+  in** (see [Data location](#data-location)), **Zero data retention** and
+  **Models not on its list**.
+- **Add region** opens a dialog for what a region changes: its name and id, its
+  endpoint, where it keeps data, the provider's key or one of its own, and
+  under **More** its `client_args` and supported countries. Adding the first
+  region also names the provider's current connection, which becomes the first
+  region. See [Regions](#regions).
+- Once the provider has regions, a **Regions** card lists them in the order
+  they are tried, each with where it keeps data, its key, its endpoint and its selector
+  (`tokenhub@sg`), a switch, and a menu to edit, move or remove it.
+- A `hosted_providers:` entry carries a `config.yml` badge, and its settings
+  cannot be edited, switched or removed here, while its models can.
+
+**Models** are listed under their vendors (see [Vendors](#vendors)). A summary
+counts the models, vendors, models serving, models without a price, operator
+prices that differ from the default, and vendors switched off. Each vendor's
+row shows how many of its models it serves, and:
+
+- its own switch, **Serve X models**, which withholds every model of the
+  vendor while keeping each model's own switch
+- a menu with **Serve all models**, **Withhold all models**, **Withhold
+  unpriced models** and **Reset custom prices to default…**
+
+Open a vendor to see its models, each with a serving switch and a price, set
+in any unit on [Entering a rate](#entering-a-rate) with **Edit price** (a
+per-second video price goes through `POST /api/v1/pricing` instead); an
+unpriced model arrives switched off. A provider with one vendor shows that
+vendor already open. Tabs show one kind of model at a time (the kind
+comes from models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes
+it as `type`), and the search box finds models by name or vendor (`search`).
+See [Who is shown which models](models.md#who-is-shown-which-models).
+
+Where an operator's price differs from the default, the default is shown under
+the model's rate, and **Use default price** puts the model back on it. **Sync
+prices…** lists every such model with both prices, ticked, and the models
+whose price already matches the default, unticked; **Use default price for N**
+resets the ticked ones. See
+[Going back to the default price](#going-back-to-the-default-price).
+
+With two regions or more, the models table shows a price column per region
+beside the provider price. A region with no price of its own shows the
+provider price in muted text, which is what it is charged; selecting a cell
+sets the region's own price, and **Use provider price** removes it.
+
+**Refresh models** asks the provider again, and **Add model** offers a model
+it does not list.
 
 ## Deployment-paid credentials
 

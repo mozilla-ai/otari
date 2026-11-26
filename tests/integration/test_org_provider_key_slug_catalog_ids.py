@@ -26,6 +26,9 @@ from gateway.services.tenancy.org_provider_key_service import reset_org_provider
 
 from .conftest import shared_test_config
 
+pytestmark = pytest.mark.usefixtures("public_dns")
+
+
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _KEYS = f"{API_ROOT}/organizations/me/provider-keys"
 _SLUG = "acme-ds"
@@ -122,6 +125,19 @@ def test_the_listing_names_the_model_by_the_catalog_id_the_index_builds(
     assert detail.json()["id"] == _CATALOG_ID
 
 
+def test_the_listing_describes_a_model_the_organizations_key_serves(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """The key is a slug, so only the slug map names the provider models.dev describes the model under."""
+    listed = client.get(f"{API_ROOT}/models", headers=api_key_header)
+    assert listed.status_code == status.HTTP_200_OK, listed.text
+    (row,) = [model for model in listed.json()["data"] if model["id"] == _CATALOG_ID]
+
+    assert row["name"] == "DeepSeek V4.1 Flash 1017"
+    assert row["type"] == "chat"
+    assert row["context_window"] is not None
+
+
 def test_every_listed_id_is_served_on_the_organizations_key(client: TestClient, api_key_header: dict[str, str]) -> None:
     listed = client.get(f"{API_ROOT}/models", headers=api_key_header)
     assert listed.status_code == status.HTTP_200_OK, listed.text
@@ -131,3 +147,17 @@ def test_every_listed_id_is_served_on_the_organizations_key(client: TestClient, 
         assert response.status_code == status.HTTP_200_OK, (model["id"], response.text)
         assert response.headers["Otari-Provider"] == _SLUG
         assert response.headers["Otari-Model"] == _MODEL
+
+
+def test_the_catalog_ids_bare_name_is_served_on_the_organizations_key(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A client that sends a model's bare name, as Claude Code does, reaches it with no alias."""
+    bare = _CATALOG_ID.partition("/")[2]
+
+    response = _chat(client, api_key_header, bare)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.headers["Otari-Provider"] == _SLUG
+    assert response.headers["Otari-Model"] == _MODEL
+    assert response.json()["model"] == bare

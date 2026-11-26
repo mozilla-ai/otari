@@ -14,15 +14,33 @@
  * server reporting the caller's own standing rather than by a rule of its own.
  * `reachableWithoutOrganization` rides on the same read: its 404 says the
  * caller belongs to no organization, and then only the rows that opt in show.
+ *
+ * The caller axis also decides who may open a page at all (`useRouteAccess`):
+ * a page someone may not use is in none of their navigation, and typing its
+ * address goes Home rather than to a refusal.
  */
 
+import { type AnyRouter, useRouter } from "@tanstack/react-router"
 import { useMemo } from "react"
 
-import { useDeploymentOperator } from "@/shared/api/organizations"
+import type { OrganizationContext } from "@/client"
+import {
+  canContributeToWorkspace,
+  canManage,
+  canManageWorkspace,
+} from "@/features/organization/roles"
+import {
+  type DeploymentOperatorAnswer,
+  deploymentOperatorAnswer,
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
-import type { NavItem } from "./types"
+import { navContextForPath, navItemForPath } from "./registry"
+import type { NavItem, Requirement } from "./types"
 
 /**
  * A predicate over registry entries: true when this deployment hosts the
@@ -36,6 +54,8 @@ import type { NavItem } from "./types"
  */
 export function useNavVisibility(): (item: NavItem) => boolean {
   const isRouteVisible = useRouteVisibility()
+  // A row's `to` is a declared path already, so it needs no router to resolve.
+  const { context, selectedWorkspaceRole } = useCaller()
   // The caller axis, and it rides on the organization context rather than on a
   // query of its own: `GET /v1/organizations/me` carries `deployment_operator`,
   // the same answer `/admin/access` gives from the same server-side
@@ -81,23 +101,23 @@ export function useNavVisibility(): (item: NavItem) => boolean {
       return (item: NavItem) =>
         item.reachableWithoutOrganization === true && isRouteVisible(item)
     }
-    return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
-  }, [isRouteVisible, answer, isOperator])
+    const caller = { context, answer, selectedWorkspaceRole }
+    return (item: NavItem) =>
+      isRouteVisible(item) &&
+      allowedByCaller(item) &&
+      routeAccess({ route: item.to, params: {} }, caller) === "open"
+  }, [isRouteVisible, answer, isOperator, context, selectedWorkspaceRole])
 }
 
 /**
  * The two deployment-shaped axes, without the caller one.
  *
- * What decides whether the *route* renders, where `useNavVisibility` decides
- * whether the *rail row* does. The two answers differ on exactly one kind of
- * entry and for two reasons. An operator-only destination is answered by a
- * query, so composing it into the route gate would show the shell's "this
- * deployment does not serve that page" panel to a real operator for the length
- * of that request and then swap it for the page. And a caller who is genuinely
- * not an operator is not looking at a page this deployment does not serve: the
- * page is served, it is theirs to be refused, and it says so itself in words
- * that name the reason (`features/admin/DeploymentAccountsPage`). The shell's
- * panel would say something false instead.
+ * What decides whether the shell answers a *route* with its "this deployment
+ * does not serve that page" panel, where `useNavVisibility` decides whether the
+ * *rail row* shows. The caller axis stays out of it: who may open a page is
+ * `useRouteAccess`, which waits for its answer and sends someone it refuses
+ * Home, while the panel is a claim about the deployment and would be false
+ * said to a caller.
  *
  * Both other axes are settled before the shell renders (the surface one from
  * the bootstrap) or settle without a page of their own to explain themselves
@@ -139,5 +159,144 @@ export function useSurfaceVisibility(): (item: NavItem) => boolean {
     () => (item: NavItem) =>
       item.surface === undefined || hostsSurface(item.surface),
     [hostsSurface],
+  )
+}
+
+export type { Requirement } from "./types"
+
+/** Whether the caller may open a page, or that it is not known yet. */
+export type Access = "open" | "blocked" | "pending"
+
+/** What is known about the caller, from the queries the shell holds. */
+export interface Caller {
+  /** The organization context, once read. */
+  context: OrganizationContext | undefined
+  /** How the context read went, as `useDeploymentOperator` reports it. */
+  answer: DeploymentOperatorAnswer
+  /** The caller's role in the selected workspace: null in none, undefined while unknown. */
+  selectedWorkspaceRole: string | null | undefined
+}
+
+/**
+ * What the router serves at an address: the route by the path it declares, and
+ * its params as the address wrote them. Judged by the router's own matching, so
+ * whatever the router forgives (the case of a letter) the rules forgive too:
+ * `/Organization/Members` is the members page, and is gated as one.
+ */
+export interface Target {
+  /** The declared path without a trailing slash, or undefined for the catch-all. */
+  route: string | undefined
+  params: Readonly<Record<string, string>>
+  /** What the route itself declares (`staticData.access`), if anything. */
+  access?: Requirement | "anyone"
+}
+
+export function targetOf(router: AnyRouter, pathname: string): Target {
+  const [, params, found] = router.getMatchedRoutes(pathname)
+  const declared = found?.fullPath as string | undefined
+  return {
+    route:
+      declared === undefined || declared === "/$"
+        ? undefined
+        : declared.replace(/(.)\/$/, "$1"),
+    params,
+    access: found?.options.staticData?.access,
+  }
+}
+
+/**
+ * What a route asks of the caller, read off the registry entry that governs
+ * it: its `operatorOnly`, its `requires`, or the organization rail it sits in,
+ * which is a manager's. One route asks less than its entry: a workspace's own
+ * page opens to that workspace's owner or admin, who may not open the list.
+ */
+export function requirementFor(route: string): Requirement | undefined {
+  if (route === "/workspaces/$workspaceId") return "workspace-manager"
+  const item = navItemForPath(route)
+  if (!item) return undefined
+  if (item.operatorOnly) return "operator"
+  if (item.requires) return item.requires
+  return navContextForPath(route) === "organization" ? "manager" : undefined
+}
+
+/**
+ * Whether `caller` may open what `target` serves. `pending` until what the
+ * requirement asks about is known, so nobody is sent away from a page they may
+ * open while their role is still loading. A failed read opens the page, as the
+ * shell's Organization row fails open: the page then shows the server's own
+ * answer.
+ */
+export function routeAccess(target: Target, caller: Caller): Access {
+  const requirement =
+    target.access ??
+    (target.route === undefined ? undefined : requirementFor(target.route))
+  const { answer, context } = caller
+  if (requirement === undefined || requirement === "anyone") {
+    // Someone in no organization has only the rows that opt in for them, so a
+    // page the rail hides from them does not open by its address either.
+    const item =
+      target.route === undefined ? undefined : navItemForPath(target.route)
+    return answer === "no-organization" &&
+      requirement === undefined &&
+      item !== undefined &&
+      !item.reachableWithoutOrganization
+      ? "blocked"
+      : "open"
+  }
+  const verdict = (allowed: boolean): Access => (allowed ? "open" : "blocked")
+  if (answer === "pending") return "pending"
+  if (answer === "unavailable") return "open"
+  if (answer === "no-organization") return "blocked"
+  switch (requirement) {
+    case "operator":
+      return verdict(answer === "operator")
+    case "manager":
+      return verdict(canManage(context))
+    case "workspace-manager": {
+      // From the address as written: an id keeps its case.
+      const role = context?.workspace_memberships?.find(
+        (one) => one.workspace_id === target.params.workspaceId,
+      )?.role
+      return verdict(canManageWorkspace(context, role))
+    }
+    case "contributor":
+      if (caller.selectedWorkspaceRole === undefined) return "pending"
+      return verdict(
+        canContributeToWorkspace(
+          context,
+          caller.selectedWorkspaceRole ?? undefined,
+        ),
+      )
+  }
+}
+
+/** The caller as `routeAccess` reads them. */
+export function useCaller(): Caller {
+  const context = useOrganizationContext()
+  const { selected, isSettled } = useSelectedWorkspace()
+  return {
+    context: context.data,
+    answer: deploymentOperatorAnswer(context),
+    selectedWorkspaceRole: isSettled ? (selected?.role ?? null) : undefined,
+  }
+}
+
+/**
+ * Whether the caller may open the page at an address. Stable while the
+ * caller's answers are, since the rail and its memory are memos and effects
+ * keyed on it. Client-side only, like every gate here: it decides what to
+ * offer, and the server still authorizes every request a page makes.
+ */
+export function useRouteAccess(): (pathname: string) => Access {
+  const router = useRouter()
+  const { context, answer, selectedWorkspaceRole } = useCaller()
+  return useMemo(
+    () => (pathname: string) =>
+      routeAccess(targetOf(router, pathname), {
+        context,
+        answer,
+        selectedWorkspaceRole,
+      }),
+    [router, context, answer, selectedWorkspaceRole],
   )
 }

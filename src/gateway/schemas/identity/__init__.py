@@ -14,7 +14,15 @@ from gateway.models.identity import (
     MailedLinkStatus,
 )
 from gateway.models.tenancy import AVATAR_FACE_COUNT, OrganizationDomainRole
-from gateway.schemas.identity.oauth_apps import OAuthClientId, OAuthRedirectUri, OAuthState, PKCECodeChallenge
+from gateway.schemas.identity.oauth_apps import (
+    AppKeyExpiration,
+    AppKeyLimit,
+    OAuthClientId,
+    OAuthRedirectUri,
+    OAuthState,
+    PKCECodeChallenge,
+)
+from gateway.types.key_scope import KeyScope
 
 # A generated token is about 43 characters; this bounds the request body, it is not a format.
 _MAX_SUBMITTED_TOKEN = 512
@@ -44,11 +52,24 @@ class PasswordLinkPublic(BaseModel):
         default=None,
         description=(
             "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a "
-            "password through it records the address as vouched for rather than proven, since the mailbox never "
-            "saw the link."
+            "password through it leaves the address verified rather than proved, since the mailbox never saw "
+            "the link."
         ),
     )
     expires_at: datetime = Field(description="When the link stops working.")
+
+
+class BootstrapHandoverRequest(BaseModel):
+    """Hand the bootstrap operator role to another operator."""
+
+    current_password: str | None = Field(
+        default=None,
+        max_length=1024,
+        description=(
+            "The caller's own current password. Required from a dashboard session whose account has a password, "
+            "and ignored with the master key, as when changing a password."
+        ),
+    )
 
 
 class MailedLinkRequest(BaseModel):
@@ -382,6 +403,7 @@ __all__ = [
     "BlockedEmailCreatedPublic",
     "BlockedEmailPublic",
     "BlockedEmailsPublic",
+    "BootstrapHandoverRequest",
     "MailedLinkRequest",
     "MailedLinkStatusResponse",
     "OIDCConnectionDomain",
@@ -414,3 +436,11 @@ class AppAuthorizationRequest(BaseModel):
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"
     workspace_id: uuid.UUID
+    scopes: list[KeyScope] = Field(
+        description="The scopes the consent screen showed. The key holds these and what the registration "
+        "still names, so one added since the screen was drawn is left out and one removed since takes effect."
+    )
+    limit: AppKeyLimit | None = Field(
+        default=None, description="The key's spending limit in USD over its whole life. Null sets none."
+    )
+    expiration: AppKeyExpiration = Field(default="never", description="How long the key lives once it is issued.")

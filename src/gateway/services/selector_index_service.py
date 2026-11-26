@@ -25,6 +25,7 @@ from gateway.services.catalog import (
     Identities,
     OfferingRow,
     OrganizationSelectors,
+    apply_model_metadata,
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
@@ -169,13 +170,44 @@ def models_by_identity(
             if selector in members
         ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
         first = offerings[ranked[0]]
+        # An organization's key is addressed by its slug, which no configured
+        # instance names, so the metadata pass that built this offering asked
+        # models.dev about the slug and got nothing. The slug map names the
+        # provider the key stands for, so read the model under that provider now.
+        resolved = (slug_providers or {}).get(first.id.partition(":")[0])
+        if resolved is not None:
+            apply_model_metadata(config, catalog, first, organization_id=organization_id, provider_type=resolved)
         rows[identity.id] = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
+                **_limits_from_others(first, [offerings[selector] for selector in sorted(members - {ranked[0]})]),
             }
         )
     return [rows[model_id] for model_id in sorted(rows)]
+
+
+def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, int]:
+    """The token limits ``first`` leaves unknown, as the smallest the model's other offerings report.
+
+    A self-hosted engine is often the one offering that knows its context
+    length, and rarely the one tried first. The smallest is the one every
+    offering that reports a limit holds, whichever a fallback reaches. A
+    filled output limit is capped at the row's context window; a limit
+    ``first`` knows is kept as it is.
+    """
+    filled: dict[str, int] = {}
+    contexts = [obj.context_window for obj in others if obj.context_window is not None]
+    if first.context_window is None and contexts:
+        filled["context_window"] = min(contexts)
+    outputs = [obj.max_output_tokens for obj in others if obj.max_output_tokens is not None]
+    if first.max_output_tokens is None and outputs:
+        filled["max_output_tokens"] = min(outputs)
+    window = filled.get("context_window", first.context_window)
+    output = filled.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        filled["max_output_tokens"] = window
+    return filled
 
 
 def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:
@@ -288,6 +320,13 @@ async def _organization_views(
     return views
 
 
+# Builds overlap (the refresher's tick, each hosted write's), so each takes a
+# number as it starts and publishes only if no later-started build has
+# published: an older snapshot never replaces a newer index.
+_builds_started = 0
+_build_published = 0
+
+
 async def rebuild_selector_index(
     db: AsyncSession, config: GatewayConfig, *, model_provider: ModelProviderPort | None = None, fetch: bool = False
 ) -> None:
@@ -313,6 +352,9 @@ async def rebuild_selector_index(
     dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is that
     the reads do their own dialing.
     """
+    global _builds_started, _build_published
+    _builds_started += 1
+    build = _builds_started
     merged = await build_merged_catalog(
         db,
         config,
@@ -334,12 +376,16 @@ async def rebuild_selector_index(
     grouped = group_offerings(seeds).values()
     identities = _identities(grouped)
     organizations = await _organization_views(db, config, catalog, rows, seeds)
+    workspace_organization = await workspace_organizations(db) if organizations else {}
+    if build < _build_published:
+        return
+    _build_published = build
     set_selector_index(
         build_selector_index(
             rows,
             identities,
             organizations=organizations,
-            workspace_organization=await workspace_organizations(db) if organizations else {},
+            workspace_organization=workspace_organization,
             names=_names(grouped),
         )
     )
@@ -355,10 +401,10 @@ async def run_selector_index_refresher(
 ) -> None:
     """Keep the selector index current with discovery, pricing and providers.
 
-    Rebuilt on a short fixed interval rather than hooked into every writer that
-    could change it (a price set, a provider added, a discovery tick): the
-    build is one catalog read, and a spelling that lags a minute behind a
-    change is a far smaller hazard than one hook missed.
+    Rebuilt on a short fixed interval, so a writer nothing hooks (a price set,
+    a discovery tick) lags at most a minute. The hosted-provider routes also
+    rebuild once their write commits, since an operator who switches a model on
+    sends a request by its catalog id next.
 
     ``resolve_model_provider`` hands each tick the hosted port for its session
     and Unit of Work, the way a request resolves it; the composition root is

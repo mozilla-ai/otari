@@ -17,6 +17,9 @@ Create one budget per feature in **Spend & budgets**, as in
 - `end-user-budget-ai`, $0.10 a day
 - `end-user-budget-memories`, with its own limit
 
+A budget's id, which the end-user API takes as `budget_id`, is in the **ID**
+column of **Spend & budgets**, with a button to copy it.
+
 Each end user gets a copy of the budget it starts on: the full limit and its own
 reset period. An organization's budget can limit spend, tokens and requests per
 period, but not requests or tokens per minute.
@@ -26,9 +29,9 @@ cannot be deleted.
 
 ## 2. Create the service key
 
-1. Open **API keys** and click **Create key**.
+1. Open **API keys** and click **Create API key**.
 2. Enter a **Name**, such as `mlpa`.
-3. Click **Advanced** and tick **Service key**.
+3. Click **More options** and tick **Service key**.
 4. Pick the **Budget for each end user**: every new end user starts on its own
    copy of it. Picking **None** leaves new end users uncapped, limited only by
    the key's own ceiling.
@@ -36,7 +39,11 @@ cannot be deleted.
    names in the `Otari-End-User-Budget` header instead.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
-7. Click **Create key** and copy the key.
+7. To manage end users with the key (step 4), check the scopes it needs in the
+   **End users** group under **Access** → **Advanced scopes**. With only **Call models** checked, the
+   key makes model calls for its end users but cannot list, change or delete
+   them.
+8. Click **Create API key** and copy the key.
 
 The key belongs to the organization, not to you:
 
@@ -53,6 +60,12 @@ spend of all its end users together, give the key its own spend ceiling (see
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
 [OpenAPI specification](public/openapi.json).
+
+A service key created without naming scopes can make model calls for its end
+users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
+the `end-users` [scopes](api-keys.md#scopes). Give the key only those it uses.
+Most services need `end-users:read` and `end-users:write`; `end-users:delete`
+also erases an end user's records, so leave it off a key that never deletes.
 
 ## 3. Name the end user on each request
 
@@ -86,7 +99,9 @@ A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
 End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
-`/v1/search`, `/v1/fetch` and `/v1/code/execute`. On those endpoints, a request
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`, and on `/v1/files`, where the
+file belongs to the end user ([Who can see an uploaded file](files.md#who-can-see-an-uploaded-file)).
+On the first six, a request
 that sends `Otari-End-User-Budget` without naming an end user, or sends it on a
 key that is not a service key, is refused with `400`
 (`end_user_budget_without_end_user`), since there is no end user for the budget
@@ -172,13 +187,20 @@ guests), keep separate caps:
   a place, and is refused when the key is full.
 - A key that assigns no budget counts every end user of its user.
 
-The cap holds across replicas.
+The cap holds across replicas. To see it coming, open the key's **End users**
+in **API keys**, which shows how many end users the cap counts against it, or
+read `end_users` from `GET /api/v1/key/budget` with the key itself, for example
+`{"count": 19, "max_end_users": 20}`.
 
 ## End-user routes
 
-All of these take only the service key. Another API key, the master key and a
-dashboard session are refused, and so is a service key whose own user is blocked
-or deleted.
+All of these take only the service key, holding the `end-users` scope each
+route names below. Another API key, the master key and a dashboard session are
+refused, and so is a service key whose own user is blocked or deleted.
+
+- `GET` routes need `end-users:read`.
+- `PUT` and `PATCH` routes need `end-users:write`.
+- `DELETE` routes need `end-users:delete`.
 
 | Request | Does |
 |---|---|

@@ -140,6 +140,41 @@ export interface paths {
         patch: operations["admin-update_deployment_user"];
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/bootstrap-operator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand Over Bootstrap Operator
+         * @description Make another operator the deployment's bootstrap operator.
+         *
+         *     The bootstrap operator is the account the master key acts as: master-key sign-in
+         *     and requests carrying the master key resolve to it, and it cannot be deactivated or
+         *     lose operator access. Only the current bootstrap operator, or a request carrying the
+         *     master key, may hand the role on, and from a dashboard session it takes the caller's
+         *     ``current_password``. The previous bootstrap operator stays an operator, which the new
+         *     one may remove afterwards.
+         *
+         *     Refused with 400 when the caller is another operator, when the current password is
+         *     missing or wrong, for a session whose account has no password, and for a target that
+         *     is the caller, deactivated, not an operator, or without an unblocked email address the
+         *     owner proved rather than one an organization recorded, and a password.
+         *
+         *     The master key keeps working and now acts as the new bootstrap operator, including
+         *     resetting their password, so rotate it when whoever held it should no longer.
+         */
+        post: operations["admin-hand_over_bootstrap_operator"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/password-link": {
         parameters: {
             query?: never;
@@ -156,12 +191,13 @@ export interface paths {
          *     Where this deployment can mail links, the link goes to the account's address and is not returned, the
          *     same as "Forgot your password?". Where it cannot, or the send fails, the response carries the link for
          *     you to pass on, which is how a member who forgot their password gets back in on a deployment without
-         *     mail. A password chosen through a link that was not mailed records the address as vouched for rather
-         *     than proven. A new link replaces any earlier reset link for the account.
+         *     mail. A password chosen through a link that was not mailed leaves the address verified rather
+         *     than proved. A new link replaces any earlier reset link for the account.
          *
          *     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
          *     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
-         *     disabled, an unverified address no organization still has as a member or invitee.
+         *     disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
+         *     account is refused too unless the request carries the master key.
          */
         post: operations["admin-issue_password_link"];
         delete?: never;
@@ -386,6 +422,34 @@ export interface paths {
          */
         post: operations["audio-create_transcription"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Account
+         * @description Delete the caller's account and sign them out.
+         *
+         *     Erases the account's sign-in identity, sessions, passkeys, Playground
+         *     conversations, agent traces, telemetry, files and keys. Usage rows are
+         *     kept for the deployment's totals under a new id that does not identify
+         *     the person, and an organization nobody else is active in is renamed, its
+         *     keys revoked and its stored credentials cleared. Invitations to the
+         *     account's address are withdrawn everywhere. Refused while the account is the last active owner of
+         *     an organization other people are active in.
+         */
+        delete: operations["auth-delete_own_account"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1284,9 +1348,56 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days.
+         *     each over the last 30 days, and how fast each answered it over the last 7, and
+         *     so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Catalog Providers
+         * @description The provider instances offering a model this caller may use, with each one's policy links.
+         *
+         *     Read from the same grouped catalog as ``GET /catalog/models``, so a provider
+         *     is listed exactly when that listing shows one of its models.
+         */
+        get: operations["catalog-list_catalog_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Provider
+         * @description One provider instance and a page of the models it offers this caller, at the caller's rates.
+         *
+         *     An instance offering the caller nothing answers 404, the same as one that
+         *     does not exist, so the route cannot be used to probe for a restricted provider.
+         */
+        get: operations["catalog-get_catalog_provider"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2145,7 +2256,9 @@ export interface paths {
          * Reencrypt Hosted Providers
          * @description Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
          *
-         *     Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/search-tools/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``.
          *     A provider no configured key reads is left as it is, to be re-entered.
          */
         post: operations["hosted-providers-reencrypt_hosted_providers"];
@@ -2244,6 +2357,9 @@ export interface paths {
         /**
          * List Hosted Models
          * @description List the models offered on one provider, with the price each currently serves at.
+         *
+         *     ``search`` matches a model's name or its vendor. ``vendors`` counts each vendor's models
+         *     across the whole provider, whatever the list was narrowed to, with the vendor's own switch.
          */
         get: operations["hosted-providers-list_hosted_models"];
         put?: never;
@@ -2285,6 +2401,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hosted-providers/{provider}/models/reset-prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Hosted Model Prices
+         * @description Put models priced by an operator back on the default price, or preview it with ``dry_run``.
+         *
+         *     The default is models.dev's price, or the one the provider's own listing names. A model the
+         *     default does not price keeps its price. Requests already billed keep the cost they were billed at.
+         */
+        post: operations["hosted-providers-reset_hosted_model_prices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Hosted Vendor Models
+         * @description Switch every model of one vendor on or off at once.
+         *
+         *     Switching on serves only the models that have a price; the rest stay off and are counted
+         *     as skipped. ``only_unpriced`` with switching off withholds only the models served without a price.
+         */
+        post: operations["hosted-providers-switch_hosted_vendor_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/hosted-providers/{provider}/models/{model_id}": {
         parameters: {
             query?: never;
@@ -2307,6 +2469,81 @@ export interface paths {
          * @description Reprice one offered model, toggle whether it is served, or both.
          */
         patch: operations["hosted-providers-update_hosted_model"];
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Hosted Provider Region
+         * @description Add a region the provider serves from, after its others, and answer the provider.
+         *
+         *     The first region added keeps the provider's own connection as a region
+         *     ahead of it, so what was served keeps being served. A request to the
+         *     provider is served by the first enabled region whose countries admit it,
+         *     and ``<provider>@<slug>:<model>`` pins one. A provider defined in
+         *     configuration answers 409.
+         */
+        post: operations["hosted-providers-add_hosted_provider_region"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/regions/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Hosted Provider Region
+         * @description Remove one region, and answer the provider.
+         *
+         *     Removing the last region leaves the provider serving from its own connection.
+         */
+        delete: operations["hosted-providers-remove_hosted_provider_region"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Provider Region
+         * @description Change, switch off or move one region, and answer the provider.
+         */
+        patch: operations["hosted-providers-update_hosted_provider_region"];
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/vendors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Vendor
+         * @description Switch one vendor on or off on a provider.
+         *
+         *     Off withholds every model of the vendor, including models a later refresh offers, and keeps
+         *     each model's own switch, which applies again once the vendor is switched back on.
+         */
+        patch: operations["hosted-providers-update_hosted_vendor"];
         trace?: never;
     };
     "/api/v1/images/edits": {
@@ -2433,7 +2670,8 @@ export interface paths {
          *     requests in flight. A period that has ended reads as the fresh one the next
          *     request starts. ``remaining_usd`` is the least any cap on every provider
          *     leaves, which is what a request can still spend before a 403. Caps shared with
-         *     the rest of the workspace or organization report only what they leave.
+         *     the rest of the workspace or organization report only what they leave. On a
+         *     service key, ``end_users`` counts its end users against its ``max_end_users``.
          */
         get: operations["key-get_key_budget"];
         put?: never;
@@ -2481,7 +2719,8 @@ export interface paths {
          *     The same summary as ``GET /api/v1/usage/summary``, over the rows this key
          *     wrote alone: the same bounded window (default last 30 days), breakdowns, tag
          *     filters and ``group_by_tag``. Tag a request with ``metadata`` and pass
-         *     ``group_by_tag`` to read what each kind of request cost.
+         *     ``group_by_tag`` to read what each kind of request cost. The key's own user
+         *     is listed in ``by_user`` without a ``label``.
          */
         get: operations["key-get_key_usage_summary"];
         put?: never;
@@ -2564,6 +2803,26 @@ export interface paths {
          *     Requires master key authentication.
          */
         patch: operations["keys-update_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User Count
+         * @description How many end users a service key's ``max_end_users`` counts, and the cap itself.
+         */
+        get: operations["keys-get_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/keys/{key_id}/end-users": {
@@ -2719,6 +2978,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp-catalog/popular": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Popular Mcp Servers
+         * @description Well-known remote MCP servers, from a list bundled with Otari, that the catalog holds now.
+         *
+         *     Each is matched to the catalog by its URL, so the list is empty until a sync has run.
+         */
+        get: operations["mcp-catalog-list_popular_mcp_servers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Mcp Catalog
+         * @description Search the catalog of remote MCP servers, or page through all of it with no `q`.
+         *
+         *     A title that starts with `q` comes first, then a title that contains it, then a
+         *     match in the name or description alone; within each, a server whose
+         *     `publisher_kind` is `vendor` comes first. The catalog is
+         *     empty until a sync has run, and stays empty on a deployment whose
+         *     `mcp_catalog_sync` is `off`. Listing a server here permits nothing: a
+         *     workspace reaches a server only once it is added to that workspace.
+         */
+        get: operations["mcp-catalog-search_mcp_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Catalog Sync
+         * @description Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.
+         */
+        get: operations["mcp-catalog-get_mcp_catalog_sync"];
+        put?: never;
+        /**
+         * Request Mcp Catalog Sync
+         * @description Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.
+         *
+         *     An operator may always ask. Anyone else names a `workspace_id` they may add MCP
+         *     servers to, and waits out `next_request_at` after the last sync: an hour after
+         *     a complete one, five minutes after any other. A sync already running or asked
+         *     for is left to finish, and this request returns its status.
+         */
+        post: operations["mcp-catalog-request_mcp_catalog_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-connections/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Mcp Connection
+         * @description Finish a sign-in to a per-user MCP server, from the code its authorization server returned.
+         *
+         *     The dashboard calls this from the page the callback lands on. The state
+         *     is consumed whatever happens next, so it finishes one sign-in at most, and
+         *     it must be one the caller started: another person's is refused with a 400.
+         *     Send the redirect's `iss` too when it had one: an answer naming another
+         *     authorization server is refused (RFC 9207).
+         */
+        post: operations["mcp-connections-complete_mcp_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/execute": {
         parameters: {
             query?: never;
@@ -2766,6 +3129,12 @@ export interface paths {
          *     owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
          *     (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
          *     the token are never returned. A master key has no workspace and is refused with a 404.
+         *
+         *     A server that sends each user's own credential is listed with `sign_in_required` true until this
+         *     key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool
+         *     discovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the
+         *     same `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot
+         *     sign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.
          */
         get: operations["mcp-list_mcp_servers"];
         put?: never;
@@ -2920,7 +3289,10 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate. A value nobody knows is omitted rather than sent as null.
+         *     caller's own rate; a token limit that offering does not know is the smallest
+         *     the model's other offerings report, and an output limit filled that way is
+         *     capped at the entry's context window. A value nobody knows is omitted rather
+         *     than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
@@ -3174,6 +3546,33 @@ export interface paths {
          *     Every refusal of the identity token answers 401 ``invalid_grant`` with the same description.
          */
         post: operations["oauth-exchange_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization-provider-keys/reencrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reencrypt Org Provider Keys
+         * @description Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
+         *
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
+         *     encrypted values: the provider API key, the stored client arguments and the
+         *     endpoint credential. A key holding one no configured secret reads is left
+         *     as it is and counted, to be re-entered.
+         */
+        post: operations["provider-keys-reencrypt_org_provider_keys"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3747,6 +4146,28 @@ export interface paths {
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
     };
+    "/api/v1/organizations/me/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Key End User Count
+         * @description How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+         *
+         *     The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+         */
+        get: operations["organization-keys-get_own_key_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys/{key_id}/end-users": {
         parameters: {
             query?: never;
@@ -4147,9 +4568,11 @@ export interface paths {
          * @description Accept an invitation addressed to the caller, resolving it to an active membership.
          *
          *     Does the same work as ``POST /api/v1/invitations/accept``, including the
-         *     workspace assignments parked at invite time, and answers the same shape.
-         *     Addressed by membership id rather than by token: the caller is already the
-         *     addressee, so a token would add nothing their session does not carry.
+         *     workspace assignments parked at invite time. Addressed by membership id
+         *     rather than by token: the caller is already the addressee, so a token would
+         *     add nothing their session does not carry. It answers the membership alone,
+         *     because the next step that route carries is for a visitor whose only
+         *     credential is a link.
          *
          *     Idempotent for any membership the caller already holds ``active``, which is
          *     what two clicks before the list refreshes produces: it answers that
@@ -4805,6 +5228,37 @@ export interface paths {
          *     Refused with 404 when the organization has not saved a connection yet.
          */
         post: operations["organization-sso-test_organization_sso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/subagent-savings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Subagent Savings
+         * @description What the subagent router saved, within what the caller's membership lets them see.
+         *
+         *     Each recommendation records the model the subagent would have started on
+         *     without it: the model the caller asked for, else the parent's. When the
+         *     harness reports what the subagent consumed, those tokens are priced at the
+         *     models it ran on and at that baseline. The saving is the difference, less
+         *     what the recommendations themselves cost, so it can be negative.
+         *
+         *     The costs count only the outcomes priced on both sides. `router_cost`
+         *     counts every recommendation in the window, also one whose subagent was
+         *     never reported or could not be priced. The figures are estimates unless
+         *     counted under `measured`. With no dates, the last 30 days.
+         */
+        get: operations["organization-usage-read_subagent_savings"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6147,6 +6601,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Report Subagent Outcome
+         * @description Report what the subagent a recommendation started has consumed.
+         *
+         *     The harness sends the token counts it holds for the subagent, one line per
+         *     model it ran on, as running totals: each report replaces the one before
+         *     it. The gateway prices those tokens twice, at the models named and at the
+         *     model the subagent would have started on without the recommendation, and
+         *     keeps both amounts as an estimate. No content is sent, nothing is charged
+         *     and no usage row is written.
+         *
+         *     Authentication modes:
+         *     - Master key: any decision.
+         *     - API key: a decision made for the key's own user in the key's workspace.
+         */
+        put: operations["routing-report_subagent_outcome"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -6248,7 +6733,8 @@ export interface paths {
          *     among the request's own `candidates` for pi; a bootstrap may bind a
          *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
-         *     and its probability for each candidate.
+         *     and its probability for each candidate. `decision_id` names the record of
+         *     this answer, and is absent where the record could not be kept.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -6397,7 +6883,8 @@ export interface paths {
          *     The tool is taken from ``search_tool_name``, which may be omitted when the
          *     deployment's ``web_search_default_tool`` names one, or when exactly one
          *     tool is configured. Such a call runs on the workspace's organization search
-         *     key when it has one.
+         *     key when it has one. A deployment with no search tool serves the backend its
+         *     legacy search settings describe, named after its provider.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -6529,8 +7016,9 @@ export interface paths {
          * Reencrypt Stored Search Tool Keys
          * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
          *
-         *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
-         *     alongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be
+         *     Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+         *     ``POST /api/v1/hosted-providers/reencrypt`` and
+         *     ``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be
          *     decrypted are left untouched and must be recovered by replacing the affected
          *     tool's key.
          */
@@ -7049,7 +7537,8 @@ export interface paths {
          *     unavailable, and so is a tool that runs on the deployment's account while
          *     the key's organization has no funds. Every other `tools[]` entry, including
          *     provider-native keywords not listed here, is forwarded to the upstream
-         *     provider untouched.
+         *     provider untouched. Web search and web fetch also say whether their direct
+         *     endpoints would run a call from this caller.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -7927,6 +8416,222 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Mcp Connections
+         * @description List the caller's own connections to this workspace's MCP servers.
+         *
+         *     A connection is the caller's sign-in to a server whose `credential_mode`
+         *     is `per_user`. Any member who can see the workspace may call this, oldest
+         *     connection first; `count` is the total. Tokens are never included.
+         */
+        get: operations["mcp-connections-list_my_mcp_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Mcp Connection
+         * @description Start the caller's own sign-in to a per-user MCP server.
+         *
+         *     Returns the server's authorization page to send the browser to. Otari
+         *     discovers the server's authorization server, registers itself as a client
+         *     where the server holds no client ID, and uses the authorization code flow
+         *     with S256 PKCE. The sign-in is bound to the caller: it finishes only in
+         *     their own dashboard session, once, within 30 minutes. The connection then
+         *     belongs to the caller's user, so every key they own in this workspace
+         *     reaches the server as them.
+         *
+         *     Any member who can see the workspace may call this. A server in `shared`
+         *     mode is refused with a 409, and a deployment with no `public_base_url`
+         *     with a 400, because the address the authorization server returns to is
+         *     derived from it.
+         */
+        post: operations["mcp-connections-start_mcp_connection"];
+        /**
+         * End My Mcp Connection
+         * @description End the caller's own connection to an MCP server.
+         *
+         *     The stored tokens are deleted, and the authorization server is asked to
+         *     revoke them where it publishes a revocation endpoint. The caller's keys
+         *     then get `mcp_sign_in_required` from this server until they sign in again.
+         */
+        delete: operations["mcp-connections-end_my_mcp_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Requests
+         * @description The workspace's pending requests, one entry per catalog server, the longest-waiting first.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Each entry names the first five
+         *     who asked, with their notes, and `requester_count` says how many asked in all; the
+         *     `requesters` list pages through the rest. Each also carries the catalog's entry for the server
+         *     as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
+         *     requests wait in all, and `server_count` how many servers they ask for.
+         */
+        get: operations["mcp-servers-list_mcp_server_requests"];
+        put?: never;
+        /**
+         * Request Mcp Server
+         * @description Ask the workspace's owners and admins to add a server the MCP catalog lists.
+         *
+         *     Any member who can see the workspace, a viewer included. The request keeps the title and URL
+         *     the catalog gives the server now. Where this deployment can send mail, the workspace's owners
+         *     and admins and its organization's are told, at most 20 of them; otherwise they find the
+         *     request on the MCP servers page. A caller holds one pending request per server.
+         */
+        post: operations["mcp-servers-request_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Mcp Server Requests
+         * @description Decline every pending request for one catalog server.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Each requester sees the
+         *     `reason`, and is mailed it where this deployment can send mail. To approve instead, add the
+         *     server to the workspace: storing a server at the requested URL approves every pending request
+         *     for it.
+         */
+        post: operations["mcp-servers-decline_mcp_server_requests"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Mcp Server Requests
+         * @description The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.
+         *
+         *     Any member who can see the workspace. Pending requests come first, then the answers, each
+         *     newest first, so a first page of 10 or more holds every pending one. An answer, approved or
+         *     declined, is listed until the caller acknowledges it. A declined request also leaves the list
+         *     when the caller asks for the server again or the server is added, and an approved one when its
+         *     server is deleted.
+         */
+        get: operations["mcp-servers-list_my_mcp_server_requests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Requesters
+         * @description Everyone waiting for one catalog server, a page at a time, the earliest first.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. For a server whose entry in the
+         *     list above names fewer requesters than its `requester_count`.
+         */
+        get: operations["mcp-servers-list_mcp_server_requesters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw Mcp Server Request
+         * @description Withdraw one of the caller's own pending requests. Someone else's request is a 404.
+         */
+        delete: operations["mcp-servers-withdraw_mcp_server_request"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Mcp Server Request
+         * @description Record that the caller has seen the answer to one of their own requests, so it is no longer listed for them.
+         *
+         *     Repeating it changes nothing. Someone else's request is a 404.
+         */
+        post: operations["mcp-servers-acknowledge_mcp_server_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7981,8 +8686,10 @@ export interface paths {
          *
          *     What a form's Test button calls before it saves. Answers with what a stored
          *     server's `health` would say, and records nothing. Pass `server_id` and omit
-         *     `authorization_token` to test with that server's stored token. The URL is
-         *     checked for SSRF safety first, with the same 400 a create gets.
+         *     `authorization_token` to test with that server's stored credential, which is
+         *     only sent to a URL on that server's own origin (scheme, host and port): any
+         *     other is a 400. The URL is checked for SSRF safety first, with the same 400
+         *     a create gets.
          */
         post: operations["mcp-servers-check_workspace_mcp_server_connection"];
         delete?: never;
@@ -8009,6 +8716,31 @@ export interface paths {
          *     ceiling. A key of another workspace is answered with a 404.
          */
         get: operations["mcp-servers-get_workspace_mcp_key_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/logos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Mcp Server Logos
+         * @description The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.
+         *
+         *     Paged as the server list is, oldest server first. Readable by any member who can
+         *     see the workspace, as the servers are. A logo is an admin's upload, else the
+         *     catalog's for the server's URL, else one the gateway found on the server's host.
+         *     Listing them makes the gateway fetch nothing.
+         */
+        get: operations["mcp-servers-list_workspace_mcp_server_logos"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8173,10 +8905,176 @@ export interface paths {
          *     Opens one session, lists the server's tools, and stores the outcome as
          *     `health`. A server that fails is still a 200, with `health.status` set to
          *     `failing`. A 429 means every check slot on this gateway was busy and
-         *     nothing was recorded.
+         *     nothing was recorded. A per-user server holds no token to check with and
+         *     is refused with a 409: start its check with `POST .../check/sign-in`.
          */
         post: operations["mcp-servers-check_workspace_mcp_server"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Workspace Mcp Server Check Sign In
+         * @description Start a sign-in made only to check a per-user server. Organization or workspace owners/admins.
+         *
+         *     Returns the authorization page to send the browser to, as starting a connection does. The
+         *     caller signs in with any account; finishing the sign-in (`POST /mcp-connections/complete`)
+         *     lists the server's tools once with the token it returns, stores the outcome as `health`, and
+         *     drops the token, revoking it where the authorization server allows. No connection is created,
+         *     and the caller's own connection, if they have one, is left as it was. A server in `shared` mode
+         *     is refused with a 409.
+         */
+        post: operations["mcp-servers-start_workspace_mcp_server_check_sign_in"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Connections
+         * @description List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Each entry names the user the connection belongs to and, when that user
+         *     is a dashboard account, its email and name: the caller's own connection
+         *     first, then the rest oldest first.
+         *     `count` is the total. Tokens are never included.
+         */
+        get: operations["mcp-connections-list_mcp_server_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Mcp Server Connection
+         * @description End one user's connection to an MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The stored tokens are deleted and the authorization server is asked to
+         *     revoke them. That user's keys get `mcp_sign_in_required` from this server
+         *     until they sign in again.
+         */
+        delete: operations["mcp-connections-remove_mcp_server_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workspace Mcp Server Logo
+         * @description Set how a server's logo shows: the tile choice, and an uploaded PNG in place of its own logo.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. The upload is kept
+         *     apart from the logo the gateway fetches, so no fetch or catalog sync replaces it.
+         */
+        put: operations["mcp-servers-set_workspace_mcp_server_logo"];
+        post?: never;
+        /**
+         * Remove Workspace Mcp Server Logo
+         * @description Remove a server's uploaded logo, so it shows its own again. The tile choice stays.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         */
+        delete: operations["mcp-servers-remove_workspace_mcp_server_logo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/my-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Workspace Mcp Server Tools
+         * @description The tools the caller may use on a server. Any member who can see the workspace.
+         *
+         *     Applies the caller's own rule: their user's grant, else the server's `everyone_tools`, within
+         *     its `allowed_tools`; a disabled server admits nothing. The tool list comes from the server's
+         *     last passing check; where there is none and the server is per-user, it is listed with the
+         *     caller's own connection and not stored. `known` is false when neither is available.
+         */
+        get: operations["mcp-servers-get_my_workspace_mcp_server_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Workspace Mcp Server Shared Sign In
+         * @description Start a sign-in for everyone, to a shared server. Organization or workspace owners/admins.
+         *
+         *     Returns the authorization page to send the browser to, as starting a connection does. The
+         *     caller signs in with the account the whole workspace should act as, so a service account is
+         *     the better choice. Finishing the sign-in (`POST /mcp-connections/complete`) stores that
+         *     account as the server's `shared_account`: every caller's call then carries its token, which
+         *     Otari renews as it does a user's own, and a stored `authorization_token` is removed. A server
+         *     in `per_user` mode is refused with a 409.
+         */
+        post: operations["mcp-servers-start_workspace_mcp_server_shared_sign_in"];
+        /**
+         * End Workspace Mcp Server Shared Account
+         * @description End a shared server's account. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The stored tokens are deleted, and the authorization server is asked to revoke them where it
+         *     publishes a revocation endpoint. The server is then checked again with no credential, and
+         *     comes back with `needs_setup` when it asks for one. A server with no shared account is a 404.
+         */
+        delete: operations["mcp-servers-end_workspace_mcp_server_shared_account"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8727,7 +9625,7 @@ export interface components {
             full_name?: string | null;
             /**
              * Password
-             * @description Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
+             * @description Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
              */
             password?: string | null;
             /**
@@ -8741,40 +9639,32 @@ export interface components {
         };
         /**
          * AcceptInvitationResultPublic
-         * @description What accepting produces: enough for the accept page to say where the visitor landed.
+         * @description What accepting through the link produced, and what it leaves the invitee to do.
          *
-         *     No session and no token. When the request carried a password, the identity
-         *     can sign in straight away; otherwise it stays password-less until claimed by
-         *     signup or a provider sign-in.
+         *     No session and no token: ``next_step`` is the whole of what comes next.
          */
         AcceptInvitationResultPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.
-             * @default true
-             */
-            can_sign_in: boolean;
+            /** @description What the invited address does now that it has accepted. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
-            /**
-             * Password Set
-             * @description Whether this accept set the identity's password.
-             * @default false
-             */
-            password_set: boolean;
             /** Role */
             role: string;
             /**
-             * Verification Pending
-             * @description Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.
-             * @default false
-             */
-            verification_pending: boolean;
-            /**
              * Ways In
-             * @description When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.
+             * @description What this deployment offers instead, where next_step names them, as the preview's ways_in says.
              */
-            ways_in?: ("provider" | "password_reset")[];
+            ways_in: ("provider" | "password_reset")[];
+        };
+        /**
+         * AcceptedMembershipPublic
+         * @description The membership an accepted invitation produced.
+         */
+        AcceptedMembershipPublic: {
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
         };
         /**
          * AcceptedSnapshotResponse
@@ -8854,6 +9744,18 @@ export interface components {
              * @enum {string}
              */
             status: "success" | "failed";
+        };
+        /**
+         * ActivationIssuedKeyPublic
+         * @description The setup key the guide already issued, identified as the Keys page lists it. Never its plaintext.
+         */
+        ActivationIssuedKeyPublic: {
+            /** Key Id */
+            key_id: string;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
         };
         /**
          * ActiveOrganizationMemberCreateRequest
@@ -9003,6 +9905,7 @@ export interface components {
          * AgentModelRecommendation
          * @description The model recommended for the subagent.
          * @example {
+         *       "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
          *       "model": "sonnet",
          *       "probabilities": {
          *         "haiku": 0.21,
@@ -9013,6 +9916,11 @@ export interface components {
          *     }
          */
         AgentModelRecommendation: {
+            /**
+             * Decision Id
+             * @description The gateway's record of this recommendation. Absent where the record could not be kept.
+             */
+            decision_id?: string | null;
             /**
              * Model
              * @description A model alias or id the harness can start the subagent on.
@@ -9136,7 +10044,7 @@ export interface components {
             output_price_per_million: number;
             /**
              * Provider
-             * @description The decision provider: typesafe, openrouter or llamacpp.
+             * @description The decision provider: typesafe, openrouter, gemini or llamacpp.
              */
             provider: string;
         };
@@ -9694,6 +10602,18 @@ export interface components {
              * @constant
              */
             code_challenge_method: "S256";
+            /**
+             * Expiration
+             * @description How long the key lives once it is issued.
+             * @default never
+             * @enum {string}
+             */
+            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year" | "never";
+            /**
+             * Limit
+             * @description The key's spending limit in USD over its whole life. Null sets none.
+             */
+            limit?: number | string | null;
             /** Redirect Uri */
             redirect_uri: string;
             /**
@@ -9702,6 +10622,11 @@ export interface components {
              * @constant
              */
             response_type: "code";
+            /**
+             * Scopes
+             * @description The scopes the consent screen showed. The key holds these and what the registration still names, so one added since the screen was drawn is left out and one removed since takes effect.
+             */
+            scopes: components["schemas"]["KeyScope"][];
             /** State */
             state: string;
             /**
@@ -9715,7 +10640,10 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppDetails */
+        /**
+         * AppDetails
+         * @description What the consent screen shows about an app before a person approves it.
+         */
         AppDetails: {
             /** Issuer */
             issuer: string;
@@ -9723,6 +10651,21 @@ export interface components {
             name: string;
             /** Redirect Uri */
             redirect_uri: string;
+            /**
+             * Scopes
+             * @description The scopes each key this app is issued will hold, from its registration.
+             */
+            scopes: components["schemas"]["KeyScope"][];
+            /**
+             * Spend Limits
+             * @description Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.
+             */
+            spend_limits: boolean;
+            /**
+             * Verified
+             * @description Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.
+             */
+            verified: boolean;
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {
@@ -9750,10 +10693,23 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppTokenResponse */
+        /**
+         * AppTokenResponse
+         * @description A minted app key, as RFC 6749 section 5.1 shapes it.
+         */
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Manage Url
+             * @description The absolute URL of the page where the person sees this key, and revokes it.
+             */
+            manage_url: string;
+            /**
+             * Scope
+             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
+             */
+            scope: string;
             /**
              * Token Type
              * @default Bearer
@@ -10074,6 +11030,17 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["BlockedEmailPublic"][];
+        };
+        /**
+         * BootstrapHandoverRequest
+         * @description Hand the bootstrap operator role to another operator.
+         */
+        BootstrapHandoverRequest: {
+            /**
+             * Current Password
+             * @description The caller's own current password. Required from a dashboard session whose account has a password, and ignored with the master key, as when changing a password.
+             */
+            current_password?: string | null;
         };
         /**
          * BreakGlassCreate
@@ -10921,6 +11888,7 @@ export interface components {
              * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
+            speed_7d?: components["schemas"]["OfferingSpeedInfo"] | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
             /**
              * Zero Data Retention
@@ -10928,6 +11896,131 @@ export interface components {
              * @default false
              */
             zero_data_retention: boolean;
+        };
+        /**
+         * CatalogProviderDetail
+         * @description One provider instance and a page of the models it offers the caller, sorted by name.
+         */
+        CatalogProviderDetail: {
+            /**
+             * Display Name
+             * @description models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.
+             */
+            display_name: string;
+            /**
+             * Model Count
+             * @description Catalog models the caller may see that this instance offers.
+             */
+            model_count: number;
+            /**
+             * Models
+             * @description The requested page; `model_count` is the total.
+             */
+            models: components["schemas"]["CatalogProviderModel"][];
+            /**
+             * Name
+             * @description The instance name a selector starts with, such as `fireworks` or `openai-eu`.
+             */
+            name: string;
+            /**
+             * Privacy Url
+             * @description The provider's privacy policy; null where none is set.
+             */
+            privacy_url?: string | null;
+            /**
+             * Provider
+             * @description The any-llm implementation behind the instance.
+             */
+            provider: string;
+            /**
+             * Terms Url
+             * @description The provider's terms of service; null where none is set.
+             */
+            terms_url?: string | null;
+        };
+        /**
+         * CatalogProviderModel
+         * @description One catalog model as one provider instance offers it.
+         */
+        CatalogProviderModel: {
+            /**
+             * Context Length
+             * @description The largest context window this instance serves.
+             */
+            context_length?: number | null;
+            /**
+             * Id
+             * @description The catalog id, the one `GET /catalog/models/{id}` takes.
+             */
+            id: string;
+            /**
+             * Input Price
+             * @description This instance's input rate for the caller, in USD per million of `price_unit`, as the catalog's `min_input_price_per_million` is. The cheapest where the instance offers the model more than once.
+             */
+            input_price?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Output Price
+             * @description This instance's output rate for the caller, in the same unit as `input_price`.
+             */
+            output_price?: number | null;
+            /**
+             * Price Unit
+             * @description What the prices are per. Null where nothing on this instance prices the model.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            /** Vendor */
+            vendor: string | null;
+        };
+        /**
+         * CatalogProviderSummary
+         * @description One provider instance offering at least one model the caller may see.
+         */
+        CatalogProviderSummary: {
+            /**
+             * Display Name
+             * @description models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.
+             */
+            display_name: string;
+            /**
+             * Model Count
+             * @description Catalog models the caller may see that this instance offers.
+             */
+            model_count: number;
+            /**
+             * Name
+             * @description The instance name a selector starts with, such as `fireworks` or `openai-eu`.
+             */
+            name: string;
+            /**
+             * Privacy Url
+             * @description The provider's privacy policy; null where none is set.
+             */
+            privacy_url?: string | null;
+            /**
+             * Provider
+             * @description The any-llm implementation behind the instance.
+             */
+            provider: string;
+            /**
+             * Terms Url
+             * @description The provider's terms of service; null where none is set.
+             */
+            terms_url?: string | null;
+        };
+        /** CatalogProvidersResponse */
+        CatalogProvidersResponse: {
+            /**
+             * Count
+             * @description Providers the caller may see, before paging.
+             */
+            count: number;
+            /**
+             * Providers
+             * @description The requested page, sorted by display name.
+             */
+            providers: components["schemas"]["CatalogProviderSummary"][];
         };
         /**
          * CatalogResponse
@@ -11107,7 +12200,7 @@ export interface components {
          *     server said. The first two are decided before any connection is opened.
          * @enum {string}
          */
-        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed" | "sign_in_unsupported" | "sign_in_unavailable";
         /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
@@ -11679,6 +12772,11 @@ export interface components {
              */
             reject_user_mismatch?: boolean | null;
             /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
+            /**
              * User Id
              * @description Optional user ID to associate with this key
              */
@@ -11737,6 +12835,8 @@ export interface components {
             };
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
         };
@@ -11808,6 +12908,11 @@ export interface components {
              * @description Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.
              */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
             /**
              * Workspace Id
              * @description Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.
@@ -12165,6 +13270,26 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * DeleteAccountRequest
+         * @description The confirmation an account deletion needs.
+         * @example {
+         *       "confirm_email": "ada@example.com",
+         *       "current_password": "..."
+         *     }
+         */
+        DeleteAccountRequest: {
+            /**
+             * Confirm Email
+             * @description The account's email address, typed to confirm the deletion.
+             */
+            confirm_email: string;
+            /**
+             * Current Password
+             * @description The account's password. Required when the account has one.
+             */
+            current_password?: string | null;
+        };
+        /**
          * DeploymentAdminAccessPublic
          * @description Whether the caller may reach the deployment administration surface.
          *
@@ -12177,6 +13302,11 @@ export interface components {
         DeploymentAdminAccessPublic: {
             /** Granted */
             granted: boolean;
+            /**
+             * Is Bootstrap Operator
+             * @default false
+             */
+            is_bootstrap_operator: boolean;
         };
         /**
          * DeploymentBootstrap
@@ -12198,11 +13328,8 @@ export interface components {
              * @description Whether this deployment accepts deliberate feedback submissions.
              */
             feedback_enabled: boolean;
-            /**
-             * Mail Ready
-             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.
-             */
-            mail_ready: boolean;
+            /** @description How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature. */
+            mail: components["schemas"]["MailReadiness"];
             /**
              * Maintenance Mode
              * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.
@@ -12218,6 +13345,11 @@ export interface components {
              * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.
              */
             open_signup: boolean;
+            /**
+             * Organization Oidc Enabled
+             * @description Whether this deployment offers organizations their own OIDC sign-in connection (the organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen renders no option to continue through an organization's provider. Additive to sign_in_methods rather than part of it, the way oauth_providers is: whether a given address resolves to a connection is answered per address, not published here.
+             */
+            organization_oidc_enabled: boolean;
             /**
              * Passkeys Enabled
              * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so.
@@ -12742,6 +13874,71 @@ export interface components {
              */
             deleted: number;
         };
+        /**
+         * EndpointAuthMethod
+         * @description How the credential for one endpoint is produced.
+         * @enum {string}
+         */
+        EndpointAuthMethod: "static_header";
+        /**
+         * EndpointAuthPublic
+         * @description What an endpoint credential reports. Never carries the value, only its last four characters.
+         */
+        EndpointAuthPublic: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Header Name */
+            header_name: string;
+            /**
+             * Last4
+             * @description The last four characters of the stored value.
+             */
+            last4: string;
+            /** @description How the credential is produced. */
+            method: components["schemas"]["EndpointAuthMethod"];
+            /** @description How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request. */
+            state: components["schemas"]["EndpointAuthState"];
+        };
+        /**
+         * EndpointAuthRequest
+         * @description The credential an edge proxy in front of a key's base URL requires.
+         *
+         *     ``method`` is a closed set of ways to produce request headers. TLS client
+         *     authentication is not one of them: it is presented when the connection is
+         *     made, so it would be a field of its own rather than a method here.
+         */
+        EndpointAuthRequest: {
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.
+             */
+            expires_at: string;
+            /**
+             * Header Name
+             * @description The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.
+             */
+            header_name: string;
+            /** @description How the credential is produced. `static_header` sends one stored value as one header. */
+            method: components["schemas"]["EndpointAuthMethod"];
+            /**
+             * Secret
+             * @description The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.
+             */
+            secret?: string | null;
+        };
+        /**
+         * EndpointAuthState
+         * @description How a stored credential stands against its own expiry.
+         *
+         *     Reported so every reader draws the line in the same place. None of the
+         *     members refuses a request.
+         * @enum {string}
+         */
+        EndpointAuthState: "expired" | "expiring_soon" | "valid";
         /**
          * ExecutionState
          * @description Whether the remote tool may have run.
@@ -13379,11 +14576,11 @@ export interface components {
          *
          *     URL safety: when ``url`` is supplied it is validated by
          *     :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
-         *     time — the check does a DNS lookup that must be awaited) with the same
-         *     SSRF guard used for MCP server URLs (loopback allowed by default for
-         *     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
-         *     ``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely
-         *     on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
+         *     time, since the check does a DNS lookup that must be awaited) with the same
+         *     SSRF guard used for MCP server URLs: public addresses only, connected at the
+         *     address that was checked, with no redirect followed. Most deployments omit
+         *     ``url`` and rely on the operator-set ``OTARI_GUARDRAILS_URL`` instead, which
+         *     may be on a private address.
          */
         GuardrailConfig: {
             /** Credential */
@@ -13969,6 +15166,13 @@ export interface components {
          *     while it waits for a rate, ``operator`` when an operator switched it off,
          *     ``unavailable`` when its provider refused to serve it. ``type`` is the
          *     kind of model, from models.dev, and None when it does not know.
+         *     ``vendor`` is who makes the model, ``Other`` when nothing names one.
+         *     ``default_rates`` is what the default rung (models.dev, or the provider's
+         *     own listing) would price a model an operator priced, where it prices it
+         *     and the two differ; None otherwise. ``region_rates`` holds, by region slug,
+         *     the rates a region of the provider sets of its own (stored under
+         *     ``<provider>@<slug>:<model>`` through the pricing endpoint); a region
+         *     absent from it settles at the provider's rate.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -13980,6 +15184,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            default_rates?: components["schemas"]["HostedModelRates"] | null;
             /** Disabled Reason */
             disabled_reason?: ("unpriced" | "operator" | "unavailable") | null;
             /** Enabled */
@@ -13999,12 +15204,42 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults" | "provider") | null;
             /** Provider */
             provider: string;
+            /** Region Rates */
+            region_rates?: {
+                [key: string]: components["schemas"]["HostedModelRates"];
+            };
             /** Type */
             type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /** Unit */
             unit?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /** Vendor */
+            vendor?: string | null;
+        };
+        /**
+         * HostedModelRates
+         * @description The rates a hosted model is currently served at, and which rung of the deployment's ladder said so.
+         */
+        HostedModelRates: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "organization" | "deployment" | "defaults" | "provider";
+            /**
+             * Unit
+             * @default token
+             */
+            unit: string;
         };
         /**
          * HostedModelUpdateRequest
@@ -14050,6 +15285,8 @@ export interface components {
             type_counts?: {
                 [key: string]: number;
             };
+            /** Vendors */
+            vendors?: components["schemas"]["HostedVendorPublic"][];
         };
         /**
          * HostedModelsRefreshPublic
@@ -14075,6 +15312,61 @@ export interface components {
             repriced: string[];
         };
         /**
+         * HostedPriceResetChangePublic
+         * @description One model a reset covers: the rate an operator set, and the default rate it moves to.
+         */
+        HostedPriceResetChangePublic: {
+            current: components["schemas"]["HostedModelRates"];
+            default: components["schemas"]["HostedModelRates"];
+            /** Matches */
+            matches: boolean;
+            /** Model */
+            model: string;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedPriceResetPublic
+         * @description What a price reset changed, or would change on a dry run.
+         *
+         *     ``changes`` lists every operator-priced model the default rung prices,
+         *     ``matches`` marking one whose price is already the default; a price the
+         *     configuration stored is never listed. ``skipped_no_default`` names the
+         *     operator-priced models the default rung does not price, which keep their
+         *     price. ``applied`` is true only when a reset wrote something.
+         */
+        HostedPriceResetPublic: {
+            /** Applied */
+            applied: boolean;
+            /** Changes */
+            changes: components["schemas"]["HostedPriceResetChangePublic"][];
+            /** Skipped No Default */
+            skipped_no_default: string[];
+        };
+        /**
+         * HostedPriceResetRequest
+         * @description Put models an operator priced back on the default rate.
+         *
+         *     ``models`` names them; null means every model, narrowed to ``vendor``
+         *     when one is given. ``dry_run`` answers what a reset would change and
+         *     writes nothing.
+         * @example {
+         *       "dry_run": true,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedPriceResetRequest: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Models */
+            models?: string[] | null;
+            /** Vendor */
+            vendor?: string | null;
+        };
+        /**
          * HostedProviderCreateRequest
          * @description Configure a provider this deployment will serve hosted inference on.
          *
@@ -14094,8 +15386,14 @@ export interface components {
          *     whether or not something prices it. ``supported_countries`` keeps the
          *     provider to requests from those ISO country codes, checked as well as
          *     ``provider_supported_countries``; null serves every country.
+         *     ``data_location`` declares where the upstream keeps request data: an ISO
+         *     3166-1 alpha-2 country code, ``EU`` or ``GLOBAL``; null leaves it undeclared.
+         *     A workspace that lists the locations it accepts is served only from one of them.
          *     ``zero_data_retention`` declares that the upstream keeps no prompt or
          *     completion data; the catalog shows it and nothing enforces it.
+         *     ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
+         *     and privacy policy from the public Providers pages: absolute http(s)
+         *     addresses with no username or password.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -14110,6 +15408,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** Data Location */
+            data_location?: string | null;
             /**
              * Enabled
              * @default true
@@ -14117,6 +15417,8 @@ export interface components {
             enabled: boolean;
             /** Name */
             name?: string | null;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Provider */
             provider: string;
             /** Restricted To Organization Id */
@@ -14128,11 +15430,31 @@ export interface components {
             serves_unlisted_models: boolean;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /**
              * Zero Data Retention
              * @default false
              */
             zero_data_retention: boolean;
+        };
+        /**
+         * HostedProviderModelSummary
+         * @description How many models a hosted provider offers, how many it serves, and what holds the rest back.
+         *
+         *     ``serving`` counts a model switched on whose vendor is switched on too.
+         *     ``unpriced`` counts a model held off for want of a rate, and
+         *     ``vendors_off`` the vendors the provider does not serve.
+         */
+        HostedProviderModelSummary: {
+            /** Serving */
+            serving: number;
+            /** Total */
+            total: number;
+            /** Unpriced */
+            unpriced: number;
+            /** Vendors Off */
+            vendors_off: number;
         };
         /**
          * HostedProviderPublic
@@ -14156,7 +15478,12 @@ export interface components {
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
          *     does not list. ``supported_countries`` is null for one that serves every
          *     country. ``zero_data_retention`` is the operator's declaration that the
-         *     upstream keeps no prompt or completion data.
+         *     upstream keeps no prompt or completion data. ``terms_url`` and
+         *     ``privacy_url`` are the upstream's policies, null where none is linked.
+         *     ``data_location`` is where the upstream keeps request data, null where
+         *     nobody declared it. ``regions`` lists the regions it serves from, in the
+         *     order they are tried, and is empty for a provider that serves from its own
+         *     connection alone. ``models`` counts its offered models, on the list only.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -14169,6 +15496,8 @@ export interface components {
             } | null;
             /** Created At */
             created_at?: string | null;
+            /** Data Location */
+            data_location?: string | null;
             /**
              * Decryptable
              * @default true
@@ -14183,10 +15512,15 @@ export interface components {
             has_api_key: boolean;
             /** Id */
             id?: string | null;
+            models?: components["schemas"]["HostedProviderModelSummary"] | null;
             /** Name */
             name: string;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Provider */
             provider: string;
+            /** Regions */
+            regions?: components["schemas"]["HostedProviderRegionPublic"][];
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
             /**
@@ -14207,6 +15541,8 @@ export interface components {
             source: "database" | "config";
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /** Updated At */
             updated_at?: string | null;
             /**
@@ -14214,6 +15550,152 @@ export interface components {
              * @default false
              */
             zero_data_retention: boolean;
+        };
+        /**
+         * HostedProviderRegionCreateRequest
+         * @description Add a region a hosted provider serves from.
+         *
+         *     Only what differs from the provider is given; every field left out is the
+         *     provider's. ``slug`` pins the region in a selector
+         *     (``<provider>@<slug>:<model>``) and names it in every route. ``api_key``
+         *     left out uses the provider's key, which a region on another origin than
+         *     the provider's endpoint may not: it needs a key of its own there.
+         *     ``client_args`` are merged over the provider's on the provider's origin, so
+         *     a Bedrock region gives its ``region_name`` alone; a region on another
+         *     origin takes its own alone. An ``api_base`` that carries a key must be https.
+         *     ``data_location`` declares where the region keeps request data. Left out, it
+         *     copies the provider's declaration as it stands; null declares nothing. It is
+         *     the region's own from then on: a later change to the provider's does not
+         *     move it.
+         *
+         *     A request is served by the first enabled region whose countries admit it
+         *     and whose data location the workspace accepts; a pinned region is held to
+         *     the same filters. A provider with no regions yet serves from its own connection. Adding its
+         *     first region keeps that connection as a region of its own, ahead of the new
+         *     one, under ``primary_slug`` and ``primary_label``: by default the
+         *     provider's data location, or ``primary``.
+         * @example {
+         *       "api_base": "https://tokenhub-intl.example.com/v1",
+         *       "api_key": "<the region's key>",
+         *       "data_location": "SG",
+         *       "label": "Southeast Asia",
+         *       "slug": "sg"
+         *     }
+         */
+        HostedProviderRegionCreateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Data Location */
+            data_location?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Label */
+            label: string;
+            /** Primary Label */
+            primary_label?: string | null;
+            /** Primary Slug */
+            primary_slug?: string | null;
+            /** Slug */
+            slug: string;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
+        };
+        /**
+         * HostedProviderRegionPublic
+         * @description One region of a hosted provider, as stored: null wherever it uses the provider's value.
+         *
+         *     ``data_location`` is the exception: it is the region's own, and null there
+         *     means nothing is declared.
+         *
+         *     ``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``
+         *     is true for a region with a key of its own, known by its last four
+         *     characters; ``client_args`` holds only the region's own extras, masked as
+         *     the provider's are. ``decryptable`` is false for a region whose own key or
+         *     extras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until
+         *     re-entered.
+         */
+        HostedProviderRegionPublic: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key Last4 */
+            api_key_last4?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Data Location */
+            data_location?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Has Api Key
+             * @default false
+             */
+            has_api_key: boolean;
+            /** Label */
+            label: string;
+            /** Position */
+            position: number;
+            /** Selector */
+            selector: string;
+            /** Slug */
+            slug: string;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedProviderRegionUpdateRequest
+         * @description Change one region. A field left out is left alone.
+         *
+         *     Null puts a field the region inherits back on the provider's value:
+         *     ``api_key`` null returns the region to the provider's key, an empty
+         *     ``api_base`` or null to the provider's endpoint, and so on for
+         *     ``client_args`` and ``supported_countries``. ``data_location`` is the
+         *     region's own, so null declares nothing. Null on ``label``, ``enabled`` or
+         *     ``position`` changes nothing. ``client_args`` echoed
+         *     back with masked entries keeps the stored values. ``position`` moves the
+         *     region to that place in the order regions are tried, counted from 0.
+         * @example {
+         *       "enabled": false
+         *     }
+         */
+        HostedProviderRegionUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Data Location */
+            data_location?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Label */
+            label?: string | null;
+            /** Position */
+            position?: number | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderTestPublic
@@ -14278,7 +15760,8 @@ export interface components {
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
          *     restriction, null lifts it, and so does ``supported_countries``, where an
-         *     empty list closes the provider to every country.
+         *     empty list closes the provider to every country, and ``data_location``. ``terms_url`` and
+         *     ``privacy_url`` omitted are left alone; null or an empty string removes the link.
          * @example {
          *       "enabled": false
          *     }
@@ -14292,14 +15775,20 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** Data Location */
+            data_location?: string | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /** Zero Data Retention */
             zero_data_retention?: boolean | null;
         };
@@ -14328,6 +15817,89 @@ export interface components {
             skipped: number;
             /** Unreadable */
             unreadable: number;
+        };
+        /**
+         * HostedVendorModelsSwitchPublic
+         * @description What a vendor-wide switch did: how many models it changed, and how many it left off.
+         *
+         *     ``skipped_unpriced`` counts those left off for want of a rate, ``skipped_unavailable``
+         *     those the provider refused to serve, which an operator switches on one at a time.
+         */
+        HostedVendorModelsSwitchPublic: {
+            /** Changed */
+            changed: number;
+            /**
+             * Skipped Unavailable
+             * @default 0
+             */
+            skipped_unavailable: number;
+            /** Skipped Unpriced */
+            skipped_unpriced: number;
+        };
+        /**
+         * HostedVendorModelsSwitchRequest
+         * @description Set the switch of every model of one vendor at once.
+         *
+         *     ``enabled`` true serves each model that has a rate, and leaves one with
+         *     none off. ``only_unpriced`` with ``enabled`` false withholds only the
+         *     models served without a rate.
+         * @example {
+         *       "enabled": false,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedVendorModelsSwitchRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Only Unpriced
+             * @default false
+             */
+            only_unpriced: boolean;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedVendorPublic
+         * @description One vendor whose models a hosted provider offers, and what it serves of them.
+         *
+         *     ``enabled`` is the vendor's switch: off withholds every model of the
+         *     vendor, including ones offered later, and keeps each model's own switch.
+         *     The counts cover the whole provider, whatever the list was narrowed to:
+         *     ``serving`` the models served, ``unpriced`` those held off for want of a
+         *     rate, ``unavailable`` those the provider refused to serve, and
+         *     ``custom_differs`` those an operator priced where the default rate now
+         *     says something else.
+         */
+        HostedVendorPublic: {
+            /** Custom Differs */
+            custom_differs: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Serving */
+            serving: number;
+            /** Total */
+            total: number;
+            /** Unavailable */
+            unavailable: number;
+            /** Unpriced */
+            unpriced: number;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedVendorUpdateRequest
+         * @description Switch a vendor on or off on one hosted provider.
+         * @example {
+         *       "enabled": false,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedVendorUpdateRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /** Vendor */
+            vendor: string;
         };
         /**
          * Icon
@@ -14432,20 +16004,30 @@ export interface components {
             total: number;
         };
         /**
+         * InvitationNextStep
+         * @description What an invitee does to get in, as Otari decides it.
+         *
+         *     The members are exclusive and cover every pending invitation.
+         *     ``set_password`` means accepting may choose this address's first password.
+         *     ``sign_in`` means the address's credentials open a session.
+         *     ``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.
+         *     ``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.
+         *
+         *     NOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.
+         *     The other two leave it empty.
+         * @enum {string}
+         */
+        InvitationNextStep: "set_password" | "sign_in" | "use_another_way_in" | "verify_email";
+        /**
          * InvitationPreviewPublic
          * @description What an unauthenticated visitor sees before committing to accept.
          *
          *     Deliberately narrow: the address it was sent to, the organization's name,
-         *     and the role on offer. The token is the caller's only credential here, not
-         *     a session, so this carries nothing that identifies who sent it or any
-         *     other member.
+         *     the role on offer, and what to do next.
+         *     The token is the caller's only credential here, not a session, so this
+         *     carries nothing that identifies who sent it or any other member.
          */
         InvitationPreviewPublic: {
-            /**
-             * Can Sign In
-             * @description Whether the invited address can already sign in, with a password or through a provider.
-             */
-            can_sign_in: boolean;
             /** Email */
             email: string;
             /**
@@ -14453,18 +16035,15 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
-            /**
-             * Needs Password
-             * @description Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.
-             */
-            needs_password: boolean;
+            /** @description What the invited address does to get in. Accept refuses a password unless this is 'set_password'. */
+            next_step: components["schemas"]["InvitationNextStep"];
             /** Organization Name */
             organization_name: string;
             /** Role */
             role: string;
             /**
              * Ways In
-             * @description When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.
+             * @description What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with "Forgot your password?"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.
              */
             ways_in: ("provider" | "password_reset")[];
         };
@@ -14572,6 +16151,8 @@ export interface components {
              * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
              */
             budgets_enforced: boolean;
+            /** @description A service key's end users against its cap; null for any other key */
+            end_users?: components["schemas"]["KeyEndUsersPublic"] | null;
             /**
              * Limits
              * @description The key's user's budget first, then each spend ceiling, the most specific first
@@ -14582,6 +16163,22 @@ export interface components {
              * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
              */
             remaining_usd: number | null;
+        };
+        /**
+         * KeyEndUsersPublic
+         * @description How many end users a service key has, against its ``max_end_users``.
+         */
+        KeyEndUsersPublic: {
+            /**
+             * Count
+             * @description The live end users the cap counts: those on the budgets the key assigns, and those on none when the key has a list and no default. A key that assigns no budget counts every live end user of its user
+             */
+            count: number;
+            /**
+             * Max End Users
+             * @description The key's cap; null when it has none. A request naming a new end user is refused with end_user_limit_reached once count reaches it
+             */
+            max_end_users: number | null;
         };
         /**
          * KeyInfo
@@ -14636,6 +16233,8 @@ export interface components {
             operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
             /**
@@ -14697,6 +16296,16 @@ export interface components {
              */
             used_usd: number | null;
         };
+        /**
+         * KeyScope
+         * @description One group of endpoints an API key may be granted, named ``resource:action``.
+         *
+         *     Ordered by resource, not A-Z: the order is what a stored list is normalized
+         *     to and what the dashboard renders, and the end-user scopes come last because
+         *     only a service key may hold them.
+         * @enum {string}
+         */
+        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -14809,6 +16418,17 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * MailReadiness
+         * @description How far an email carrying a link back to this deployment gets.
+         *
+         *     The members are exclusive and cover every deployment.
+         *     ``none`` means no message is sent at all.
+         *     ``sends_only`` means a message is sent and no link the recipient can open reaches them.
+         *     ``delivers`` means the recipient's mailbox receives it.
+         * @enum {string}
+         */
+        MailReadiness: "none" | "sends_only" | "delivers";
+        /**
          * MailSettings
          * @description What this deployment can send, and what stands in the way if it cannot.
          */
@@ -14840,7 +16460,7 @@ export interface components {
             public_base_url: string | null;
             /**
              * Ready
-             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.
+             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.
              */
             ready: boolean;
             /**
@@ -14908,6 +16528,11 @@ export interface components {
              */
             description: string;
             /**
+             * Direct Available
+             * @description For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` naming no tool would be admitted for this caller: something is set up to run it, the workspace allows web access, the organization can pay for a call on the deployment's account, and for an API key, the key holds the `web:search` or `web:fetch` scope and its tool list allows the instance the call would run on. Pricing and budgets still apply to the call itself. It can differ from `available`, which is about declaring the tool in a model request. `null` for the other tools, which have no direct endpoint here.
+             */
+            direct_available?: boolean | null;
+            /**
              * Example
              * @description A ready-to-use `tools[]` entry.
              */
@@ -14939,6 +16564,287 @@ export interface components {
             reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
         };
         /**
+         * McpCatalogServerPublic
+         * @description One remote MCP server the catalog lists.
+         */
+        McpCatalogServerPublic: {
+            /** Description */
+            description: string | null;
+            /**
+             * Icon Url
+             * @description The https image the registry entry names as the server's icon, null when it names none.
+             */
+            icon_url: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Logo Tone
+             * @description Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both.
+             */
+            logo_tone: ("dark" | "light" | "tile") | null;
+            /**
+             * Logo Url
+             * @description Where this gateway serves the server's logo, which it fetched once and keeps. Null when it looked and found none. A URL without `v` has not been looked for yet, and asking for it starts the look.
+             */
+            logo_url: string | null;
+            /**
+             * Name
+             * @description The source's own identifier, such as `com.example/mcp`.
+             */
+            name: string;
+            /**
+             * Publisher Kind
+             * @description `vendor` when the server is its maker's own: the endpoint lives on the domain the registry verified for the publisher's namespace, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A website or title the publisher writes never earns it, and neither does a GitHub namespace. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API.
+             * @enum {string}
+             */
+            publisher_kind: "vendor" | "community";
+            /**
+             * Requires Token
+             * @description The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.
+             */
+            requires_token: boolean;
+            /**
+             * Source
+             * @description Where the entry came from. `registry` is the official MCP Registry; `curated` is a short list bundled with Otari of well-known servers the registry does not list.
+             */
+            source: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description The server's streamable HTTP endpoint.
+             */
+            url: string;
+            /** Version */
+            version: string | null;
+            /** Website Url */
+            website_url: string | null;
+        };
+        /**
+         * McpCatalogServersPublic
+         * @description A page of catalog servers. `count` is how many match in all.
+         */
+        McpCatalogServersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpCatalogServerPublic"][];
+        };
+        /**
+         * McpCatalogSyncRequest
+         * @description Who asks for a sync, for a caller who does not operate the deployment.
+         */
+        McpCatalogSyncRequest: {
+            /**
+             * Workspace Id
+             * @description A workspace the caller may add MCP servers to. Required unless the caller operates the deployment.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * McpCatalogSyncStatus
+         * @description Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.
+         */
+        McpCatalogSyncStatus: {
+            /**
+             * Error
+             * @description Why the last sync was partial or failed.
+             */
+            error: string | null;
+            /**
+             * Fetched
+             * @description Registry entries read.
+             */
+            fetched: number;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Is Stale
+             * @description The catalog is empty, or no sync has read the whole registry into it in the last day.
+             */
+            is_stale: boolean;
+            /**
+             * Kept
+             * @description Entries stored: remote servers Otari can connect to.
+             */
+            kept: number;
+            /**
+             * Last Completed At
+             * @description When a sync last read the whole registry.
+             */
+            last_completed_at: string | null;
+            /**
+             * Mode
+             * @description The deployment's `mcp_catalog_sync` setting.
+             * @enum {string}
+             */
+            mode: "off" | "manual" | "scheduled";
+            /**
+             * Next Request At
+             * @description Before this time a workspace admin's sync request is refused with a 429, because a sync ended recently. Null when one may be asked for now. An operator is not held to it.
+             */
+            next_request_at: string | null;
+            /**
+             * Next Sync At
+             * @description When the next scheduled sync is due, if the mode is scheduled.
+             */
+            next_sync_at: string | null;
+            /**
+             * Outcome
+             * @description How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.
+             */
+            outcome: ("complete" | "partial" | "failed") | null;
+            /** Pages */
+            pages: number;
+            /**
+             * Removed
+             * @description Servers a complete sync deleted because the registry no longer lists them.
+             */
+            removed: number;
+            /**
+             * Requested
+             * @description A sync was asked for and no worker has started it yet.
+             */
+            requested: boolean;
+            /** Running */
+            running: boolean;
+            /**
+             * Server Count
+             * @description Servers in the catalog now.
+             */
+            server_count: number;
+            /** Started At */
+            started_at: string | null;
+        };
+        /**
+         * McpConnectionComplete
+         * @description What the authorization server sent back, as the dashboard received it.
+         */
+        McpConnectionComplete: {
+            /**
+             * Code
+             * @description The authorization code from the redirect
+             */
+            code: string;
+            /**
+             * Iss
+             * @description The redirect's iss, the authorization server's own name, if it sent one
+             */
+            iss?: string | null;
+            /**
+             * State
+             * @description The state from the redirect
+             */
+            state: string;
+        };
+        /**
+         * McpConnectionCompleted
+         * @description A finished sign-in: which server it connected, and where to land.
+         */
+        McpConnectionCompleted: {
+            /**
+             * Checked
+             * @description The sign-in was made only to check the server: its health was recorded and nothing was connected
+             * @default false
+             */
+            checked: boolean;
+            /**
+             * Return To
+             * @description The dashboard path the sign-in was started with, if any
+             */
+            return_to: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /** Server Name */
+            server_name: string;
+            /**
+             * Shared
+             * @description The sign-in was a manager's for everyone: it is now the shared server's account
+             * @default false
+             */
+            shared: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * McpConnectionPublic
+         * @description One of the caller's own connections. Never carries a token.
+         */
+        McpConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Expires At
+             * @description When the current access token expires; null when the server stated no lifetime
+             */
+            expires_at: string | null;
+            /**
+             * Renewable
+             * @description Whether Otari can renew the token on its own; false means signing in again once it expires
+             */
+            renewable: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * McpConnectionStart
+         * @description What a caller sends to start their own sign-in to a per-user MCP server.
+         */
+        McpConnectionStart: {
+            /**
+             * Return To
+             * @description A dashboard path to land on once signed in, such as /tools/mcp-servers. Anything that is not a path inside the dashboard is refused
+             */
+            return_to?: string | null;
+        };
+        /**
+         * McpConnectionStarted
+         * @description Where to send the caller's browser to sign in.
+         */
+        McpConnectionStarted: {
+            /**
+             * Authorization Url
+             * @description The MCP server's authorization page. It carries a single-use state that expires in 30 minutes
+             */
+            authorization_url: string;
+        };
+        /** McpConnectionsPublic */
+        McpConnectionsPublic: {
+            /**
+             * Count
+             * @description How many of the workspace's servers the caller is connected to in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpConnectionPublic"][];
+        };
+        /**
+         * McpCredentialMode
+         * @description Whose credential the gateway sends to a stored MCP server.
+         * @enum {string}
+         */
+        McpCredentialMode: "shared" | "per_user";
+        /**
          * McpErrorBody
          * @description The one error shape both stored-server endpoints return.
          */
@@ -14950,6 +16856,11 @@ export interface components {
             execution_state: components["schemas"]["ExecutionState"];
             /** Request Id */
             request_id: string;
+            /**
+             * Sign In Url
+             * @description With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. It works for 30 minutes and stores nothing until it is opened
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpExecuteRequest
@@ -15023,6 +16934,257 @@ export interface components {
             url: string;
         };
         /**
+         * McpServerConnectionPublic
+         * @description One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token.
+         */
+        McpServerConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Email
+             * @description The dashboard account's email, when the user is one's
+             */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * User Id
+             * @description The request-plane user the connection belongs to
+             */
+            user_id: string;
+        };
+        /** McpServerConnectionsPublic */
+        McpServerConnectionsPublic: {
+            /**
+             * Count
+             * @description How many users are connected in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpServerConnectionPublic"][];
+        };
+        /**
+         * McpServerLeftOut
+         * @description A server the key's access list grants and that is still not listed, and why.
+         */
+        McpServerLeftOut: {
+            /**
+             * Detail
+             * @description The reason in a sentence, for a person reading the response
+             */
+            detail: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Reason
+             * @description `key_has_no_user`: the server signs each person in with their own account, and this key belongs to no person, so there is nobody to sign in as
+             * @constant
+             */
+            reason: "key_has_no_user";
+        };
+        /**
+         * McpServerRequestCreate
+         * @description A member asking the workspace's admins to add one server of the MCP catalog.
+         */
+        McpServerRequestCreate: {
+            /**
+             * Catalog Name
+             * @description The catalog server's `name`, such as `com.example/mcp`
+             */
+            catalog_name: string;
+            /**
+             * Note
+             * @description What the member needs the server for, shown to the admins
+             */
+            note?: string | null;
+        };
+        /**
+         * McpServerRequestDecline
+         * @description Declines every pending request for one catalog server.
+         */
+        McpServerRequestDecline: {
+            /** Catalog Name */
+            catalog_name: string;
+            /**
+             * Reason
+             * @description Shown to each requester
+             */
+            reason?: string | null;
+        };
+        /**
+         * McpServerRequestGroupPublic
+         * @description Everyone waiting for one catalog server in a workspace.
+         */
+        McpServerRequestGroupPublic: {
+            /** Catalog Name */
+            catalog_name: string;
+            /** @description The catalog's entry as it is now; null once the catalog no longer lists the server */
+            catalog_server: components["schemas"]["McpCatalogServerPublic"] | null;
+            /**
+             * First Requested At
+             * Format: date-time
+             */
+            first_requested_at: string;
+            /**
+             * Requester Count
+             * @description How many pending requests ask for this server in all
+             */
+            requester_count: number;
+            /**
+             * Requesters
+             * @description Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest
+             */
+            requesters: components["schemas"]["McpServerRequesterPublic"][];
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * McpServerRequestGroupsPublic
+         * @description A workspace's pending requests, one entry per catalog server, the longest-waiting first.
+         */
+        McpServerRequestGroupsPublic: {
+            /**
+             * Count
+             * @description How many requests are pending in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpServerRequestGroupPublic"][];
+            /**
+             * Server Count
+             * @description How many catalog servers have a request pending, for paging `data`
+             */
+            server_count: number;
+        };
+        /**
+         * McpServerRequestPublic
+         * @description One of the caller's own requests for a catalog server.
+         */
+        McpServerRequestPublic: {
+            /** Catalog Name */
+            catalog_name: string;
+            /** @description The catalog's entry as it is now; null once the catalog no longer lists the server */
+            catalog_server: components["schemas"]["McpCatalogServerPublic"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /**
+             * Decision Reason
+             * @description An admin's reason for declining, when they gave one
+             */
+            decision_reason: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /**
+             * Server Id
+             * @description The stored server an approval produced
+             */
+            server_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "declined" | "withdrawn";
+            /**
+             * Title
+             * @description The catalog's title for the server when it was requested
+             */
+            title: string;
+            /**
+             * Url
+             * @description The server's endpoint when it was requested
+             */
+            url: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * McpServerRequesterPublic
+         * @description One member who asked for a server, as a workspace manager sees them.
+         */
+        McpServerRequesterPublic: {
+            /** Email */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /** Note */
+            note: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * McpServerRequestersPublic
+         * @description A page of the members waiting for one catalog server in a workspace.
+         */
+        McpServerRequestersPublic: {
+            /**
+             * Count
+             * @description How many pending requests ask for this server in all
+             */
+            count: number;
+            /**
+             * Data
+             * @description Who asked, earliest first
+             */
+            data: components["schemas"]["McpServerRequesterPublic"][];
+        };
+        /** McpServerRequestsDeclined */
+        McpServerRequestsDeclined: {
+            /**
+             * Declined
+             * @description How many requests were declined
+             */
+            declined: number;
+        };
+        /**
+         * McpServerRequestsPublic
+         * @description The caller's pending requests in a workspace, and the answers they have not acknowledged, newest first.
+         */
+        McpServerRequestsPublic: {
+            /** Data */
+            data: components["schemas"]["McpServerRequestPublic"][];
+        };
+        /**
          * McpServerSummary
          * @description A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.
          */
@@ -15036,23 +17198,58 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and this key's user has not signed in to it, so a call is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
+            /**
+             * Sign In Url
+             * @description With sign_in_required: a link that starts this key's user's own sign-in to the server, working for 30 minutes
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpServersResponse
          * @description The enabled stored servers the authenticated key can reach.
          */
         McpServersResponse: {
+            /**
+             * Left Out
+             * @description Servers the key's access list grants that are not in `servers`, each with the reason. Empty for a key that belongs to a user.
+             */
+            left_out?: components["schemas"]["McpServerLeftOut"][];
             /** Servers */
             servers: components["schemas"]["McpServerSummary"][];
+        };
+        /**
+         * McpSharedAccountPublic
+         * @description The account a manager signed in to for everyone on a shared server. Never carries a token.
+         */
+        McpSharedAccountPublic: {
+            /**
+             * Renewable
+             * @description Whether Otari can renew the token on its own; false means signing in again once it expires
+             */
+            renewable: boolean;
+            /** Signed In At */
+            signed_in_at: string;
+            /**
+             * Signed In By
+             * @description The name, or else the email, of the dashboard account that signed in; null once it is gone
+             */
+            signed_in_by: string | null;
         };
         /**
          * McpToolDefinition
          * @description One live tool a caller-orchestrated application may expose to its model.
          *
          *     ``annotations`` is the remote server's own metadata, passed through as
-         *     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-         *     decision; each application owns its risk policy, and a server
-         *     cannot waive an application's approval gate by labeling itself read-only.
+         *     untrusted data. Otari reads ``readOnlyHint`` in one place only, as the
+         *     default for a stored server's read tools until a manager sets them; each
+         *     application owns its risk policy, and a server cannot waive an
+         *     application's approval gate by labeling itself read-only.
          */
         McpToolDefinition: {
             /**
@@ -15079,6 +17276,25 @@ export interface components {
              * @description The remote MCP tool name to send back to /api/v1/mcp/execute.
              */
             name: string;
+        };
+        /**
+         * McpToolSummary
+         * @description One tool of a server: its name and, where the server described it, the first line of that description.
+         */
+        McpToolSummary: {
+            /**
+             * Description
+             * @description Untrusted text the server wrote; null when it has none
+             */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Read Only
+             * @description Whether the tool is one of the server's read tools
+             * @default false
+             */
+            read_only: boolean;
         };
         /**
          * McpToolWarning
@@ -15888,6 +18104,47 @@ export interface components {
             issuer: string;
         };
         /**
+         * OfferingSpeedInfo
+         * @description How fast one offering answered the viewer's organization over the last 7 days.
+         *
+         *     Read from the organization's own requests, so it describes that traffic rather
+         *     than the provider in general: an offering that served the long prompts looks
+         *     slower. Only a request a routing plan's first candidate served counts, and
+         *     only one that ran no gateway tool.
+         */
+        OfferingSpeedInfo: {
+            /**
+             * Output Tokens Per Second P50
+             * @description Median output tokens per second over the whole request, time to first token included, as OpenRouter measures it. Null on fewer than 20 measured requests.
+             */
+            output_tokens_per_second_p50: number | null;
+            /**
+             * Output Tokens Per Second P95
+             * @description The 5th percentile of output tokens per second: the slow tail.
+             */
+            output_tokens_per_second_p95: number | null;
+            /**
+             * Throughput Samples
+             * @description Requests the throughput is read from: those with 20 or more output tokens.
+             */
+            throughput_samples: number;
+            /**
+             * Ttft Ms P50
+             * @description Median milliseconds to the first token. Null on fewer than 20 streamed requests.
+             */
+            ttft_ms_p50: number | null;
+            /**
+             * Ttft Ms P95
+             * @description The 95th percentile of milliseconds to the first token, rounded: the slow tail.
+             */
+            ttft_ms_p95: number | null;
+            /**
+             * Ttft Samples
+             * @description Streamed requests the time to first token is read from.
+             */
+            ttft_samples: number;
+        };
+        /**
          * OfferingUsage
          * @description What the viewer's organization actually paid for one offering, last 30 days.
          *
@@ -16018,6 +18275,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name: string;
             /** Provider */
@@ -16147,6 +18406,13 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            endpoint_auth?: components["schemas"]["EndpointAuthPublic"] | null;
+            /**
+             * Endpoint Auth Unreadable
+             * @description True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.
+             * @default false
+             */
+            endpoint_auth_unreadable: boolean;
             /**
              * Id
              * Format: uuid
@@ -16184,7 +18450,7 @@ export interface components {
             updated_at?: string | null;
             /**
              * Usable
-             * @description False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.
+             * @description False when the key cannot be served as stored, so it supplies nothing at dispatch and the catalog withholds its provider: a credential this deployment cannot decrypt or read, a provider that cannot take a custom base URL, or an endpoint credential the key may not carry. Such a row is still listed, because deleting or replacing it is what fixes it.
              */
             usable: boolean;
             /**
@@ -16206,6 +18472,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** @description The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored. */
+            endpoint_auth?: components["schemas"]["EndpointAuthRequest"] | null;
             /** Name */
             name?: string | null;
             /** Zero Data Retention */
@@ -16217,6 +18485,24 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
+         * OrgProviderKeysReencryptPublic
+         * @description What re-encrypting the stored organization provider credentials did.
+         *
+         *     Each count is keys, not values, because a key holding one value no
+         *     configured secret reads has to be re-entered whole: it serves nothing until
+         *     it is. ``unreadable`` counts those, left exactly as they were;
+         *     ``skipped`` those edited while the rotation ran, already written under the
+         *     primary secret.
+         */
+        OrgProviderKeysReencryptPublic: {
+            /** Reencrypted */
+            reencrypted: number;
+            /** Skipped */
+            skipped: number;
+            /** Unreadable */
+            unreadable: number;
         };
         /**
          * OrgProviderModelsRefreshPublic
@@ -16283,7 +18569,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng.
              */
             provider: string;
         };
@@ -16600,7 +18886,7 @@ export interface components {
          *       "credential": "sk-guardrails-...",
          *       "mode": "block",
          *       "profile": "prompt-injection",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailCreate: {
@@ -16726,8 +19012,13 @@ export interface components {
          */
         OrganizationGuardrailDefinitionPublic: {
             /**
+             * Build Refusal
+             * @description When build_state is failed because the definition breaks one of the gateway's own rules (an address off the vendor's hosts or not public, or an endpoint without its own credential), which rule and which argument. Null otherwise, including when the vendor's library failed, whose reason stays in the gateway's log because it can repeat what was sent
+             */
+            build_refusal?: string | null;
+            /**
              * Build State
-             * @description Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is never reported here: the reason is in the gateway's log
+             * @description Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is not reported here: see build_refusal for a rule this definition breaks, and the gateway's log for anything else
              * @enum {string}
              */
             build_state: "built" | "failed" | "pending" | "disabled";
@@ -16972,7 +19263,7 @@ export interface components {
          * @example {
          *       "credential": "sk-guardrails-...",
          *       "mode": "monitor",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailUpdate: {
@@ -17608,7 +19899,7 @@ export interface components {
             expires_at: string;
             /**
              * Link
-             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it records the address as vouched for rather than proven, since the mailbox never saw the link.
+             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it leaves the address verified rather than proved, since the mailbox never saw the link.
              */
             link?: string | null;
             /**
@@ -17975,6 +20266,12 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint?: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and the caller has not signed in to it, so a message that attaches it is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
         };
         /**
          * PlaygroundMessageCreate
@@ -18034,7 +20331,7 @@ export interface components {
         PlaygroundToolStatus: {
             /**
              * Configured
-             * @description Whether this deployment has a backend for the tool at all.
+             * @description Whether the menu lists the tool: the deployment, or for web search the workspace's organization search key, provides it. Whether it can be attached, and why not, are enabled and reason.
              */
             configured: boolean;
             /**
@@ -18058,6 +20355,8 @@ export interface components {
             files: components["schemas"]["PlaygroundToolStatus"];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
+            /** @description Whether a message may declare otari_web_fetch. */
+            web_fetch: components["schemas"]["PlaygroundToolStatus"];
             web_search: components["schemas"]["PlaygroundToolStatus"];
         };
         /**
@@ -19351,6 +21650,20 @@ export interface components {
             version: number;
         };
         /**
+         * RotateMasterKeyRequest
+         * @description The proof a session-authenticated master-key rotation has to supply.
+         *
+         *     Only read when the caller authenticated with the dashboard session cookie. A request
+         *     carrying the master key is the deployment credential already, so it needs no further proof.
+         */
+        RotateMasterKeyRequest: {
+            /**
+             * Current Password
+             * @description The caller's current password. Required for a session-authenticated rotation.
+             */
+            current_password?: string | null;
+        };
+        /**
          * RotateMasterKeyResponse
          * @description A newly generated dashboard master key, returned once.
          */
@@ -19401,6 +21714,175 @@ export interface components {
          * @enum {string}
          */
         SandboxProvider: "protocol" | "e2b";
+        /**
+         * SavingsAmounts
+         * @description What a group of subagent decisions comes to, in USD.
+         *
+         *     The two costs sum only the decisions whose outcome is priced on both
+         *     sides, which `measured` and `estimated` count. `router_cost` sums every
+         *     decision in the group, so `net_saved` can be negative.
+         */
+        SavingsAmounts: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsByAgentType
+         * @description One subagent type.
+         */
+        SavingsByAgentType: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /** Agent Type */
+            agent_type: string;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SavingsBySwap
+         * @description Reported outcomes with one baseline model and one model run on.
+         */
+        SavingsBySwap: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Baseline Model
+             * @description The priced model the baseline was read as, or the harness's name for it where it was read as none.
+             */
+            baseline_model: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Ran On
+             * @description The model the subagent ran on, as the harness named it.
+             */
+            ran_on: string;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
         /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
@@ -20410,6 +22892,211 @@ export interface components {
             url?: string | null;
         };
         /**
+         * SubagentOutcomeReport
+         * @description What the subagent a recommendation started has consumed so far, in total.
+         *
+         *     Each report replaces the one before it, so a harness sends running totals
+         *     and may send them more than once.
+         * @example {
+         *       "usage": [
+         *         {
+         *           "cache_read_tokens": 42000,
+         *           "cache_write_tokens": 9000,
+         *           "input_tokens": 1200,
+         *           "model": "claude-haiku-5-5",
+         *           "output_tokens": 800
+         *         }
+         *       ]
+         *     }
+         */
+        SubagentOutcomeReport: {
+            /**
+             * Usage
+             * @description One line per model the subagent ran on.
+             */
+            usage: components["schemas"]["SubagentUsageLine"][];
+        };
+        /**
+         * SubagentSavingsPoint
+         * @description One time bucket, by when the recommendation was made.
+         */
+        SubagentSavingsPoint: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Bucket Start
+             * @description Canonical ISO-8601 UTC.
+             */
+            bucket_start: string;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SubagentSavingsPublic
+         * @description What the subagent router saved in a window, within the caller's scope.
+         */
+        SubagentSavingsPublic: {
+            /**
+             * By Agent Type
+             * @description Largest saving first, at most 20.
+             */
+            by_agent_type: components["schemas"]["SavingsByAgentType"][];
+            /**
+             * By Swap
+             * @description Largest saving first, at most 20.
+             */
+            by_swap: components["schemas"]["SavingsBySwap"][];
+            /** @description The decisions whose outcome is the harness's own count. */
+            estimated: components["schemas"]["SavingsAmounts"];
+            /** @description The decisions whose outcome is metered. */
+            measured: components["schemas"]["SavingsAmounts"];
+            /**
+             * Recommender Available
+             * @description Whether anything answers a recommendation on this deployment.
+             */
+            recommender_available: boolean;
+            /** Series */
+            series: components["schemas"]["SubagentSavingsPoint"][];
+            totals: components["schemas"]["SubagentSavingsTotals"];
+        };
+        /**
+         * SubagentSavingsTotals
+         * @description The whole window.
+         */
+        SubagentSavingsTotals: {
+            /**
+             * Actual Cost
+             * @description The same tokens priced at the models they ran on.
+             */
+            actual_cost: number;
+            /**
+             * Baseline Cost
+             * @description The subagents' tokens priced at the models they would have started on.
+             */
+            baseline_cost: number;
+            /**
+             * Decisions
+             * @description Recommendations answered.
+             */
+            decisions: number;
+            /**
+             * Estimated
+             * @description Priced outcomes read from the harness's own token counts.
+             */
+            estimated: number;
+            /**
+             * Gross Saved
+             * @description `baseline_cost` less `actual_cost`.
+             */
+            gross_saved: number;
+            /**
+             * Measured
+             * @description Priced outcomes read from metered usage.
+             */
+            measured: number;
+            /**
+             * Net Saved
+             * @description `gross_saved` less `router_cost`.
+             */
+            net_saved: number;
+            /**
+             * No Outcome
+             * @description Decisions with no consumption reported. Their router cost still counts.
+             */
+            no_outcome: number;
+            /**
+             * Router Cost
+             * @description What the recommendations themselves were charged.
+             */
+            router_cost: number;
+            /**
+             * Router Unanswered
+             * @description Recommendation requests the router failed to answer.
+             */
+            router_unanswered: number;
+            /**
+             * Unpriced
+             * @description Reported outcomes left out of the costs because a side has no price.
+             */
+            unpriced: number;
+            /**
+             * With Outcome
+             * @description Decisions whose subagent's consumption was reported.
+             */
+            with_outcome: number;
+        };
+        /**
+         * SubagentUsageLine
+         * @description What a subagent consumed on one model, as its harness counted it.
+         *
+         *     The cache counts are beside `input_tokens`, not inside it.
+         */
+        SubagentUsageLine: {
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Input Tokens
+             * @description Input tokens that were neither read from nor written to a cache.
+             */
+            input_tokens: number;
+            /**
+             * Model
+             * @description The model, as the harness names it.
+             */
+            model: string;
+            /** Output Tokens */
+            output_tokens: number;
+        };
+        /**
          * SwitchActiveOrganizationRequest
          * @description Point the caller's identity at one of the organizations they belong to.
          *
@@ -20787,6 +23474,16 @@ export interface components {
             /** Api Key Id */
             api_key_id: string | null;
             /**
+             * Client Language
+             * @description The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.
+             */
+            client_language?: ("python" | "javascript" | "go" | "java" | "rust" | "ruby") | null;
+            /**
+             * Client Version
+             * @description The client's version, from its own User-Agent.
+             */
+            client_version?: string | null;
+            /**
              * Cost
              * @description USD, a snapshot of the usage rows' cost. Usage stays the billing record.
              */
@@ -21122,6 +23819,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateMaintenanceModeRequest
@@ -21172,6 +23874,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateProfileRequest
@@ -21245,8 +23952,6 @@ export interface components {
             budget_estimate_default_output_tokens?: number | null;
             /** Default Pricing */
             default_pricing?: boolean | null;
-            /** File Understanding Enabled */
-            file_understanding_enabled?: boolean | null;
             /** Model Cache Ttl Seconds */
             model_cache_ttl_seconds?: number | null;
             /** Model Discovery */
@@ -21361,6 +24066,8 @@ export interface components {
              * @default false
              */
             by_filter: boolean;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -21430,6 +24137,16 @@ export interface components {
             cost: number | null;
             /** Counts Toward Budget */
             counts_toward_budget: boolean;
+            /**
+             * Data Location
+             * @description Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.
+             */
+            data_location?: string | null;
+            /**
+             * Deployment Paid
+             * @default false
+             */
+            deployment_paid: boolean;
             /** Endpoint */
             endpoint: string;
             /** Error Message */
@@ -21440,6 +24157,8 @@ export interface components {
             latency_ms: number | null;
             /** Model */
             model: string;
+            /** Output Tokens Per Second */
+            output_tokens_per_second: number | null;
             /** Policy Name */
             policy_name?: string | null;
             /** Pricing Breakdown */
@@ -21456,6 +24175,8 @@ export interface components {
             reasoning_tokens?: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Selection Reason */
             selection_reason?: string | null;
             /** Source */
@@ -21476,6 +24197,8 @@ export interface components {
             timestamp: string;
             /** Total Tokens */
             total_tokens: number | null;
+            /** Ttft Ms */
+            ttft_ms: number | null;
             /** User Alias */
             user_alias?: string | null;
             /** User Id */
@@ -21524,6 +24247,8 @@ export interface components {
             key: string | null;
             /** Label */
             label?: string | null;
+            /** Model Group */
+            model_group?: string | null;
             /** Requests */
             requests: number;
             /** Tokens */
@@ -21687,6 +24412,8 @@ export interface components {
             cache_read_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
+            /** Deployment Paid */
+            deployment_paid?: boolean | null;
             /** End Date */
             end_date?: string | null;
             /** Endpoint */
@@ -21839,6 +24566,11 @@ export interface components {
             completion_tokens: number;
             /** Cost */
             cost: number;
+            /**
+             * Deployment Paid Cost
+             * @default 0
+             */
+            deployment_paid_cost: number;
             /** Error Count */
             error_count: number;
             /** Prompt Tokens */
@@ -22170,6 +24902,8 @@ export interface components {
              * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
              */
             experience_eligible: boolean;
+            /** @description The setup key the guide already issued, so a reopened guide can offer it instead of rotating it. Null until one is issued, once it is revoked, deleted or expired, when the caller is not the one it was issued to, and whenever the guide is not offered to this caller. */
+            issued_key?: components["schemas"]["ActivationIssuedKeyPublic"] | null;
             /** @description The most recent request, so a failure can be reported while the guide keeps waiting. */
             latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
@@ -22309,6 +25043,11 @@ export interface components {
              * @description Whether this workspace stores a departure from full inheritance.
              */
             customized: boolean;
+            /**
+             * Data Locations
+             * @description Where each region the provider serves from declares it keeps request data (one entry for a provider with no regions), null where nothing is declared. A workspace listing allowed data locations is refused the provider when none of these is on its list.
+             */
+            data_locations?: (string | null)[];
             /** Enabled */
             enabled: boolean;
             /**
@@ -22384,9 +25123,10 @@ export interface components {
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
-         *     ``server_id`` names a stored server whose token stands in when
-         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
-         *     a token it was never shown. ``""`` checks with no token at all.
+         *     ``server_id`` names a stored server whose credential stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new path with
+         *     a token it was never shown. The credential is only sent to that server's own
+         *     origin. ``""`` checks with no token at all.
          */
         WorkspaceMcpServerCheckRequest: {
             /**
@@ -22401,7 +25141,7 @@ export interface components {
             authorization_token?: string | null;
             /**
              * Server Id
-             * @description A stored server whose token to use
+             * @description A stored server whose credential to use, when `url` is on that server's origin
              */
             server_id?: string | null;
             /**
@@ -22425,10 +25165,21 @@ export interface components {
              */
             allowed_tools?: string[] | null;
             /**
+             * Attach By Default
+             * @description Add this server to every model request from the workspace's keys, as if the request named it in mcp_server_ids. A key the server's access rules grant nothing is left without it
+             * @default false
+             */
+            attach_by_default: boolean;
+            /**
              * Authorization Token
              * @description Bearer token for the server; requires an https URL. Encrypted at rest, never returned
              */
             authorization_token?: string | null;
+            /**
+             * @description Whose credential a call carries: 'shared' sends one credential for every caller, authorization_token or the account a manager signs in to for everyone once the server is stored; 'per_user' sends the calling user's own token, which each user gets by signing in to the server, and takes no authorization_token
+             * @default shared
+             */
+            credential_mode: components["schemas"]["McpCredentialMode"];
             /**
              * Enabled
              * @description Whether a request naming this server actually reaches it
@@ -22446,15 +25197,25 @@ export interface components {
              */
             name: string;
             /**
+             * Oauth Client Id
+             * @description For a server whose authorization server does not register clients on its own: the OAuth client ID a sign-in goes through. Omit it to let Otari register itself
+             */
+            oauth_client_id?: string | null;
+            /**
+             * Oauth Client Secret
+             * @description The secret of oauth_client_id, when it has one. Encrypted at rest, never returned
+             */
+            oauth_client_secret?: string | null;
+            /**
              * Purpose Hint
              * @description Hint prepended to the system message to help the model choose
              */
             purpose_hint?: string | null;
             /**
              * Read Tools
-             * @description The tool names a manager labeled read, which '@read' in an access rule stands for. The server's own readOnlyHint is never read as one
+             * @description The tool names a manager labeled read, which '@read' in an access rule stands for. Omit it, or send null, and the labels follow the tools the server itself marks readOnlyHint
              */
-            read_tools?: string[];
+            read_tools?: string[] | null;
             /**
              * Url
              * @description Streamable HTTP MCP endpoint
@@ -22531,11 +25292,11 @@ export interface components {
         };
         /**
          * WorkspaceMcpServerHealth
-         * @description The last connection check: whether the gateway reached the server, and what it found.
+         * @description The last time the gateway talked to the server: whether it answered, and what it found.
          *
-         *     Describes the server as the gateway saw it at ``checked_at``, not now: a
-         *     server that answered then can be down since, and the request path checks
-         *     nothing in advance on the strength of this.
+         *     Written by a manager's check and by real requests that reach the server. Describes the server
+         *     as the gateway saw it at ``checked_at``, not now: a server that answered then can be down
+         *     since, and the request path checks nothing in advance on the strength of this.
          */
         WorkspaceMcpServerHealth: {
             /** Checked At */
@@ -22554,7 +25315,7 @@ export interface components {
             missing_allowed_tools?: string[];
             /**
              * Read Only Hinted Tools
-             * @description Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling read_tools and never applied as one
+             * @description Those of tools the server annotates readOnlyHint in this listing: untrusted, and never what '@read' stands for after the server's first listing
              */
             read_only_hinted_tools?: string[];
             /**
@@ -22564,9 +25325,16 @@ export interface components {
             status: "healthy" | "failing";
             /**
              * Tool Count
-             * @description Live tools the allow-list admits; null when the check failed
+             * @description Live tools the allow-list admits; null when the check failed, or when the server answered a request that did not list its tools and no listing is on record
              */
             tool_count?: number | null;
+            /**
+             * Tool Descriptions
+             * @description The first line of each offered tool's own description, where it has one: untrusted text the server wrote, for a person to read
+             */
+            tool_descriptions?: {
+                [key: string]: string;
+            };
             /**
              * Tools
              * @description Every tool name the server offers, allowed or not, up to 200; empty on a failure
@@ -22611,6 +25379,87 @@ export interface components {
             tools: string[];
         };
         /**
+         * WorkspaceMcpServerLogoPublic
+         * @description How the dashboard shows one of a workspace's MCP servers.
+         */
+        WorkspaceMcpServerLogoPublic: {
+            /**
+             * Has Logo Override
+             * @description An admin uploaded this server's logo.
+             */
+            has_logo_override: boolean;
+            /**
+             * Logo Tile
+             * @description An admin's choice: a tile only where the logo would fade out, always, or never.
+             * @enum {string}
+             */
+            logo_tile: "auto" | "always" | "never";
+            /**
+             * Logo Tone
+             * @description Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both, or the tile is `never`.
+             */
+            logo_tone: ("dark" | "light" | "tile") | null;
+            /**
+             * Logo Url
+             * @description Where this gateway serves the server's logo: an admin's upload, else the catalog's logo for its URL, else one found on its host. Null when none was found; the dashboard shows the server's initial.
+             */
+            logo_url: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+        };
+        /**
+         * WorkspaceMcpServerLogosPublic
+         * @description The logo of each of a workspace's MCP servers.
+         */
+        WorkspaceMcpServerLogosPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceMcpServerLogoPublic"][];
+        };
+        /**
+         * WorkspaceMcpServerMyTools
+         * @description The tools the caller may use on one server, under the access rules that apply to them.
+         *
+         *     The rule is the caller's own: their user's grant, else the server's ``everyone_tools``. A key
+         *     with a grant of its own can reach more or less than this.
+         */
+        WorkspaceMcpServerMyTools: {
+            /**
+             * Access
+             * @description 'all' when the rule admits every tool the server offers, 'none' when it admits nothing
+             * @enum {string}
+             */
+            access: "all" | "some" | "none";
+            /**
+             * Checked At
+             * @description When the tool list was read; null when it is not known
+             */
+            checked_at: string | null;
+            /**
+             * Decided By
+             * @description The caller's own grant, the server's everyone_tools, or the server itself when it is disabled
+             * @enum {string}
+             */
+            decided_by: "user" | "everyone" | "server";
+            /**
+             * Known
+             * @description Whether the server's tool list is known: from its last passing check, or listed just now with the caller's own connection to a per-user server
+             */
+            known: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Tools
+             * @description The tools the caller may use, in the server's order; empty when not known
+             */
+            tools: components["schemas"]["McpToolSummary"][];
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -22622,8 +25471,25 @@ export interface components {
         WorkspaceMcpServerPublic: {
             /** Allowed Tools */
             allowed_tools: string[] | null;
+            /**
+             * Attach By Default
+             * @description Whether every model request from the workspace's keys gets this server without naming it
+             */
+            attach_by_default: boolean;
+            /**
+             * Caller Access
+             * @description On a read of one server or of the list: what the access rules give the caller's own user. 'all' every tool, 'read' the read tools only, 'some' a named subset, 'none' nothing. A key with a rule of its own can differ
+             */
+            caller_access?: ("all" | "read" | "some" | "none") | null;
+            /**
+             * Connected Users
+             * @description On a per_user server, for a caller who may manage the workspace: how many users have connected their own account. Null on a shared server, and for a caller who may not manage
+             */
+            connected_users?: number | null;
             /** Created At */
             created_at: string;
+            /** @description 'shared': one workspace credential for every caller. 'per_user': each user's own connection */
+            credential_mode: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled: boolean;
             /**
@@ -22631,9 +25497,11 @@ export interface components {
              * @description What every key of the workspace may call; [] denies everyone
              */
             everyone_tools: string[];
+            /** Has Oauth Client Secret */
+            has_oauth_client_secret: boolean;
             /** Has Token */
             has_token: boolean;
-            /** @description The last connection check; null until one has run */
+            /** @description What the gateway last learned by talking to the server, from a check or from a real request; null until either has happened */
             health: components["schemas"]["WorkspaceMcpServerHealth"] | null;
             /**
              * Id
@@ -22642,13 +25510,31 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Needs Setup
+             * @description A shared server with no token and no shared account, whose server asked for a credential when last reached. Requests skip it, as they skip a disabled server, until it has one
+             * @default false
+             */
+            needs_setup: boolean;
+            /**
+             * Oauth Client Id
+             * @description The OAuth client ID a manager supplied for sign-ins; null when Otari registers itself
+             */
+            oauth_client_id: string | null;
             /** Purpose Hint */
             purpose_hint: string | null;
             /**
              * Read Tools
-             * @description The tool names a manager labeled read, which '@read' stands for
+             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marked readOnlyHint when its tools were first listed. A later listing never adds to them
              */
             read_tools: string[];
+            /**
+             * Read Tools From Server
+             * @description True while no manager has edited read_tools, so they are the readOnlyHint of the server's first listing
+             */
+            read_tools_from_server: boolean;
+            /** @description On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none */
+            shared_account?: components["schemas"]["McpSharedAccountPublic"] | null;
             /** Updated At */
             updated_at: string;
             /** Url */
@@ -22668,23 +25554,42 @@ export interface components {
          *     ``""`` to clear it, send a value to rotate it. An explicit ``null`` also
          *     leaves it alone, matching the platform: a client that serializes its whole
          *     form back, with an empty token box it never filled in, must not destroy a
-         *     token it was never shown.
+         *     token it was never shown. ``oauth_client_secret`` follows the same three
+         *     states, and so does ``oauth_client_id``, where ``""`` goes back to letting
+         *     Otari register itself.
+         *
+         *     Changing ``credential_mode``, the URL, or the OAuth client ends every
+         *     sign-in to the server, each user's own and the shared account: the tokens
+         *     were issued for the server and the client as they were. Setting a token on
+         *     a shared server ends its shared account too, since a server sends one
+         *     credential.
          */
         WorkspaceMcpServerUpdate: {
             /** Allowed Tools */
             allowed_tools?: string[] | null;
+            /** Attach By Default */
+            attach_by_default?: boolean;
             /** Authorization Token */
             authorization_token?: string | null;
+            /** Credential Mode */
+            credential_mode?: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled?: boolean;
             /** Everyone Tools */
             everyone_tools?: string[];
             /** Name */
             name?: string;
+            /** Oauth Client Id */
+            oauth_client_id?: string | null;
+            /** Oauth Client Secret */
+            oauth_client_secret?: string | null;
             /** Purpose Hint */
             purpose_hint?: string | null;
-            /** Read Tools */
-            read_tools?: string[];
+            /**
+             * Read Tools
+             * @description The tool names a manager labeled read. An explicit null goes back to following the tools the server marks readOnlyHint; omit it to leave the labels as they are
+             */
+            read_tools?: string[] | null;
             /** Url */
             url?: string;
         };
@@ -22694,6 +25599,11 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceMcpServerPublic"][];
+            /**
+             * Sign In Unavailable
+             * @description Why this deployment cannot sign anyone in to an MCP server yet, in words for a workspace admin: a server in personal-accounts mode cannot be added, and nobody can sign in for everyone. Null when sign-ins work.
+             */
+            sign_in_unavailable?: string | null;
         };
         /** WorkspaceMemberBudgetPoliciesPublic */
         WorkspaceMemberBudgetPoliciesPublic: {
@@ -23071,6 +25981,8 @@ export interface components {
         };
         /** WorkspaceProviderPolicyPublic */
         WorkspaceProviderPolicyPublic: {
+            /** Allowed Data Locations */
+            allowed_data_locations?: string[] | null;
             /** Require Zero Data Retention */
             require_zero_data_retention: boolean;
         };
@@ -23080,10 +25992,15 @@ export interface components {
          */
         WorkspaceProviderPolicyRequest: {
             /**
-             * Require Zero Data Retention
-             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.
+             * Allowed Data Locations
+             * @description The data locations a hosted provider region must declare to serve the workspace: ISO 3166-1 alpha-2 country codes, EU (which also admits each member state) or GLOBAL. Null accepts any location, and omitting the field keeps the stored list. A region whose location nobody declared never matches a list.
              */
-            require_zero_data_retention: boolean;
+            allowed_data_locations?: string[] | null;
+            /**
+             * Require Zero Data Retention
+             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns. Omitted keeps the stored setting.
+             */
+            require_zero_data_retention?: boolean | null;
         };
         /** WorkspacePublic */
         WorkspacePublic: {
@@ -23560,6 +26477,39 @@ export interface operations {
             };
         };
     };
+    "admin-hand_over_bootstrap_operator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BootstrapHandoverRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "admin-issue_password_link": {
         parameters: {
             query?: never;
@@ -23935,6 +26885,37 @@ export interface operations {
             };
             /** @description The audio upload exceeds the maximum request size. */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-delete_own_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25230,6 +28211,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogModelDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-list_catalog_providers": {
+        parameters: {
+            query?: {
+                /** @description For a signed-in caller, only the providers a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of providers to skip. */
+                skip?: number;
+                /** @description Maximum number of providers to return. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProvidersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-get_catalog_provider": {
+        parameters: {
+            query?: {
+                /** @description For a signed-in caller, only the models a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of the provider's models to skip. */
+                skip?: number;
+                /** @description Maximum number of the provider's models to return. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProviderDetail"];
                 };
             };
             /** @description Validation Error */
@@ -26712,8 +29767,10 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
                 /** @description Only models whose name contains this text, case-insensitively */
                 search?: string | null;
-                /** @description Only models served (`true`) or only models withheld (`false`) */
+                /** @description Only models served (`true`) or only models withheld (`false`), a model of a vendor switched off counting as withheld */
                 enabled?: boolean | null;
+                /** @description Only models made by this vendor, `Other` for those nothing names one for */
+                vendor?: string | null;
             };
             header?: never;
             path: {
@@ -26809,6 +29866,76 @@ export interface operations {
             };
         };
     };
+    "hosted-providers-reset_hosted_model_prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedPriceResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedPriceResetPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-switch_hosted_vendor_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedVendorModelsSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedVendorModelsSwitchPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "hosted-providers-remove_hosted_model": {
         parameters: {
             query?: never;
@@ -26864,6 +29991,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-add_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderRegionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-remove_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderRegionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_vendor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedVendorUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedVendorPublic"];
                 };
             };
             /** @description Validation Error */
@@ -27086,6 +30351,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
             };
@@ -27144,6 +30411,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
@@ -27326,6 +30595,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-get_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
                 };
             };
             /** @description Validation Error */
@@ -27696,6 +30996,187 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-list_popular_mcp_servers": {
+        parameters: {
+            query?: {
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-search_mcp_catalog": {
+        parameters: {
+            query?: {
+                /** @description Text to find in a server's title, name or description */
+                q?: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-get_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-request_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["McpCatalogSyncRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+            /** @description The caller does not operate the deployment and may not add MCP servers to the workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The sync is switched off on this deployment; nothing was started. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description A sync ended too recently for a workspace admin to ask for another; see next_request_at. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-connections-complete_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionComplete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionCompleted"];
                 };
             };
             /** @description Validation Error */
@@ -28400,6 +31881,10 @@ export interface operations {
                 code_challenge: string;
                 code_challenge_method: "S256";
                 response_type?: "code";
+                /** @description A spending limit in USD to suggest for the key. The person can change it on the consent screen, and one the screen cannot use is left blank. */
+                limit?: string | null;
+                /** @description An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, 1-year or never. The person can change it, and any other value leaves it at never. */
+                expiration?: string | null;
             };
             header?: never;
             path?: never;
@@ -28673,6 +32158,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OAuthErrorResponse"];
+                };
+            };
+        };
+    };
+    "provider-keys-reencrypt_org_provider_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeysReencryptPublic"];
                 };
             };
         };
@@ -29709,6 +33214,37 @@ export interface operations {
             };
         };
     };
+    "organization-keys-get_own_key_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-keys-list_own_key_end_users": {
         parameters: {
             query?: {
@@ -30357,7 +33893,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                    "application/json": components["schemas"]["AcceptedMembershipPublic"];
                 };
             };
             /** @description Validation Error */
@@ -31502,6 +35038,46 @@ export interface operations {
             };
         };
     };
+    "organization-usage-read_subagent_savings": {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description The grain of `series`. */
+                bucket?: "hour" | "day";
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentSavingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organizations-switch_active_organization": {
         parameters: {
             query?: never;
@@ -32004,6 +35580,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -32070,6 +35648,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -32136,6 +35716,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -32200,6 +35782,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -33901,6 +37485,48 @@ export interface operations {
             };
         };
     };
+    "routing-report_subagent_outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubagentOutcomeReport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No decision of the caller's has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationRefusal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "routing-list_policies": {
         parameters: {
             query?: {
@@ -34959,7 +38585,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RotateMasterKeyRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -34968,6 +38598,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotateMasterKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -35604,6 +39243,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -35703,6 +39344,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
                 /** @description Only usage recorded in this workspace. */
@@ -35853,6 +39496,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -35950,6 +39595,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
+                /** @description Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row */
+                deployment_paid?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
@@ -36781,6 +40428,390 @@ export interface operations {
             };
         };
     };
+    "mcp-connections-list_my_mcp_connections": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-start_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-end_my_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_mcp_server_requests": {
+        parameters: {
+            query?: {
+                /** @description Number of catalog servers to skip */
+                skip?: number;
+                /** @description Maximum number of catalog servers to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestGroupsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-request_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestPublic"];
+                };
+            };
+            /** @description The catalog lists no server by that name. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workspace already has the server, or the caller's request for it is already waiting. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The caller has 10 requests waiting in this workspace, or made 10 there in the last day. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-servers-decline_mcp_server_requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerRequestDecline"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestsDeclined"];
+                };
+            };
+            /** @description Nobody is waiting for that server in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_my_mcp_server_requests": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_mcp_server_requesters": {
+        parameters: {
+            query: {
+                /** @description The catalog server asked for */
+                catalog_name: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-withdraw_mcp_server_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request was already answered or withdrawn. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-acknowledge_mcp_server_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is still waiting for an answer. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-list_workspace_mcp_servers": {
         parameters: {
             query?: {
@@ -36876,7 +40907,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
                 };
             };
-            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            /** @description The URL failed the SSRF or TLS check, or is on another origin than the stored server whose credential was asked for; nothing was sent to it. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -36920,6 +40951,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMcpServerKeyAccess"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_workspace_mcp_server_logos": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogosPublic"];
                 };
             };
             /** @description Validation Error */
@@ -37244,6 +41311,291 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "mcp-servers-start_workspace_mcp_server_check_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-list_mcp_server_connections": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-remove_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-set_workspace_mcp_server_logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A PNG of at most 512 KB to show instead of the server's own logo. Leave out to keep it. */
+                    file?: string;
+                    /**
+                     * @description Whether the logo sits on a tile: where it would fade out, always, or never.
+                     * @enum {string}
+                     */
+                    tile: "auto" | "always" | "never";
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogoPublic"];
+                };
+            };
+            /** @description The body is larger than the logo limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The file is not a PNG, or the tile is not one of the choices. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-servers-remove_workspace_mcp_server_logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-get_my_workspace_mcp_server_tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerMyTools"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-start_workspace_mcp_server_shared_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-end_workspace_mcp_server_shared_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

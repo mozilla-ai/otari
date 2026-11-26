@@ -54,6 +54,10 @@ class LogWriter(Protocol):
         """
         ...
 
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        """Report transactionally staged rows after their request transaction commits."""
+        ...
+
     async def start(self) -> None: ...
 
     async def stop(self) -> None: ...
@@ -75,6 +79,9 @@ class SingleLogWriter:
                 logger.error("SingleLogWriter failed: %s", e)
                 ROWS.labels(writer="single", result="dropped").inc()
                 return False
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        ROWS.labels(writer="single", result="written").inc(len(logs))
 
     async def start(self) -> None:
         pass
@@ -126,6 +133,9 @@ class BatchLogWriter:
         finally:
             QUEUE_DEPTH.set(self._queue.qsize())
         return True
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        ROWS.labels(writer="batch", result="written").inc(len(logs))
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -268,6 +278,15 @@ class TracingLogWriter:
         self._traces = traces
 
     async def put(self, log: UsageLog) -> bool:
+        self._trace(log)
+        return await self._inner.put(log)
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        for log in logs:
+            self._trace(log)
+        await self._inner.after_commit(logs)
+
+    def _trace(self, log: UsageLog) -> None:
         trace = self._traces.get(log.request_group_id)
         if trace is not None:
             # The row is the billing record: tracing it must never be why it is not written.
@@ -275,7 +294,6 @@ class TracingLogWriter:
                 trace.record_llm_call(_llm_call(log))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
-        return await self._inner.put(log)
 
     async def start(self) -> None:
         await self._inner.start()
@@ -331,25 +349,39 @@ class SignalingLogWriter:
         # building the facts nor whatever the adapter raises may reach settlement.
         # Built before the row is handed over, because a batch writer flushes it
         # from another task and the facts should not depend on how far it got.
-        usage: RecordedUsage | None = None
-        try:
-            usage = recorded_usage(log)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        usage = _usage_facts(log)
         accepted = await self._inner.put(log)
-        if not accepted or usage is None:
-            return accepted
+        if accepted and usage is not None:
+            await self._announce(usage)
+        return accepted
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        await self._inner.after_commit(logs)
+        for log in logs:
+            usage = _usage_facts(log)
+            if usage is not None:
+                await self._announce(usage)
+
+    async def _announce(self, usage: RecordedUsage) -> None:
         try:
             await self._signal.usage_recorded(usage)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
-        return accepted
 
     async def start(self) -> None:
         await self._inner.start()
 
     async def stop(self) -> None:
         await self._inner.stop()
+
+
+def _usage_facts(log: UsageLog) -> RecordedUsage | None:
+    """The facts ``UsageSignalPort`` is told about ``log``, or ``None`` when they cannot be built."""
+    try:
+        return recorded_usage(log)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+        return None
 
 
 def recorded_usage(log: UsageLog) -> RecordedUsage:

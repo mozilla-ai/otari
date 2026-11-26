@@ -1,14 +1,15 @@
 """ORM tables for usage rows and coding-agent telemetry."""
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, event, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
@@ -27,6 +28,9 @@ SERVED_HERE_SLUG = "gateway"
 # identifier, not a URL: it keeps its value if the route ever moves, exactly as
 # ``chat.USAGE_ENDPOINT`` does.
 PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
+
+# The endpoint label on a usage row for every decisions path.
+DECISIONS_ENDPOINT = "/v1/decisions"
 
 
 class UsageLog(Base):
@@ -104,6 +108,11 @@ class UsageLog(Base):
     # where an overlay binds one. False for every other row, and for every row
     # written before the column existed.
     deployment_paid: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # Where the hosted provider (or region) that served the attempt declared it
+    # keeps request data, read when the row was written: a country code, ``EU``
+    # or ``GLOBAL``. Null for a row the deployment did not serve, or one served
+    # where nothing was declared.
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
 
     prompt_tokens: Mapped[int | None] = mapped_column()
     completion_tokens: Mapped[int | None] = mapped_column()
@@ -139,6 +148,12 @@ class UsageLog(Base):
     # is, where looking up the tools' prices failed, and on every row written
     # before the column existed.
     tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The part of ``cost`` the deployment's account ran, which is what it charges the
+    # organization for: the model's cost where ``deployment_paid``, plus each
+    # gateway-run tool call it ran whoever paid for the model call. Null where
+    # neither part has a cost, on rows written by a path that does not split it, and
+    # on every row written before the column existed.
+    deployment_paid_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
@@ -201,6 +216,11 @@ class UsageLog(Base):
     # `Otari-Request-ID` it sent the caller here on every row, routed or not, so a
     # caller can look a request's cost up by that id.
     policy_name: Mapped[str | None] = mapped_column(index=True)
+    # The model name the caller sent, before an alias or a policy resolved it into
+    # ``model``. Null on rows written before the column, and on rows that bill
+    # something other than a model the caller named (a vision side-call, imported
+    # usage).
+    requested_model: Mapped[str | None] = mapped_column()
     selection_reason: Mapped[str | None] = mapped_column()
     attempt_position: Mapped[int | None] = mapped_column()
     attempt_count: Mapped[int | None] = mapped_column()
@@ -320,3 +340,42 @@ class AgentTelemetry(Base):
     temporality: Mapped[str | None] = mapped_column()
     series_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     series_key: Mapped[str | None] = mapped_column()
+
+
+class AgentTelemetryUserBarrier(Base):
+    """When a user's telemetry was last erased, so no export admitted before it is stored after it.
+
+    Erasure sets ``erased_at`` and deletes in one transaction, and each write locks
+    the row of the user it stores for, so an export another replica admitted before
+    the erasure is refused rather than stored after it. The row goes with the user's
+    own, after which the foreign key on ``agent_telemetry`` refuses their writes.
+    """
+
+    __tablename__ = "agent_telemetry_user_barriers"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+# Where a hosted provider (or region) name declares it keeps request data,
+# registered by the composition root: the provider domain owns that answer.
+_data_location_of: Callable[[str], str | None] | None = None
+
+
+def configure_usage_data_location(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup that stamps each deployment-served row with where it was served from."""
+    global _data_location_of  # noqa: PLW0603
+    _data_location_of = resolver
+
+
+@event.listens_for(UsageLog, "init")
+def _stamp_data_location(_row: UsageLog, _args: object, kwargs: dict[str, Any]) -> None:
+    """Fill in where a deployment-served row was served from, as the row is built.
+
+    Built in the request that served it, so the registered lookup answers what
+    the serving credential declared then, and a later change to a declaration
+    never reaches the row. A row that names its location keeps it.
+    """
+    if kwargs.get("deployment_paid") and kwargs.get("provider") and "data_location" not in kwargs:
+        if _data_location_of is not None:
+            kwargs["data_location"] = _data_location_of(kwargs["provider"])

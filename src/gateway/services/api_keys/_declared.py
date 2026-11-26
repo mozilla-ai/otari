@@ -70,6 +70,7 @@ async def apply_declared_key(
         "max_end_users": spec.max_end_users,
         "exclude_from_budget": spec.exclude_from_budget,
         "reject_user_mismatch": spec.reject_user_mismatch,
+        "scopes": spec.held_scopes(),
         "declared_digest": digest,
     }
     if key.key_hash != key_hash:

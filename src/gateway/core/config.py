@@ -3,6 +3,7 @@ import binascii
 import json
 import os
 import re
+import secrets
 import types
 import typing
 from collections.abc import Callable, Container
@@ -20,12 +21,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
+from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.identity import IdentitySettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.mcp_catalog import McpCatalogSettings
 from gateway.core.settings.memory import MemorySettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
@@ -84,12 +87,14 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # Response headers describing how a completion was served: the
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
-# than the plan's first served it, and how long the gateway took to answer. See
+# than the plan's first served it, whether the deployment paid for the provider
+# call, and how long the gateway took to answer. See
 # docs/routing.md#what-is-billed-and-what-the-caller-sees.
 PROVIDER_HEADER = "Otari-Provider"
 MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
+DEPLOYMENT_PAID_HEADER = "Otari-Deployment-Paid"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # The same duration split into the gateway's own time and the provider's (W3C Server Timing).
 SERVER_TIMING_HEADER = "Server-Timing"
@@ -119,7 +124,7 @@ OTLP_ROOT = "/otlp"
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
-# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# (Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 # Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
@@ -162,11 +167,10 @@ ENV_BRIDGED_FIELDS = (
     "web_search_max_results",
     "web_search_extract",
     "web_search_allow_private_hosts",
+    "mcp_private_hosts",
     "web_search_default_tool",
     "web_fetch_default_tool",
     "web_search_max_calls",
-    "mcp_allow_loopback",
-    "mcp_allow_private_hosts",
     "provider_allow_private_hosts",
 )
 
@@ -177,13 +181,14 @@ VISION_STRATEGIES = ("describe", "ocr", "off")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
-# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# llama-server's /v1/systemone adopted and Gemini's Decisions API is translated
+# to and from, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
 # here, as the search providers are in ``core/settings/tools.py``, so startup
 # validation needs no service module.
-DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+DECISION_PROVIDERS = ("typesafe", "openrouter", "gemini", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
@@ -295,7 +300,8 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
-    OpenAI endpoint.
+    OpenAI endpoint. A stored provider is also refused ``@``, which pins a
+    region (``name@region:model``); a configured name holding one keeps loading.
     """
     if name in RESERVED_PROVIDER_INSTANCE_NAMES:
         return "is reserved; give the provider a name of its own"
@@ -310,6 +316,27 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
+
+
+# Joins a hosted provider's name and one of its regions in a selector: ``tokenhub@sg:model``.
+REGION_SEPARATOR = "@"
+_REGION_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+
+
+def region_slug_problem(slug: str) -> str | None:
+    """Why ``slug`` cannot name a hosted provider region, or None when it can.
+
+    It pins the region in a selector, so it keeps to lower-case letters, digits
+    and hyphens, starting with a letter or digit, at most 32 characters.
+    """
+    if _REGION_SLUG.fullmatch(slug) is None:
+        return "must be 1 to 32 lower-case letters, digits or hyphens, starting with a letter or digit"
+    return None
+
+
+def region_instance(name: str, region: str | None) -> str:
+    """The instance name a request served from ``region`` of the hosted provider ``name`` settles under."""
+    return name if region is None else f"{name}{REGION_SEPARATOR}{region}"
 
 
 def hosted_key_optional(provider_type: str, api_base: str | None) -> bool:
@@ -593,20 +620,25 @@ def _is_origin(value: str) -> bool:
 
     That is a scheme and a lowercase ASCII host, a port only when it is not the
     scheme's default, and nothing else: a browser never sends any other spelling,
-    so an entry written another way could never match.
+    so an entry written another way could never match. Origins are compared
+    whole, so a ``*`` inside a host is a literal that no page has.
     """
     try:
         parts = urlsplit(value)
         port = parts.port
     except ValueError:
         return False
+    host = parts.hostname
+    if not host or parts.scheme not in _DEFAULT_PORTS:
+        return False
+    if ":" in host:
+        host = f"[{host}]"
     return (
-        parts.scheme in _DEFAULT_PORTS
-        and bool(parts.hostname)
-        and "@" not in parts.netloc
-        and value.isascii()
-        and parts.netloc == parts.netloc.lower()
+        value.isascii()
+        and "*" not in host
         and port != _DEFAULT_PORTS[parts.scheme]
+        # urlsplit lowercases the host and drops userinfo and an empty port, so any of those leaves a difference.
+        and parts.netloc == (host if port is None else f"{host}:{port}")
         and value == f"{parts.scheme}://{parts.netloc}"
     )
 
@@ -620,6 +652,7 @@ class GatewayConfig(
     ProviderSettings,
     FeedbackSettings,
     HealthCheckFeatureSettings,
+    McpCatalogSettings,
     IdentitySettings,
     MemorySettings,
     OrganizationSettings,
@@ -652,7 +685,7 @@ class GatewayConfig(
             "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
             "and public-catalog limits key on the address these headers resolve to, so behind a "
             "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
-            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "the proxy is the sole path to the server. Unset leaves it to uvicorn: "
             "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
         ),
     )
@@ -800,7 +833,8 @@ class GatewayConfig(
     cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list,
         description=(
-            "Origins whose pages may call the model endpoints from a browser with an API key, or '*' for any. "
+            "Origins whose pages may call the model and web tool endpoints from a browser with an API key, "
+            "and exchange or revoke an OAuth app token, or '*' for any. "
             "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
         ),
     )
@@ -1056,7 +1090,7 @@ class GatewayConfig(
         description=(
             "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
-            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "openrouter, gemini, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
         ),
@@ -1326,14 +1360,6 @@ class GatewayConfig(
             "left rather than uploading the same file again."
         ),
     )
-    file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
-        default=True,
-        description=(
-            "Normalize file/image content blocks before the provider call: pass through for "
-            "natively-capable models, extract to text for text-only models. When False, content "
-            "blocks are forwarded unchanged (legacy pass-through)."
-        ),
-    )
     vision_strategy: Annotated[str, Shown(SettingsGroup.VISION)] = Field(
         default="describe",
         description=(
@@ -1491,19 +1517,6 @@ class GatewayConfig(
             "False makes code execution something a workspace admin turns on."
         ),
     )
-    mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=True,
-        description=(
-            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host sidecars). On by default."
-        ),
-    )
-    mcp_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=False,
-        description=(
-            "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
-            "hostnames that fail to resolve at validation time. Off by default."
-        ),
-    )
     provider_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
@@ -1514,7 +1527,9 @@ class GatewayConfig(
             f"credential write path (POST {API_ROOT}/hosted-providers and PATCH "
             f"{API_ROOT}/hosted-providers/{{provider}}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
-            "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
+            "general egress control. It governs operator-supplied endpoints only: an organization's "
+            "provider key, an owned provider endpoint and an organization's search key are always held "
+            "to public addresses. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     provider_endpoints_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1543,6 +1558,13 @@ class GatewayConfig(
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
 
+    def is_master_key(self, token: str) -> bool:
+        """Whether ``token`` is the configured master key, in constant time.
+
+        Compared as UTF-8 bytes: ``compare_digest`` raises on a non-ASCII str, and a pasted key can hold one.
+        """
+        return self.master_key is not None and secrets.compare_digest(token.encode(), self.master_key.encode())
+
     @property
     def effective_ui_base_url(self) -> str:
         """Where a browser reaches this deployment's interface, with no trailing slash on its path.
@@ -1556,11 +1578,10 @@ class GatewayConfig(
     def ui_link(self, path: str) -> str:
         """An absolute link into the interface, or ``path`` itself when the address is unknown.
 
-        A query on ``ui_base_url`` travels with every link, placed before the hash
-        route: ``https://app.example.com/ui/?edge=a`` and ``/#/verify-email?token=t``
-        give ``https://app.example.com/ui/?edge=a#/verify-email?token=t``, which is
-        the one order a browser keeps the query in the page's own location rather
-        than in the route's.
+        A query on ``ui_base_url`` travels with every link, joined to the page's
+        own query and placed before its fragment: ``https://app.example.com/ui/?edge=a``
+        and ``/verify-email#token=t`` give
+        ``https://app.example.com/ui/verify-email?edge=a#token=t``.
         """
         base = self.effective_ui_base_url
         if not base:
@@ -1799,6 +1820,7 @@ class GatewayConfig(
         *,
         alias_names: Container[str] | None = None,
         hosted_implementation: Callable[[str], str | None] | None = None,
+        own_prefixes: Container[str] = frozenset(),
     ) -> None:
         """Validate a single alias, raising ``ValueError`` with the reason.
 
@@ -1816,7 +1838,9 @@ class GatewayConfig(
         store aliases elsewhere (the runtime ``model_aliases`` table) pass the
         union, so chaining is rejected no matter which side each alias came from.
         ``hosted_implementation`` names the implementation behind a hosted
-        provider's name, so a target may name one.
+        provider's name, so a target may name one. ``own_prefixes`` are the
+        selector prefixes the writing workspace reaches on its organization's own
+        keys, so a target may name a key by its request prefix.
         """
         known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
 
@@ -1838,10 +1862,11 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
             raise ValueError(msg)
         prefix = target[:cut]
-        if prefix in known_aliases:
+        # Alias names span every workspace, so another workspace's alias may share a key's prefix here.
+        if prefix in known_aliases and prefix not in own_prefixes:
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
-        if prefix in self.providers:
+        if prefix in self.providers or prefix in own_prefixes:
             return
         # A hosted provider's own name, which the caller passes in where the
         # deployment's database is read: configuration is validated before it is.
@@ -2261,7 +2286,7 @@ class GatewayConfig(
                 msg = (
                     f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
                     "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
-                    "such as https://app.example.com, or '*'"
+                    "such as https://app.example.com, or '*' alone, since an origin is matched whole"
                 )
                 raise ValueError(msg)
         return origins
@@ -2290,18 +2315,7 @@ class GatewayConfig(
         so a credential written into any of these would reach every browser that
         asked, which no redaction in the operator-gated config viewer would cover.
         """
-        normalized = (value or "").strip()
-        if not normalized:
-            return None
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.username is not None or parsed.password is not None:
-            # The value is left out of the message: the offending part of it is the credential.
-            msg = f"{info.field_name} must carry no username or password"
-            raise ValueError(msg)
-        return normalized
+        return normalize_link_url(value, info.field_name or "link")
 
     @field_validator("models_dev_base_url")
     @classmethod
@@ -2323,7 +2337,7 @@ class GatewayConfig(
         in the second. A path-prefixed interface writes the whole URL, the way
         ``public_base_url`` already does. A query string is kept, since an edge
         that serves one interface for several deployments may need each link to
-        say which one built it; ``ui_link`` places it ahead of the hash route.
+        say which one built it; ``ui_link`` joins it to each link's own query.
         """
         stripped = (value or "").strip()
         if not stripped:
@@ -2426,19 +2440,12 @@ class GatewayConfig(
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
             raise ValueError(msg)
-        # Shape-checked here for the same reason the transport is: a typo in the
-        # from-address is a misconfiguration, and letting it through means the
-        # first anyone hears of it is a recipient's server rejecting the
-        # envelope, which is the send-time failure this design exists to avoid.
-        # Every recipient address already goes through the same check.
-        #
-        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
-        # deliberate and costs nothing: mail_transport is new here, so no
-        # existing deployment can be holding the value this refuses, while a
-        # deployment that has had a working odd-looking address under the
-        # implicit path keeps booting.
+        # NOTE: Checked only under an explicit 'smtp'. Under 'auto', a from-address that is not plain still starts.
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
-            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
+            msg = (
+                f"mail_from_email is not a plain email address: {self.mail_from_email!r}. "
+                "Set the address alone, such as otari@example.com, and put the display name in mail_from_name."
+            )
             raise ValueError(msg)
 
     def warn_about_half_configured_oauth(self) -> None:
@@ -2618,6 +2625,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
     _warn_about_unknown_keys(config_dict)
+    _warn_about_retired_mcp_settings(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2642,6 +2650,28 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+# Settings that once relaxed the address check for every tenant's MCP URL. They
+# are read by nothing now, so a deployment still setting one is told what replaced it.
+_RETIRED_MCP_SETTINGS = ("mcp_allow_loopback", "mcp_allow_private_hosts")
+
+
+def _warn_about_retired_mcp_settings(config: dict[str, Any]) -> None:
+    """Say so when a removed MCP address setting is still set, in the config file or the environment."""
+    found = [name for name in _RETIRED_MCP_SETTINGS if name in config]
+    found += [
+        f"{OTARI_ENV_PREFIX}{name.upper()}"
+        for name in _RETIRED_MCP_SETTINGS
+        if os.getenv(f"{OTARI_ENV_PREFIX}{name.upper()}") is not None
+    ]
+    if found:
+        logger.warning(
+            "Ignoring %s: MCP server URLs must reach public addresses, and no setting relaxes that for every "
+            "tenant any more. List exact private hosts in mcp_private_hosts (OTARI_MCP_PRIVATE_HOSTS) on a "
+            "single-tenant or trusted deployment.",
+            ", ".join(found),
+        )
 
 
 def _warn_about_unknown_keys(config: dict[str, Any]) -> None:

@@ -661,7 +661,7 @@ describe("SessionsPage", () => {
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", {
-        name: /gpt-5 failed, a later attempt answered/,
+        name: /^Fallback\s?gpt-5 failed\s?Failed with error\. Routing tried the next candidate\./,
       }),
     )
 
@@ -669,7 +669,7 @@ describe("SessionsPage", () => {
       await within(peek).findByRole("button", { name: "Attributes" }),
     ).toBeInTheDocument()
     expect(
-      within(peek).getByText("error, recovered by a fallback"),
+      within(peek).getByText("error, routing tried the next candidate"),
     ).toBeInTheDocument()
   })
 
@@ -1670,6 +1670,27 @@ describe("SessionsPage", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("names the SDK that sent a session, with its version, in the panel", async () => {
+    const user = userEvent.setup()
+    const summary = traceSummary({
+      harness: "openai",
+      client_language: "python",
+      client_version: "2.30.0",
+    })
+    mockApi({ traces: [summary], traceDetail: traceDetail({ summary }) })
+
+    renderPage(<SessionsPage />, "/sessions")
+    const sessions = await screen.findByRole("grid", { name: "Sessions" })
+    await user.click(
+      await within(sessions).findByRole("row", { name: /openai/ }),
+    )
+    const peek = await screen.findByRole("complementary", {
+      name: "Trace openai",
+    })
+
+    expect(await within(peek).findByText("openai 2.30.0")).toBeInTheDocument()
   })
 
   it("clears the span search on Escape and leaves the panel open", async () => {

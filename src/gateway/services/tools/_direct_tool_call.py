@@ -46,6 +46,7 @@ from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, Insuffici
 from gateway.services.tools._tool_prices import unfunded_tool_detail
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    legacy_search_instance,
     organization_key_search_instance,
     pick_direct_fetch_instance,
     pick_direct_search_instance,
@@ -334,10 +335,11 @@ class DirectToolService:
         stood_in: list[ToolInstance] = []
 
         def stand_in(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
-            """The organization's key, standing in for a tool where an unnamed call finds none to pick."""
+            """What an unnamed call with no tool to pick runs on: the organization's key, else the legacy backend."""
             if (instance := organization_key_search_instance(policy)) is not None:
                 stood_in.append(instance)
-            return instance
+                return instance
+            return legacy_search_instance(config)
 
         def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[SearchResponse]:
             # A workspace whose organization brought its own search key searches with it on a
@@ -366,7 +368,8 @@ class DirectToolService:
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
             # A named call means a deployment tool; an unnamed one may find none to pick, as
-            # on a deployment where every organization brings its own key.
+            # on a deployment where every organization brings its own key or only the legacy
+            # settings describe a backend.
             stand_in=stand_in if tool_name is None else None,
             stand_in_for=(SearchToolSelectionError,),
         )
@@ -541,6 +544,13 @@ class DirectToolService:
                 provider=unresolved_provider,
                 workspace_id=workspace_id,
             ) from exc
+        # A call with nothing to run on is refused as such before the switch is read,
+        # since turning the switch on would not let it run.
+        if isinstance(picked, TenancyError):
+            standing = stand_in(policy) if stand_in is not None else None
+            if standing is None:
+                raise await refused_pick(picked) from picked
+            picked = standing
         if policy is not None and not policy.enabled:
             refusal = web_access_disabled_refusal(policy_tools)
             raise await refused(
@@ -551,11 +561,6 @@ class DirectToolService:
                 workspace_id=workspace_id,
                 answer_headers=error_headers(WEB_ACCESS_DISABLED),
             )
-        if isinstance(picked, TenancyError):
-            standing = stand_in(policy) if stand_in is not None else None
-            if standing is None:
-                raise await refused_pick(picked) from picked
-            picked = standing
         tool = picked
 
         try:
@@ -632,7 +637,7 @@ class DirectToolService:
                 raise await refused_after_hold(
                     unfunded_tool_detail([tool.name], exc.public_message, declared=False),
                     HTTPStatus.PAYMENT_REQUIRED,
-                    error_headers(INSUFFICIENT_FUNDS),
+                    error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
                 ) from exc
             except FundsCheckFailedError as exc:
                 logger.error(

@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   deltaFraction,
+  formatBucketTick,
   formatCost,
+  formatCount,
   formatFileSize,
   formatLatency,
   formatNumber,
@@ -15,6 +17,7 @@ import {
   formatReleaseDate,
   formatScore,
   formatSpend,
+  formatThroughput,
   formatTokens,
   formatTokensCompact,
   formatUnitRate,
@@ -28,6 +31,22 @@ describe("formatNumber", () => {
     expect(formatNumber(1234567)).toBe("1,234,567")
     expect(formatNumber(null)).toBe("0")
     expect(formatNumber(undefined)).toBe("0")
+  })
+})
+
+describe("formatBucketTick", () => {
+  it("names a day bucket by its UTC day, whatever zone reads it", () => {
+    expect(formatBucketTick("2026-11-11T00:00:00Z", "day")).toBe("Nov 11")
+  })
+
+  it("names an hour bucket by its hour", () => {
+    expect(formatBucketTick("2026-11-11T14:00:00Z", "hour")).toMatch(
+      /^\d{1,2}\s?(AM|PM)$/,
+    )
+  })
+
+  it("hands back what is not a date", () => {
+    expect(formatBucketTick("soon", "day")).toBe("soon")
   })
 })
 
@@ -80,6 +99,13 @@ describe("formatTokensCompact and formatUsdCompact", () => {
     expect(formatTokensCompact(10_000_000)).toBe("10M")
     expect(formatUsdCompact(12_345_678.9)).toBe("$12.3M")
     expect(formatUsdCompact(100_000)).toBe("$100K")
+  })
+})
+
+describe("formatCount", () => {
+  it("groups a whole count", () => {
+    expect(formatCount(24108)).toBe("24,108")
+    expect(formatCount(7)).toBe("7")
   })
 })
 
@@ -160,6 +186,13 @@ describe("formatUnitRate", () => {
 
   it("renders zero as money rather than as significant digits", () => {
     expect(formatUnitRate(0)).toBe("$0.00")
+  })
+})
+
+describe("formatThroughput", () => {
+  it("reads a rate in whole tokens per second, grouped", () => {
+    expect(formatThroughput(142.6)).toBe("143 tok/s")
+    expect(formatThroughput(5807.2)).toBe("5,807 tok/s")
   })
 })
 

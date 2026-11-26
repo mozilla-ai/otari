@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from apron_auth.pkce import generate_code_challenge
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -18,21 +17,14 @@ from gateway.models.identity import OAuthAppGrant
 from gateway.repositories.api_keys.api_key_repository import ApiKeyRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
-from .test_oauth_apps import REDIRECT, VERIFIER, approve, code_from, redeem
+from .test_oauth_apps import REDIRECT, approve, code_from, consent_body, redeem
 from .test_oauth_apps import test_config as test_config
 from .test_organization_member_keys import _World
 from .test_organization_member_keys import world as world
 
 
-def _consent(world: _World) -> dict[str, str]:
-    return dict(
-        client_id="thunderbolt",
-        redirect_uri=REDIRECT,
-        state="s" * 43,
-        code_challenge=generate_code_challenge(VERIFIER),
-        code_challenge_method="S256",
-        workspace_id=str(world.workspaces["alpha_one"]),
-    )
+def _consent(world: _World) -> dict[str, object]:
+    return consent_body(str(world.workspaces["alpha_one"]))
 
 
 @pytest.mark.parametrize("site", ["same-site", "cross-site", None])
@@ -77,6 +69,37 @@ def test_configured_dashboard_can_approve_across_same_site_origins(
     assert details.json()["issuer"] == "http://testserver"
 
 
+@pytest.mark.parametrize(
+    ("public_base_url", "issuer"),
+    [
+        ("https://otari.example/dashboard", "https://otari.example"),
+        ("https://OTARI.Example:443/dashboard", "https://otari.example"),
+        ("https://user@otari.example", "https://otari.example"),
+        ("https://otari.example:8443", "https://otari.example:8443"),
+        ("http://[::1]:8080", "http://[::1]:8080"),
+    ],
+)
+def test_issuer_is_the_public_origin_behind_a_proxy_that_rewrites_the_host(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    public_base_url: str,
+    issuer: str,
+) -> None:
+    test_config.public_base_url = public_base_url
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    response = client.post(
+        f"{API_ROOT}/oauth/apps/authorize", json=_consent(world), headers={"Sec-Fetch-Site": "same-origin"}
+    )
+    assert response.status_code == 200, response.text
+    callback = parse_qs(urlsplit(response.json()["redirect_uri"]).query)
+    assert callback["iss"] == [issuer]
+    details = client.get(
+        f"{API_ROOT}/oauth/apps/clients", params={"client_id": "thunderbolt", "redirect_uri": REDIRECT}
+    )
+    assert details.json()["issuer"] == issuer
+
+
 def test_cookie_consent_without_origin_or_fetch_metadata_is_refused(client: TestClient, world: _World) -> None:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     response = client.post(f"{API_ROOT}/oauth/apps/authorize", json=_consent(world))
@@ -97,14 +120,7 @@ def test_header_authenticated_scripts_can_approve_consent(
     response = client.post(
         f"{API_ROOT}/oauth/apps/authorize",
         headers=headers,
-        json={
-            "client_id": "thunderbolt",
-            "redirect_uri": REDIRECT,
-            "state": "s" * 43,
-            "code_challenge": generate_code_challenge(VERIFIER),
-            "code_challenge_method": "S256",
-            "workspace_id": workspaces.json()["data"][0]["id"],
-        },
+        json=consent_body(workspaces.json()["data"][0]["id"]),
     )
     assert response.status_code == 200, response.text
     assert redeem(client, code_from(response)).status_code == 200

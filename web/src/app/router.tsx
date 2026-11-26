@@ -1,7 +1,8 @@
-import { createHashHistory, createRouter } from "@tanstack/react-router"
+import { createBrowserHistory, createRouter } from "@tanstack/react-router"
 import { PendingPage } from "@/app/PendingPage"
 import { PageError } from "@/design-system/feedback/PageError"
 import { routeTree } from "@/routeTree.gen"
+import { BASE_PATH } from "@/shared/helpers/appLocation"
 import {
   type DashboardSearch,
   parseSearch,
@@ -10,11 +11,14 @@ import {
 
 export const router = createRouter({
   routeTree,
-  // Hash routing, as before the TanStack migration: the gateway serves this
-  // dashboard from the same origin as its API and hashed assets, so client
-  // routes live under `/#/...` and need no server catch-all that could shadow
-  // `/v1` or `/assets`.
-  history: createHashHistory(),
+  // Path routing under the base the bundle was built for. The gateway answers
+  // a browser opening any path it has no route for with this page
+  // (`gateway/dashboard.py`), and only once every route has declined it, so a
+  // dashboard path never shadows the API or the assets. A link from before
+  // path routing (`/#/keys`) is rewritten by `legacyHashRouteOnLoad`, which
+  // `main.tsx` imports ahead of this module.
+  history: createBrowserHistory(),
+  basepath: BASE_PATH || "/",
   parseSearch,
   stringifySearch,
   // Each page is its own chunk, so the first visit to one waits on a fetch.

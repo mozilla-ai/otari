@@ -51,6 +51,8 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_master_key,
 )
+from gateway.api.deps._deployment_access import deployment_administration_access
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -66,7 +68,6 @@ from gateway.services.guardrail_catalog import (
     cached_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
     SERVICE_URL_FIELD,
@@ -261,13 +262,13 @@ async def get_tool_settings(
     a session reads everything only while it operates the deployment, and
     otherwise gets the fields without the service endpoints in them.
     """
-    include_urls = session_identity is None or await DeploymentAdministrationAccess(db).has_administration_access(
+    include_urls = session_identity is None or await deployment_administration_access(db).has_administration_access(
         session_identity
     )
     return _current_fields(config, include_urls=include_urls)
 
 
-@catalog_router.get("/guardrails/profiles")
+@catalog_router.get("/guardrails/profiles", openapi_extra=key_scope(None))
 async def list_guardrail_profiles(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GuardrailCatalog:
@@ -298,7 +299,7 @@ async def list_guardrail_profiles(
     return await cached_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
 
-@catalog_router.get("/guardrails/catalog")
+@catalog_router.get("/guardrails/catalog", openapi_extra=key_scope(None))
 async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     """List the guardrails this gateway can run itself, for the form that defines one.
 

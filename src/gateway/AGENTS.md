@@ -38,7 +38,7 @@ does not commit.
 
 Completion requests follow this order:
 
-1. Extract and verify the API key or master key in `api/deps.py`.
+1. Extract and verify the API key or master key in `api/deps/`.
 2. Resolve the billed user, workspace, and organization.
 3. Compile routing into an attempt plan.
 4. Resolve pricing and reserve applicable budgets.
@@ -260,11 +260,42 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
+An organization's provider key (`services/tenancy/org_provider_key_service.py`)
+is held the same way. Its `api_base` is refused at write unless it reaches
+public addresses and its provider is in `TENANT_ENDPOINT_PROVIDERS`
+(`core/provider_params.py`), the SDKs that take an injected client;
+`get_provider_kwargs` then hands that SDK the pinned client on every dispatch,
+and the key's model discovery and its provider file sessions
+(`adapters/provider_file_adapter.py`) dial through it too. Its `client_args` are
+held to `tenant_client_args_allowed`, refused at write and dropped from a row
+stored before, because other names reach the SDK constructor and can choose
+the destination, the transport, the headers or an ambient credential.
+
 Provider resolution asks `ModelProviderPort` for a deployment-owned credential
 only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`
-tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
-hosted credential must never move ahead of BYO or leave its trusted gateway.
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. The
+adapter resolves every candidate of a request on one `HostedServing`, which
+reads the providers and their regions once, as detached rows, rather than once
+per candidate. A hosted credential must never move ahead of BYO or leave its
+trusted gateway.
+A vendor switched off on a hosted provider (`hosted_provider_disabled_vendors`,
+vendor read by `_hosted_vendors.vendor_of`) is refused in both
+`HostedServing.resolve` and `serveable_models`, so dispatch and the
+catalog agree; change one and change the other.
+
+A hosted provider with regions (`hosted_provider_regions`, `_hosted_regions.py`)
+answers the port with its first enabled region and the rest as the
+credential's `alternates`. The gateway side narrows them, in order, to the
+workspace's data locations (`narrow_to_workspace_locations` in
+`hosted_credential_for`) and then to the request's country
+(`ensure_hosted_country`). An overlay adapter that returns no alternates keeps
+its behavior while the workspace lists no data locations; for a workspace that
+does, its credential must declare a `data_location` on the list or it is
+refused. A region is addressed as `<name>@<slug>`, resolved from the region
+rows and never by splitting a name (`get_serving`, `HostedRegionIndex`), since
+a provider named before regions may hold `@`: it is the instance a request
+settles under, and a pricing key that falls back to its provider's.
 
 A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
 reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
@@ -279,9 +310,24 @@ tenant.
 
 ## Mail
 
-Features import `Mailer`, ask `can_send_links` before offering a mail-only
-flow, and inspect the `MailDelivery` returned by `send`. They do not select
-transports or catch transport exceptions.
+Features import `Mailer`, inspect the `MailDelivery` returned by `send`, and do
+not select transports or catch transport exceptions.
+
+Two predicates say what mail can do, and the choice turns on what the answer
+decides. `can_send_links` asks whether mail is configured at all, for a readiness
+check and for hiding a mail-only surface. `can_deliver_links` asks whether the
+message reaches its recipient, and is false for the console transport, which
+shows an email to the deployment operator and delivers it to nobody.
+
+Anything whose outcome depends on the recipient receiving the message asks
+`can_deliver_links`. That covers a send no person watches, such as a background
+worker's, a flow that falls back to handing the link over, and any decision about
+what a link proves: a link the recipient's mailbox never saw is hand-carried,
+whatever the transport reported.
+
+`Mailer.readiness` answers both at once, as `MailReadiness`, and that is what
+`GET /api/v1/bootstrap` publishes as `mail`. A caller outside this package that
+needs both questions reads it rather than deriving the pair separately.
 
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing

@@ -28,8 +28,10 @@ import {
   useTestHostedProvider,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
+import { DataLocationField } from "./DataLocationField"
 import { movesToAnotherOrigin } from "./endpointOrigin"
-
+import { PolicyUrlFields } from "./PolicyUrlFields"
+import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { formatCountries, parseCountries } from "./supportedCountries"
@@ -53,7 +55,10 @@ interface EditDraft {
   redacted: string[]
   servesUnlistedModels: boolean
   supportedCountries: string
+  dataLocation: string
   zeroDataRetention: boolean
+  termsUrl: string
+  privacyUrl: string
 }
 
 function draftFrom(provider: HostedProvider): EditDraft {
@@ -69,7 +74,10 @@ function draftFrom(provider: HostedProvider): EditDraft {
     redacted,
     servesUnlistedModels: provider.serves_unlisted_models,
     supportedCountries: formatCountries(provider.supported_countries),
+    dataLocation: provider.data_location ?? "",
     zeroDataRetention: provider.zero_data_retention,
+    termsUrl: provider.terms_url ?? "",
+    privacyUrl: provider.privacy_url ?? "",
   }
 }
 
@@ -85,6 +93,9 @@ export function EditHostedProviderForm({
   const update = useUpdateHostedProvider()
   const test = useTestHostedProvider()
   const [draft, setDraft] = useState<EditDraft>(() => draftFrom(provider))
+  // What the dialog opened on, so a refresh that lands while it is open is not
+  // read as the operator's edit and written back over.
+  const [opened] = useState(() => draftFrom(provider))
 
   const spec = credentialSpecFor(provider.provider)
   const identity =
@@ -113,6 +124,8 @@ export function EditHostedProviderForm({
   const canSubmit =
     parsedClientArgs.ok &&
     countries.ok &&
+    policyUrlError(draft.termsUrl) === undefined &&
+    policyUrlError(draft.privacyUrl) === undefined &&
     Object.keys(credentialErrors).length === 0 &&
     !needsKey
 
@@ -160,6 +173,18 @@ export function EditHostedProviderForm({
             ? {}
             : { zero_data_retention: draft.zeroDataRetention }),
           ...(countriesChanged ? { supported_countries: countries.value } : {}),
+          // Sent only when changed; cleared is null, undeclared.
+          ...(draft.dataLocation === opened.dataLocation
+            ? {}
+            : { data_location: draft.dataLocation || null }),
+          // Sent only when changed; blank clears the link.
+          ...(policyUrlValue(draft.termsUrl) === (provider.terms_url ?? null)
+            ? {}
+            : { terms_url: policyUrlValue(draft.termsUrl) }),
+          ...(policyUrlValue(draft.privacyUrl) ===
+          (provider.privacy_url ?? null)
+            ? {}
+            : { privacy_url: policyUrlValue(draft.privacyUrl) }),
         },
       },
       { onSuccess: onClose },
@@ -219,12 +244,22 @@ export function EditHostedProviderForm({
           setDraft({ ...draft, zeroDataRetention })
         }
       />
+      <DataLocationField
+        value={draft.dataLocation}
+        onChange={(dataLocation) => setDraft({ ...draft, dataLocation })}
+      />
       <SupportedCountriesField
         value={draft.supportedCountries}
         parsed={countries}
         onChange={(supportedCountries) =>
-          setDraft({ ...draft, supportedCountries })
+          setDraft((current) => ({ ...current, supportedCountries }))
         }
+      />
+      <PolicyUrlFields
+        termsUrl={draft.termsUrl}
+        privacyUrl={draft.privacyUrl}
+        onTermsUrlChange={(termsUrl) => setDraft({ ...draft, termsUrl })}
+        onPrivacyUrlChange={(privacyUrl) => setDraft({ ...draft, privacyUrl })}
       />
       <ProviderCredentialFields
         provider={provider.provider}

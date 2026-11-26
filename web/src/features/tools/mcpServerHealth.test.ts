@@ -1,26 +1,16 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  checkedTools,
   healthDetail,
-  healthLabel,
   healthNeedsAttention,
-  toolCountLabel,
+  healthState,
+  healthStateDetail,
 } from "@/features/tools/mcpServerHealth"
 import { workspaceMcpServerHealth as health } from "@/tests/fixtures"
 
 describe("mcpServerHealth", () => {
-  it("calls a passing check connected and leaves the count to the Tools column", () => {
-    expect(healthLabel(health())).toBe("CONNECTED")
-    expect(toolCountLabel(health({ tool_count: 1, tools: ["a"] }), false)).toBe(
-      "1 tool",
-    )
-    expect(
-      toolCountLabel(health({ tool_count: 1, tools: ["a", "b", "c"] }), true),
-    ).toBe("1 of 3 tools")
-    expect(
-      toolCountLabel(health({ status: "failing", error: "timeout" }), false),
-    ).toBeUndefined()
-    expect(toolCountLabel(null, false)).toBeUndefined()
+  it("says how many tools a passing check found", () => {
     expect(healthDetail(health({ tool_count: 2, tools: ["a", "b"] }))).toBe(
       "Connected. The server offers 2 tools.",
     )
@@ -38,7 +28,6 @@ describe("mcpServerHealth", () => {
       missing_allowed_tools: ["close_issue", "merge"],
     })
 
-    expect(healthLabel(missing)).toBe("CONNECTED")
     expect(healthDetail(missing)).toMatch(/does not offer close_issue, merge/)
     expect(healthNeedsAttention(missing)).toBe(true)
   })
@@ -51,7 +40,6 @@ describe("mcpServerHealth", () => {
       tool_count: null,
     })
 
-    expect(healthLabel(refused)).toBe("TOKEN REJECTED")
     expect(healthDetail(refused)).toMatch(/Check the authorization token/)
     expect(healthNeedsAttention(refused)).toBe(true)
   })
@@ -64,7 +52,44 @@ describe("mcpServerHealth", () => {
       tool_count: null,
     })
 
-    expect(healthLabel(refused)).toBe("HTTP 406")
     expect(healthDetail(refused)).toMatch(/HTTP 406/)
+  })
+})
+
+describe("healthState", () => {
+  const passing = {
+    status: "healthy" as const,
+    checked_at: "2026-11-10T10:00:00Z",
+    tool_count: 2,
+    tools: ["a", "b"],
+  }
+  const now = Date.parse("2026-11-12T10:00:00Z")
+
+  it("reads each of the four states", () => {
+    expect(healthState(null, now)).toBe("unchecked")
+    expect(
+      healthState({ ...passing, status: "failing", error: "timeout" }, now),
+    ).toBe("failing")
+    expect(healthState(passing, now)).toBe("healthy")
+    expect(
+      healthState({ ...passing, missing_allowed_tools: ["gone"] }, now),
+    ).toBe("attention")
+  })
+
+  it("claims no tool count for a server that answered without listing its tools", () => {
+    // What a tool call records on a server no check ever listed.
+    const reached = health({ tool_count: null, tools: [] })
+    expect(healthDetail(reached)).toBe("Connected.")
+    expect(checkedTools({ health: reached, allowed_tools: null }).isKnown).toBe(
+      false,
+    )
+  })
+
+  it("turns amber once a server has not answered in a week", () => {
+    const later = now + 8 * 24 * 60 * 60 * 1000
+    expect(healthState(passing, later)).toBe("attention")
+    expect(healthStateDetail(passing, "attention")).toMatch(
+      /No successful contact in the last 7 days/,
+    )
   })
 })

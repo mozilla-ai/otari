@@ -46,9 +46,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import get_web_provider_client
 from gateway.api.routes import _pipeline as pipeline
 from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
-from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE_LIMIT_RULE_HEADER, RATE_LIMITED
+from gateway.core.error_codes import (
+    BILLING_URL_HEADER,
+    ERROR_CODE_HEADER,
+    INSUFFICIENT_FUNDS,
+    RATE_LIMIT_RULE_HEADER,
+    RATE_LIMITED,
+)
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
@@ -56,7 +63,7 @@ from gateway.ports.billing_port import BilledModel, ToolUse
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import FAKE_SEARCH, build_test_client, price_fake_search
+from .conftest import ALL_KEY_SCOPES, FAKE_SEARCH, build_test_client, price_fake_search
 
 MODULE = "probe_deployment_paid"
 PROBE_BOOTSTRAP = """
@@ -106,7 +113,7 @@ class ProbeBilling:
         if "funds" in FAULTS:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
-            raise InsufficientFundsError(FUNDS["available"])
+            raise InsufficientFundsError(FUNDS["available"], action_url=FUNDS.get("action_url"))
 
     async def has_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
         GATES.append(("has_funds_on_deposit", str(organization_id)))
@@ -208,6 +215,17 @@ def billed_in_loop_search(
 
 
 @pytest.fixture
+def billed_legacy_search(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, searching only through the legacy settings' Tavily key, which the deployment pays for."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    yield from _billed(
+        postgres_url, tmp_path, monkeypatch, web_search_provider="tavily", web_search_provider_api_key="tvly-ours"
+    )
+
+
+@pytest.fixture
 def billed_sandbox(
     postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[tuple[TestClient, ModuleType]]:
@@ -242,6 +260,11 @@ def _billed(
                     "fleet_second": {
                         "select": [{"default": "anthropic:claude-opus-4"}],
                         "on_failure": ["openai:gpt-4o"],
+                    },
+                    # Fleet candidates only.
+                    "fleet_only": {
+                        "select": [{"default": "openai:gpt-4o"}],
+                        "on_failure": ["openai:gpt-4o-mini"],
                     },
                 }
             }
@@ -285,7 +308,9 @@ def _key(client: TestClient) -> dict[str, Any]:
         f"{API_ROOT}/users", json={"user_id": "billed", "budget_id": budget.json()["budget_id"]}, headers=MASTER
     )
     assert user.status_code == status.HTTP_200_OK, user.text
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "billed", "user_id": "billed"}, headers=MASTER)
+    created = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "billed", "user_id": "billed"}, headers=MASTER
+    )
     assert created.status_code == status.HTTP_200_OK, created.text
     key: dict[str, Any] = created.json()
     return key
@@ -486,7 +511,7 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     assert _deployment_paid_flags(db_session_factory) == [True]
 
 
-@pytest.mark.parametrize(
+_REFUSAL_FORMATS = pytest.mark.parametrize(
     ("path", "body", "error_body"),
     [
         (
@@ -507,6 +532,9 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     ],
     ids=["chat", "messages", "responses"],
 )
+
+
+@_REFUSAL_FORMATS
 def test_an_organization_without_funds_is_refused_before_dispatch(
     billed: tuple[TestClient, ModuleType],
     db_session_factory: Callable[[], Session],
@@ -531,6 +559,8 @@ def test_an_organization_without_funds_is_refused_before_dispatch(
     payload = response.json()
     expected = error_body(detail)
     assert {name: payload.get(name) for name in expected} == expected
+    assert "billing_url" not in payload
+    assert BILLING_URL_HEADER not in response.headers
     chat_call.assert_not_called()
     responses_call.assert_not_called()
     assert probe.LEDGER == []
@@ -540,6 +570,26 @@ def test_an_organization_without_funds_is_refused_before_dispatch(
     assert [(row["status"], row["status_code"], row["provider"]) for row in rows] == [("error", 402, "openai")]
     # Refused before it was served, so nothing the deployment paid for.
     assert _deployment_paid_flags(db_session_factory) == [False]
+
+
+@_REFUSAL_FORMATS
+def test_a_refusal_for_insufficient_funds_names_where_to_add_them(
+    billed: tuple[TestClient, ModuleType], path: str, body: dict[str, Any], error_body: Any
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    key = _key(client)
+    url = "https://otari.example/billing"
+    probe.FUNDS.update(available=Decimal("0"), action_url=url)
+
+    response = client.post(f"{API_ROOT}{path}", json={"model": "openai:gpt-4o", **body}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[BILLING_URL_HEADER] == url
+    payload = response.json()
+    detail = f"Insufficient funds ($0.00) to serve this request. Add funds at {url}."
+    expected = {**error_body(detail), "billing_url": url}
+    assert {name: payload.get(name) for name in expected} == expected
 
 
 def test_a_request_on_the_gateways_own_key_never_reaches_billing(
@@ -646,6 +696,26 @@ def test_a_policy_skips_a_deployment_paid_candidate_its_organization_cannot_fund
     with db_session_factory() as db:
         served = db.scalars(select(UsageLog.deployment_paid).where(UsageLog.status == "success")).all()
     assert served == [False]
+
+
+def test_a_policy_its_organization_cannot_fund_anywhere_is_refused_once_against_its_first_model(
+    billed: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "openai:gpt-4o-mini")
+    key = _key(client)
+    probe.FUNDS.update(available=Decimal("0"), action_url="https://otari.example/billing")
+
+    response, provider = _routed(client, key, "fleet_only", failing="none")
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert response.json()["billing_url"] == "https://otari.example/billing"
+    provider.assert_not_called()
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
+    assert [(row["status_code"], row["model"]) for row in rows] == [(402, "gpt-4o")]
+    assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
 def test_a_policy_skips_a_deployment_paid_candidate_with_no_free_slot(
@@ -991,6 +1061,54 @@ def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
     assert any("deployment-paid search" in message and "RuntimeError" in message for message in errors), errors
 
 
+def _tavily_answers(client: TestClient) -> None:
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        answer = {"results": [{"url": "https://otari.example", "title": "Otari", "content": "A snippet."}]}
+        transport = httpx.MockTransport(lambda _: httpx.Response(200, json=answer))
+        async with httpx.AsyncClient(transport=transport) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+
+
+def test_a_direct_search_on_the_legacy_settings_is_charged_at_the_web_search_rate(
+    billed_legacy_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed_legacy_search
+    _price(client, "otari:web_search")
+    key = _key(client)
+    _tavily_answers(client)
+
+    response = client.post(f"{API_ROOT}/search", json={"query": "otari"}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert (response.headers[COST_USD_HEADER], response.headers[PRICING_SOURCE_HEADER]) == ("0.001000", "deployment")
+    assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [("charge", Decimal("0.001"), "tavily:tavily")]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=Decimal("0.001"))}]
+    assert _user(client)["spend"] == pytest.approx(0.001)
+    assert _deployment_paid_flags(db_session_factory) == [True]
+
+
+def test_a_direct_search_on_the_legacy_settings_is_refused_without_funds(
+    billed_legacy_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed_legacy_search
+    _price(client, "otari:web_search")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched:
+        response = client.post(f"{API_ROOT}/search/tavily", json={"query": "otari"}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    searched.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [False]
+
+
 def test_a_tool_admission_that_does_not_commit_is_not_served(
     billed_in_loop_search: tuple[TestClient, ModuleType],
 ) -> None:
@@ -1015,7 +1133,7 @@ def test_a_direct_search_whose_admission_does_not_commit_is_not_served(
     key = _key(client)
 
     with (
-        patch("gateway.api.deps.release_session", new=AsyncMock(return_value=False)),
+        patch("gateway.api.deps.tools.release_session", new=AsyncMock(return_value=False)),
         patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched,
     ):
         response = _search(client, key)

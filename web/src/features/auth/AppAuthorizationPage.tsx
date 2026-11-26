@@ -3,21 +3,55 @@ import { FiArrowRight, FiCheck, FiCpu, FiGrid, FiShield } from "react-icons/fi"
 import type { Workspace } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
+import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
 import { ProductMark } from "@/design-system/ProductMark"
+import { SCOPE_INFO } from "@/features/keys/scopes"
 import {
+  type AppApproval,
   useAuthorizeOAuthApp,
   useOAuthApp,
   useOAuthAppWorkspaces,
 } from "@/shared/api/oauthApps"
 import { LoginPageShell } from "./LoginPageShell"
 
+const EXPIRATIONS: { value: AppApproval["expiration"]; label: string }[] = [
+  { value: "never", label: "Never" },
+  { value: "1-hour", label: "In 1 hour" },
+  { value: "1-day", label: "In 1 day" },
+  { value: "7-days", label: "In 7 days" },
+  { value: "30-days", label: "In 30 days" },
+  { value: "90-days", label: "In 90 days" },
+  { value: "180-days", label: "In 180 days" },
+  { value: "1-year", label: "In 1 year" },
+]
+
+/** A positive amount under a million dollars, in whole cents, as the server accepts. */
+function isLimit(value: string) {
+  return /^\d{1,6}(\.\d{1,2})?$/.test(value) && Number(value) > 0
+}
+
+function expirationFrom(value: string | null): AppApproval["expiration"] {
+  return EXPIRATIONS.find((choice) => choice.value === value)?.value ?? "never"
+}
+
 /** Consent stays behind the dashboard's normal session gate. */
 export function AppAuthorizationPage() {
-  const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
+  const params = new URLSearchParams(window.location.search)
   const [workspace, setWorkspace] = useState<Workspace>()
   const [search, setSearch] = useState("")
+  // The app may suggest both; one the screen cannot use starts blank or at never.
+  const [limit, setLimit] = useState(() => {
+    const suggested = params.get("limit") ?? ""
+    return isLimit(suggested) ? suggested : ""
+  })
+  const [expiration, setExpiration] = useState(() =>
+    expirationFrom(params.get("expiration")),
+  )
+  const limitInvalid = limit !== "" && !isLimit(limit)
   const app = useOAuthApp(
     params.get("client_id") ?? "",
     params.get("redirect_uri") ?? "",
@@ -26,7 +60,7 @@ export function AppAuthorizationPage() {
     search,
     Boolean(app.data) && !app.error,
   )
-  const approval = useAuthorizeOAuthApp(params)
+  const approval = useAuthorizeOAuthApp(params, app.data?.scopes ?? [])
   const choices = workspaces.data?.data ?? []
   const soleWorkspace =
     !search && !workspaces.isPlaceholderData && workspaces.data?.count === 1
@@ -93,6 +127,12 @@ export function AppAuthorizationPage() {
       {loading && <PageLoading label="Loading connection details…" />}
       {app.data && !app.error && !loading && (
         <>
+          {!app.data.verified && (
+            <InfoBanner tone="warning">
+              Otari has not verified this site. Allow access only if you trust{" "}
+              <span className="text-mono-caption">{app.data.name}</span>.
+            </InfoBanner>
+          )}
           <div className="flex flex-col gap-4 border-y border-border py-5">
             <h2 className="text-overline">What you’re allowing</h2>
             <div className="flex items-start gap-3">
@@ -101,11 +141,28 @@ export function AppAuthorizationPage() {
                 className="mt-0.5 size-4 shrink-0 text-muted"
               />
               <div className="flex flex-col gap-1">
-                <p className="text-emphasis">Use your models and tools</p>
-                <p className="text-caption">
-                  The app can send AI requests using the access you have in this
-                  workspace.
+                <p className="text-emphasis">
+                  This app will be able to, with the access you have in this
+                  workspace:
                 </p>
+                <ul className="flex flex-col gap-1">
+                  {app.data.scopes.map((scope) => {
+                    // A gateway newer than this bundle can name a scope it has
+                    // no description for, which is still worth showing raw.
+                    const info = SCOPE_INFO[scope]
+                    return (
+                      <li key={scope} className="text-caption">
+                        {info ? info.label : `${scope} (not described here)`}
+                        {info?.risk ? (
+                          <span className="text-warning">
+                            {" "}
+                            &middot; {info.risk}
+                          </span>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
               </div>
             </div>
             <div className="flex items-start gap-3">
@@ -164,6 +221,27 @@ export function AppAuthorizationPage() {
               administrator for workspace access.
             </p>
           ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {app.data.spend_limits && (
+              <Field
+                label="Spending limit (USD)"
+                value={limit}
+                onChange={setLimit}
+                placeholder="No limit"
+                inputMode="decimal"
+                isDisabled={approval.isPending}
+                isInvalid={limitInvalid}
+                errorMessage="Enter an amount above 0 and under 1,000,000, in dollars and cents."
+              />
+            )}
+            <Select
+              label="Key expires"
+              value={expiration}
+              onChange={(value) => setExpiration(expirationFrom(value))}
+              options={EXPIRATIONS}
+              isDisabled={approval.isPending}
+            />
+          </div>
           <div className="flex flex-col gap-2 pt-1">
             <Button
               variant="primary"
@@ -171,12 +249,18 @@ export function AppAuthorizationPage() {
               isPending={approval.isPending}
               isDisabled={
                 !selectedWorkspace ||
+                limitInvalid ||
                 Boolean(workspaces.error) ||
                 workspaces.isFetching ||
                 approval.isPending
               }
               onPress={() =>
-                selectedWorkspace && approval.mutate(selectedWorkspace.id)
+                selectedWorkspace &&
+                approval.mutate({
+                  workspaceId: selectedWorkspace.id,
+                  limit: app.data.spend_limits ? limit : "",
+                  expiration,
+                })
               }
             >
               Allow access{" "}

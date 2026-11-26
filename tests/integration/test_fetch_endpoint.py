@@ -20,10 +20,11 @@ from fastapi.testclient import TestClient
 from gateway.api.deps import get_web_provider_client, get_workspace_web_search_policies
 from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
+from gateway.exceptions.tools_exceptions import WebAccessNotEnabledError
 from gateway.models.tools import ResolvedWebSearchConfig, WebFetchCredential, WebTool
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 FETCH_USAGE_LABEL = "/v1/fetch"
 URL = "https://example.com/article"
@@ -82,7 +83,9 @@ def strict_client(test_config: GatewayConfig) -> Generator[TestClient]:
 def _keyed(client: TestClient, master_key_header: dict[str, str], user_id: str, **lists: Any) -> dict[str, str]:
     assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header).status_code == 200
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id, **lists}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": user_id, "user_id": user_id, **lists},
+        headers=master_key_header,
     )
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
@@ -294,7 +297,7 @@ def test_a_workspace_with_web_access_off_is_refused(
     resp = client.post(f"{API_ROOT}/fetch", json=PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"] == "web access is not enabled for this workspace"
+    assert resp.json()["detail"] == WebAccessNotEnabledError().message
     assert resp.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     ((_, requested),) = stub.asked
     assert requested == (WebTool.FETCH,)

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import type { PublicAuthPath } from "@/features/auth/publicAuthPaths"
 import { apiFetch } from "@/shared/api/client"
@@ -19,12 +20,12 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 function renderPage(
   path: PublicAuthPath | null,
   {
-    hash = path === null ? "#/" : `#${path}`,
-    mailReady = true,
+    route = path === null ? "/" : `#${path}`,
+    mail = "delivers" as MailReadiness,
     oauthProviders = [] as string[],
   } = {},
 ) {
-  window.location.hash = hash
+  window.history.replaceState(null, "", route)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -36,11 +37,11 @@ function renderPage(
       <AppProviders>
         <DeploymentProvider
           value={bootstrap({
-            mail_ready: mailReady,
+            mail,
             oauth_providers: oauthProviders,
           })}
         >
-          <PublicAuthPage path={path} hash={hash} />
+          <PublicAuthPage path={path} route={route} />
         </DeploymentProvider>
       </AppProviders>
     </QueryClientProvider>,
@@ -53,7 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 describe("PublicAuthPage: the mail gate", () => {
@@ -65,7 +66,7 @@ describe("PublicAuthPage: the mail gate", () => {
   ] as const)(
     "answers %s with a panel instead of a form when this gateway cannot send mail",
     (path) => {
-      renderPage(path, { mailReady: false })
+      renderPage(path, { mail: "none" })
 
       expect(
         screen.getByRole("heading", { name: "Not available on this gateway" }),
@@ -75,10 +76,25 @@ describe("PublicAuthPage: the mail gate", () => {
     },
   )
 
+  it.each(["/signup", "/resend-verification", "/recover-password"] as const)(
+    "still opens %s where a send reaches no recipient",
+    (path) => {
+      // These endpoints accept the request on such a deployment, so a panel
+      // here would refuse a flow the server does not.
+      renderPage(path, { mail: "sends_only" })
+
+      expect(
+        screen.queryByRole("heading", {
+          name: "Not available on this gateway",
+        }),
+      ).not.toBeInTheDocument()
+    },
+  )
+
   it("still opens a reset link, whose message was sent while mail worked", () => {
     renderPage("/reset-password", {
-      hash: "#/reset-password?token=abc",
-      mailReady: false,
+      route: "/reset-password?token=abc",
+      mail: "none",
     })
 
     expect(
@@ -88,7 +104,7 @@ describe("PublicAuthPage: the mail gate", () => {
 })
 
 describe("PublicAuthPage: the OAuth provider gate", () => {
-  it.each(["/auth/google/callback", "/auth/github/callback"] as const)(
+  it.each(["/sign-in/google/callback", "/sign-in/github/callback"] as const)(
     "answers %s with a panel naming the provider when this gateway configures none",
     (path) => {
       renderPage(path, { oauthProviders: [] })
@@ -106,7 +122,7 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
   it("gates per provider, not per flow", () => {
     // Google configured, GitHub not: the GitHub callback still answers with the
     // panel, or a bookmark reaches a page whose only outcome is a 503.
-    renderPage("/auth/github/callback", { oauthProviders: ["google"] })
+    renderPage("/sign-in/github/callback", { oauthProviders: ["google"] })
 
     expect(
       screen.getByRole("heading", { name: "Not available on this gateway" }),
@@ -119,13 +135,13 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
   })
 
   it("does not gate an OAuth callback on mail, which it never sends", () => {
-    renderPage("/auth/google/callback", {
-      mailReady: false,
+    renderPage("/sign-in/google/callback", {
+      mail: "none",
       oauthProviders: ["google"],
     })
 
     // The page renders, so the gate let it past. It refuses on its own terms a
-    // moment later, because this hash carries no code and no state, which is
+    // moment later, because this route carries no code and no state, which is
     // the callback page's answer and not the deployment's.
     expect(
       screen.queryByRole("heading", { name: "Not available on this gateway" }),
@@ -139,10 +155,10 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
 describe("PublicAuthPage: the organization-connection callback", () => {
   it("renders its own page rather than falling through to a blank screen", () => {
     // No deployment gate applies to this path at all, unlike the OAuth pair
-    // above it, and a hash with no arm in the switch renders nothing: this is
+    // above it, and a route with no arm in the switch renders nothing: this is
     // the dispatch itself, not the callback page's own refusal handling.
-    renderPage("/auth/sso/callback", {
-      mailReady: false,
+    renderPage("/sign-in/sso/callback", {
+      mail: "none",
       oauthProviders: [],
     })
 
@@ -157,9 +173,9 @@ describe("PublicAuthPage: the organization-connection callback", () => {
 
 describe("PublicAuthPage: a direct link to an organization's own connection", () => {
   it("renders its own page for a slug the fixed table holds no entry for", () => {
-    // `path` is null here: this covers the dispatch for an unmatched hash,
+    // `path` is null here: this covers the dispatch for an unmatched route,
     // not just the page rendered on its own.
-    renderPage(null, { hash: "#/sso/acme" })
+    renderPage(null, { route: "/sso/acme" })
 
     expect(
       screen.getByRole("heading", { name: "Sign in with your company" }),

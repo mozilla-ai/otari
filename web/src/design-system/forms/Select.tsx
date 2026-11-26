@@ -10,10 +10,16 @@ import type { ReactNode } from "react"
 import { FieldMessages } from "./FieldMessages"
 import { optionKey, optionValue } from "./optionKey"
 
-/** One choice in a `Select`. `isDisabled` shows a choice that exists but cannot be taken. */
+/**
+ * One choice in a `Select`. `isDisabled` shows a choice that exists but cannot
+ * be taken. `description` is one sentence under the label in the open list,
+ * for a set whose labels alone do not say what each choice does; the closed
+ * control still shows the label only.
+ */
 export interface SelectOption {
   value: string
   label: string
+  description?: string
   isDisabled?: boolean
 }
 
@@ -38,6 +44,7 @@ export function Select({
   onChange,
   options,
   description,
+  labelAction,
   placeholder = "Select an option",
   autoFocus,
   isRequired,
@@ -53,6 +60,12 @@ export function Select({
   onChange: (value: string) => void
   options: readonly SelectOption[]
   description?: ReactNode
+  /**
+   * A small control on the label's line, such as an icon that explains the
+   * field. A native element: a react-aria `Button` here would read the select's
+   * own button context and become a second trigger.
+   */
+  labelAction?: ReactNode
   /** Shown while nothing is selected. An example, never the label. */
   placeholder?: string
   /** A form's first field takes this; see feedback.md. Same as `ComboBoxField`'s. */
@@ -82,6 +95,8 @@ export function Select({
       ? options
       : [{ value, label: value }, ...options]
 
+  const hasDescriptions = items.some((option) => option.description)
+
   return (
     <HeroSelect.Root
       selectedKey={value === "" ? null : optionKey(value)}
@@ -99,7 +114,14 @@ export function Select({
     >
       {/* No manual "*": HeroUI marks a required field's label through CSS, so
           adding one renders two. */}
-      <Label className="text-body">{label}</Label>
+      {labelAction ? (
+        <span className="flex items-center gap-1">
+          <Label className="text-body">{label}</Label>
+          {labelAction}
+        </span>
+      ) : (
+        <Label className="text-body">{label}</Label>
+      )}
       <HeroSelect.Trigger autoFocus={autoFocus}>
         {/* `isPlaceholder` and not a nullish check on `selectedText`, which
             reads as the same test and is not: react-aria reports an empty
@@ -113,15 +135,29 @@ export function Select({
         </HeroSelect.Value>
         <HeroSelect.Indicator />
       </HeroSelect.Trigger>
-      <HeroSelect.Popover>
+      {/* Wider than a narrow trigger where the choices carry a sentence each. */}
+      <HeroSelect.Popover className={hasDescriptions ? "min-w-72" : undefined}>
         <ListBox items={items} className="max-h-72 overflow-auto">
           {(option: SelectOption) => (
             <ListBoxItem
               id={optionKey(option.value)}
               textValue={option.label}
+              aria-label={option.description ? option.label : undefined}
               isDisabled={option.isDisabled}
             >
-              {option.label}
+              {option.description ? (
+                // The library's description slot, so the sentence is read as
+                // the option's description while `aria-label` keeps its name
+                // the label alone.
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span>{option.label}</span>
+                  <Description className="whitespace-normal text-muted">
+                    {option.description}
+                  </Description>
+                </span>
+              ) : (
+                option.label
+              )}
             </ListBoxItem>
           )}
         </ListBox>

@@ -1,5 +1,6 @@
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { AvatarCard } from "@/features/account/avatar/AvatarCard"
+import { DeleteAccountCard } from "@/features/account/DeleteAccountCard"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
 import { ProfileCard } from "@/features/account/ProfileCard"
@@ -22,11 +23,7 @@ export function AccountPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Account settings">
-        Who you are on this deployment, and how you sign in to it. Every setting
-        here is yours alone; the gateway&rsquo;s own configuration is on the
-        Settings page.
-      </PageIntro>
+      <PageIntro title="Account settings" />
       <ProfileCard />
       <AvatarCard />
       <PasswordCard />
@@ -34,6 +31,7 @@ export function AccountPage() {
           routes that are not there. A deployment that merely has not set them
           up still shows it, saying so. */}
       {passkeys_enabled ? <PasskeysCard /> : null}
+      <DeleteAccountCard />
     </div>
   )
 }

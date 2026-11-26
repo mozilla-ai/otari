@@ -41,9 +41,12 @@ export function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     status_code: null,
     latency_ms: 842,
     provider_latency_ms: null,
+    ttft_ms: null,
+    output_tokens_per_second: null,
     source: "gateway",
     source_label: null,
     counts_toward_budget: true,
+    deployment_paid: false,
     ...overrides,
   }
   return {
@@ -178,6 +181,15 @@ export function mockApi(
             is_other: false,
           })),
           by_api_key: [],
+          by_provider: Array.from(new Set(rows.map((r) => r.provider))).map(
+            (p) => ({
+              key: p,
+              cost: 0,
+              tokens: 0,
+              requests: 0,
+              is_other: false,
+            }),
+          ),
           by_source: Array.from(new Set(rows.map((r) => r.source))).map(
             (s) => ({
               key: s,

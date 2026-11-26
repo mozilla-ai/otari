@@ -15,6 +15,7 @@ import {
   organizationGuardrailDefinition,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { rowMenuTriggers } from "@/tests/rowMenu"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const BETA = "22222222-2222-2222-2222-222222222222"
@@ -115,7 +116,7 @@ describe("WorkspaceGuardrailsPage", () => {
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull()
   })
 
-  it("offers nothing to change here, and points at where it is changed", async () => {
+  it("offers nothing to change here", async () => {
     mockApi({
       definitions: [organizationGuardrailDefinition()],
       mandates: [organizationGuardrail({ workspace_ids: [ALPHA] })],
@@ -126,10 +127,7 @@ describe("WorkspaceGuardrailsPage", () => {
       name: "Guardrails running in this workspace",
     })
     expect(screen.queryByRole("button")).toBeNull()
-    expect(screen.getByRole("link", { name: "Guardrails" })).toHaveAttribute(
-      "href",
-      "/organization/guardrails",
-    )
+    expect(rowMenuTriggers()).toHaveLength(0)
     // And none of the deployment's guardrails settings this page used to hold.
     expect(screen.queryByText(/Backend URL/)).toBeNull()
   })

@@ -132,6 +132,57 @@ function guardrailEvent(
   }
 }
 
+export type LaterCalls = {
+  // The first later call of the request that answered.
+  answer: TraceSpan | undefined
+  // The first later call of the request, whatever its outcome.
+  next: TraceSpan | undefined
+  // Whether every later call failed, and `next` is the request's final call.
+  last: boolean
+}
+
+function byEnd(a: TraceSpan, b: TraceSpan): number {
+  return (a.end_time ?? "").localeCompare(b.end_time ?? "")
+}
+
+// What routing did after a recovered attempt, read from the request's other
+// gateway calls: the backend marks every attempt it moved on from as recovered,
+// whether or not a later candidate answered. A call that starts at the same
+// instant is later when it ends later, or else when it comes later in `spans`.
+export function laterCalls(
+  span: TraceSpan,
+  spans: readonly TraceSpan[],
+): LaterCalls {
+  if (!span.request_id)
+    return { answer: undefined, next: undefined, last: false }
+  const own = spans.indexOf(span)
+  const later = spans
+    .map((other, index) => ({ other, index }))
+    .filter(
+      ({ other, index }) =>
+        other !== span &&
+        other.origin === "gateway" &&
+        other.kind === "llm" &&
+        other.request_id === span.request_id &&
+        (byStart(other, span) || byEnd(other, span) || index - own) > 0,
+    )
+    .sort(
+      (a, b) =>
+        byStart(a.other, b.other) ||
+        byEnd(a.other, b.other) ||
+        a.index - b.index,
+    )
+    .map(({ other }) => other)
+  return {
+    answer: later.find((other) => other.outcome === "ok"),
+    next: later[0],
+    // A recovered next call is not the request's end, even when the call routing
+    // moved on to is missing from the trace.
+    last:
+      later.length === 1 && later[0].outcome === "error" && !later[0].recovered,
+  }
+}
+
 export function gatewayEvents(detail: TraceDetail): GatewayEvent[] {
   const spans = detail.spans.filter((span) => span.origin === "gateway")
   const byId = new Map(spans.map((span) => [span.span_id, span]))
@@ -161,23 +212,37 @@ export function gatewayEvents(detail: TraceDetail): GatewayEvent[] {
   const fellBack = new Set<string>()
   for (const span of calls) {
     if (!span.recovered) continue
-    const answer = calls.find(
-      (other) =>
-        other.request_id === span.request_id &&
-        other.outcome === "ok" &&
-        byStart(other, span) > 0,
-    )
+    const { answer, next, last } = laterCalls(span, calls)
     if (span.request_id) fellBack.add(span.request_id)
-    events.push({
-      spanId: span.span_id,
-      at: at(span),
-      word: "Fallback",
-      tone: "warning",
-      title: answer
-        ? `${modelName(span)} failed, ${modelName(answer)} answered`
-        : `${modelName(span)} failed, a later attempt answered`,
-      detail: `Failed with ${failureLabel(span.error_class)}. Routing tried the next candidate.`,
-    })
+    const failed = failureLabel(span.error_class)
+    if (answer) {
+      events.push({
+        spanId: span.span_id,
+        at: at(span),
+        word: "Fallback",
+        tone: "warning",
+        title: `${modelName(span)} failed, ${modelName(answer)} answered`,
+        detail: `Failed with ${failed}. Routing tried the next candidate.`,
+      })
+    } else if (next?.outcome === "error") {
+      events.push({
+        spanId: span.span_id,
+        at: at(span),
+        word: "Fallback",
+        tone: "danger",
+        title: `${modelName(span)} failed, ${modelName(next)} failed too`,
+        detail: `Failed with ${failed}. Routing tried ${modelName(next)}, which failed with ${failureLabel(next.error_class)}.${last ? " No candidate answered, so the request failed." : ""}`,
+      })
+    } else {
+      events.push({
+        spanId: span.span_id,
+        at: at(span),
+        word: "Fallback",
+        tone: "warning",
+        title: `${modelName(span)} failed`,
+        detail: `Failed with ${failed}. Routing tried the next candidate.`,
+      })
+    }
   }
 
   // A switch is read between the calls that answered, so a fallback's failed

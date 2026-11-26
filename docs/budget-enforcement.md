@@ -43,15 +43,32 @@ measured figures afterwards. Only the unused part of an over-estimate is
 released.
 
 The hold is the request's worst case: its prompt at roughly four characters per
-token, plus its whole output token limit (`max_tokens`, or `max_output_tokens` on
-Responses; a deployment default of 1024 tokens when the request sets none). A
-request with `max_tokens: 8192` holds the price of 8192 output tokens however few
+token, plus its whole output token limit (`max_tokens` or `max_completion_tokens`
+on Chat Completions, `max_output_tokens` on Responses, `max_tokens` on Messages; a
+deployment default of 1024 tokens when the request sets none). A Chat Completions
+request with `n` above 1 holds that output limit once for each choice, and its
+prompt once. A request with `max_tokens: 8192` holds the price of 8192 output tokens however few
 the model writes, so a user near the cap is refused once that hold no longer
 fits. A client that sends a realistic output limit keeps more of its allowance
 usable near the cap.
 
 The prompt side is an estimate, so a request can settle a little past its hold
 (and its budget past the cap) when the prompt tokenizes heavier than assumed.
+
+A request that runs Otari's tools is a loop of model calls, each billed, and each
+resending the whole conversation so far. The hold above covers the loop's first
+round and its output limit. Every later round grows the hold by its own prompt
+before it is sent: the whole request it carries (the conversation, a system
+prompt or instructions, and the tools), at the same four characters per token.
+It grows it by what the round before wrote too, at the output rate, so the hold
+is always the output written so far plus one output limit for the round being
+sent. A round whose provider reported no usage is held at the output allowance
+admission holds: the request's own limit, or the deployment default, an estimate
+the model can write past, when it sets none. A round on a free or unpriced model holds its tokens alone. A round the budget
+cannot hold is sent as the loop's last: it offers none of Otari's tools and asks
+the model to answer from what it already has, and it may settle past the budget.
+The model can answer from those results; if it calls one of Otari's tools in
+that round anyway, the request fails as one past `max_tool_iterations` does.
 
 Holds are priced at the rules of the model's price the request meets before the
 call: estimated context, requested tier, image size, video resolution and start

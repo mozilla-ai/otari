@@ -85,14 +85,17 @@ class _ReservationMoves:
         *,
         estimate_inputs: EstimateInputs | None,
         price_of: PricingLookup,
+        ceiling_instance: str | None = None,
     ) -> ReservationMove | None:
         """Return what moving ``handle`` onto ``attempt``'s ceilings changes, or None when it changes nothing.
 
         A fallback chain's holds only grow, so a ceiling holds the larger of its hold and ``attempt``'s estimate.
+        ``ceiling_instance`` names the provider whose ceilings bind ``attempt`` where that is not its own
+        instance: a hosted provider's region is held to its provider's.
         """
         if not handle.counts_toward_budget or handle.strategy == "disabled":
             return None
-        target = get_provider_ceilings(handle.scope_ceilings, attempt.instance)
+        target = get_provider_ceilings(handle.scope_ceilings, ceiling_instance or attempt.instance)
         if not target and not handle.scoped_budgets:
             return None
         pricing: ModelPricing | None = None

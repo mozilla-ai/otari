@@ -123,7 +123,7 @@ describe("layer boundaries", () => {
     expect(
       rejects(
         "shared",
-        'import { UsagePage } from "@/features";\nexport const a = UsagePage;\n',
+        'import { PeoplePage } from "@/features";\nexport const a = PeoplePage;\n',
       ),
     ).toHaveLength(1)
     expect(
@@ -166,9 +166,9 @@ describe("layer boundaries", () => {
     const messages = rejects(
       "shared",
       [
-        'import { UsagePage } from "@/features/usage/UsagePage";',
+        'import { PeoplePage } from "@/features/people/PeoplePage";',
         'import { router } from "@/app/router";',
-        "export const a = [UsagePage, router];",
+        "export const a = [PeoplePage, router];",
       ].join("\n"),
     )
     expect(messages).toHaveLength(2)
@@ -263,11 +263,11 @@ describe("layer boundaries", () => {
       "design-system",
       [
         'import { formatUsd } from "@/shared/helpers/format";',
-        'import { UsagePage } from "@/features/usage/UsagePage";',
+        'import { PeoplePage } from "@/features/people/PeoplePage";',
         'import { router } from "@/app/router";',
         'import { Route } from "@/routes/usage";',
         'import type { User } from "@/client";',
-        "export const a = [formatUsd, UsagePage, router, Route];",
+        "export const a = [formatUsd, PeoplePage, router, Route];",
         "export type B = User;",
       ].join("\n"),
     )

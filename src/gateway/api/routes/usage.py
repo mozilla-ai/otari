@@ -23,6 +23,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
@@ -56,6 +57,7 @@ from gateway.services.usage_admin_service import (
     set_usage_price,
 )
 from gateway.services.usage_and_telemetry import UsageFilters, parse_tag_filters
+from gateway.types.key_scope import KeyScope
 
 # Two routers under one prefix, because their callers authenticate
 # differently. Reading or amending usage rows across an organization is an
@@ -83,13 +85,6 @@ SURFACE = Surface("usage")
 # a fixed cap beats a pagination knob; the response reports the true count next to
 # the capped list, and the longest-running are the ones kept.
 _MAX_IN_FLIGHT_ROWS = 50
-
-# Sessions (``source_label``) are an order of magnitude higher-cardinality than
-# models or users: one agent workload can open hundreds of them in a month, and
-# the interesting signal is a long-ish head ("which tasks burned the budget"),
-# not just the top few. Give that dimension a deeper cap so the head is not
-# swallowed by the "other" fold.
-_SESSION_BREAKDOWN_TOP_N = 250
 
 # How many request groups one call may ask for. The dashboard batches the groups
 # visible on a page of the activity log into a single lookup, so the bound tracks
@@ -183,6 +178,10 @@ _COUNT_COUNTS_DESC = (
     "imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the "
     "total matches what bulk delete and set-price can reach"
 )
+_PAID_DESC = (
+    "Filter by who paid the provider: true = only rows served on a credential the deployment "
+    "pays for (a hosted provider), false = every other row"
+)
 _WORKSPACE_DESC = "Only usage recorded in this workspace."
 # The three entity filters are repeatable on every usage endpoint, so a chart or a
 # log view can compare a handful of models / users / keys instead of one at a time.
@@ -232,6 +231,7 @@ async def list_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -266,13 +266,14 @@ async def list_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
     return await usage.page(filters, usage_scope, skip=skip, limit=limit)
 
 
-@key_router.post("/external-events")
+@key_router.post("/external-events", openapi_extra=key_scope(KeyScope.USAGE_WRITE))
 async def ingest_external_usage(
     request: ExternalEventsRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -302,7 +303,7 @@ async def ingest_external_usage(
         )
 
 
-@key_router.get("/requests/{request_id}")
+@key_router.get("/requests/{request_id}", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_request_settlement(
     request_id: Annotated[str, Path(max_length=255)],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -355,6 +356,7 @@ async def count_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNT_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -389,6 +391,7 @@ async def count_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
@@ -501,6 +504,7 @@ async def usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
@@ -541,6 +545,7 @@ async def usage_summary(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.summary(filters, usage_scope, bucket=bucket, dimensions=dimensions, group_by_tag=group_by_tag)
@@ -568,6 +573,7 @@ async def usage_series(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
@@ -599,6 +605,7 @@ async def usage_series(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.grouped_series(filters, usage_scope, bucket=bucket, group_by=group_by)

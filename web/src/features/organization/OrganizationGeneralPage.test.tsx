@@ -66,7 +66,6 @@ describe("OrganizationGeneralPage", () => {
     renderPage(<OrganizationGeneralPage />)
 
     expect(await screen.findByText("Default Organization")).toBeInTheDocument()
-    expect(screen.getByText(/Your role here is owner/)).toBeInTheDocument()
     expect(screen.getByText("default-organization")).toBeInTheDocument()
   })
 

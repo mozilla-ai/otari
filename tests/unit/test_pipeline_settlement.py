@@ -14,6 +14,7 @@ identically for every format. These tests pin that contract:
 import asyncio
 import contextlib
 import dataclasses
+import importlib
 import json
 import logging
 import re
@@ -22,6 +23,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -45,6 +47,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
+from _unavailable_model_support import RecordingListener, background_tasks_done, reporter_with_null_listener
 from gateway.api.deps import ToolPorts
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
@@ -54,15 +57,20 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     build_streaming_response,
+    log_absorbed_attempt,
+    log_exhausted_plan,
     log_usage,
     prepare_gateway_tools,
+    release_reservation,
     run_non_stream,
     run_single_attempt_stream,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
+    McpConnectionUnavailableError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceMcpServerNotFoundError,
@@ -73,13 +81,17 @@ from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchC
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import (
+    EstimateInputs,
     ReservationHandle,
     estimate_output_tokens,
     settle_abandoned_stream,
     settle_cut_stream,
 )
-from gateway.services.inference import DeploymentCharge
+from gateway.services.inference import DeploymentCharge, UnavailableModel, UnavailableModelReporter
+from gateway.services.mcp_loop import AnsweredRounds
 from gateway.services.pricing_service import ResolvedPricing
+from gateway.services.routing import CompiledPlan
+from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
@@ -88,6 +100,7 @@ from gateway.services.tools._mcp_admission import (
 )
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL, WorkspaceWebExecutors
 from gateway.services.traces import SessionRef
+from gateway.types.attempt import Attempt
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -137,10 +150,13 @@ class _Servers:
     def __init__(self, resolve_many: _ResolveMany) -> None:
         self._resolve_many = resolve_many
 
-    async def resolve_many(
-        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: Any = None
-    ) -> list[McpServerConfig]:
-        return await self._resolve_many(workspace_id, server_ids)
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: Any, *, attach: bool
+    ) -> RequestMcpServers:
+        return RequestMcpServers(servers=await self._resolve_many(workspace_id, server_ids))
+
+    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+        return False
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
@@ -174,11 +190,13 @@ def _ctx(
     rate_limit_info: RateLimitInfo | None = None,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
+    uow: UnitOfWork | None = None,
 ) -> RequestContext:
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=config,
         db=db,
-        uow=cast(Any, AsyncMock()),
+        uow=uow if uow is not None else cast(Any, AsyncMock()),
         log_writer=log_writer,
         api_key_id="key-1",
         user_id="user-1",
@@ -221,6 +239,7 @@ def test_all_settlement_callbacks_wired_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -273,6 +292,7 @@ def test_keepalive_interval_wired_from_config_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -385,6 +405,7 @@ def _build(
     prompt_chars: int | None = None,
 ) -> Any:
     return build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -631,6 +652,121 @@ async def test_stream_error_after_reported_usage_bills_it(monkeypatch: pytest.Mo
     assert logged["usage_override"].prompt_tokens == 120
     assert logged["error"] == "upstream broke"
     assert logged["request_id"] == "req-1"
+
+
+_ANSWERED = CompletionUsage(prompt_tokens=120, completion_tokens=30, total_tokens=150)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("failed", ["non-streaming", "before-the-stream", "mid-stream"])
+async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch, failed: str, cost: Decimal
+) -> None:
+    """A tool loop whose later round fails still owes for the rounds before it, as a broken stream does.
+
+    A round that only ran the gateway's tools sends the client nothing, so the failure can
+    land before the stream starts. Mid-stream, an Anthropic round's message_start has
+    already reported its input, which must not hide the output the round went on to bill.
+    A free model's rounds still count against a token ceiling.
+    """
+    settlement = _Settlement(row_cost=cost)
+    settlement.install(monkeypatch)
+    failure = RuntimeError("context length exceeded")
+    granted: list[int] = []
+
+    if failed == "non-streaming":
+        AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+        with pytest.raises(HTTPException):
+            await _run_non_stream(monkeypatch, error=failure, reservation=_reservation())
+    elif failed == "before-the-stream":
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        class _Grant:
+            async def admit_model(self, *_args: Any, **_kwargs: Any) -> None:
+                return None
+
+            async def settle(self, tokens: int) -> None:
+                granted.append(tokens)
+
+        async def failing_provider(**kwargs: Any) -> Any:
+            raise failure
+
+        ctx = _ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation())
+        ctx.rate_limit_grant = cast(Any, _Grant())
+        monkeypatch.setattr(chat, "acompletion", failing_provider)
+        with pytest.raises(HTTPException):
+            await run_single_attempt_stream(
+                adapter=chat._ADAPTER,
+                ctx=ctx,
+                tool_ctx=_tool_ctx(),
+                call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+                provider=LLMProvider.OPENAI,
+                model="gpt-4",
+            )
+    else:
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        async def broken() -> AsyncIterator[ChatCompletionChunk]:
+            yield _chunk(_PARTIAL_USAGE)
+            raise failure
+
+        await _drain(_build(broken(), GatewayConfig()))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [cost]
+    assert settlement.settled_tokens == [150]
+    # The per-minute token limit settles them too, where the request holds a grant.
+    assert granted == ([150] if failed == "before-the-stream" else [])
+    (logged,) = settlement.logged
+    billed = logged["usage_override"]
+    assert (billed.prompt_tokens, billed.completion_tokens) == (120, 30)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("deployment_paid", [False, True], ids=["own-credential", "deployment-paid"])
+async def test_a_locked_plan_settles_the_tokens_of_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch, cost: Decimal, deployment_paid: bool
+) -> None:
+    """A tool loop that answered locks its plan, so a later failure exhausts it: its rounds settle as on one model."""
+    from gateway.services.routing import CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    settlement = _Settlement(row_cost=cost)
+    settlement.install(monkeypatch)
+    granted: list[int] = []
+    charged: list[Decimal | None] = []
+
+    class _Grant:
+        async def settle(self, tokens: int) -> None:
+            granted.append(tokens)
+
+    class _Charge:
+        async def settle(self, amount: Decimal | None, **_kwargs: Any) -> None:
+            charged.append(amount)
+
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(begin_nested=None), log_writer=object(), reservation=_reservation())
+    ctx.rate_limit_grant = cast(Any, _Grant())
+    ctx.prices = cast(Any, object())
+    if deployment_paid:
+        ctx.deployment_charge = cast(Any, _Charge())
+    ctx.plan = CompiledPlan("policy", [Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4")])
+    failure = RuntimeError("context length exceeded")
+    AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+    exhausted = HTTPException(status_code=400, detail="context length exceeded")
+    exhausted.__cause__ = failure
+
+    await log_exhausted_plan(ctx, chat._ADAPTER, exhausted)
+    await release_reservation(ctx)
+
+    assert settlement.reconciled == [cost]
+    assert settlement.settled_tokens == [150]
+    assert granted == [150]
+    (logged,) = settlement.logged
+    assert logged["prices"] is ctx.prices
+    assert logged["deployment_paid"] is deployment_paid
+    assert charged == ([cost] if deployment_paid else [])
 
 
 @pytest.mark.asyncio
@@ -1770,6 +1906,7 @@ def _build_inline_stream(
 ) -> AsyncIterator[str]:
     """A stream that settles inline, so its terminal carrier waits for the cost."""
     response = build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -2020,6 +2157,28 @@ async def test_successful_admission_releases_the_database_connection(monkeypatch
     db.commit.assert_awaited_once()
     # The reservation is still held: this request is going to the provider.
     assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_disconnects_during_mcp_admission_has_its_reservation_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+
+    async def disconnected(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise asyncio.CancelledError
+
+    db = AsyncMock()
+    ctx = _ctx(
+        GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4(), uow=UnitOfWork(db)
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(disconnected), mcp_server_ids=[uuid.uuid4()])
+
+    db.rollback.assert_awaited_once()
+    assert settlement.refunded == 1
 
 
 @pytest.mark.asyncio
@@ -2407,10 +2566,7 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     assert settlement.refunded == 1
 
 
-# RFC 1918, deliberately not loopback: `MCP_ALLOW_LOOPBACK` defaults to *true*,
-# so `127.0.0.1` passes `validate_mcp_url` and would make the ordering test below
-# vacuous. `MCP_ALLOW_PRIVATE_HOSTS` defaults to false, so these are rejected with
-# only that variable cleared.
+# RFC 1918 literals, so `validate_mcp_url` refuses them without a DNS lookup.
 _UNSAFE_URL = "https://10.0.0.1/mcp"
 _OTHER_UNSAFE_URL = "https://10.0.0.2/mcp"
 
@@ -2422,7 +2578,6 @@ async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
     """Negative control for the ordering test below: these URLs really do fail the safety check."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
@@ -2440,6 +2595,32 @@ async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/mcp",
+        "http://127.1:8000/mcp",
+        "http://0177.0.0.1:8000/mcp",
+        "http://[::1]:8000/mcp",
+        "http://127.0.0.1:4318/v1",
+    ],
+)
+async def test_an_inline_loopback_url_is_refused(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    """Any key holder writes an inline server, so it may not name the gateway's own host, whatever the old flag says."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=[McpServerConfig(name="tools", url=url)])
+
+    assert exc_info.value.status_code == 400
+    assert "loopback" in str(exc_info.value.detail) or "written as a name" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
 async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2451,7 +2632,6 @@ async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
     """
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     dupes = [
@@ -2499,9 +2679,9 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
         )
 
     assert exc_info.value.status_code == 500
-    # The caller can neither see nor fix a stored server, so the name stays in
-    # the log, as it does for a stored URL that fails its safety check.
-    assert exc_info.value.detail == MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    # The caller can neither see nor fix a stored server: a 5xx through `domain_error`
+    # keeps its message, and the name, in the log.
+    assert MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL not in str(exc_info.value.detail)
     assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
@@ -2526,6 +2706,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError):
         await _call_prepare_gateway_tools(
@@ -2579,6 +2760,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError, match="connection reset"):
         await _call_prepare_gateway_tools(
@@ -3303,6 +3485,7 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
 
     monkeypatch.setattr(pipeline, "streaming_generator", capture)
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=empty(),
         provider=LLMProvider.OPENAI,
@@ -3328,6 +3511,208 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     assert all(health.active == 0 for health in router.health.values())
 
     assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
+
+
+class _ModelNotServed(Exception):
+    status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__("Unable to access non-serverless model m. Please visit the provider to start an endpoint.")
+
+
+def _refused_attempt() -> Attempt:
+    return Attempt(1, "together", LLMProvider.TOGETHER, "m", deployment_paid=True)
+
+
+def _reporting_ctx(listener: RecordingListener, *, plan: CompiledPlan | None = None) -> RequestContext:
+    ctx = _ctx(GatewayConfig(), db=object(), log_writer=object())
+    ctx.unavailable_model_reporter = UnavailableModelReporter(listener)
+    ctx.plan = plan
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_refusing_the_model_before_another_serves_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    await log_absorbed_attempt(_reporting_ctx(listener), chat._ADAPTER, _refused_attempt(), refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_plan_ending_on_a_candidate_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    attempt = _refused_attempt()
+    refusal = _ModelNotServed()
+    exhausted = HTTPException(status_code=502, detail="every candidate failed")
+    exhausted.__cause__ = refusal
+
+    await log_exhausted_plan(
+        _reporting_ctx(listener, plan=CompiledPlan("model", [attempt])), chat._ADAPTER, exhausted, stopped_on=attempt
+    )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_ending_in_the_provider_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        report_refusal=partial(
+            UnavailableModelReporter(listener).report,
+            instance="together",
+            model="m",
+            uses_deployment_credential=True,
+        ),
+        adapter=chat._ADAPTER,
+        stream=empty(),
+        provider="together",
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+    )
+    refusal = _ModelNotServed()
+
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_the_provider_refuses_to_start_for_the_model_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    async def refusing_provider(**kwargs: Any) -> Any:
+        raise refusal
+
+    monkeypatch.setattr(chat, "acompletion", refusing_provider)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+
+    with pytest.raises(HTTPException):
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(),
+            call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+            provider=LLMProvider.TOGETHER,
+            model="m",
+        )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_refused_on_the_deployments_credential_with_nothing_to_charge_is_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def streaming_provider(**kwargs: Any) -> Any:
+        return empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(chat, "acompletion", streaming_provider)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+    assert ctx.deployment_charge is None
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.TOGETHER,
+        model="m",
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_stream_is_reported_with_the_credential_of_the_candidate_that_served_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+    own_key = Attempt(1, "openai", LLMProvider.OPENAI, "m")
+    hosted = _refused_attempt()
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def serve_from_the_hosted_candidate(**kwargs: Any) -> tuple[Attempt, AsyncIterator[Any]]:
+        return hosted, empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "walk_attempts", serve_from_the_hosted_candidate)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener, plan=CompiledPlan("model", [own_key, hosted]))
+    assert not ctx.deployment_paid
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.OPENAI,
+        model="m",
+        base_request_fields={},
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
 
 
 def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
@@ -3373,3 +3758,159 @@ def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_pr
     assert final is not None and final.usage == started
     unestimated = settle_abandoned_stream(**args, policy="allow_free", reported_usage=started, usage_is_final=False)
     assert unestimated is not None and unestimated.usage == started
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_stored_server_credential_is_a_503_with_no_detail_of_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendered through ``domain_error`` as every tenancy error here is: retryable, and the server stays in the log."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    server_id = uuid.uuid4()
+
+    async def unavailable(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise McpConnectionUnavailableError(server_id)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(unavailable), mcp_server_ids=[server_id])
+
+    assert exc_info.value.status_code == 503
+    assert str(server_id) not in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+def _round_gate_ctx(monkeypatch: pytest.MonkeyPatch, rate: float, hold: Callable[..., Any]) -> RequestContext:
+    """A request holding a reservation, served on a model priced at ``rate``, whose round holds go to ``hold``."""
+    monkeypatch.setattr(pipeline, "hold_tool_call", hold)
+    monkeypatch.setattr(pipeline, "release_session", AsyncMock())
+    handle = _reservation()
+    handle.reservation_id = "reservation-1"
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(rollback=AsyncMock()), reservation=handle)
+    ctx.estimate_inputs = EstimateInputs(prompt_chars=40, max_output_tokens=8000, default_output_tokens=1024)
+    ctx.serving = ("openai", "gpt-4", False)
+    pricing = ModelPricing(model_key="openai:gpt-4", input_price_per_million=rate, output_price_per_million=rate)
+    ctx.prices = cast(Any, SimpleNamespace(resolve=AsyncMock(return_value=ResolvedPricing(pricing, "deployment"))))
+    return ctx
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("rate", "dollars"), [(10.0, 0.1), (0.0, 0.0)], ids=["priced", "free"])
+async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_its_tokens_alone(
+    monkeypatch: pytest.MonkeyPatch, rate: float, dollars: float
+) -> None:
+    """A round grows the hold by its own prompt only: the request's one output limit is already held."""
+    holds: list[tuple[Decimal, int, bool]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens, model_is_free))
+        return amount
+
+    ctx = _round_gate_ctx(monkeypatch, rate, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is True
+
+    [(amount, tokens, model_is_free)] = holds
+    assert float(amount) == pytest.approx(dollars)
+    assert tokens == 10_000
+    assert model_is_free is (dollars == 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("written", "output_tokens"), [(2_000, 2_000), (None, 8_000)], ids=["reported", "unreported"])
+async def test_a_tool_loop_round_holds_what_the_round_before_wrote(
+    monkeypatch: pytest.MonkeyPatch, written: int | None, output_tokens: int
+) -> None:
+    """The round before's reported output is held at the output rate; with no report, the request's output limit is."""
+    holds: list[tuple[Decimal, int]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens))
+        return amount
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, written) is True
+
+    [(amount, tokens)] = holds
+    assert float(amount) == pytest.approx((10_000 + output_tokens) * 10 / 1_000_000)
+    assert tokens == 10_000 + output_tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reserved", "fits"), [(False, True), (True, False)], ids=["holds nothing", "unledgered"])
+async def test_a_tool_loop_round_grows_no_hold_without_a_ledger_row(
+    monkeypatch: pytest.MonkeyPatch, reserved: bool, fits: bool
+) -> None:
+    """A request that holds nothing is not gated; one whose hold has no ledger row ends its loop at that round.
+
+    A hold with no ledger row cannot be reclaimed if the request is abandoned, so it is not grown.
+    """
+    hold = AsyncMock(return_value=Decimal("0.1"))
+    ctx = _round_gate_ctx(monkeypatch, 10.0, hold)
+    assert ctx.reservation is not None
+    ctx.reservation.reservation_id = None
+    ctx.reservation.reserved = reserved
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is fits
+    hold.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["no room", "database"])
+async def test_a_tool_loop_round_that_cannot_be_held_is_refused(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    """A round the budgets have no room for, or cannot be asked about, is not held and is sent as the last."""
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal | None:
+        if failure == "database":
+            raise SQLAlchemyError("budgets unavailable")
+        return None
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "loop", "stream"),
+    [
+        ("chat", "mcp_tool_loop", False),
+        ("chat", "mcp_tool_loop_stream", True),
+        ("messages", "anthropic_tool_loop", False),
+        ("messages", "anthropic_tool_loop_stream", True),
+        ("responses", "responses_tool_loop", False),
+        ("responses", "responses_tool_loop_stream", True),
+    ],
+)
+async def test_every_format_hands_the_round_gate_to_its_tool_loop(
+    monkeypatch: pytest.MonkeyPatch, route: str, loop: str, stream: bool
+) -> None:
+    module = importlib.import_module(f"gateway.api.routes.{route}")
+    seen: dict[str, Any] = {}
+    gate = cast(Any, object())
+
+    def fake_stream(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    async def fake_loop(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(module, loop, fake_stream if stream else fake_loop)
+    adapter = module._ADAPTER
+    kwargs = {"model": "m", "messages": []}
+    if stream:
+        adapter.open_tool_loop_stream(kwargs, cast(Any, object()), 3, round_gate=gate)
+    else:
+        await adapter.run_tool_loop(kwargs, cast(Any, object()), 3, round_gate=gate)
+
+    assert seen["round_gate"] is gate

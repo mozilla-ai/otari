@@ -1,9 +1,17 @@
-import { makerMark, providerMark } from "@/shared/helpers/brandMarks"
+import {
+  harnessMark,
+  languageMark,
+  makerMark,
+  providerMark,
+} from "@/shared/helpers/brandMarks"
+
+/** The table a mark is looked up in. */
+export type MarkKind = "provider" | "maker" | "harness" | "language"
 
 /**
  * One mark, drawn from the geometry table.
  *
- * Its own module, and the only thing that imports `brandMarks`, so the 70 kB of
+ * Its own module, and the only thing that imports `brandMarks`, so the 130 kB of
  * path data lands in a chunk of its own that `BrandMark` fetches after paint.
  * A default export because `React.lazy` takes one, which is the sanctioned
  * exception to this codebase's named-exports rule.
@@ -17,10 +25,17 @@ export default function BrandMarkGlyph({
   box,
 }: {
   markKey: string
-  kind: "provider" | "maker"
+  kind: MarkKind
   box: string
 }) {
-  const glyph = kind === "provider" ? providerMark(markKey) : makerMark(markKey)
+  const glyph =
+    kind === "provider"
+      ? providerMark(markKey)
+      : kind === "maker"
+        ? makerMark(markKey)
+        : kind === "harness"
+          ? harnessMark(markKey)
+          : languageMark(markKey)
   // The caller already asked whether a mark exists before rendering this, so
   // reaching here without one means the key lists and the tables disagree.
   // Nothing is drawn rather than throwing: the slot stays the size it was.

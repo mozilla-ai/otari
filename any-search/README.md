@@ -29,9 +29,10 @@ AnySearch.get_provider_metadata("fake")
 - `api_base`: overrides the provider's endpoint, which is how a test or a proxy redirects it. When
   it is not passed, the variable `env_api_base` names is read, then the provider's default.
 - `timeout`: seconds per request, 15 by default.
-- `client`: an `httpx.AsyncClient` you own. The provider sends every request through it with its own
-  timeout, and never closes it or changes its settings. Without one, the provider opens a client
-  with httpx's defaults and closes it in `aclose()`, which `async with` calls.
+- `client`: an `httpx.AsyncClient` you own. The provider sends every request to its API through it,
+  with its own timeout and without following a redirect, and never closes it or changes its
+  settings. Without one, the provider opens a client with httpx's defaults and closes it in
+  `aclose()`, which `async with` calls.
 
 Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
 version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
@@ -59,10 +60,13 @@ provider signaled one inside a successful response, and the provider's whole res
 `raw` is left out of `repr`.
 
 A failed call raises `ProviderError` with the provider's name, a `tag` and the HTTP `status` when
-there is one. A successful answer that lacks a field the provider documents, or carries one of
-the wrong type, raises it with the tag `unexpected_response`, so a change on the provider's side
-fails the call rather than degrading it. A missing key raises `MissingCredentialError`. All errors derive from
-`AnySearchError`, and none carries a response body, a URL, the query or a key.
+there is one. A request to the provider's API follows no redirect, whatever `client` is set to, so
+a key sent in a header never reaches another host: a redirect, or any other answer below 400 that
+is not a success, raises it with the tag `http_error`. A successful answer that lacks a field the
+provider documents, or carries one of the wrong type, raises it with the tag `unexpected_response`,
+so a change on the provider's side fails the call rather than degrading it. A missing key raises
+`MissingCredentialError`. All errors derive from `AnySearchError`, and none carries a response
+body, a URL, the query or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
 query or the key travels in the URL, the provider's `tier` (`production` or `test`), its
@@ -73,7 +77,8 @@ the library accepts both from anyone, and acting on them is the host's job).
 
 A provider's cost tiers are the values of one option for which its pricing lists a price per call
 of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
-`default` is the tier the provider uses when the option is not sent. The metadata records no
+`default` is the tier a call is billed at when the option is not passed: the provider's own,
+unless the adapter sends another. The metadata records no
 amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
 that bills searches at a price per call for a provider that does not report its cost can let only
 whoever set that price choose the tier.
@@ -109,6 +114,37 @@ when it parses. `--json` prints the result as JSON without `raw`, `--raw` prints
 own response, and both together print the result with `raw` kept. `--describe PROVIDER` prints the
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
+
+## Brave
+
+`brave` calls Brave's [Web Search API](https://api-dashboard.search.brave.com/api-reference/web/search/get),
+`GET /res/v1/web/search`, with the key read from `BRAVE_API_KEY` when not passed. The key travels
+in the `X-Subscription-Token` header; the query travels in the URL, which the log filter above
+keeps out of httpx's log.
+
+| `SearchHit` | From Brave |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `web.results` |
+| `snippet` | `description`, or `""` when Brave sends none or null; Brave returns no page text, so `text` is always `None` |
+| `published` | `page_age`, an ISO 8601 date, read as UTC when it has no zone; `None` when Brave sends none or one that does not parse, which stays in `raw` |
+
+Brave reports no cost. `max_results` becomes `count`, at most 20. `time_range` becomes Brave's
+`freshness`, `pd`, `pw`, `pm` or `py`, and wins over the `freshness` option; Brave ignores a
+`freshness` value it does not know. The other native options are Brave's own query parameters,
+such as `country`, `search_lang`, `offset` and `safesearch`; `--describe brave` lists them. An
+option set to `None` is not sent. Two options trim the answer: `result_filter: web` leaves out the
+videos, news and other sections Brave adds by default, which the adapter does not read, and
+`text_decorations: false` leaves out the HTML, such as `<strong>`, that marks the query's words in
+snippets.
+
+Any status from 400 raises `ProviderError`, tagged with Brave's `error.code` in lower case, else
+`http_error`: `subscription_token_invalid` for a refused key, which comes as a 422, and
+`validation` for a parameter out of range. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. An answer without `web`, or with `web`
+null, found nothing and has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
+string, or whose `description` or `page_age` is neither a string nor null, raises `ProviderError`
+with the tag `unexpected_response`.
 
 ## DeepSeek
 
@@ -186,6 +222,48 @@ of these, `text`, `highlights`, `publishedDate` or `costDollars.total` of the wr
 that does not parse, raises `ProviderError` with the tag `unexpected_response`. Exa documents its
 cost as optional, so an answer without one reports none; the live tests check that it reports
 one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
+
+## Keenable
+
+`keenable` calls Keenable's [search API](https://docs.keenable.ai/api-reference/search) with or
+without a key. With a key, passed or read from `KEENABLE_API_KEY`, it calls `POST /v1/search` with
+the key in the `X-API-Key` header. Without one it calls `POST /v1/search/public`, which Keenable
+limits to 1,000 searches an hour and 10 a second per IP address, shared with every other caller from
+that address. The query travels in the JSON body. Keenable logs each query with the caller's IP
+address and app name; see its [data privacy](https://docs.keenable.ai/data-privacy) page.
+
+Every call carries the `X-Keenable-Title` header, which the keyless endpoint requires and Keenable
+logs to tell apps apart: `any-search`, unless the `X-Keenable-Title` option names the app, its
+surrounding spaces stripped. The option is marked operator-only, since its value can name whoever
+runs the host.
+
+| `SearchHit` | From Keenable |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `snippet`, Markdown cut from the page for the query, or `description` when `snippet` is blank; Keenable returns no page text, so `text` is always `None` |
+| `published` | `published_at`, ISO 8601, read as UTC when it has no zone; `None` when Keenable knows no publish date |
+
+Keenable reports a keyed call's cost in credits under `usage`, which the adapter does not read, so
+the cost is `None`. `max_results` is sent as it is, 10 when unset, at most 50. `time_range` becomes
+`published_after` as a span back from now (`1d`, `7d`, `30d` or `365d`) and wins over that option;
+Keenable then leaves out the pages it knows no publish date for. The other native options are
+Keenable's own fields, such as `mode` (`pro` or `realtime`, the same price), `site`,
+`exclude_domains`, `snippet_max_length` and `disable_cards`; `--describe keenable` lists them. An
+option set to `None` is not sent. `query_time` searches the index as it stood then, but
+`time_range` and the spans in the other date options still count back from now. Snippets run to
+a few thousand characters by default; `snippet_max_length` asks for less.
+
+Any status from 400 raises `ProviderError`, tagged with Keenable's `code`: `invalid_api_key` for a
+refused key, `insufficient_credits` for a 402, and for a 429 `public_rate_limit_hourly`,
+`public_rate_limit_per_second` or `rate_limit_per_second`, `public_rate_limit_domain` (a limit on
+some sites, shared by every keyless caller) or `public_domain_requires_api_key` (a site Keenable
+serves only with a key, so a retry without one fails again). A body without a code is
+`rate_limited` for a 429 and `http_error` for any other status. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. A `results` that is not a list, a result
+whose `url` is missing, empty or not a string, whose `title` is missing or not a string, or whose
+`snippet`, `description` or `published_at` is present and not a string, or a `published_at` that is
+not ISO 8601, raises `ProviderError` with the tag `unexpected_response`. Unread fields are ignored.
 
 ## Mojeek
 
@@ -356,6 +434,77 @@ Every field read from a successful answer is checked: an answer without `results
 lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
 neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
 tag `unexpected_response`. Fields the adapter does not read are ignored.
+
+## Tavily
+
+`tavily` calls Tavily's [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+`POST /search`, with the key read from `TAVILY_API_KEY` when not passed. The key travels as a
+Bearer token.
+
+| `SearchHit` | From Tavily |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `content`, the passages of the page relevant to the query |
+| `text` | `raw_content`, the page's full text, which Tavily returns only when `include_raw_content` asks for it; else `None` |
+| `published` | `published_date`, an RFC 1123 date such as `Thu, 15 Oct 2026 00:00:00 GMT`; `None` when Tavily sends none or one that does not parse, which stays in `raw` |
+
+Tavily reports credits, not dollars, so it reports no cost. `search_depth` is its cost tier:
+`basic`, `fast` and `ultra-fast` cost 1 credit a search, `advanced` 2. `auto_parameters` is not
+offered, since it always costs 2 credits. `max_results` is sent at most 20, and only when passed;
+`time_range` is Tavily's own parameter of that name. The other native options are Tavily's own,
+such as `topic`, `include_domains` and `include_published_date`; `--describe tavily` lists them.
+An option set to `None` is not sent.
+
+Tavily signals every failure with an HTTP status and a sentence, which never reaches the error.
+Any status from 400 raises `ProviderError`, tagged by its status: `unauthorized` (401),
+`rate_limited` (429), `plan_limit_exceeded` (432), `pay_as_you_go_limit_exceeded` (433), else
+`http_error`.
+
+Every field read from a successful answer is checked. An answer without a `results` list, a
+result whose `url`, `title` or `content` is missing or not a string, or whose `raw_content` or
+`published_date` is neither a string nor null, raises `ProviderError` with the tag
+`unexpected_response`.
+
+## You.com
+
+`youdotcom` calls You.com's [Search API](https://you.com/docs/api-reference/search/v1-search),
+`POST /v1/search`, with the key in the `X-API-Key` header, read from `YDC_API_KEY` when not
+passed. The query travels in the JSON body.
+
+It sends what You.com's SDK sends unless told otherwise: `language` `EN`, `knowledge` `core` and
+highlights extraction. `None` is not sent, so `knowledge=None` or `extraction=None` turns that
+default off. Highlights share 8,192 tokens across the results, so few results come back long; pass
+`extraction` to ask for less, for the whole page, or for none:
+
+```python
+await engine.search(query, extraction={"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}})
+await engine.search(query, extraction={"extraction_mode": "full_page"})  # Markdown, billed per page crawled live
+await engine.search(query, extraction=None)  # each result's joined snippets, or its description
+```
+
+| `SearchHit` | From You.com |
+|---|---|
+| `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
+| `snippet` | `contents.highlights`, joined; then joined `snippets`, then `description` when the preceding fields have no nonblank text |
+| `text` | `contents.markdown`, only when `extraction_mode` is `full_page`; `markdown` is added to the `full_page.extraction_formats` array by default and an HTML copy, when listed there, is available in `raw` |
+| `published` | `page_age` when it is ISO 8601, taken as UTC; another form stays in `raw` |
+
+You.com reports no cost. `max_results` becomes `count`, 10 when unset, at most 100, and at most 50
+under highlights. `time_range` becomes `freshness` and wins over that option. The other native
+options are `offset`, `country`, `safesearch`, `include_domains`, `exclude_domains`,
+`boost_domains`, `strict_operators` and `crawl_timeout`; `--describe youdotcom` lists them.
+Knowledge results stay in `raw`.
+
+Any status from 400 raises `ProviderError`: `unauthorized`, `forbidden` (a refused key) and
+`invalid_request` by status, since those bodies are not a code. A 402 takes the code in `error`,
+else `payment_required`. Any other status is `http_error`.
+
+`results` must be an object when present; without it there are no hits. `web` must be a list
+when present. Each item read must have `url` and `page_age` as a string or null, `title` and
+`description` as strings, `snippets` as a list of strings when present, and, when present,
+`contents` whose `highlights` is a list of strings and whose `markdown` is a string. A `page_age`
+that looks like ISO 8601 but does not parse fails too. Anything else raises `ProviderError` with
+the tag `unexpected_response`. Unread fields are ignored.
 
 ## The fake provider
 

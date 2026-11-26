@@ -303,12 +303,7 @@ export function OrganizationDomainsPage() {
             </Button>
           ) : null
         }
-      >
-        Let colleagues join this organization automatically. Anyone who signs in
-        with a verified address at a domain you have proven you control becomes
-        a member, at the role you choose. A claim does nothing until its DNS
-        record is verified.
-      </PageIntro>
+      />
 
       <ErrorBanner error={context.error ?? domains.error ?? update.error} />
 

@@ -53,7 +53,8 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import SandboxFileEntry
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
@@ -67,23 +68,24 @@ from gateway.services.tools import (
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
 )
+from gateway.services.tools._code_execution_admission import SANDBOX_NOT_ENABLED_DETAIL
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.types.code_execution import ResultBlock
 
-from .conftest import MODEL_NAME, admitted_search_spy
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, admitted_search_spy
 
 _MCP_TOOL = "lookup"
 # The hit carries its page text, so a search reads no page and every page read is a fetch call.
 _HITS = [{"url": "https://python.org", "title": "Python", "text": "3.14"}]
-_MCP_SERVER = {"name": "docs", "url": "http://127.0.0.1:9999/mcp"}
+_MCP_SERVER = {"name": "docs", "url": "http://93.184.216.34/mcp"}
 _SEARCH = {"type": "otari_web_search"}
 _FETCH = {"type": "otari_web_fetch"}
 _CODE = {"type": "otari_code_execution"}
 _ARGUMENTS: dict[str, dict[str, object]] = {
     "web_search": {"query": "python"},
     "web_fetch": {"url": "https://example.com/"},
-    "code_execution": {"code": "print(6 * 7)"},
+    "code_execution": {"language": "python", "code": "print(6 * 7)"},
     _MCP_TOOL: {"q": "docs"},
 }
 
@@ -101,7 +103,7 @@ class _Session:
     def discard(self) -> None:
         return None
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
         self._port.executed.append(code)
         self._files = [SandboxFileEntry(path="chart.png", size_bytes=3, modified_at=1.0)]
         return ResultBlock.model_validate(
@@ -123,6 +125,7 @@ class _Session:
 
 class _Port:
     label = "fake-sandbox"
+    languages = ("python",)
 
     def __init__(self) -> None:
         self.opened = 0
@@ -161,7 +164,17 @@ def _fake_mcp_pool(backends: _Backends) -> Callable[..., Any]:
     class _Pool:
         """The MCP pool's surface, recording on the request's tally as the real one does."""
 
-        def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
+        signed_out: tuple[()] = ()
+
+        def __init__(
+            self,
+            configs: Any,
+            *,
+            tally: Any = None,
+            trace: Any = None,
+            ceded_tool_names: Any = (),
+            contacts: Any = None,
+        ) -> None:
             self._tally = tally
 
         async def __aenter__(self) -> _Pool:
@@ -622,6 +635,8 @@ def test_a_capped_search_beside_mcp_stops_at_its_cap_while_mcp_keeps_running(
     assert response.status_code == 200, response.text
     assert backends.searches.await_count == 1
     assert backends.mcp_calls == [_MCP_TOOL, _MCP_TOOL]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert {tool["function"]["name"] for tool in sent[1]["tools"]} == {_MCP_TOOL}
     second_round = {m["tool_call_id"]: m["content"] for m in sent[2]["messages"] if m.get("role") == "tool"}
     assert second_round["call_0"] == MAX_USES_EXCEEDED_ERROR
     assert second_round["call_1"] == "mcp result"
@@ -763,7 +778,7 @@ def test_code_execution_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["error"]["message"] == "code execution is not enabled for this workspace"
+    assert response.json()["error"]["message"] == SANDBOX_NOT_ENABLED_DETAIL
     assert sent == []
     assert _ran(backends) == set()
 
@@ -788,7 +803,7 @@ def test_web_search_disabled_for_the_workspace_refuses_the_whole_request(
         response = client.post(f"{API_ROOT}/messages", json=_messages_body(tools, with_mcp), headers=api_key_header)
 
     assert response.status_code == 403, response.text
-    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.json()["error"]["message"] == WebSearchNotEnabledError().message
     assert sent == []
     assert backends.port.opened == 0
     assert _ran(backends) == set()
@@ -810,7 +825,7 @@ def _response(output: list[Any]) -> Response:
         tools=[],
         usage=ResponseUsage(
             input_tokens=5,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
             output_tokens=2,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
             total_tokens=7,
@@ -871,7 +886,6 @@ def _streamed_function_calls() -> AsyncIterator[Any]:
                 type="response.function_call_arguments.done",
                 item_id=f"fc_{index}",
                 output_index=index,
-                name=call.name,
                 arguments=call.arguments,
                 sequence_number=0,
             ),
@@ -904,3 +918,106 @@ def test_responses_stream_runs_all_four_and_announces_the_builtins(
     assert done == ["web_search_call", "code_interpreter_call"], (
         "a gateway-run call leaked, or a built-in went unannounced"
     )
+
+
+# ---------- Key scopes ----------
+
+_TOOL_SCOPES = {
+    "search": ([_SEARCH], False, "web:search"),
+    "fetch": ([_FETCH], False, "web:fetch"),
+    "code": ([_CODE], False, "code:execute"),
+    "MCP": ([], True, "mcp:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_run_it_through_a_completion(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    """A tool Otari runs inside a completion needs the scope of the endpoint that runs it directly."""
+    tools, with_mcp, scope = _TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+    body = _messages_body(tools, with_mcp)
+
+    with _scripted("gateway.services.mcp_loop_messages.amessages", [_done_message()]) as sent:
+        refused = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
+
+    assert refused.status_code == 403, refused.text
+    assert f"'{scope}'" in refused.json()["error"]["message"]
+    assert refused.headers["WWW-Authenticate"] == f'Bearer error="insufficient_scope", scope="{scope}"'
+    assert not sent
+    assert not _ran(backends)
+
+
+# A declaration in a provider's own words, which a provider may run itself.
+_PROVIDER_TOOL_SCOPES = {
+    "search": ({"type": "web_search_20250305", "name": "web_search"}, "web:search"),
+    "code": ({"type": "code_execution_20250522", "name": "code_execution"}, "code:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_PROVIDER_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_ask_a_provider_to_run_it_either(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    """The scope is what the caller may ask for, so a provider-named declaration needs it too.
+
+    Who runs the tool is settled per candidate from headers and policy, which no
+    caller chooses, so a key that may not search cannot reach a search by asking
+    a provider for one.
+    """
+    entry, scope = _PROVIDER_TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    with _scripted("gateway.services.mcp_loop_messages.amessages", [_done_message()]) as sent:
+        refused = client.post(f"{API_ROOT}/messages", json=_messages_body([entry], False), headers=headers)
+
+    assert refused.status_code == 403, refused.text
+    assert f"'{scope}'" in refused.json()["error"]["message"]
+    assert not sent
+
+
+_CHAT_TOOL_SCOPES = {
+    "search": ({"tools": [{"type": "otari_web_search"}]}, "web:search"),
+    "MCP": ({"mcp_servers": [_MCP_SERVER]}, "mcp:execute"),
+}
+
+
+@pytest.mark.parametrize("tool", list(_CHAT_TOOL_SCOPES))
+def test_a_key_without_a_tools_scope_cannot_run_it_through_a_chat_completion(
+    client: TestClient, master_key_header: dict[str, str], backends: _Backends, tool: str
+) -> None:
+    extra, scope = _CHAT_TOOL_SCOPES[tool]
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "narrow", "scopes": [held for held in ALL_KEY_SCOPES if held != scope]},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    with _scripted("gateway.services.mcp_loop.acompletion", [_completion(None)]) as sent:
+        refused = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "research"}], **extra},
+            headers=headers,
+        )
+
+    assert refused.status_code == 403, refused.text
+    body = refused.json()
+    message = body["detail"] if "detail" in body else body["error"]["message"]
+    assert f"'{scope}'" in message
+    assert not sent
+    assert not _ran(backends)

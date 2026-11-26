@@ -47,6 +47,11 @@ export const pageHeading = (page: Page, name: string): Locator =>
   page.getByRole("main").getByRole("heading", { name, exact: true })
 
 export async function login(page: Page): Promise<void> {
+  // The e2e gateway offers otari.ai, so the operator's one-time welcome would
+  // cover whatever a spec opens next.
+  await page.addInitScript(() =>
+    localStorage.setItem("otari.welcome.answered", "e2e"),
+  )
   await page.goto("/")
   // Once any member holds a password (the tenancy spec's invitee does), the
   // screen offers both credentials and defaults to email and password.
@@ -58,7 +63,7 @@ export async function login(page: Page): Promise<void> {
   await field.press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
-  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()
+  await expect(nav(page).getByRole("link", { name: "Home" })).toBeVisible()
 }
 
 // The dashboard authenticates with a session cookie, but the seeding and
@@ -76,6 +81,17 @@ export async function openOrganization(page: Page): Promise<void> {
   await page.getByRole("link", { name: "Organization", exact: true }).click()
   await expect(
     nav(page).getByRole("link", { name: "Members & roles" }),
+  ).toBeVisible()
+}
+
+/**
+ * Enter the deployment's own rail, from the account menu as an operator does.
+ */
+export async function openDeployment(page: Page): Promise<void> {
+  const menu = await openAccountMenu(page)
+  await menu.getByRole("link", { name: "Deployment" }).click()
+  await expect(
+    nav(page).getByRole("link", { name: "Deployment budgets" }),
   ).toBeVisible()
 }
 
@@ -99,9 +115,10 @@ export async function openAccountMenu(page: Page): Promise<Locator> {
 /**
  * Expand a sidebar group and open one of the destinations nested under it.
  *
- * Routing and Tools nest their pages, so their sidebar row expands rather than
- * navigating; a spec reaching a child has to open the group first. Idempotent
- * on an already-open group, which is what arriving from a child route leaves.
+ * The organization rail's Providers nests its pages, so its row expands rather
+ * than navigating; a spec reaching a child has to open the group first.
+ * Idempotent on an already-open group, which is what arriving from a child
+ * route leaves.
  */
 export async function openNested(
   page: Page,
@@ -113,6 +130,66 @@ export async function openNested(
     await toggle.click()
   }
   await nav(page).getByRole("link", { name: child, exact: true }).click()
+}
+
+/**
+ * Open a rail row, then one of the tabs its page draws under its title: a
+ * tool under Tools, Routing under Rules. The tab is current once it has
+ * opened. The names are spelled at the call site so the docs check sees them.
+ */
+export async function openTab(
+  page: Page,
+  row: string,
+  tab: string,
+): Promise<void> {
+  await nav(page).getByRole("link", { name: row, exact: true }).click()
+  const link = page
+    .getByRole("main")
+    .getByRole("navigation")
+    .getByRole("link", { name: tab, exact: true })
+  await link.click()
+  await expect(link).toHaveAttribute("aria-current", "page")
+}
+
+/**
+ * A table row's actions are one three-dot menu (`RowActionRow` or `RowMenu`). Opens the
+ * menu inside `scope` (a row, or anything holding several rows) that has an
+ * item named `name`, and returns that item, left open. Names match the way
+ * Playwright matches any name: a case-insensitive substring unless `exact`.
+ * An item's name is the action's `ariaLabel` when it has one ("Remove
+ * openai"), else its label as the menu shows it ("Edit…").
+ */
+export async function rowMenuItem(
+  scope: Locator,
+  name: string | RegExp,
+  options: { exact?: boolean } = {},
+): Promise<Locator> {
+  const page = scope.page()
+  // `RowActionRow`'s trigger, or `RowMenu`'s, which names its row.
+  const triggers = scope.getByRole("button", {
+    name: /^(Row actions|Actions for )/,
+  })
+  await triggers.first().waitFor()
+  const count = await triggers.count()
+  for (let index = 0; index < count; index++) {
+    await triggers.nth(index).click()
+    const item = page
+      .getByRole("menu")
+      .getByRole("menuitem", { name, ...options })
+    if ((await item.count()) > 0) return item
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menu")).toHaveCount(0)
+  }
+  throw new Error(`No row menu holds an item named ${String(name)}`)
+}
+
+/** Opens a row's menu and presses its item named `name`. */
+export async function pressRowAction(
+  row: Locator,
+  name: string | RegExp,
+  options: { exact?: boolean } = {},
+): Promise<void> {
+  await (await rowMenuItem(row, name, options)).click()
 }
 
 export const authHeaders = {
@@ -158,10 +235,10 @@ export async function dismissSetupGuide(page: Page): Promise<void> {
   }
 }
 
-// Open a client route directly. The router runs on hash history, so a
-// filtered view is a hash URL and its query string is what `useUrlState` reads.
+// Open a client route directly: a reload of that address, so its query string
+// is what `useUrlState` reads.
 export async function gotoRoute(page: Page, route: string): Promise<void> {
-  await page.goto(`/#${route}`)
+  await page.goto(route)
 }
 
 // Fail with the server's own body rather than a bare status code: a 422 from the
@@ -215,9 +292,23 @@ export async function dismissComboBox(box: Locator): Promise<void> {
 // cannot prevent that: a closed popover satisfies it instantly, by which point
 // the keystroke has already landed. It is kept for what it does cover, a
 // popover that closes asynchronously.
+//
+// The check and the press still race: the popover can close on its own
+// between them (it does while a slow runner settles the typed value), and the
+// Escape then arms the guard anyway. So a guard that appears right after the
+// press is answered with Keep editing, which is the state the caller expects.
 export async function dismissComboBoxInDialog(box: Locator): Promise<void> {
   if ((await box.getAttribute("aria-expanded")) === "true") {
     await box.press("Escape")
+    const keepEditing = box.page().getByRole("button", { name: "Keep editing" })
+    if (
+      await keepEditing
+        .waitFor({ state: "visible", timeout: 500 })
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await keepEditing.click()
+    }
   }
   await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }

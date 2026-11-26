@@ -40,6 +40,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "pricing",
         "routing",
         "settings",
+        # What the subagent router saved the organization.
+        "subagent_savings",
         "tools",
         "usage",
         "users",

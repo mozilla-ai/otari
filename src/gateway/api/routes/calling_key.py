@@ -16,12 +16,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from gateway.api.deps import BudgetServiceDep, CallingKey, UsageServiceDep, get_config, verify_api_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes.usage import (
     _COUNTS_DESC,
     _DIMENSIONS_DESC,
     _END_DESC,
     _ENDPOINT_DESC,
     _MODEL_MULTI_DESC,
+    _PAID_DESC,
     _PRICED_DESC,
     _PROVIDER_DESC,
     _SOURCE_DESC,
@@ -43,9 +45,11 @@ from gateway.schemas.usage_and_telemetry import (
     SummaryDimension,
     ToolFilter,
     UsageGroupedSeries,
+    UsageGroupRow,
     UsageSummary,
 )
 from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, parse_tag_filters
+from gateway.types.key_scope import KeyScope
 
 # An API key and nothing else, declared on the router so a route added here inherits it.
 router = APIRouter(prefix="/key", tags=["key"], dependencies=[Depends(verify_api_key)])
@@ -56,7 +60,16 @@ def _own_rows(api_key: APIKey) -> UsageScope:
     return UsageScope(workspaces=[api_key.workspace_id], api_key_id=api_key.id)
 
 
-@router.get("/budget")
+def _without_owner_label(rows: list[UsageGroupRow], api_key: APIKey) -> list[UsageGroupRow]:
+    """The user rows with the key's own user unlabeled.
+
+    That user's alias can be the account's email, and the key is all it takes to
+    read these routes. A service key's end users keep the label the service gave them.
+    """
+    return [row.model_copy(update={"label": None}) if row.key == api_key.user_id else row for row in rows]
+
+
+@router.get("/budget", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_budget(
     api_key: CallingKey,
     budgets: BudgetServiceDep,
@@ -70,12 +83,13 @@ async def get_key_budget(
     requests in flight. A period that has ended reads as the fresh one the next
     request starts. ``remaining_usd`` is the least any cap on every provider
     leaves, which is what a request can still spend before a 403. Caps shared with
-    the rest of the workspace or organization report only what they leave.
+    the rest of the workspace or organization report only what they leave. On a
+    service key, ``end_users`` counts its end users against its ``max_end_users``.
     """
     return await budgets.key_budget(api_key, strategy=config.budget_strategy)
 
 
-@router.get("/usage/summary")
+@router.get("/usage/summary", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_usage_summary(
     api_key: CallingKey,
     usage: UsageServiceDep,
@@ -92,6 +106,7 @@ async def get_key_usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
     group_by_tag: GroupByTag = None,
@@ -101,7 +116,8 @@ async def get_key_usage_summary(
     The same summary as ``GET /api/v1/usage/summary``, over the rows this key
     wrote alone: the same bounded window (default last 30 days), breakdowns, tag
     filters and ``group_by_tag``. Tag a request with ``metadata`` and pass
-    ``group_by_tag`` to read what each kind of request cost.
+    ``group_by_tag`` to read what each kind of request cost. The key's own user
+    is listed in ``by_user`` without a ``label``.
     """
     filters = UsageFilters(
         start_date=start_date,
@@ -117,13 +133,15 @@ async def get_key_usage_summary(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
     )
-    return await usage.summary(
+    summary = await usage.summary(
         filters, _own_rows(api_key), bucket=bucket, dimensions=dimensions, group_by_tag=group_by_tag
     )
+    return summary.model_copy(update={"by_user": _without_owner_label(summary.by_user, api_key)})
 
 
-@router.get("/usage/series")
+@router.get("/usage/series", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_key_usage_series(
     api_key: CallingKey,
     usage: UsageServiceDep,
@@ -141,6 +159,7 @@ async def get_key_usage_series(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
     """The calling key's own requests over time, split by one dimension.
@@ -162,5 +181,9 @@ async def get_key_usage_series(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
     )
-    return await usage.grouped_series(filters, _own_rows(api_key), bucket=bucket, group_by=group_by)
+    series = await usage.grouped_series(filters, _own_rows(api_key), bucket=bucket, group_by=group_by)
+    if group_by != "user_id":
+        return series
+    return series.model_copy(update={"groups": _without_owner_label(series.groups, api_key)})

@@ -27,6 +27,7 @@ from sqlmodel import col
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyConflictError, TenancyForbiddenError
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.exceptions.tools_exceptions import SearchToolMisconfiguredError
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -46,13 +47,18 @@ from gateway.models.playground import (
     PlaygroundMessagePublic,
 )
 from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import (
+    McpCredentialMode,
+    ResolvedWebSearchConfig,
+    WorkspaceMcpServer,
+    WorkspaceWebSearchConfig,
+)
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.model_access import resolve_request_mcp_access
+from gateway.services.model_access import mcp_read_tools, resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
+from gateway.services.tools import McpSignedInServers, WorkspaceCodeExecutionPolicies, fetch_resolves, search_resolves
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -213,6 +219,8 @@ class McpServerAvailability:
     name: str
     purpose_hint: str | None
     enabled: bool
+    # The server sends each user's own credential, and this user has not signed in to it.
+    sign_in_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +228,7 @@ class PlaygroundToolAvailability:
     """Everything the composer's tools menu renders."""
 
     web_search: ToolAvailability
+    web_fetch: ToolAvailability
     code_execution: ToolAvailability
     files: ToolAvailability
     mcp_servers: list[McpServerAvailability]
@@ -229,6 +238,12 @@ _WORKSPACE_DISABLED = "Turned off for this workspace."
 _WORKSPACE_NOT_ENABLED = "Not turned on for this workspace."
 _NOT_CONFIGURED = "No backend is configured on this deployment."
 _FILES_OFF = "File uploads are turned off on this deployment."
+_FETCH_OFF = "Web fetch is turned off on this deployment."
+_WEB_POLICY_UNREADABLE = "This workspace's web search settings hold a domain rule that cannot be read."
+_FETCH_KEY_UNUSABLE = "The organization's web fetch key for this workspace cannot be used."
+# Fetch is turned on and off with web search, so its reasons point there.
+_FETCH_WORKSPACE_DISABLED = "Turned off for this workspace, with web search."
+_FETCH_WORKSPACE_NOT_ENABLED = "Not turned on for this workspace. Turning on web search turns it on."
 
 
 class PlaygroundToolOffer(Protocol):
@@ -240,6 +255,14 @@ class PlaygroundToolOffer(Protocol):
 
     def files(self) -> ToolAvailability:
         """Whether a message may attach an uploaded file."""
+        ...
+
+
+class WebAccessPolicies(Protocol):
+    """The reader of a workspace's web access, as the request path resolves the web tools with it."""
+
+    async def access(self, workspace_id: uuid.UUID) -> tuple[bool, ResolvedWebSearchConfig]:
+        """Whether the workspace's requests may declare the web tools, and the policy they resolve on."""
         ...
 
 
@@ -270,6 +293,8 @@ async def resolve_tool_availability(
     config: GatewayConfig,
     offer: PlaygroundToolOffer,
     code_execution_policies: WorkspaceCodeExecutionPolicies,
+    web_policies: WebAccessPolicies,
+    signed_in: McpSignedInServers,
     workspace_id: uuid.UUID,
     user_id: str,
 ) -> PlaygroundToolAvailability:
@@ -281,14 +306,18 @@ async def resolve_tool_availability(
     the same direction, so the menu cannot offer something the request path would
     then refuse. It is a read of stored policy only and dials nothing: a live
     reachability probe belongs to the request that needs the backend, not to
-    drawing a menu. The MCP servers are the ones the user's access reaches, as
-    the request path admits them for a session.
+    drawing a menu. The web tools are read through ``web_policies``, the reader
+    the request path resolves them with, so the workspace's own search and fetch
+    keys count and a stored policy that cannot be read refuses both. The MCP
+    servers are the ones the user's access reaches, as the request path admits
+    them for a session.
     """
     web_search_row = (
         await db.execute(
             select(WorkspaceWebSearchConfig.enabled).where(WorkspaceWebSearchConfig.workspace_id == workspace_id)
         )
     ).scalar_one_or_none()
+    web_allowed, web_policy = await web_policies.access(workspace_id)
     code_execution_policy = await code_execution_policies.resolve(workspace_id)
     code_execution_row = code_execution_policy.enabled if code_execution_policy is not None else None
     servers = (
@@ -303,10 +332,27 @@ async def resolve_tool_availability(
         .all()
     )
     access = await resolve_request_mcp_access(db, None, workspace_id, session_user_id=user_id)
+    per_user = [server.id for server in servers if server.credential_mode == McpCredentialMode.PER_USER]
+    connected = await signed_in.signed_in(user_id, per_user)
 
     return PlaygroundToolAvailability(
-        web_search=_tool_availability(
-            web_search_configured(config), web_search_row, on_without_policy=config.web_search_workspace_default
+        web_search=_web_availability(
+            _search_resolves(config, web_policy),
+            web_allowed,
+            web_search_row,
+            not_configured_reason=_NOT_CONFIGURED,
+            disabled_reason=_WORKSPACE_DISABLED,
+            not_enabled_reason=_WORKSPACE_NOT_ENABLED,
+        ),
+        web_fetch=_web_availability(
+            config.web_fetch_enabled,
+            web_allowed,
+            web_search_row,
+            not_configured_reason=_FETCH_OFF,
+            disabled_reason=_FETCH_WORKSPACE_DISABLED,
+            not_enabled_reason=_FETCH_WORKSPACE_NOT_ENABLED,
+            # Fetch always has the built-in fetcher, so only the organization's own key can fail to resolve.
+            unresolved_reason=None if fetch_resolves(config, web_policy) else _FETCH_KEY_UNUSABLE,
         ),
         code_execution=offer.code_execution(code_execution_row),
         files=offer.files(),
@@ -316,11 +362,57 @@ async def resolve_tool_availability(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.id in per_user and server.id not in connected,
             )
             for server in servers
-            if access.patterns_for(server.id, server.everyone_tools, server.read_tools)
+            if access.patterns_for(
+                server.id, server.everyone_tools, mcp_read_tools(server.read_tools, server.read_tools_hinted)
+            )
         ],
     )
+
+
+def _web_availability(
+    configured: bool,
+    allowed: bool,
+    web_search_row: bool | None,
+    *,
+    not_configured_reason: str,
+    disabled_reason: str,
+    not_enabled_reason: str,
+    unresolved_reason: str | None = None,
+) -> ToolAvailability:
+    """One web tool, from whether it resolves and whether the workspace's web access allows it.
+
+    ``web_search_row`` is the workspace's stored switch, ``None`` without a row,
+    and says which reason a refusal carries. Fetch has no switch of its own: the
+    request path refuses it whenever that row refuses search. ``unresolved_reason``
+    is set where the tool exists but the workspace's own key cannot run it, which
+    admission checks after the workspace's web access.
+    """
+    if not configured:
+        return ToolAvailability(configured=False, enabled=False, reason=not_configured_reason)
+    if allowed:
+        if unresolved_reason is not None:
+            return ToolAvailability(configured=True, enabled=False, reason=unresolved_reason)
+        return ToolAvailability(configured=True, enabled=True)
+    if web_search_row is None:
+        return ToolAvailability(configured=True, enabled=False, reason=not_enabled_reason)
+    if web_search_row is False:
+        return ToolAvailability(configured=True, enabled=False, reason=disabled_reason)
+    return ToolAvailability(configured=True, enabled=False, reason=_WEB_POLICY_UNREADABLE)
+
+
+def _search_resolves(config: GatewayConfig, policy: ResolvedWebSearchConfig) -> bool:
+    """Whether a declared search finds something to run on.
+
+    A search instance admission refuses as misconfigured counts as nothing to
+    run on, so one bad instance leaves the rest of the menu readable.
+    """
+    try:
+        return search_resolves(config, policy)
+    except SearchToolMisconfiguredError:
+        return False
 
 
 def _tool_availability(

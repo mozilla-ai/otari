@@ -35,7 +35,6 @@ import contextlib
 import hashlib
 import json
 import operator
-import re
 import time
 import uuid
 from collections.abc import (
@@ -53,29 +52,23 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from enum import Enum, StrEnum, auto
+from enum import StrEnum
 from functools import partial, reduce
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, cast
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 
 import httpx
 import httpx2
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
-    ContextLengthExceededError,
-    InvalidRequestError,
     MissingApiKeyError,
-    UnsupportedParameterError,
 )
 from any_llm.providers.anthropic.base import BaseAnthropicProvider
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
-    CompletionParams,
     CompletionUsage,
 )
-from any_llm.types.messages import MessagesParams
-from any_llm.types.responses import ResponsesParams
 from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
@@ -89,9 +82,11 @@ from gateway.api.deps import (
     get_automatic_router,
     get_budget_service,
     get_request_prices,
+    get_unavailable_model_reporter,
     routed_trace_content,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import may_read_files
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import (
@@ -103,7 +98,7 @@ from gateway.api.routes._attempts import (
 )
 from gateway.api.routes._guardrail_answers import finish_result, guarded_stream
 from gateway.api.routes._guardrail_targets import RequestTarget
-from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
+from gateway.api.routes._guardrails import RequestGuardrails
 from gateway.api.routes._helpers import (
     GUARDRAILS_RESULT_HEADER,
     country_gate_for,
@@ -121,10 +116,10 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _resolve_web_search_purpose_hint,
 )
-from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     END_USER_BUDGET_HEADER,
     FALLBACK_HEADER,
     MODEL_HEADER,
@@ -138,23 +133,16 @@ from gateway.core.database import DATABASE_ERRORS, describe_database_error, rele
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     BUDGET_EXCEEDED,
-    CONTEXT_LENGTH_EXCEEDED,
     COUNTRY_NOT_SUPPORTED,
     INSUFFICIENT_FUNDS,
     INVALID_MODEL,
     PRICING_REQUIRED,
-    PROVIDER_CREDENTIAL_REJECTED,
-    PROVIDER_ERROR,
     PROVIDER_NOT_CONFIGURED,
-    PROVIDER_STREAM_INTERRUPTED,
-    REQUEST_TOO_LARGE,
-    STRUCTURED_OUTPUT_FAILED,
-    UNSUPPORTED_CONTENT,
-    UNSUPPORTED_PARAMETER,
-    UPSTREAM_RATE_LIMITED,
     USER_BLOCKED,
+    USER_MISMATCH,
     USER_NOT_FOUND,
     WRONG_MODEL_TYPE,
+    ErrorKind,
     RefusalException,
     body_fields_of,
     error_code_of,
@@ -166,7 +154,6 @@ from gateway.core.metered_pricing import (
     priced_per_request,
     quantize_cost,
 )
-from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.core.settings.tools import effective_web_search_max_calls
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
@@ -181,11 +168,13 @@ from gateway.core.usage import (
     service_tier_of,
 )
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.budget_exceptions import (
     EndUserBudgetWithoutEndUserError,
     ProviderSpendCeilingExceededError,
     SpendCeilingExceededError,
 )
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.exceptions.inference_exceptions import StoredStateOnManagedCredentialError
 from gateway.exceptions.memory_exceptions import MemoryToolsRefusedError
 from gateway.exceptions.tools_exceptions import (
@@ -194,8 +183,10 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionRefusedError,
     ContainerOnManagedCredentialError,
     GatewayToolPricingRequiredError,
+    McpConnectionUnavailableError,
     McpServerConfigurationError,
     McpServerDeclarationError,
+    McpSignInRequiredError,
     SearchToolMisconfiguredError,
     WebAccessRefusedError,
     WebSearchCredentialRefusedError,
@@ -273,7 +264,6 @@ from gateway.services.code_execution import (
 from gateway.services.files import SandboxFileBridge
 from gateway.services.guardrails import InProcessGuardrail
 from gateway.services.inference import (
-    EMPTY_COMPLETION_DETAIL,
     BlockedCaller,
     Claimed,
     DeploymentCharge,
@@ -281,34 +271,28 @@ from gateway.services.inference import (
     KeyReused,
     Replay,
     StillInFlight,
+    UnavailableModelReporter,
     UnidentifiedEndUserError,
     UnknownCaller,
+    UpstreamFailure,
     admit_deployment_paid,
     billed_model,
     describe_port_error,
     end_user_identifier,
-    is_empty_completion,
-    is_provider_billing_error,
     is_provider_credential_rejection,
     is_provider_cut,
-    is_upstream_connect_failure,
-    is_upstream_request_fault,
-    is_upstream_stream_interrupted,
     organization_slot_key,
     provider_failure,
-    upstream_body_messages,
-    upstream_error_message,
-    upstream_error_tag,
-    upstream_exception_chain,
     upstream_exception_shape,
-    upstream_retry_after,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
+    AnsweredRounds,
     MaxToolIterationsExceeded,
+    RoundGate,
     ToolBackend,
 )
 from gateway.services.mcp_stateless import failure_class
@@ -316,6 +300,7 @@ from gateway.services.memory import MEMORY_TOOL_NAMES, MemoryToolBackend
 from gateway.services.model_access import (
     McpAccess,
     key_model_refusal,
+    misspelled_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
@@ -355,7 +340,6 @@ from gateway.services.provider_kwargs import (
     MissingCredential,
     ResolvedProvider,
     hosted_lookup,
-    missing_credential,
     provider_key,
     require_declared_credential,
     resolve_provider_selector,
@@ -365,6 +349,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
+    HostedRegionIndex,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
     ensure_hosted_country,
@@ -411,17 +396,23 @@ from gateway.services.tool_usage import (
     ToolUsageTally,
 )
 from gateway.services.tools import (
+    BUILTIN_TOOLS,
     CONTAINER_GONE_DETAIL_TEMPLATE,
     NO_WEB_TOOLS,
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
     AdmittedCodeExecution,
+    AdmittedMcpServers,
     AdmittedWebTools,
     CandidateTools,
     CombinedToolBackend,
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    McpConnectionService,
+    McpSignInBackend,
+    McpSignInNeeded,
+    McpSignInReason,
     PricedTool,
     ProviderToolDeclaration,
     ToolUseBudget,
@@ -440,6 +431,7 @@ from gateway.services.tools import (
     declares_code_execution,
     declares_provider_mcp,
     extract_web_tools,
+    mcp_server_contacts,
     native_rendering,
     read_web_declarations,
     read_web_fetch_max_uses,
@@ -453,16 +445,16 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import (
     ContextWeights,
+    RequestClient,
     RequestTrace,
     SessionRef,
     TurnFacts,
     context_of,
-    harness_of,
     is_subagent,
     read_turn_content,
     resolve_session,
 )
-from gateway.services.upstream_redaction import redacted_upstream_detail
+from gateway.services.upstream_redaction import stored_error_message
 from gateway.services.web_retrieval_backend import (
     WebRetrievalBackend,
     WebRetrievalCounter,
@@ -482,6 +474,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
@@ -541,28 +534,6 @@ API_KEY_NO_USER_DETAIL = "API key has no associated user"
 NO_UPSTREAM_USER_DETAIL = (
     "This request has no workspace and user, so Otari cannot send the provider the end-user identifier it requires"
 )
-PROVIDER_ERROR_DETAIL = "LLM provider error"
-PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
-PROVIDER_STREAM_INTERRUPTED_DETAIL = "The provider's stream ended before it finished"
-# Fixed details for the provider failures that are the gateway's fault rather
-# than the caller's. These never embed the upstream message: a rejected
-# credential or an exhausted account is where provider internals concentrate,
-# and it is not the caller's problem to debug (see classify_provider_error and
-# test_error_detail_leakage). The bad-request, model-not-found, and rate-limited
-# details below are fallbacks, used only when the provider gave us no message.
-PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
-PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
-PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
-PROVIDER_BILLING_DETAIL = (
-    "The upstream provider account is out of credit or over its billing limit. "
-    "Top up the provider account, or route this model to a provider that has credit."
-)
-PROVIDER_ACCOUNT_QUOTA_DETAIL = (
-    "The upstream provider account is over one of its service quotas. "
-    "Raise the quota, or route this model to another provider."
-)
-PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
-PROVIDER_REQUEST_TOO_LARGE_DETAIL = "The provider refused the request as too large (reduce the request size)"
 
 
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
@@ -585,110 +556,6 @@ WEB_SEARCH_UNREACHABLE_DETAIL = (
 )
 
 
-class ErrorKind(Enum):
-    """Coarse error category, for a dialect that names one on the wire.
-
-    The set covers every category a dialect distinguishes, so an error can say what it is.
-    """
-
-    API = auto()
-    AUTHENTICATION = auto()
-    INVALID_REQUEST = auto()
-    NOT_FOUND = auto()
-    PERMISSION = auto()
-    RATE_LIMIT = auto()
-    REQUEST_TOO_LARGE = auto()
-
-
-# An error flattened into an ``HTTPException`` no longer carries its kind, so a
-# status stands in for one here.
-_STATUS_ERROR_KINDS = {
-    status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
-    status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
-    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
-    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
-    status.HTTP_413_CONTENT_TOO_LARGE: ErrorKind.REQUEST_TOO_LARGE,
-    status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
-}
-
-
-def error_kind_for_status(status_code: int) -> ErrorKind:
-    """The kind a bare status implies, falling back to ``API``."""
-    return _STATUS_ERROR_KINDS.get(status_code, ErrorKind.API)
-
-
-class ProviderErrorMapping(NamedTuple):
-    """A safe, client-facing (status, detail) for a classified provider failure."""
-
-    status_code: int
-    detail: str
-
-
-def _is_unsupported_feature_error(exc: BaseException) -> bool:
-    """True when any-llm refused a request feature its backend cannot express.
-
-    Newer any-llm releases use ``UnsupportedParameterError`` for typed provider
-    capability checks, while older feature checks still raise
-    ``NotImplementedError``. Unwrap ``original_exception`` as well so either
-    signal survives the unified-exception wrapper.
-    """
-    unsupported_types = (NotImplementedError, UnsupportedParameterError)
-    return any(isinstance(candidate, unsupported_types) for candidate in upstream_exception_chain(exc))
-
-
-def unsupported_parameter_name(exc: BaseException) -> str | None:
-    """The parameter any-llm said the provider cannot express, or ``None`` when it named none."""
-    for candidate in upstream_exception_chain(exc):
-        if isinstance(candidate, UnsupportedParameterError):
-            return candidate.parameter_name
-    return None
-
-
-def _unsupported_feature_detail(exc: BaseException) -> str:
-    """Return one actionable reason for a locally rejected request feature."""
-    for candidate in upstream_exception_chain(exc):
-        if isinstance(candidate, UnsupportedParameterError):
-            # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
-            # both through upstream_error_message would repeat the same reason.
-            return redacted_upstream_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
-    return _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-
-
-_UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
-
-# The params a caller can actually put in a request body, across the three
-# formats that share this classifier. Derived from any-llm's ``*Params`` for the
-# same reason the request schemas are (see ``_schema_derive``): a param any-llm
-# grows is picked up here without an edit, and nothing else can pass the gate.
-#
-# Derived the same way means derived *minus* ``SENSITIVE_PARAM_FIELDS``, not
-# merely from the same models. ``derive_request_base`` skips those names because
-# a future any-llm version could add a credential or provider-selection field to
-# a typed ``*Params``, and exposing one as caller-settable would let a request
-# override the operator's value (#160). A name the schema refuses to accept is by
-# definition a name no caller sent, so it must not pass the caller-fault gate
-# either: the two definitions of "settable by a caller" are one definition, and
-# spelling it twice is how they drift.
-_FORWARDED_PARAMS: frozenset[str] = frozenset(
-    (set(CompletionParams.model_fields) | set(MessagesParams.model_fields) | set(ResponsesParams.model_fields))
-    - SENSITIVE_PARAM_FIELDS
-)
-
-
-def _provider_rejected_param_detail(param: str) -> str:
-    """Detail for a request param the provider serving this model cannot express."""
-    return f"The provider serving this model does not accept the '{param}' parameter"
-
-
-def unsupported_image_detail(model: str | None = None) -> str:
-    """Detail for a request carrying an image to a model that does not accept images."""
-    subject = f"The model '{model}'" if model else "The model serving this request"
-    return (
-        f"{subject} does not accept image content. "
-        "Remove the image parts, or send the request to a model that accepts images."
-    )
-
-
 def _model_as_named(provider: Any, model: str, display_model: str | None) -> str:
     """The model as a caller names it: the alias it sent, else its ``provider:model`` selector."""
     if display_model is not None:
@@ -696,303 +563,19 @@ def _model_as_named(provider: Any, model: str, display_model: str | None) -> str
     return f"{provider_key(provider)}:{model}" if provider else model
 
 
-def failure_error_message(exc: BaseException) -> str:
-    """The error a usage row records for a provider failure.
+def answered_rounds_usage(adapter: FormatAdapter[Any, Any], exc: BaseException | None) -> CompletionUsage | None:
+    """What the rounds a failed tool loop had answered owe, or None when it failed before one was.
 
-    The gateway's own wording where the failure is one it names, since an SDK's
-    string form can redact to nothing (Cohere's leads with the response headers).
+    The provider billed those rounds, so the failure row bills them too, as a
+    stream that dies after reporting usage still owes for it.
     """
-    if _is_image_input_rejection(exc):
-        return unsupported_image_detail()
-    return str(exc)
-
-
-def _rejected_param(exc: BaseException, request_params: Collection[str] = _FORWARDED_PARAMS) -> str | None:
-    """The request param a provider SDK refused as an unknown keyword, if any.
-
-    any-llm hands a provider's SDK the params its ``*Params`` model declares, so
-    a param that model carries but the SDK's method does not take arrives as
-    ``TypeError: ...create() got an unexpected keyword argument 'x'``. That is
-    every OpenAI-only chat param against a provider that never grew one
-    (``seed``, ``n``, the penalties, the logprobs family, against Anthropic).
-
-    It carries no HTTP status, so it would otherwise fall through to the generic
-    502 and report a permanent, caller-fixable mismatch between a model and a
-    param as an upstream outage. Only the param name is returned: the SDK's
-    method name is an internal detail and never reaches the client (see
-    ``test_error_detail_leakage``).
-
-    Two gates keep that from blaming a caller for someone else's fault, because
-    Python raises this same wording for any bad keyword and this classifier is
-    reached from ``except Exception`` arms that wrap more than the provider call:
-
-    * The name has to be one a request body can carry: ``request_params``, which
-      defaults to the completion formats' :data:`_FORWARDED_PARAMS`. A
-      pass-through route names the fields its own request set instead.
-      An operator's ``client_args`` typo (``timeoutt``) and a gateway-internal
-      signature drift after an SDK bump (a tool backend's ``image``) are neither,
-      so they keep the generic 502 and stay on the error-rate panel as the
-      upstream-or-gateway failures they are.
-    * The failing callable must not be a constructor. ``client_args`` is
-      operator-owned and reaches a provider *client's* ``__init__``, so a key
-      there that happens to collide with a real param name (``client_args={"seed":
-      1}``) would otherwise pass the first gate and read as the caller's ``seed``.
-
-    Both gates key on the same interpreter wording the match already depends on,
-    so neither adds a new assumption about how CPython phrases the error.
-    """
-    for candidate in upstream_exception_chain(exc):
-        if not isinstance(candidate, TypeError):
-            continue
-        message = str(candidate)
-        if "__init__" in message:
-            continue
-        match = _UNEXPECTED_KWARG.search(message)
-        if match and match.group(1) in request_params:
-            return match.group(1)
-    return None
-
-
-def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
-    """The detail for a failure the caller can act on.
-
-    Returns the provider's own message, redacted and length-capped, because the
-    provider is the only party that knows what it objected to.
-
-    An error body an SDK parsed onto the exception is read first, and when one
-    is there nothing else is: the message inside it is what the provider wrote,
-    while the same exception's ``message`` and string form wrap that body in a
-    status prefix and a Python dict repr (OpenAI, Anthropic) or prepend the
-    response headers (Cohere).
-
-    Otherwise a message the provider put on an exception wins over the joined chain.
-    An SDK's string form can repeat that message, add its own labels, or append the response body.
-    A wrapper's message is its original's string form, so a message deeper in the chain wins over it.
-
-    Falls back to ``fallback`` when what is left says nothing. Some SDKs
-    stringify a failure as bare punctuation or the status code itself, and
-    "404" is not an explanation the caller did not already have from the
-    status. Requiring one letter is a low bar deliberately: it rejects the
-    empty cases without second-guessing a provider that wrote a real sentence.
-    A message made entirely of redaction placeholders is empty for this
-    purpose, too.
-    """
-    body_messages = upstream_body_messages(exc)
-    if body_messages is not None:
-        for body_message in body_messages:
-            if detail := redacted_upstream_detail(body_message, ""):
-                return detail
-        return fallback
-    wrapper_message: str | None = None
-    for candidate in upstream_exception_chain(exc):
-        message = _carried_message(candidate)
-        if message is None:
-            continue
-        if getattr(candidate, "original_exception", None) is not None:
-            wrapper_message = wrapper_message or message
-        elif detail := redacted_upstream_detail(message, ""):
-            return detail
-    if wrapper_message is not None and (detail := redacted_upstream_detail(wrapper_message, "")):
-        return detail
-    return redacted_upstream_detail(upstream_error_message(exc), fallback)
-
-
-def _carried_message(exc: BaseException) -> str | None:
-    """The message the provider put on one exception, without text the SDK adds, or ``None``."""
-    message = getattr(exc, "message", None)
-    if not isinstance(message, str):
-        message = _error_response(exc).get("Message")
-    return message if isinstance(message, str) else None
-
-
-def _error_response(exc: BaseException) -> Mapping[str, object]:
-    """The ``Error`` part of an AWS SDK error response, or an empty mapping."""
-    response = getattr(exc, "response", None)
-    error = response.get("Error") if isinstance(response, Mapping) else None
-    return error if isinstance(error, Mapping) else {}
-
-
-def _is_account_quota_error(exc: BaseException) -> bool:
-    """Whether the provider refused because the operator's account is over a service quota."""
-    return any(
-        _error_response(current).get("Code") == "ServiceQuotaExceededException"
-        for current in upstream_exception_chain(exc)
-    )
-
-
-# Lowercase substrings of a rejection that says the model takes no image input.
-# Each is a provider's wording seen in a real response; add one only on the same footing.
-# Narrow for the same reason as the billing probes: each names images and says
-# they are refused, so a malformed request of any other kind cannot match.
-_IMAGE_REJECTION_PROBES: tuple[str, ...] = (
-    "image content is not supported",  # cohere
-    "unsupported chatmessagecontent type: image_url",  # fireworks
-)
-
-
-def _is_image_input_rejection(exc: BaseException) -> bool:
-    """Whether the provider refused the request because the model does not accept images.
-
-    Only a request fault can say that: a 400 or 422, or a rejection the provider
-    raised before assigning a status.
-    """
-    _kind, status_code = upstream_exception_shape(exc)
-    if status_code not in (None, 400, 422):
-        return False
-    message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in _IMAGE_REJECTION_PROBES)
-
-
-def classify_provider_error(
-    exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS, model: str | None = None
-) -> ProviderErrorMapping | None:
-    """Map an upstream provider exception to a safe, specific (status, detail).
-
-    Returns ``None`` when the failure carries no signal we can safely act on, so
-    the caller falls back to its existing generic provider-error response. The
-    mapping is intentionally conservative, classifying only the cases a caller
-    can act on and leaving everything else (including provider 5xx and
-    connection errors) to the generic 502.
-
-    Detail text splits on whether the caller can act on the failure. A rejection
-    of the caller's request (400/422/404) and a rate limit (429) pass the
-    provider's own message through, redacted and length-capped, because it is
-    the only description of what was actually wrong. When the failure is the
-    gateway's own (a rejected credential, an exhausted provider account, a 5xx),
-    the detail stays a fixed string: those carry no remedy the caller could
-    apply, and are where a raw message is most likely to name the operator's
-    credentials or topology.
-
-    Timeout detection (including the OpenAI/Anthropic SDKs' own
-    ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
-    shared with the attempt walker via :func:`upstream_exception_shape`, so both
-    stay in sync.
-
-    ``request_params`` is the set of names a caller could have sent, which is
-    what lets an SDK's unknown-keyword ``TypeError`` read as the caller's 400
-    (see :func:`_rejected_param`). ``model``, the name the caller knows the
-    model by, is named in a detail that is about the model.
-    """
-    missing = missing_credential(exc)
-    if missing is not None:
-        return ProviderErrorMapping(missing.status_code, missing.detail)
-    if is_empty_completion(exc):
-        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, EMPTY_COMPLETION_DETAIL)
-    kind, status_code = upstream_exception_shape(exc)
-    if kind == "timeout":
-        return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
-    # any-llm raises UnsupportedParameterError for typed provider-capability
-    # checks and still uses NotImplementedError for older feature checks such as
-    # context_management/betas (#530). Neither carries an HTTP status, so either
-    # would otherwise fall through to a generic 502/500 and tell the caller a
-    # guaranteed-permanent failure was transient. The exception type is the
-    # whole signal here, and its message names the unsupported feature.
-    if _is_unsupported_feature_error(exc):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
-    # The same shape one layer down: a param any-llm forwards that the resolved
-    # provider's SDK has no parameter for.
-    if (param := _rejected_param(exc, request_params)) is not None:
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
-    # Each provider words this its own way, so it gets one wording and one code.
-    if _is_image_input_rejection(exc):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, unsupported_image_detail(model))
-    if status_code is None:
-        # A status-less InvalidRequestError means the provider (gemini, bedrock,
-        # anthropic) rejected the request shape before assigning an HTTP status.
-        # Mirror the UnsupportedParameterError / NotImplementedError branches: the
-        # exception type is the whole signal, and the provider's own message names
-        # what was wrong. Gated on the failure's own status rather than each
-        # link's, so a chain that does carry one (401, 429, 5xx) keeps its fixed
-        # detail instead of echoing the upstream text as a client 400.
-        if any(isinstance(candidate, InvalidRequestError) for candidate in upstream_exception_chain(exc)):
-            return ProviderErrorMapping(
-                status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-            )
+    answered = AnsweredRounds.of(exc)
+    if answered is None:
         return None
-    # Account billing exhaustion, which several providers report as a 400/422
-    # rather than the 402 the condition deserves (and DeepSeek does report as a
-    # 402). This is a gateway-side account fault rather than anything wrong with
-    # the caller's request, so it surfaces as a 502 and never as a client-facing
-    # 400: telling the caller to "check the model name and parameters" for an
-    # empty wallet sends operators debugging the wrong thing. Checked ahead of the
-    # status branches so it wins over both the generic bad-request detail and the
-    # 402 fall-through to a bare 502.
-    if is_provider_billing_error(exc):
-        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
-    # An account quota is the operator's limit, like billing, even where the provider answers 400.
-    if _is_account_quota_error(exc):
-        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_ACCOUNT_QUOTA_DETAIL)
-    if status_code == 400 and _is_structured_output_failure(exc):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _structured_output_failed_detail(exc))
-    # OpenAI answers some request faults with a 403 (logprobs on a model without
-    # them), which is the caller's to fix and not the gateway's key.
-    if status_code in (400, 422) or is_upstream_request_fault(exc):
-        return ProviderErrorMapping(
-            status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-        )
-    if status_code == 404:
-        return ProviderErrorMapping(
-            status.HTTP_404_NOT_FOUND, _upstream_message_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
-        )
-    # A provider rejecting the gateway's credentials is a gateway-config fault,
-    # not the caller's, so never a client-facing 401/403. Nor a 5xx: no retry
-    # makes the key valid, so it is refused like a missing credential is.
-    if is_provider_credential_rejection(exc):
-        return ProviderErrorMapping(status.HTTP_424_FAILED_DEPENDENCY, PROVIDER_CREDENTIALS_DETAIL)
-    # A 429 is not the caller's request to fix but is theirs to act on, and only
-    # the provider's text names the exhausted quota and the retry window. Still
-    # drops the upstream Retry-After: the (status, detail) pair cannot carry it,
-    # and on a streaming failure the headers are already flushed.
-    if status_code == 429:
-        return ProviderErrorMapping(
-            status.HTTP_429_TOO_MANY_REQUESTS, _upstream_message_detail(exc, PROVIDER_RATE_LIMITED_DETAIL)
-        )
-    # A 413 refuses the request for its size, so it fails the same way on every
-    # retry and the provider's sentence (the limit, the size requested) is what
-    # tells the caller how far to shrink it.
-    if status_code == 413:
-        return ProviderErrorMapping(
-            status.HTTP_413_CONTENT_TOO_LARGE, _upstream_message_detail(exc, PROVIDER_REQUEST_TOO_LARGE_DETAIL)
-        )
-    return None
-
-
-def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, str] | None:
-    """Response headers for a classified provider failure, or ``None``.
-
-    On a 429, ``Otari-Error-Code: upstream_rate_limited`` (so a caller can tell
-    the provider's limit from the gateway's own) and the upstream ``Retry-After``,
-    the one piece of a provider's rate-limit response that its message body cannot
-    always carry. Restricted to the 429: on the statuses that surface as a
-    fixed-detail 502 the header would describe the gateway's own upstream
-    account, which is not the caller's to read. A 424 names which of the
-    gateway's credentials failed it, missing or rejected, and nothing more. A
-    completion with no choices is the one 502 with a code, ``provider_error``.
-    """
-    if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
-        return error_headers(CONTEXT_LENGTH_EXCEEDED)
-    if status_code == status.HTTP_400_BAD_REQUEST and _is_image_input_rejection(exc):
-        return error_headers(UNSUPPORTED_CONTENT)
-    if status_code == status.HTTP_400_BAD_REQUEST and _is_structured_output_failure(exc):
-        return error_headers(STRUCTURED_OUTPUT_FAILED)
-    if status_code == status.HTTP_400_BAD_REQUEST and unsupported_parameter_name(exc) is not None:
-        return error_headers(UNSUPPORTED_PARAMETER)
-    if status_code == status.HTTP_413_CONTENT_TOO_LARGE and upstream_exception_shape(exc)[1] == 413:
-        return error_headers(REQUEST_TOO_LARGE)
-    missing = missing_credential(exc)
-    if missing is not None and status_code == missing.status_code:
-        return error_headers(missing.code)
-    if status_code == status.HTTP_424_FAILED_DEPENDENCY and is_provider_credential_rejection(exc):
-        return error_headers(PROVIDER_CREDENTIAL_REJECTED)
-    if status_code == status.HTTP_502_BAD_GATEWAY and is_empty_completion(exc):
-        return error_headers(PROVIDER_ERROR)
-    if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
-        return None
-    headers = error_headers(UPSTREAM_RATE_LIMITED)
-    retry_after = upstream_retry_after(exc)
-    if retry_after is not None:
-        headers["Retry-After"] = retry_after
-    return headers
+    if answered.result is not None:
+        return adapter.extract_usage(answered.result)
+    reported = (adapter.extract_stream_usage(event) for event in reversed(answered.events))
+    return next((usage for usage in reported if usage is not None), None)
 
 
 def with_provider_failure(error: HTTPException, exc: BaseException, provider: str | None) -> HTTPException:
@@ -1006,149 +589,6 @@ def with_provider_failure(error: HTTPException, exc: BaseException, provider: st
         return error
     error.headers = {**(error.headers or {}), **failure.as_headers()}
     return error
-
-
-def _is_context_length_error(exc: BaseException) -> bool:
-    """Whether any-llm classified the failure as a prompt too long for the model."""
-    return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
-
-
-# Groq's code for a generation that did not match the requested schema.
-_STRUCTURED_OUTPUT_FAILURE_TAGS = frozenset({"json_validate_failed"})
-# Groq's message points at ``failed_generation``, a body field Otari does not relay.
-_FAILED_GENERATION_POINTER = re.compile(r"\s*See 'failed_generation'[^.]*\.?")
-
-
-def _is_structured_output_failure(exc: BaseException) -> bool:
-    """Whether the provider's own code says the model's output did not match the requested schema."""
-    return upstream_error_tag(exc) in _STRUCTURED_OUTPUT_FAILURE_TAGS
-
-
-def _structured_output_failed_detail(exc: BaseException) -> str:
-    """The provider's sentence, without its pointer to a field the caller never receives."""
-    detail = _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-    return _FAILED_GENERATION_POINTER.sub("", detail).strip() or PROVIDER_BAD_REQUEST_DETAIL
-
-
-def refusal_code(exc: BaseException) -> str | None:
-    """The ``Otari-Error-Code`` an exception ending a request stands for, or None.
-
-    Read by the stream error events, which go out after the headers that would
-    otherwise carry it.
-    """
-    if isinstance(exc, HTTPException):
-        return error_code_of(exc.headers)
-    mapping = classify_provider_error(exc)
-    if mapping is None:
-        return None
-    return error_code_of(provider_error_headers(exc, mapping.status_code))
-
-
-def stream_error_code(exc: BaseException) -> str | None:
-    """The ``error.code`` of the event that ends a stream on ``exc``, or None.
-
-    The refusal's own code where it has one, otherwise ``provider_error`` for any
-    failure the provider caused, so a client can tell a provider failure from the
-    gateway's own without reading the message. A failure
-    :func:`classify_provider_error` recognizes counts as the provider's even
-    when it carries no status, such as a parameter the provider's SDK refused.
-    """
-    code = refusal_code(exc)
-    if code is not None or isinstance(exc, HTTPException):
-        return code
-    if is_upstream_stream_interrupted(exc):
-        return PROVIDER_STREAM_INTERRUPTED
-    if _is_upstream_failure(exc) or classify_provider_error(exc) is not None:
-        return PROVIDER_ERROR
-    return None
-
-
-def stream_error_message(exc: BaseException) -> str | None:
-    """The message of the event that ends a stream on ``exc``, or None for the format's fixed one.
-
-    The detail the same failure gets as an HTTP error, where that names a cause
-    (:func:`classify_provider_error`, or :func:`provider_failure_detail` for a
-    provider failure it leaves to the 502), since that detail is already safe
-    for the caller to read.
-    """
-    if isinstance(exc, AnswerRefused):
-        return str(cast("dict[str, Any]", exc.detail)["message"])
-    if isinstance(exc, HTTPException):
-        return None
-    mapping = classify_provider_error(exc)
-    if mapping is not None:
-        return mapping.detail
-    if is_upstream_stream_interrupted(exc):
-        return PROVIDER_STREAM_INTERRUPTED_DETAIL
-    return _provider_failure_cause(exc)
-
-
-def provider_failure_detail(exc: BaseException, fallback: str = PROVIDER_ERROR_DETAIL) -> str:
-    """The detail of the 502 for a provider failure :func:`classify_provider_error` leaves unclassified.
-
-    It says what happened upstream (the provider's error status, a connection it
-    closed or never opened, a stream it cut short) and nothing else: no host,
-    message or body, since those are the gateway's own topology. ``fallback`` when
-    the failure says none of that, such as a fault in the gateway itself.
-    """
-    return _provider_failure_cause(exc) or fallback
-
-
-def _provider_failure_cause(exc: BaseException) -> str | None:
-    if isinstance(exc, IncompleteStreamError):
-        return PROVIDER_STREAM_INTERRUPTED_DETAIL
-    kind, status_code = upstream_exception_shape(exc)
-    if status_code is not None:
-        return f"The provider failed the request with HTTP {status_code}"
-    if kind == "conn_err":
-        if is_upstream_connect_failure(exc):
-            return "The gateway could not connect to the provider"
-        return "The provider closed the connection before answering"
-    if kind == "timeout":
-        return "The provider did not answer in time"
-    return None
-
-
-def _is_upstream_failure(exc: BaseException) -> bool:
-    """Whether ``exc`` came from the provider rather than from the gateway."""
-    if isinstance(exc, IncompleteStreamError) or upstream_exception_shape(exc) != (None, None):
-        return True
-    return any(isinstance(current, AnyLLMError) for current in upstream_exception_chain(exc))
-
-
-def failure_status_code(exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS) -> int:
-    """The HTTP status to record on the usage log for an upstream failure.
-
-    Prefers the status the provider actually returned, which is deliberately not
-    always the status the caller saw: an upstream 401/403 surfaces to the caller
-    as a 424 (a provider rejecting the gateway's credentials is a gateway-config
-    fault, not the caller's key), but the log keeps the 401 so "how much of my
-    error rate is my own misconfiguration" stays answerable. When the provider
-    returned no status at all (timeout, unreachable), records the gateway's own
-    classification instead, so an error row still carries a code to group on.
-
-    The tool-loop cap is checked first because it is the gateway's own limit, not
-    an upstream failure: it carries no HTTP status of its own, so it would
-    otherwise fall through to the generic 502 and read in the taxonomy as a
-    provider outage. It reaches here from the streaming path, where the cap is
-    raised while the SSE body is already streaming (see ``run_tool_loop_stream``)
-    and settles through ``on_error``; the non-streaming path records the same 422
-    at its own ``except MaxToolIterationsExceeded``.
-    """
-    if isinstance(exc, MaxToolIterationsExceeded):
-        return status.HTTP_422_UNPROCESSABLE_CONTENT
-    if isinstance(exc, AnswerRefused):
-        return exc.status_code
-    # Before the wrapper's own status: a wrapper can carry a 500 around a
-    # credential any-llm never found, and the row records what the caller saw.
-    missing = missing_credential(exc)
-    if missing is not None:
-        return missing.status_code
-    _kind, status_code = upstream_exception_shape(exc)
-    if status_code is not None:
-        return status_code
-    mapping = classify_provider_error(exc, request_params=request_params)
-    return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
 
 
 class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
@@ -1236,6 +676,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -1246,6 +687,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
@@ -1289,11 +731,14 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         logger.error("Request failed: %s", exc.message)
         return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
+    headers = error_headers(exc.error_code) if exc.error_code is not None else {}
+    if isinstance(exc, KeyScopeMissingError):
+        headers = {**headers, **exc.challenge}
     return adapter.error(
         exc.status_code,
         exc.message,
         _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST),
-        headers=error_headers(exc.error_code) if exc.error_code is not None else None,
+        headers=headers or None,
     )
 
 
@@ -1319,6 +764,7 @@ class RequestContext:
         db: AsyncSession,
         uow: UnitOfWork,
         log_writer: LogWriter,
+        unavailable_model_reporter: UnavailableModelReporter,
         api_key_id: str | None,
         user_id: str | None,
         rate_limit_info: RateLimitInfo | None,
@@ -1344,8 +790,11 @@ class RequestContext:
         country_gate: CountryGate | None = None,
         api_key: APIKey | None = None,
         session: bool = False,
+        requested_model: str | None = None,
     ) -> None:
         self.config = config
+        # The model name as the caller sent it, before an alias or a policy resolved it.
+        self.requested_model = requested_model
         # The key that authenticated the request; ``None`` for the master key and a session principal.
         self.api_key = api_key
         # Whether a dashboard session (the Playground) made the request, which MCP access binds as its user.
@@ -1358,6 +807,7 @@ class RequestContext:
         # The Unit of Work the route resolved, over the session the route holds.
         self.uow = uow
         self.log_writer = log_writer
+        self.unavailable_model_reporter = unavailable_model_reporter
         self.api_key_id = api_key_id
         # The organization whose rate overrides price this request, resolved once
         # in the preamble rather than at each pricing lookup. Resolving per lookup
@@ -1387,13 +837,16 @@ class RequestContext:
         # What the ``rate_limits`` rules hold for this request, settled where its reservation is.
         self.rate_limit_grant = rate_limit_grant
         self.reservation = reservation
-        # USD already written onto a failure row for gateway-run tool calls. A
-        # request whose plan is exhausted still owes for the searches it ran, and
+        # USD already written onto a failure row: the gateway-run tool calls and the
+        # tool-loop rounds a provider answered. A request whose plan is
+        # exhausted still owes for the searches and rounds it ran, and
         # ``log_exhausted_plan`` writes that onto the row without settling. Recording
         # it here lets the single release site reconcile it instead of refunding,
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
         self.tool_charge: Decimal = Decimal(0)
+        # Those rounds' tokens, for the token ceiling and the per-minute token limit.
+        self.tool_charge_tokens = 0
         # USD the reservation grew by to hold gateway-run tool calls before they ran.
         # A fallover's top-up holds it on top of the next candidate's estimate, since
         # those calls are billed whichever attempt wins.
@@ -1414,6 +867,9 @@ class RequestContext:
         # Monotonic clock reading taken as the first provider attempt is sent,
         # which splits ``Server-Timing`` into the gateway's time and the provider's.
         self.dispatched_at: float | None = None
+        # The instance, model and funding of the candidate the request was last sent to, which a
+        # tool loop's later rounds are priced at.
+        self.serving: tuple[str, str, bool] | None = None
         # The request's fields beyond its schema's, forwarded only to a provider
         # instance whose ``request_fields`` lists them (``with_request_fields``).
         self.request_extras: dict[str, Any] = {}
@@ -1499,6 +955,7 @@ def _served_by_headers(
     opening for a streamed one.
     """
     fell_back = chosen is not None and ctx.plan is not None and ctx.plan.is_fallback(chosen)
+    deployment_paid = chosen.deployment_paid if chosen is not None else ctx.deployment_paid
     headers = {PROVIDER_HEADER: provider_key(provider)}
     # A plain request's model is the caller's own string, and one a provider accepted
     # but a header cannot carry would fail the response after the provider answered.
@@ -1511,14 +968,16 @@ def _served_by_headers(
         | {
             ATTEMPT_COUNT_HEADER: str(sent),
             FALLBACK_HEADER: "true" if fell_back else "false",
+            DEPLOYMENT_PAID_HEADER: "true" if deployment_paid else "false",
             RESPONSE_DURATION_HEADER: str(round((now - ctx.started_at) * 1000)),
         }
         | _server_timing(ctx, now)
     )
 
 
-def _mark_dispatched(ctx: RequestContext) -> None:
-    """Note that the request is going to its first provider, unless an earlier attempt already went."""
+def _mark_dispatched(ctx: RequestContext, instance: str, model: str, *, deployment_paid: bool) -> None:
+    """Note the candidate the request is going to, and when it first went to a provider."""
+    ctx.serving = (instance, model, deployment_paid)
     if ctx.dispatched_at is None:
         ctx.dispatched_at = time.monotonic()
 
@@ -1597,17 +1056,18 @@ def _end_user(
         raise adapter.error(502, NO_UPSTREAM_USER_DETAIL, ErrorKind.API) from exc
 
 
-def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception, *, detail: str | None = None) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
     resolve_provider_selector raises ValueError for an unparseable
     selector (no provider: prefix) and AnyLLMError for an unknown
     provider.  Both are client input errors; surfacing them as a bare 500 is
-    confusing.
+    confusing. ``detail`` replaces the general one where the caller has a
+    more specific reason.
     """
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=unresolvable_model_detail(model_selector),
+        detail=detail or unresolvable_model_detail(model_selector),
         headers=error_headers(INVALID_MODEL),
     ) from exc
 
@@ -1643,7 +1103,7 @@ async def resolve_dispatch_provider(
     """
     if ctx.resolved_provider is not None:
         return await _prepare_for_dispatch(
-            ctx, ctx.resolved_provider, adapter=adapter, port=model_provider, billing=billing
+            ctx, ctx.resolved_provider, model_selector, adapter=adapter, port=model_provider, billing=billing
         )
     try:
         resolved = resolve_provider_selector(
@@ -1658,6 +1118,7 @@ async def resolve_dispatch_provider(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=model_selector,
+            requested_model=ctx.requested_model,
             provider=None,
             endpoint=adapter.endpoint,
             detail=unresolvable_model_detail(model_selector),
@@ -1668,12 +1129,15 @@ async def resolve_dispatch_provider(
             safety_identifier=ctx.upstream_user,
         )
         _raise_for_unresolvable_model(model_selector, exc)
-    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider, billing=billing)
+    return await _prepare_for_dispatch(
+        ctx, resolved, model_selector, adapter=adapter, port=model_provider, billing=billing
+    )
 
 
 async def _prepare_for_dispatch(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -1687,7 +1151,7 @@ async def _prepare_for_dispatch(
         # and follows no redirect; see ``services/providers``.
         client_args = {"http_client": owned_endpoint_sdk_client(resolved.provider)}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
-    served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    served = await _serve_from_hosted_credential(ctx, resolved, model_selector, adapter=adapter, port=port)
     ctx.deployment_paid = served.deployment_paid
     if served.deployment_paid:
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
@@ -1729,6 +1193,7 @@ async def _refuse_if_hosted_model_switched_off(
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         model=resolved.model,
+        requested_model=ctx.requested_model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
         detail=detail,
@@ -1743,6 +1208,55 @@ async def _refuse_if_hosted_model_switched_off(
         detail,
         ErrorKind.API,
         headers=error_headers(PROVIDER_NOT_CONFIGURED),
+    )
+
+
+async def _refuse_if_model_unknown(
+    ctx: RequestContext, resolved: ResolvedProvider, model_selector: str, *, adapter: FormatAdapter[Any, Any]
+) -> None:
+    """Refuse a model of a vendor in the caller's catalog that neither the catalog nor models.dev knows.
+
+    That is most often a misspelled catalog id (``openai/gpt-oss-12``), which
+    would otherwise be told its provider is not configured. The refusal names
+    the nearest catalog ids. A known model keeps the provider's own answer, as
+    do an alias, whose target stays hidden, and a prefix the catalog has
+    nothing under, such as an undeclared local provider. Called after
+    :func:`_refuse_if_hosted_model_switched_off`, so a hosted provider's own
+    roster keeps answering for its models.
+    """
+    if resolved.alias is not None:
+        return
+    refusal = misspelled_model_refusal(
+        ctx.organization_id,
+        instance=resolved.instance,
+        provider=resolved.provider.value,
+        model=resolved.model,
+        selector=model_selector,
+    )
+    if refusal is None:
+        return
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        requested_model=ctx.requested_model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=refusal.detail,
+        status_code=refusal.status_code,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
+    )
+    raise adapter.error(
+        refusal.status_code,
+        refusal.detail,
+        ErrorKind.from_status(refusal.status_code),
+        headers=error_headers(refusal.code),
     )
 
 
@@ -1768,6 +1282,7 @@ async def _hold_at_deployment_paid_rate(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=served.model,
+            requested_model=ctx.requested_model,
             provider=served.instance,
             endpoint=adapter.endpoint,
             detail=detail,
@@ -1780,7 +1295,7 @@ async def _hold_at_deployment_paid_rate(
         kind = (
             ErrorKind.INVALID_REQUEST
             if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED
-            else error_kind_for_status(exc.status_code)
+            else ErrorKind.from_status(exc.status_code)
         )
         headers = dict(exc.headers) if exc.headers is not None else None
         raise adapter.error(exc.status_code, detail, kind, headers=headers) from exc
@@ -1819,7 +1334,8 @@ async def _admit_or_refuse(
         await _record_funding_refusal(
             ctx, resolved, adapter=adapter, detail=detail, status_code=status.HTTP_402_PAYMENT_REQUIRED
         )
-        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
+        headers = error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url)
+        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers) from exc
     except Exception as exc:
         # As for a ModelProviderPort failure: a funding check is expected to read
         # a database or a service, and nothing above this catches what it raises.
@@ -1921,6 +1437,7 @@ async def _record_funding_refusal(
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         model=resolved.model,
+        requested_model=ctx.requested_model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
         detail=detail,
@@ -1948,6 +1465,7 @@ async def _provider_not_configured(
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         model=resolved.model,
+        requested_model=ctx.requested_model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
         detail=missing.detail,
@@ -1961,7 +1479,7 @@ async def _provider_not_configured(
     return adapter.error(
         public.status_code,
         public.detail,
-        error_kind_for_status(public.status_code),
+        ErrorKind.from_status(public.status_code),
         headers=error_headers(public.code),
     )
 
@@ -2041,6 +1559,8 @@ def _hosted_candidate(
                 country_gate=ctx.country_gate,
             )
         except HostedAccessDeniedError as exc:
+            if ctx.plan is not None and ctx.plan.automatic is not None:
+                ctx.plan.automatic.refuse(attempt)
             selector = attempt.display_model or f"{attempt.instance}:{attempt.model}"
             raise CandidateCannotServe(
                 HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=model_not_allowed_detail(selector))
@@ -2064,6 +1584,8 @@ def _hosted_candidate(
         hosted = replace(
             attempt, instance=served.instance, provider=served.provider, kwargs=served.kwargs, deployment_paid=True
         )
+        if ctx.plan is not None and ctx.plan.automatic is not None:
+            ctx.plan.automatic.dispatched_as(attempt, hosted)
         await _grow_reservation(
             ctx,
             hosted.instance,
@@ -2086,7 +1608,7 @@ def _hosted_candidate(
                 HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail=exc.public_message,
-                    headers=error_headers(INSUFFICIENT_FUNDS),
+                    headers=error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
                 )
             ) from exc
         except Exception as exc:
@@ -2121,6 +1643,7 @@ def _hosted_candidate(
 async def _serve_from_hosted_credential(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -2170,6 +1693,11 @@ async def _serve_from_hosted_credential(
             provider=resolved.instance,
             model=resolved.model,
         )
+        country_gate = ctx.country_gate
+        if country_gate is not None and credential is not None:
+            # Read here, so a failed read of the account's country releases the reservation as a failed lookup does.
+            for candidate in credential.candidates():
+                country_gate = await country_gate.for_list(candidate.supported_countries)
     except HostedAccessDeniedError as exc:
         # The port owns this refusal precisely so a caller need not name the
         # adapter that raised it, and the adapter's own wording is internal, so
@@ -2197,6 +1725,7 @@ async def _serve_from_hosted_credential(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=resolved.model,
+            requested_model=ctx.requested_model,
             provider=resolved.instance,
             endpoint=adapter.endpoint,
             detail=denied_detail,
@@ -2237,6 +1766,7 @@ async def _serve_from_hosted_credential(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=resolved.model,
+            requested_model=ctx.requested_model,
             provider=resolved.instance,
             endpoint=adapter.endpoint,
             detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -2252,10 +1782,11 @@ async def _serve_from_hosted_credential(
 
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
+        await _refuse_if_model_unknown(ctx, resolved, model_selector, adapter=adapter)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
-        ensure_hosted_country(ctx.country_gate, credential.supported_countries)
+        credential = await ensure_hosted_country(country_gate, credential)
     except CountryNotServedError as exc:
         detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
@@ -2265,6 +1796,7 @@ async def _serve_from_hosted_credential(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=resolved.model,
+            requested_model=ctx.requested_model,
             provider=resolved.instance,
             endpoint=adapter.endpoint,
             detail=detail,
@@ -2298,6 +1830,7 @@ async def _serve_from_hosted_credential(
             api_key_id=ctx.api_key_id,
             user_id=ctx.user_id,
             model=resolved.model,
+            requested_model=ctx.requested_model,
             provider=resolved.instance,
             endpoint=adapter.endpoint,
             detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
@@ -2452,6 +1985,8 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
             price_of=_request_price_of(
                 ctx.db, ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             ),
+            # A region is held to its provider's ceilings, as the reservation was.
+            ceiling_instance=HostedRegionIndex.parent_of(attempt.instance),
         )
     except ProviderSpendCeilingExceededError as exc:
         raise CandidateCannotServe(spend_ceiling_refusal(exc)) from exc
@@ -2629,6 +2164,87 @@ class ReservationToolGate:
         return self._unit_costs[key]
 
 
+class ReservationRoundGate:
+    """Grows the request's reservation by each tool-loop round's prompt before the round is sent.
+
+    The hold taken at admission covers the request's first round and one output
+    limit. Every later round resends the whole conversation and is billed too, so
+    each grows the hold by its own prompt, priced at the candidate serving it as
+    admission prices the first: about four characters per token. It grows it by
+    what the round before wrote as well, at the output rate, so the hold stays
+    the output written so far plus one output limit for the round being sent. A
+    round before that reported no usage is held at the output allowance admission
+    holds (the request's limit, or the deployment default when it sets none). A round
+    that does not fit is sent as the loop's last, without the gateway's tools
+    (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
+    holds its tokens alone.
+    """
+
+    def __init__(self, ctx: RequestContext) -> None:
+        self._ctx = ctx
+
+    @property
+    def in_force(self) -> bool:
+        """Whether the request holds anything a round would grow; a loop is handed the gate only then."""
+        handle = self._ctx.reservation
+        return handle is not None and handle.counts_toward_budget and (handle.reserved or bool(handle.scoped_budgets))
+
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        ctx, handle = self._ctx, self._ctx.reservation
+        inputs, serving = ctx.estimate_inputs, ctx.serving
+        if handle is None or not self.in_force or inputs is None or serving is None:
+            return True
+        if handle.reservation_id is None:
+            # Its ledger row could not be written, so a growth nothing could reclaim is not taken.
+            logger.warning(
+                "Tool-loop round not held: the request's reservation has no ledger row; sending it as the last"
+            )
+            return False
+        instance, model, deployment_paid = serving
+        try:
+            prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
+            resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
+            # No usage reported is held as admission holds a round: at its limit, or the default.
+            written = output_tokens if output_tokens is not None else inputs.max_output_tokens
+            cost = estimate_cost(
+                resolved.pricing if resolved is not None else None,
+                prompt_chars=prompt_chars,
+                max_output_tokens=written,
+                default_output_tokens=inputs.default_output_tokens,
+                cache_write_ttl=inputs.cache_write_ttl,
+                facts=inputs.facts,
+            )
+            # Ends whatever the request left pending, so a failed hold rolls back only the hold.
+            await release_session(ctx.db)
+            held = await hold_tool_call(
+                ctx.db,
+                handle,
+                cost,
+                tokens=estimate_tokens(
+                    prompt_chars=prompt_chars,
+                    max_output_tokens=written,
+                    default_output_tokens=inputs.default_output_tokens,
+                ),
+                # A round that costs nothing holds its tokens alone, as a free model's request does at admission.
+                model_is_free=cost <= ZERO,
+                strategy=ctx.config.budget_strategy,
+            )
+        except DATABASE_ERRORS as exc:
+            logger.error(
+                "Could not hold a tool-loop round on the budget; sending it as the last: %s",
+                describe_database_error(exc),
+            )
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await ctx.db.rollback()
+            return False
+        if held is None:
+            logger.info(
+                "Tool-loop round on %s:%s does not fit the request's budget; sending it as the last", instance, model
+            )
+            return False
+        return True
+
+
 BUDGETS_UNAVAILABLE_DETAIL = "Budgets could not be checked for a fallback, so it was not sent."
 
 
@@ -2733,6 +2349,7 @@ async def _compile_request_plan(
             api_key_id=api_key_id,
             user_id=user_id,
             model=model,
+            requested_model=model,
             provider=None,
             endpoint=endpoint,
             detail=exc.operator_detail,
@@ -2795,7 +2412,9 @@ async def _resolve_keyed_user_id(
             master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
             no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
             no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
-            forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
+            forbidden_user_error=adapter.error(
+                403, user_forbidden_detail, ErrorKind.PERMISSION, headers=error_headers(USER_MISMATCH)
+            ),
             reject_mismatch=config.reject_user_mismatch,
         )
     except HTTPException as exc:
@@ -2822,6 +2441,7 @@ async def _resolve_keyed_user_id(
                 api_key_id=api_key_id,
                 user_id=api_key.user_id,
                 model=model,
+                requested_model=model,
                 provider=None,
                 endpoint=adapter.endpoint,
                 detail=user_forbidden_detail,
@@ -2911,7 +2531,7 @@ async def resolve_request_context(
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
-    tools: list[dict[str, Any]] | None = None,
+    declared: DeclaredTools,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
@@ -2965,6 +2585,7 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
+    unavailable_model_reporter = get_unavailable_model_reporter(raw_request)
     # One instant for every estimate, top-up and settlement, so a clock rule prices them alike.
     if price_facts.at is None:
         price_facts = replace(price_facts, at=datetime.now(UTC))
@@ -3009,6 +2630,10 @@ async def resolve_request_context(
     else:
         api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
         api_key_id = api_key.id if api_key else None
+        # This check runs ahead of the reservation and the pricing gate, so a key that may
+        # not run a declared tool is told that rather than what the deployment prices. It
+        # also runs before the end user is resolved, because resolving one may create it.
+        _require_declared_tool_scopes(adapter, api_key, declared)
         # Zero I/O for a keyed request: `api_key.workspace_id` is already an
         # in-memory attribute on the row just loaded. Only a master-key request
         # pays a lookup, which `resolve_workspace_id` itself accepts as
@@ -3069,10 +2694,12 @@ async def resolve_request_context(
     # capability detection needs the underlying implementation, so keep both.
     gate_instance: str | None
     gate_impl: LLMProvider | None
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(
+        config, raw_request, db, organization_id, api_key=api_key, session=session_principal is not None
+    )
     # A policy name, or a catalog ID with several offerings, resolves to a plan.
     # Everything below keys on the plan's head candidate, as it would on a plain model.
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     prices = get_request_prices(db, organization_id)
     plan = await _compile_request_plan(
         adapter=adapter,
@@ -3115,6 +2742,7 @@ async def resolve_request_context(
             region=preferred_region(config.automatic_routing, raw_request.headers),
             mode=f"{adapter.endpoint}:{'stream' if streaming else 'completion'}",
             own=organization_offerings(workspace_id=workspace_id, organization_id=organization_id),
+            tenant=str(workspace_id),
         )
         if plan.automatic is not None:
             on_request_finished(raw_request, plan.automatic.close)
@@ -3160,6 +2788,7 @@ async def resolve_request_context(
             api_key_id=api_key_id,
             user_id=user_id,
             model=gate_model,
+            requested_model=model,
             provider=gate_instance,
             endpoint=adapter.endpoint,
             detail=key_refusal.detail,
@@ -3172,7 +2801,7 @@ async def resolve_request_context(
         raise adapter.error(
             key_refusal.status_code,
             key_refusal.detail,
-            error_kind_for_status(key_refusal.status_code),
+            ErrorKind.from_status(key_refusal.status_code),
             headers=error_headers(key_refusal.code),
         )
 
@@ -3201,6 +2830,7 @@ async def resolve_request_context(
                 api_key_id=api_key_id,
                 user_id=user_id,
                 model=gate_model,
+                requested_model=model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
                 detail=refusal.detail,
@@ -3228,6 +2858,7 @@ async def resolve_request_context(
             api_key_id=api_key_id,
             user_id=user_id,
             model=gate_model,
+            requested_model=model,
             provider=gate_instance,
             endpoint=adapter.endpoint,
             detail=wrong_type,
@@ -3256,6 +2887,7 @@ async def resolve_request_context(
             api_key_id=api_key_id,
             user_id=user_id,
             model=gate_model,
+            requested_model=model,
             provider=gate_instance,
             endpoint=adapter.endpoint,
             detail=detail,
@@ -3279,6 +2911,7 @@ async def resolve_request_context(
                     api_key_id=api_key_id,
                     user_id=user_id,
                     model=gate_model,
+                    requested_model=model,
                     provider=gate_instance,
                     endpoint=adapter.endpoint,
                     detail=str(exc.detail),
@@ -3356,7 +2989,12 @@ async def resolve_request_context(
                     strategy=config.budget_strategy,
                     counts_toward_budget=not budget_exempt,
                     scope=BudgetScopeRequest(
-                        api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
+                        api_key=api_key,
+                        # A pinned region is held to its provider's ceilings.
+                        provider_instance=HostedRegionIndex.parent_of(gate_instance) or gate_instance
+                        if gate_instance is not None
+                        else None,
+                        workspace_id=workspace_id,
                     ),
                     organization_id=organization_id,
                     # A free row whose rules price this request is held to the dollar budget.
@@ -3411,6 +3049,7 @@ async def resolve_request_context(
                 api_key_id=api_key_id,
                 user_id=user_id,
                 model=gate_model,
+                requested_model=model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
                 detail=str(exc.detail),
@@ -3430,6 +3069,7 @@ async def resolve_request_context(
             api_key_id=api_key_id,
             user_id=user_id,
             model=gate_model,
+            requested_model=model,
             provider=None,
             endpoint=adapter.endpoint,
             detail=unresolved.detail,
@@ -3442,7 +3082,7 @@ async def resolve_request_context(
         raise adapter.error(
             unresolved.status_code,
             unresolved.detail,
-            error_kind_for_status(unresolved.status_code),
+            ErrorKind.from_status(unresolved.status_code),
             headers=error_headers(unresolved.code),
         )
     # require_pricing is a budget-enforcement safety gate: it refuses a request
@@ -3472,6 +3112,7 @@ async def resolve_request_context(
             api_key_id=api_key_id,
             user_id=user_id,
             model=gate_model,
+            requested_model=model,
             provider=gate_instance,
             endpoint=adapter.endpoint,
             detail=refusal.detail,
@@ -3486,7 +3127,7 @@ async def resolve_request_context(
             refusal.detail,
             ErrorKind.INVALID_REQUEST
             if refusal.code == PRICING_REQUIRED
-            else error_kind_for_status(refusal.status_code),
+            else ErrorKind.from_status(refusal.status_code),
             headers=error_headers(refusal.code),
         )
 
@@ -3503,7 +3144,7 @@ async def resolve_request_context(
     # who runs the code. Only a request declaring code execution on a
     # deployment with a sandbox has anything to decide. The estimate is
     # already reserved, so a read that fails releases it before propagating.
-    if config.sandbox_configured() and declares_code_execution(tools):
+    if config.sandbox_configured() and declares_code_execution(declared.tools):
         try:
             code_execution_policy = await code_execution_policies.for_request(workspace_id)
         except Exception:
@@ -3524,10 +3165,12 @@ async def resolve_request_context(
                 provider=gate_instance,
                 model=gate_model,
             )
-            if hosted is None or hosted.api_key is None:
+            if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.
-            ensure_hosted_country(country_gate, hosted.supported_countries)
+            hosted = await ensure_hosted_country(country_gate, hosted)
+            if hosted.api_key is None:
+                return None
             return ResolvedCredential(
                 api_key=hosted.api_key, api_base=hosted.api_base, client_args=dict(hosted.client_args or {})
             )
@@ -3541,7 +3184,8 @@ async def resolve_request_context(
             # workspace", matching the /api/v1/files routes.
             post_chars, vision_usage = await normalize_messages(
                 NormalizationTarget(
-                    user_id=user_id,
+                    file_user_id=user_id,
+                    may_read_files=may_read_files(api_key),
                     provider=gate_impl,
                     model=gate_model,
                     instance=gate_instance,
@@ -3553,7 +3197,7 @@ async def resolve_request_context(
                     ),
                     upstream_user=upstream_user,
                     hosted_credential=_hosted_credential,
-                    client_country=country_gate.country,
+                    country_gate=country_gate,
                 )
             )
             # Bill the vision describe side-call before the reservation
@@ -3622,6 +3266,7 @@ async def resolve_request_context(
                 api_key_id=api_key_id,
                 user_id=user_id,
                 model=gate_model,
+                requested_model=model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
                 detail=detail,
@@ -3667,9 +3312,12 @@ async def resolve_request_context(
     # trace middleware once the response is sent.
     trace: RequestTrace | None = None
     if config.trace_capture_enabled:
+        sender = RequestClient.of(raw_request.headers)
         trace = RequestTrace(
             session=session,
-            harness=harness_of(raw_request.headers),
+            harness=sender.harness,
+            client_language=sender.language,
+            client_version=sender.version,
             turn=turn,
             context=context_of(context),
             content=content,
@@ -3693,6 +3341,7 @@ async def resolve_request_context(
         db=db,
         uow=uow,
         log_writer=log_writer,
+        unavailable_model_reporter=unavailable_model_reporter,
         code_execution_policy=code_execution_policy,
         code_execution_policy_loaded=code_execution_policy_loaded,
         api_key_id=api_key_id,
@@ -3718,6 +3367,7 @@ async def resolve_request_context(
         source_label=_session_trace_id(session, workspace_id, user_id, api_key_id),
         api_key=api_key,
         session=session_principal is not None,
+        requested_model=model,
     )
 
 
@@ -3733,6 +3383,7 @@ class ToolContext:
         self,
         *,
         mcp_server_configs: list[McpServerConfig] | None,
+        mcp_sign_in: Sequence[McpSignInNeeded] = (),
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         code_execution_port: CodeExecutionPort | None,
@@ -3767,6 +3418,8 @@ class ToolContext:
         # What automatic recall found for the request's newest turn, for the route to add to it; None for nothing.
         self.memory_recall = memory_recall
         self.mcp_server_configs = mcp_server_configs
+        # The per-user servers the loop offers a sign-in link for instead of opening.
+        self.mcp_sign_in = tuple(mcp_sign_in)
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
         # of Otari's or a provider's sandbox land in. None when files are disabled.
@@ -3814,15 +3467,19 @@ class ToolContext:
         # other attempts spend, where they are dispatched with tools of their own.
         if shared is None:
             caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
+            web_call_cap = WebToolCallCap(effective_web_search_max_calls(config))
+            web_tools = _web_tool_names(self.web_search_tool_entry, self.web_fetch_tool_entry)
             shared = SharedToolUse(
-                use_budget=ToolUseBudget(caps) if caps else None,
-                web_call_cap=WebToolCallCap(effective_web_search_max_calls(config)),
+                use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+                web_call_cap=web_call_cap,
             )
         self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
         self.use_budget: ToolUseBudget | None = shared.use_budget
+        # Holds each tool-loop round after the first on the request's budgets.
+        self.round_gate: ReservationRoundGate | None = shared.round_gate
         # On the old backend, Search and Fetch share a fixed attempted-call cap across routing attempts.
         self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
         # On the libraries, they share the deployment's ``web_search_max_calls`` across routing attempts.
@@ -3977,6 +3634,7 @@ class ToolContext:
     def use_tool_loop(self) -> bool:
         return (
             bool(self.mcp_server_configs)
+            or bool(self.mcp_sign_in)
             or self.use_sandbox
             or self.use_web_search
             or self.use_web_fetch
@@ -3984,13 +3642,13 @@ class ToolContext:
         )
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
-        """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
+        """Build the request's web tool backends: on the libraries, else the old backend for a search.
 
-        On the libraries, the search and fetch backends are two members of the
-        request's pool, sharing its call allowance. A request that declared only
-        the fetch tool keeps the old backend, which delegates its fetches.
+        The search and fetch backends are members of the request's pool, sharing
+        its call allowance. A request that declared only the fetch tool gets the
+        fetch backend alone, on the instance its admission resolved.
         """
-        if self.web.in_loop_search is None:
+        if self.web.on_old_backend:
             return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
@@ -4029,6 +3687,7 @@ class SharedToolUse:
 
     tally: ToolUsageTally = field(default_factory=ToolUsageTally)
     use_budget: ToolUseBudget | None = None
+    round_gate: ReservationRoundGate | None = None
     web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
     # Sized by the deployment's ``web_search_max_calls`` when the request is admitted.
     web_call_cap: WebToolCallCap = field(kw_only=True)
@@ -4045,6 +3704,24 @@ def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, A
         (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
     )
     return {name: cap for name, cap in caps if cap is not None}
+
+
+def _web_tool_names(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> frozenset[str]:
+    """The built-in web tools a request runs, from the declarations the workspace's policy narrowed."""
+    declared = ((WEB_SEARCH_TOOL_NAME, search_entry), (WEB_FETCH_TOOL_NAME, fetch_entry))
+    return frozenset(name for name, entry in declared if entry is not None)
+
+
+def _request_use_budget(
+    caps: dict[str, int], *, web_tools: frozenset[str], web_call_cap: WebToolCallCap
+) -> ToolUseBudget | None:
+    """The request's budget, where it has something to bound.
+
+    That is a ``max_uses`` cap, or the request's ``web_tools`` under the ``web_call_cap`` they share.
+    """
+    if not caps and not web_tools:
+        return None
+    return ToolUseBudget(caps, call_cap=web_call_cap, call_capped=web_tools)
 
 
 @dataclass(eq=False)
@@ -4302,7 +3979,7 @@ async def prepare_gateway_tools(
     try:
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
-        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
+        mcp = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         admitted_memory = await _admit_memory(adapter, ctx, declared, backends.ports.memory)
         memory = admitted_memory.tools if admitted_memory is not None else None
         code = await _declare_code_execution(adapter, ctx, declared, backends)
@@ -4327,8 +4004,14 @@ async def prepare_gateway_tools(
     except DATABASE_ERRORS:
         # A database failure is not an HTTPException, so the reservation is released here too.
         # The rollback comes first, because a failed statement leaves the session unusable for the release.
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
-            await ctx.db.rollback()
+            await release_reservation(ctx)
+        raise
+    except asyncio.CancelledError:
+        # The client disconnected during an admission step's I/O. Released as a database failure is,
+        # rolling back first, because an interrupted statement leaves the session unusable.
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
@@ -4346,17 +4029,26 @@ async def prepare_gateway_tools(
     caps: dict[str, int] = {}
     for answer in admitted.values():
         caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+    web_call_cap = WebToolCallCap(effective_web_search_max_calls(ctx.config))
+    web_tools = frozenset[str]().union(
+        *(
+            _web_tool_names(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+            for answer in admitted.values()
+        )
+    )
     shared = SharedToolUse(
-        use_budget=ToolUseBudget(caps) if caps else None,
-        web_call_cap=WebToolCallCap(effective_web_search_max_calls(ctx.config)),
+        use_budget=_request_use_budget(caps, web_tools=web_tools, web_call_cap=web_call_cap),
+        web_call_cap=web_call_cap,
     )
     shared.tally.spend_gate = ReservationToolGate(ctx)
+    shared.round_gate = ReservationRoundGate(ctx)
 
     def _tool_context(answer: _AdmittedTools) -> ToolContext:
         code, web, web_access = answer.code, answer.web, answer.web_access
         return ToolContext(
             config=ctx.config,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=mcp.servers,
+            mcp_sign_in=mcp.sign_in,
             use_sandbox=code.use_sandbox,
             sandbox_tool_entry=code.tool_entry,
             code_execution_port=backends.ports.code_execution,
@@ -4505,11 +4197,14 @@ class _ToolRefusal:
     """Why the candidates that share one answer cannot be served.
 
     ``unpriced_tool`` is the tool ``require_pricing`` refused, logged as a rejection
-    only where the refusal answers the request.
+    only where the refusal answers the request. ``admitted`` is the code execution
+    admitted before the refusal, whose container claim the request gives back
+    unless another candidate runs in that container.
     """
 
     error: HTTPException
     unpriced_tool: PricedTool | None = None
+    admitted: AdmittedCodeExecution | None = None
 
 
 def _decide_for_candidates(
@@ -4553,6 +4248,7 @@ async def _admit_candidates(
             claims[candidate.claimed] = await _declare_claims(
                 adapter, ctx, code, candidate.claimed, beside_sandbox=beside_sandbox
             )
+    await _release_unused_claims(claims.values())
     requested = [
         tool
         for tool in (WebTool.SEARCH, WebTool.FETCH)
@@ -4584,8 +4280,73 @@ async def _declare_claims(
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
-        return _ToolRefusal(domain_error(adapter, exc))
+        return _refuse_after_admission(adapter, admitted, exc)
     return _DeclaredClaims(code=admitted, web=web)
+
+
+def _refuse_after_admission(
+    adapter: FormatAdapter[Any, Any], admitted: AdmittedCodeExecution, error: TenancyError
+) -> _ToolRefusal:
+    """Refuse a candidate admission already ran for, keeping the admission so its claim can be given back."""
+    return _ToolRefusal(domain_error(adapter, error), admitted=admitted)
+
+
+async def _release_unused_claims(claims: Iterable[_DeclaredClaims | _ToolRefusal]) -> None:
+    """Give back each container claim that only refused candidates took.
+
+    Candidates resuming one container share one claim, so a claim is released only
+    where no admitted candidate runs in that container. Left held, it would keep the
+    caller's own next resume of the container busy until it expires.
+    """
+    held: dict[str, AdmittedCodeExecution] = {}
+    in_use: set[str] = set()
+    for claim in claims:
+        admitted = claim.code if isinstance(claim, _DeclaredClaims) else claim.admitted
+        if admitted is None or admitted.container_lease is None or admitted.containers is None:
+            continue
+        container_id = admitted.container_lease.container_id
+        if isinstance(claim, _DeclaredClaims):
+            in_use.add(container_id)
+        else:
+            held.setdefault(container_id, admitted)
+    for container_id, admitted in held.items():
+        if container_id in in_use or admitted.containers is None:
+            continue
+        try:
+            await admitted.containers.release(container_id)
+        except DATABASE_ERRORS as exc:
+            logger.warning("could not release container claim %s: %s", container_id, describe_database_error(exc))
+
+
+def _declares_mcp(declared: DeclaredTools) -> bool:
+    """Whether the request asks to reach an MCP server, its own or one its IDs name."""
+    return bool(declared.mcp_servers or declared.mcp_server_ids or declares_provider_mcp(declared.tools))
+
+
+def _require_declared_tool_scopes(
+    adapter: FormatAdapter[Any, Any], api_key: APIKey | None, declared: DeclaredTools
+) -> None:
+    """Hold ``api_key`` to a scope for each tool ``declared`` names, whoever would run it.
+
+    Reads the key and the request body alone, so it needs none of the request's resolved state.
+
+    Raises:
+        HTTPException: the key lacks the scope one of the declared tools needs.
+    """
+    for tool in BUILTIN_TOOLS:
+        if not tool.declares(declared.tools):
+            continue
+        if missing := _missing_scope(api_key, tool.key_scope, f"the {tool.name} tool"):
+            raise domain_error(adapter, missing)
+    if _declares_mcp(declared) and (missing := _missing_scope(api_key, KeyScope.MCP_EXECUTE, "calling MCP tools")):
+        raise domain_error(adapter, missing)
+
+
+def _missing_scope(api_key: APIKey | None, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
+    """Why ``api_key`` may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
+    if api_key is None or scope in api_key.scopes:
+        return None
+    return KeyScopeMissingError(scope, what)
 
 
 async def _admit_tool_funding(
@@ -4662,9 +4423,8 @@ async def _admit_tool_funding(
                 list(dict.fromkeys(tool.type for tool in paid)), refusal.public_message, declared=True
             )
             last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal, detail)
-            unfunded[claimed] = _ToolRefusal(
-                adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS))
-            )
+            headers = error_headers(INSUFFICIENT_FUNDS, billing_url=refusal.action_url)
+            unfunded[claimed] = _ToolRefusal(adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers))
     if last_refusal is not None and len(unfunded) == len(admitted):
         tool_key, refused, detail = last_refusal
         logger.info(
@@ -4674,7 +4434,10 @@ async def _admit_tool_funding(
         )
         await _refuse_tool_funding(ctx, adapter, tool_key, detail, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+            402,
+            detail,
+            ErrorKind.INVALID_REQUEST,
+            headers=error_headers(INSUFFICIENT_FUNDS, billing_url=refused.action_url),
         ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.
@@ -4707,6 +4470,7 @@ async def _refuse_tool_funding(
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         model=tool_key,
+        requested_model=ctx.requested_model,
         provider=GATEWAY_TOOL_PRICING_PROVIDER,
         endpoint=adapter.endpoint,
         detail=detail,
@@ -4816,15 +4580,26 @@ async def _admit_guardrails(
 
 async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
-) -> list[McpServerConfig] | None:
-    """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+) -> AdmittedMcpServers:
+    """The MCP servers the request may reach: its own, the stored ones its IDs name, and its workspace's attached ones.
+
+    Only a request made with an API key that may call MCP tools gets the attached servers. The Playground
+    names the servers it uses, and a master key belongs to no workspace.
+    """
     provider_mcp = declares_provider_mcp(declared.tools)
+    declares_mcp = _declares_mcp(declared)
     try:
+        attach = (
+            ctx.api_key is not None
+            and not ctx.session
+            and KeyScope.MCP_EXECUTE in ctx.api_key.scopes
+            and await servers.any_attached(ctx.workspace_id)
+        )
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            if declares_mcp or attach
             else McpAccess()
         )
         return await admit_mcp_servers(
@@ -4834,12 +4609,16 @@ async def _admit_mcp_servers(
             workspace_id=ctx.workspace_id,
             access=access,
             provider_mcp=provider_mcp,
+            attach=attach,
         )
-    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
+    except (
+        McpServerDeclarationError,
+        WorkspaceMcpServerNotFoundError,
+        McpSignInRequiredError,
+        McpServerConfigurationError,
+        McpConnectionUnavailableError,
+    ) as exc:
         raise domain_error(adapter, exc) from exc
-    except McpServerConfigurationError as exc:
-        # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
-        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
 async def _web_declarations(
@@ -5061,6 +4840,7 @@ async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: Re
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         model=model,
+        requested_model=ctx.requested_model,
         provider=provider,
         endpoint=adapter.endpoint,
         detail=unpriced_tool_detail(tool.name, rate_key, enrichment=tool.enrichment),
@@ -5136,20 +4916,6 @@ def _ttft_ms(started_at: float | None, first_chunk_at: float | None) -> int | No
     if started_at is None or first_chunk_at is None:
         return None
     return round((first_chunk_at - started_at) * 1000)
-
-
-def _stored_error_message(error: str | None) -> str | None:
-    """The error text a usage row may carry.
-
-    ``UsageLog.error_message`` is read by every member of the workspace, including
-    a viewer, through ``/api/v1/organizations/me/usage``, so the upstream text is
-    put through the same redaction the HTTP detail gets before it is persisted.
-    Redacting at write time rather than on the read path is what covers every
-    reader of the column at once. A gateway-generated reason passes unchanged.
-    """
-    if error is None:
-        return None
-    return redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
 
 
 # Per-process memory of when each unpriced model was last warned about, so a busy
@@ -5260,6 +5026,7 @@ async def record_usage(
     result_tier: str | None = None,
     stream_cut_by: StreamCutBy | None = None,
     answered: bool = False,
+    requested_model: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -5333,6 +5100,9 @@ async def record_usage(
             the provider reports, never the one the request asked for.
         answered: The provider answered in full and ``error`` is the gateway's
             refusal of the answer, so the call is billed and counted as a success.
+        requested_model: The model name the caller sent
+            (``RequestContext.requested_model``), stored as-is; None where the
+            row bills something other than the model the caller named.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -5350,7 +5120,7 @@ async def record_usage(
         provider=provider,
         endpoint=endpoint,
         status=_row_status(error=error, attribution=attribution, incomplete=incomplete),
-        error_message=_stored_error_message(error),
+        error_message=stored_error_message(error),
         stream_cut_by=stream_cut_by,
         status_code=status_code,
         latency_ms=latency_ms,
@@ -5364,6 +5134,7 @@ async def record_usage(
         tags=tags,
         deployment_paid=deployment_paid,
         source_label=source_label,
+        requested_model=requested_model,
         safety_identifier=safety_identifier,
     )
 
@@ -5501,6 +5272,7 @@ async def record_usage(
     deployment_paid_cost = (
         None if model_cost is None and tool_cost is None else (model_cost or Decimal(0)) + (tool_cost or Decimal(0))
     )
+    usage_log.deployment_paid_cost = deployment_paid_cost
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced
@@ -5520,6 +5292,7 @@ async def record_usage(
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
             ttft_ms=ttft_ms,
+            completion_tokens=usage_log.completion_tokens,
         )
 
     await log_writer.put(usage_log)
@@ -5744,18 +5517,18 @@ async def release_reservation(ctx: RequestContext) -> None:
     it, which is the only thing that ever gives it back (the budget reset zeroes
     spend and leaves the hold in place).
 
-    When ``ctx.tool_charge`` is set, the request already ran gateway-run tool calls
-    that were written onto its failure row, so the reservation is *reconciled* to
-    that amount rather than refunded: a refund releases the hold without recording
-    spend, which would leave the charge visible in the activity log and missing from
-    the budget it should have consumed.
+    When ``ctx.tool_charge`` is set, its failure row already carries what the request
+    ran (gateway-run tool calls, tool-loop rounds a provider answered), so the
+    reservation is *reconciled* to that amount rather than refunded: a refund releases
+    the hold without recording spend, which would leave the charge visible in the
+    activity log and missing from the budget it should have consumed.
     """
     if ctx.rate_limit_grant is not None:
-        await ctx.rate_limit_grant.settle(0)
+        await ctx.rate_limit_grant.settle(ctx.tool_charge_tokens)
     if ctx.reservation is None:
         return
-    if ctx.tool_charge:
-        await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge)
+    if ctx.tool_charge or ctx.tool_charge_tokens:
+        await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge, actual_tokens=ctx.tool_charge_tokens)
         return
     await refund_reservation(ctx.db, ctx.reservation)
 
@@ -5799,6 +5572,7 @@ async def log_gateway_rejection(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
     safety_identifier: str | None = None,
+    requested_model: str | None = None,
 ) -> None:
     """Record a request the gateway itself refused before any provider was called.
 
@@ -5872,6 +5646,7 @@ async def log_gateway_rejection(
             tags=tags,
             safety_identifier=safety_identifier,
             upstream_attempt=False,
+            requested_model=requested_model,
         )
     except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.
@@ -5891,6 +5666,7 @@ async def _log_failure_and_refund(
     status_code: int | None = None,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
+    usage: CompletionUsage | None = None,
 ) -> None:
     """Record a request-level failure and release its reservation.
 
@@ -5902,10 +5678,11 @@ async def _log_failure_and_refund(
     When gateway-run tool calls happened before the failure, their cost is
     reconciled rather than refunded: ``refund_reservation`` releases the hold
     *without* writing spend, which would leave the cost visible on the row and
-    absent from ``users.spend``.
+    absent from ``users.spend``. ``usage`` is settled the same way: the tokens
+    of the tool-loop rounds the provider answered before the failure.
     """
     if ctx.rate_limit_grant is not None:
-        await ctx.rate_limit_grant.settle(0)
+        await ctx.rate_limit_grant.settle(_settled_tokens(usage))
     logged = await record_usage(
         request_facts=ctx.price_facts,
         db=ctx.db,
@@ -5915,6 +5692,7 @@ async def _log_failure_and_refund(
         provider=provider,
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
+        usage_override=usage,
         error=error,
         status_code=status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
@@ -5925,7 +5703,9 @@ async def _log_failure_and_refund(
         request_id=ctx.request_id,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        requested_model=ctx.requested_model,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
         deployment_paid=ctx.deployment_charge is not None,
     )
     if ctx.reservation is not None:
@@ -5940,7 +5720,10 @@ async def _log_failure_and_refund(
                 expects_cost=False,
                 tool_funding=ctx.tool_funding,
             )
-            await reconcile_reservation(ctx.db, ctx.reservation, cost)
+            await reconcile_reservation(ctx.db, ctx.reservation, cost, actual_tokens=_settled_tokens(usage))
+        elif tokens := _settled_tokens(usage):
+            # A free model's answered rounds still count against a token ceiling, as a stream's do.
+            await reconcile_reservation(ctx.db, ctx.reservation, Decimal(0), actual_tokens=tokens)
         else:
             await refund_reservation(ctx.db, ctx.reservation)
 
@@ -5963,6 +5746,8 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     options: dict[str, Any] = {}
     if tool_ctx.use_budget is not None:
         options["use_budget"] = tool_ctx.use_budget
+    if tool_ctx.round_gate is not None and tool_ctx.round_gate.in_force:
+        options["round_gate"] = tool_ctx.round_gate
     return options
 
 
@@ -6033,14 +5818,18 @@ async def _open_tool_backends(
     """
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
-        mcp = await stack.enter_async_context(
-            MCPClientPool(
-                tool_ctx.mcp_server_configs,
-                tally=tool_ctx.tally,
-                trace=tool_ctx.trace,
-                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+        try:
+            mcp = await stack.enter_async_context(
+                MCPClientPool(
+                    tool_ctx.mcp_server_configs,
+                    tally=tool_ctx.tally,
+                    trace=tool_ctx.trace,
+                    ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+                    contacts=mcp_server_contacts,
+                )
             )
-        )
+        except McpConnectionUnavailableError as exc:
+            raise domain_error(adapter, exc) from exc
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
         except McpServerDeclarationError as exc:
@@ -6056,6 +5845,29 @@ async def _open_tool_backends(
         backends.append(await stack.enter_async_context(tool_ctx.memory))
     if mcp is not None:
         backends.append(mcp)
+    # A server that refused the user's token at connect time, whose sign-in is over, gets a stand-in too.
+    signed_out = [
+        McpSignInNeeded(
+            server_id=exc.mcp_server_id,
+            name=cfg.name,
+            purpose_hint=cfg.purpose_hint,
+            user_id=exc.user_id,
+            reason=McpSignInReason.NOT_SIGNED_IN,
+        )
+        for cfg, exc in (mcp.signed_out if mcp is not None else [])
+    ]
+    if tool_ctx.mcp_sign_in or signed_out:
+        taken = {tool["function"]["name"] for backend in backends for tool in backend.openai_tools}
+        backends.append(
+            McpSignInBackend(
+                [*tool_ctx.mcp_sign_in, *signed_out],
+                mint=lambda server_id, user_id: McpConnectionService.sign_in_link(
+                    tool_ctx.config, server_id=server_id, user_id=user_id
+                ),
+                link_prefix=McpConnectionService.sign_in_link_prefix(tool_ctx.config),
+                taken=taken | tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
+        )
     if (guardrails := tool_ctx.guardrails) is not None and guardrails.guards_tools:
         backends = [screened_backend(backend, guardrails) for backend in backends]
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
@@ -6148,7 +5960,7 @@ class _ToolBackendKind(StrEnum):
         declared = [
             kind
             for kind, used in (
-                (cls.MCP, bool(tool_ctx.mcp_server_configs)),
+                (cls.MCP, bool(tool_ctx.mcp_server_configs) or bool(tool_ctx.mcp_sign_in)),
                 (cls.SANDBOX, tool_ctx.use_sandbox),
                 (cls.WEB_RETRIEVAL, tool_ctx.use_web_search or tool_ctx.use_web_fetch),
                 (cls.MEMORY, tool_ctx.memory is not None),
@@ -6353,6 +6165,7 @@ def build_streaming_response(
     config: GatewayConfig,
     db: AsyncSession,
     log_writer: LogWriter,
+    report_refusal: Callable[[BaseException], None],
     api_key_id: str | None,
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
@@ -6375,6 +6188,7 @@ def build_streaming_response(
     automatic_observation: AutomaticObservation | None = None,
     prompt_chars: int | None = None,
     price_facts: PriceFacts = NO_FACTS,
+    requested_model: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -6481,6 +6295,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             source_label=source_label,
+            requested_model=requested_model,
             safety_identifier=safety_identifier,
             prices=prices,
             deployment_paid=deployment_paid,
@@ -6530,6 +6345,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                requested_model=requested_model,
                 safety_identifier=safety_identifier,
                 prices=prices,
                 deployment_paid=deployment_paid,
@@ -6558,6 +6374,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                requested_model=requested_model,
                 safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
@@ -6595,6 +6412,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                requested_model=requested_model,
                 safety_identifier=safety_identifier,
                 deployment_paid=deployment_paid,
             )
@@ -6618,9 +6436,11 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
-        note_unavailable_model(config, provider, model, exc, deployment_paid=deployment_paid)
+        report_refusal(exc)
         if automatic_observation is not None:
-            automatic_observation.finish(unhealthy=_automatic_unhealthy(exc))
+            automatic_observation.finish(
+                unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+            )
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(
@@ -6640,23 +6460,35 @@ def build_streaming_response(
         provider_cut = (
             first_chunk_at is not None and not isinstance(exc, _GATEWAY_SIDE_FAILURES) and is_provider_cut(exc)
         )
+        # A tool loop's hidden rounds never reach the client's stream, so their usage
+        # rides on the failure instead; the provider billed them all the same. What the
+        # stream did report (an Anthropic round's message_start) only fills in around it.
+        answered = answered_rounds_usage(adapter, exc)
+        reported = (
+            reported_usage
+            if answered is None
+            else answered
+            if reported_usage is None
+            else merge_stream_usage(reported_usage, answered)
+        )
         cut = (
             settle_cut_stream(
                 policy=config.stream_missing_usage_policy,
                 prompt_chars=prompt_chars,
                 streamed_chars=streamed_chars,
-                reported_usage=reported_usage,
-                usage_is_final=usage_is_final,
+                reported_usage=reported,
+                usage_is_final=usage_is_final and answered is None,
             )
             if provider_cut
             else None
         )
-        billed_usage = cut if cut is not None else reported_usage
+        billed_usage = cut if cut is not None else reported
         if isinstance(exc, AnswerRefused) and exc.usage is not None:
             # The provider answered in full and a guardrail refused it; the answer is owed.
             billed_usage = exc.usage
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(billed_usage))
+        failure = UpstreamFailure(exc)
         logged = await record_usage(
             request_facts=price_facts,
             result_tier=streamed_tier,
@@ -6668,8 +6500,8 @@ def build_streaming_response(
             endpoint=adapter.endpoint,
             user_id=user_id,
             usage_override=billed_usage,
-            error=failure_error_message(exc),
-            status_code=failure_status_code(exc),
+            error=failure.logged_message,
+            status_code=failure.logged_status,
             stream_cut_by="provider" if provider_cut else None,
             answered=isinstance(exc, AnswerRefused),
             latency_ms=_elapsed_ms(started_at),
@@ -6681,6 +6513,7 @@ def build_streaming_response(
             request_id=request_id,
             tags=tags,
             source_label=source_label,
+            requested_model=requested_model,
             safety_identifier=safety_identifier,
             prices=prices,
             deployment_paid=deployment_paid,
@@ -6745,6 +6578,7 @@ def build_streaming_response(
                 request_id=request_id,
                 tags=tags,
                 source_label=source_label,
+                requested_model=requested_model,
                 safety_identifier=safety_identifier,
                 prices=prices,
                 deployment_paid=deployment_paid,
@@ -6790,11 +6624,21 @@ def build_streaming_response(
             attach_settlement=_attach_inline_cost,
             on_first_chunk=_on_first_chunk,
             error_payload=lambda exc: adapter.stream_error_payload(exc, provider),
+            is_external_failure=lambda exc: UpstreamFailure(exc).is_external,
             completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+def _failure_log(failure: UpstreamFailure) -> Callable[..., None]:
+    """The log call for a failed completion: a warning for a fault outside the gateway, an error for Otari's own.
+
+    The deployment answers a provider's outage, quota or refusal with an error
+    response and a usage row, so it is not an error of the deployment's.
+    """
+    return logger.warning if failure.is_external else logger.error
 
 
 async def _prepared(
@@ -6833,7 +6677,7 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
         isinstance(exc, IncompleteStreamError)
         or is_provider_credential_rejection(exc)
         or kind in {"timeout", "conn_err"}
-        or code == 429
+        or code in (402, 429)
         or (code is not None and code >= 500)
     )
 
@@ -6923,32 +6767,58 @@ def _failover_kwargs(
         fields = with_request_fields(config, attempt.instance, fields, ctx.request_extras)
         call_kwargs = with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
         refuse_provider_state_on_deployment_credential(adapter, call_kwargs, deployment_paid=attempt.deployment_paid)
-        return _without_unused_reasoning_effort(attempt, call_kwargs)
+        return _without_unused_reasoning(attempt, call_kwargs)
 
     return _build
 
 
-def _without_unused_reasoning_effort(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Leave ``reasoning_effort`` off a fallback candidate that models.dev says does not reason.
+# Where each format carries its reasoning hint: Chat Completions, Responses and Messages.
+_REASONING_FIELDS = ("reasoning_effort", "reasoning", "thinking")
+_ENCRYPTED_REASONING = "reasoning.encrypted_content"
 
-    The caller of a routing policy did not pick the candidate, and the effort is
-    only a hint, so a model with nothing to tune is sent the request without it
-    rather than counted as failed for it. A model models.dev does not describe
-    is sent the field as asked. The model is looked up under the provider it is
-    dispatched to, because an instance's name (a hosted provider's, an owned
-    endpoint's) need not name one.
+
+def _without_unused_reasoning(attempt: Attempt, call_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Leave the reasoning hint off a fallback candidate that models.dev says does not reason.
+
+    The caller of a routing policy did not pick the candidate, and the hint has
+    nothing to tune on such a model, so it is sent the request without it rather
+    than counted as failed for it. That covers a Responses ``include`` asking for
+    encrypted reasoning and a Messages ``output_config.effort`` (carried as
+    ``output_format``) too; the rest of either is kept. A model models.dev does
+    not describe is sent the fields as asked. The model is looked up under the
+    provider it is dispatched to, because an instance's name (a hosted
+    provider's, an owned endpoint's) need not name one.
     """
-    if call_kwargs.get("reasoning_effort") is None:
+    include = call_kwargs.get("include")
+    kept_include = [item for item in include if item != _ENCRYPTED_REASONING] if isinstance(include, list) else include
+    output_format = call_kwargs.get("output_format")
+    kept_output_format = (
+        {key: value for key, value in output_format.items() if key != "effort"}
+        if isinstance(output_format, dict)
+        else output_format
+    )
+    if (
+        kept_include == include
+        and kept_output_format == output_format
+        and all(call_kwargs.get(field) is None for field in _REASONING_FIELDS)
+    ):
         return call_kwargs
     entry = metadata_entry(cached_models_dev_catalog(), attempt.provider.value, attempt.model)
     if entry is None or entry.reasoning:
         return call_kwargs
     logger.debug(
-        "Dropped reasoning_effort for a model that does not reason instance=%s model=%s",
+        "Dropped the reasoning hint for a model that does not reason instance=%s model=%s",
         attempt.instance,
         attempt.model,
     )
-    return {key: value for key, value in call_kwargs.items() if key != "reasoning_effort"}
+    sent = {
+        key: value for key, value in call_kwargs.items() if key not in (*_REASONING_FIELDS, "include", "output_format")
+    }
+    if kept_include:
+        sent["include"] = kept_include
+    if kept_output_format:
+        sent["output_format"] = kept_output_format
+    return sent
 
 
 def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
@@ -7054,7 +6924,7 @@ async def run_single_attempt_stream(
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
-                    _mark_dispatched(ctx)
+                    _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
                     return await open_stream(
                         adapter=adapter,
                         tool_ctx=served_tools,
@@ -7063,7 +6933,9 @@ async def run_single_attempt_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
 
             absorbed_rows: list[asyncio.Task[None]] = []
@@ -7108,12 +6980,14 @@ async def run_single_attempt_stream(
             finally:
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
+            uses_deployment_credential = chosen.deployment_paid
             stream_attribution = _attribution_for(ctx, chosen)
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
-            _mark_dispatched(ctx)
+            _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
+            uses_deployment_credential = ctx.deployment_paid
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
             stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
@@ -7134,19 +7008,23 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
-        note_unavailable_model(ctx.config, provider, model, exc, deployment_paid=ctx.deployment_paid)
+        ctx.unavailable_model_reporter.report(
+            exc, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid
+        )
+        failure = UpstreamFailure(exc)
         await _log_failure_and_refund(
             ctx,
             adapter,
             provider,
             model,
-            failure_error_message(exc),
-            failure_status_code(exc),
+            failure.logged_message,
+            failure.logged_status,
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, exc),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
+        _failure_log(failure)("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise with_provider_failure(
             adapter.provider_error(exc, _model_as_named(provider, model, display_model)), exc, provider
         ) from exc
@@ -7175,6 +7053,12 @@ async def run_single_attempt_stream(
             | served_by
         ),
         log_writer=ctx.log_writer,
+        report_refusal=partial(
+            ctx.unavailable_model_reporter.report,
+            instance=provider,
+            model=model,
+            uses_deployment_credential=uses_deployment_credential,
+        ),
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
         rate_limit_info=ctx.rate_limit_info,
@@ -7189,6 +7073,7 @@ async def run_single_attempt_stream(
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        requested_model=ctx.requested_model,
         safety_identifier=ctx.upstream_user,
         tool_loop=served_tools.use_tool_loop,
         deployment_charge=ctx.deployment_charge,
@@ -7262,7 +7147,8 @@ async def log_exhausted_plan(
     caller's existing single refund site stays the only one.
 
     ``tool_tally`` is what makes an exhausted plan still owe for the searches it
-    ran, including the case that cannot fail over at all: once a tool loop has
+    ran, as the tool-loop rounds the provider answered owe their tokens, including
+    in the case that cannot fail over at all: once a tool loop has
     produced an assistant message the plan locks to that provider (see
     ``_attempts``), so a failure inside the loop is terminal and this is the only
     row the request gets. The charge is recorded on ``ctx`` for the caller's single
@@ -7273,9 +7159,15 @@ async def log_exhausted_plan(
         return
     last = stopped_on or ctx.plan.attempts[-1]
     if stopped_on is not None and exc.__cause__ is not None:
-        note_unavailable_model(
-            ctx.config, stopped_on.instance, stopped_on.model, exc.__cause__, deployment_paid=stopped_on.deployment_paid
+        ctx.unavailable_model_reporter.report(
+            exc.__cause__,
+            instance=stopped_on.instance,
+            model=stopped_on.model,
+            uses_deployment_credential=stopped_on.deployment_paid,
         )
+    answered = answered_rounds_usage(adapter, exc.__cause__)
+    # Rounds the locked candidate answered ran on its account, so they are funded as a served request is.
+    funded = ctx.deployment_charge if answered is not None else None
     logged = await record_usage(
         request_facts=ctx.price_facts,
         db=ctx.db,
@@ -7285,6 +7177,7 @@ async def log_exhausted_plan(
         provider=last.instance,
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
+        usage_override=answered,
         error=str(exc.detail),
         status_code=exc.status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
@@ -7294,12 +7187,16 @@ async def log_exhausted_plan(
         workspace_id=ctx.workspace_id,
         tags=ctx.tags,
         source_label=ctx.source_label,
+        requested_model=ctx.requested_model,
         safety_identifier=ctx.upstream_user,
+        prices=ctx.prices,
+        deployment_paid=funded is not None,
     )
     ctx.tool_charge = logged.cost or Decimal(0)
+    ctx.tool_charge_tokens = _settled_tokens(answered)
     if ctx.reservation is not None:
         await charge_deployment_paid(
-            None,
+            funded,
             ctx.db,
             logged.deployment_paid_cost,
             tools=logged.deployment_paid_tools,
@@ -7329,8 +7226,11 @@ async def log_absorbed_attempt(
     on the row that settles the request's reservation, so this row carries the
     attempt's tokens and none of the tool ledger. See :func:`log_usage`.
     """
-    note_unavailable_model(ctx.config, attempt.instance, attempt.model, exc, deployment_paid=attempt.deployment_paid)
-    await _log_absorbed_row(ctx, adapter, attempt, failure_error_message(exc), failure_status_code(exc))
+    ctx.unavailable_model_reporter.report(
+        exc, instance=attempt.instance, model=attempt.model, uses_deployment_credential=attempt.deployment_paid
+    )
+    failure = UpstreamFailure(exc)
+    await _log_absorbed_row(ctx, adapter, attempt, failure.logged_message, failure.logged_status)
 
 
 # Starts the error of an absorbed row for a candidate that was skipped rather than
@@ -7396,6 +7296,7 @@ async def _log_absorbed_row(
             workspace_id=ctx.workspace_id,
             tags=ctx.tags,
             source_label=ctx.source_label,
+            requested_model=ctx.requested_model,
             safety_identifier=ctx.upstream_user,
         )
     except Exception:
@@ -7462,7 +7363,7 @@ async def run_non_stream(
                 served_tools = tool_ctx.for_candidate(attempt.provider.value, attempt.model)
                 observation = ctx.plan.automatic.start(attempt) if ctx.plan and ctx.plan.automatic else None
                 try:
-                    _mark_dispatched(ctx)
+                    _mark_dispatched(ctx, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
                     result = await dispatch_non_stream(
                         adapter=adapter,
                         tool_ctx=served_tools,
@@ -7471,7 +7372,9 @@ async def run_non_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(unhealthy=_automatic_unhealthy(exc))
+                        observation.finish(
+                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
+                        )
                     raise
                 if observation is not None:
                     observation.finish(success=True)
@@ -7523,7 +7426,7 @@ async def run_non_stream(
             served_by = _served_by_headers(ctx, provider, model, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
-            _mark_dispatched(ctx)
+            _mark_dispatched(ctx, provider, model, deployment_paid=ctx.deployment_paid)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to
@@ -7580,10 +7483,11 @@ async def run_non_stream(
                 endpoint=adapter.endpoint,
                 user_id=ctx.user_id,
                 usage_override=usage_data,
-                error=failure_error_message(refused) if refused is not None else None,
+                error=UpstreamFailure(refused).logged_message if refused is not None else None,
                 status_code=refused.status_code if refused is not None else None,
                 answered=refused is not None,
                 latency_ms=_elapsed_ms(ctx.started_at),
+                requested_model=ctx.requested_model,
                 counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                 attribution=attribution,
                 tool_tally=tool_ctx.tally,
@@ -7637,6 +7541,7 @@ async def run_non_stream(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, e),
         )
         raise adapter.error(422, str(e), ErrorKind.INVALID_REQUEST) from e
     except SandboxNotReachableError as e:
@@ -7655,19 +7560,23 @@ async def run_non_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
-        note_unavailable_model(ctx.config, provider, model, e, deployment_paid=ctx.deployment_paid)
+        ctx.unavailable_model_reporter.report(
+            e, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid
+        )
+        failure = UpstreamFailure(e)
         await _log_failure_and_refund(
             ctx,
             adapter,
             provider,
             model,
-            failure_error_message(e),
-            failure_status_code(e),
+            failure.logged_message,
+            failure.logged_status,
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
+            usage=answered_rounds_usage(adapter, e),
         )
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
+        _failure_log(failure)("Provider call failed for %s:%s: %s", provider, model, e)
         raise with_provider_failure(
             adapter.provider_error(e, _model_as_named(provider, model, display_model)), e, provider
         ) from e

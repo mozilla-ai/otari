@@ -39,5 +39,11 @@ describe("the mark key lists against the geometry tables", () => {
     expect([...MARK_KEYS_FOR_TEST.makers].sort()).toEqual(
       [...MARK_TABLE_KEYS_FOR_TEST.makers].sort(),
     )
+    expect([...MARK_KEYS_FOR_TEST.harnesses].sort()).toEqual(
+      [...MARK_TABLE_KEYS_FOR_TEST.harnesses].sort(),
+    )
+    expect([...MARK_KEYS_FOR_TEST.languages].sort()).toEqual(
+      [...MARK_TABLE_KEYS_FOR_TEST.languages].sort(),
+    )
   })
 })

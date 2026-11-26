@@ -38,12 +38,12 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
     create_user_for_signup,
     resend_verification_email,
@@ -66,7 +66,7 @@ class SignupRequest(BaseModel):
     """Set a password for an address, claiming or registering it."""
 
     email: str = Field(
-        max_length=MAX_EMAIL_LENGTH,
+        max_length=MAX_STORED_ADDRESS_LENGTH,
         description=(
             "The address to sign in with. An address an admin added or invited where this "
             "deployment keeps signup closed; any address where the bootstrap reports open_signup."
@@ -122,7 +122,9 @@ class VerifyEmailResponse(BaseModel):
 
 
 class ResendVerificationRequest(BaseModel):
-    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to resend a verification link to.")
+    email: str = Field(
+        max_length=MAX_STORED_ADDRESS_LENGTH, description="The address to resend a verification link to."
+    )
 
 
 class ResendVerificationResponse(BaseModel):
@@ -168,8 +170,7 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    invited = await invites.invited_email(body.invite) if body.invite else None
-    address_proven = invited is not None and invited.strip().lower() == body.email.strip().lower()
+    proof = await invites.proof_for(body.invite, claimed_address=body.email) if body.invite else None
     try:
         claimed = await create_user_for_signup(
             db,
@@ -182,12 +183,12 @@ async def signup(
             blocked_addresses=identities,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
-            address_proven=address_proven,
+            proof=proof,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
-    if address_proven and claimed is not None:
+    if claimed is not None and claimed.email_verified_at is not None:
         return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 

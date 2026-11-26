@@ -10,7 +10,7 @@ The Playground lets you test different AI models directly in Otari, experiment w
 2. Make sure **Single** is selected.
 3. Choose a model from the dropdown menu below the prompt box.
 4. Enter your prompt or select one of the suggested **Starting points**.
-5. Optionally, click **Tools** to add tools to your request, such as web search, code execution, or MCP servers, and attach files with the paperclip. Only the MCP servers your [access rules](mcp-servers.md#control-who-can-use-it) let you reach are listed.
+5. Optionally, click **Tools** to add tools to your request, such as web search, web fetch, code execution, or MCP servers, and attach files with the paperclip. Web search and web fetch are separate, so a request can use either or both, and both follow your workspace's [web-access policy](tools.md#per-workspace-web-access-policy). Web fetch is listed only when the deployment has [web fetch](tools.md#web-fetch) turned on. Only the MCP servers your [access rules](mcp-servers.md#control-who-can-use-it) let you reach are listed.
 6. Press Enter or click the Send button to submit your prompt.
 7. Review the model's response and available usage and performance information.
 
@@ -39,8 +39,8 @@ Your saved Playground history is private and visible only to you.
 ## What a Playground request is
 
 Requests run through the same path as any completion, so routing policies,
-guardrails, budgets and tools all apply, and every request appears on the
-Overview.
+guardrails, budgets and tools all apply, and every request appears in
+the Requests view of Sessions.
 
 **Billing.** A Playground request uses no API key. It is billed to you, in the
 workspace selected in the switcher, against your own budget and rate limit, and

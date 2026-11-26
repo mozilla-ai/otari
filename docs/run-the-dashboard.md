@@ -4,6 +4,28 @@ A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
 the deployment view, and deployment-wide settings.
 
+Each dashboard page has its own path, such as
+`http://localhost:8000/organization/provider-keys`, so a page can be reloaded,
+bookmarked and shared. The gateway answers a browser opening any path that is not
+one of its own routes with the dashboard, so a reverse proxy in front of it has
+to forward every path, not only `/`. A link from an older release, written as
+`http://localhost:8000/#/organization/provider-keys`, still works: the dashboard
+moves it to the path it names.
+
+The dashboard reads `GET /api/v1/bootstrap` before it renders anything. If the
+gateway does not answer (it is down, restarting, or too slow to answer within 8
+seconds), the dashboard does not guess what it is connected to. It says the
+gateway is unreachable, keeps trying in the background with a growing wait of up
+to 30 seconds, tries again at once when the browser comes back online or the tab
+is shown again, and offers a **Retry now** button. It opens as soon as an
+attempt answers, with no reload. A refusal such as a 404 is not retried on its
+own; use **Retry** once the address is fixed. A 401, or a redirect to a
+sign-in page from something in front of the gateway such as an access proxy,
+asks for a **Reload**, which opens that sign-in; behind a redirect the
+dashboard also keeps asking in the background and opens by itself if the
+gateway answers. A 403 also offers **Reload**, to sign in again, or ask
+whoever runs the gateway for access.
+
 ## Sign-in and secrets
 
 | Credential | Purpose |
@@ -19,7 +41,7 @@ Otari 1.0.0 is running at http://localhost:8000
 
 Open this link to choose your password and finish setup:
 
-http://localhost:8000/#/setup?key=otari-mk-...
+http://localhost:8000/setup#key=otari-mk-...
 
 It is shown only once and carries your master key, so treat it like one.
 ```
@@ -60,6 +82,8 @@ page. The master key still works for the management API and can reset the
 operator's password, but only the operator's. For a member who forgot theirs,
 send a password link from **Accounts** (see
 [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration)).
+To make another operator the one the master key acts as, see
+[Hand over the bootstrap operator](#hand-over-the-bootstrap-operator).
 
 Which sign-in forms the page offers is described in
 [Dashboard sessions and identity](sign-in.md#dashboard-sessions-and-identity).
@@ -81,11 +105,42 @@ Which sign-in forms the page offers is described in
 4. Test the provider connection, or declare model IDs for a backend with no
    model-listing endpoint.
 5. Create an API key from the setup guide or the **Keys** page.
-6. Send a request and check that it appears on the **Overview**, in
-   **Requests**.
+6. Send a request and check that it appears in **Sessions**, in its
+   **Requests** view.
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
 example.
+
+## Hand over the bootstrap operator
+
+The bootstrap operator is the account the master key acts as (see
+[The bootstrap operator](sign-in.md#the-bootstrap-operator)). To give the role to
+someone else:
+
+1. Make sure their account is active, has a password and an email address it
+   verified by email (not one an organization supplied through a passed-on link), and is not
+   blocked.
+2. On **Accounts**, choose **Make operator** from the menu on their row if they
+   are not an operator yet.
+3. Signed in as the bootstrap operator, click **Make bootstrap operator** on
+   their row, enter your current password, and confirm. An account with no
+   password sets one in **Account settings** first, or uses the command below.
+
+   Or, wherever the master key is at hand, run:
+
+   ```bash
+   OTARI_URL=https://otari.example.com OTARI_MASTER_KEY=otari-mk-... \
+     otari operator handover grace@example.com
+   ```
+
+   The command asks before it acts, and `--yes` skips the question. It refuses
+   to send the master key over plain HTTP to any host but this machine.
+4. If someone who should no longer reset the new bootstrap operator's password
+   holds the master key, rotate it: from **Settings** for a key Otari generated,
+   or by changing `OTARI_MASTER_KEY` where you set it.
+
+You stay an operator. The new bootstrap operator can remove that from
+**Accounts**.
 
 ## The deployment view
 
@@ -98,11 +153,13 @@ gateway process rather than to an organization:
 | Accounts | Every account on the deployment | [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration) |
 | Hosted providers | The provider keys the deployment serves inference on | [The Hosted providers page](hosted-providers.md#the-hosted-providers-page) |
 | Subagent router | The decision models that pick the model a coding agent's subagent runs on | [Subagent router](#subagent-router), [Subagent routers](routing.md#subagent-routers) |
+| Deployment budgets | Every budget on the deployment, a tenant's included, and the gateway users assigned to each | [Budgets](budgets.md) |
 | Web search | The search and fetch tools the deployment runs for every workspace, and their prices | [Web search and Code execution pricing](#web-search-and-code-execution-pricing) |
 | Code execution pricing | The price per successful `otari:code_execution` call | [Web search and Code execution pricing](#web-search-and-code-execution-pricing) |
 
-Only a deployment operator sees Accounts, Hosted providers, Web search and Code
-execution pricing; anyone else who opens them is told they are not available.
+Only a deployment operator sees Accounts, Hosted providers, Deployment budgets,
+Web search and Code execution pricing; anyone else who opens them is told they
+are not available.
 **Tools > Web search** links an operator to the Web search page.
 
 ### Settings
@@ -140,13 +197,13 @@ a call on an organization's own key; `otari:web_search` also prices a search on
 the legacy settings. A tool uses its own rate, or one stored under its old
 `<provider>:<name>` model key; with neither, it is unpriced.
 
-On a tool's row:
+Open a tool's row for its endpoint, enrichment and options. The menu at the
+end of the row offers:
 
-- Open the row for its endpoint, enrichment and options.
-- The star makes it the default the model uses.
-- **Test** runs one search or fetch and reports how many hits or characters
-  came back.
-- **Edit** and **Remove** change a stored tool. A `config.yml` tool,
+- **Make default**, which makes it the default the model uses.
+- **Test**, which runs one search or fetch and reports how many hits or
+  characters came back.
+- **Edit** and **Remove**, which change a stored tool. A `config.yml` tool,
   `builtin_fetch` and the two `otari:` rates take only a price; a rate from
   `price_per_call` is changed in `config.yml`.
 
@@ -171,7 +228,12 @@ no rate, because a request that would run it is refused. See
 
 ## The setup guide
 
-Set `activation_guide: false` to turn off the Overview's
+The guide creates its API key only when you ask for one. Reopened after that,
+it offers the key it already issued, named by its last characters, instead of
+a new one: **Use it** keeps that key, and **Replace it** issues a new one and
+the old key stops working.
+
+Set `activation_guide: false` to turn off the dashboard's
 setup guide for the deployment.
 
 ## Signup and terms

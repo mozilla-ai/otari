@@ -121,6 +121,7 @@ def _eager_stream(stack: AsyncExitStack, failure: BaseException | None = None) -
         tools_header=None,
         max_tool_iterations=10,
         use_budget=None,
+        round_gate=None,
         native_tools=lambda _name: frozenset(),
     )
     opened = _OpenedTools(pool=cast(Any, SimpleNamespace(purpose_hints=lambda: [])), sandbox=None)
@@ -179,6 +180,7 @@ def _held_tool_ctx(hold_ms: int) -> Any:
         tools_header=None,
         max_tool_iterations=10,
         use_budget=None,
+        round_gate=None,
         native_tools=lambda _name: frozenset(),
         guardrails=None,
     )

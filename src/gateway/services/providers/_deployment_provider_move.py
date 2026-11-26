@@ -20,7 +20,12 @@ from gateway.services.providers._hosted_credentials import (
     normalize_provider,
     public_api_base,
 )
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    SecretDecryptionError,
+    decrypt_mapping,
+    decrypt_secret,
+)
 
 
 @dataclass
@@ -74,17 +79,19 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
         return PlannedMove(public)
 
     api_key: str | None = None
-    if credential.encrypted_api_key is not None:
-        try:
+    client_args: dict[str, Any] | None = None
+    try:
+        if credential.encrypted_api_key is not None:
             api_key = decrypt_secret(credential.encrypted_api_key)
-        except (SecretDecryptionError, SecretBoxUnavailableError):
-            public.outcome = "unreadable"
-            public.detail = (
-                "Its key cannot be decrypted with OTARI_SECRET_KEY. Configure the key it was stored under and "
-                "restart, or add the provider again on the Hosted providers page and discard this one."
-            )
-            return PlannedMove(public)
-    elif not hosted_key_optional(implementation, credential.api_base):
+        client_args = decrypt_mapping(credential.encrypted_client_args)
+    except (SecretDecryptionError, SecretBoxUnavailableError):
+        public.outcome = "unreadable"
+        public.detail = (
+            "Its stored secrets cannot be decrypted with OTARI_SECRET_KEY. Configure the key they were stored "
+            "under and restart, or add the provider again on the Hosted providers page and discard this one."
+        )
+        return PlannedMove(public)
+    if credential.encrypted_api_key is None and not hosted_key_optional(implementation, credential.api_base):
         public.outcome = "invalid"
         public.detail = (
             f"It holds no key, and '{implementation}' needs one as a hosted provider. One served on the "
@@ -106,7 +113,7 @@ def plan_move(credential: ProviderCredential, *, hosted_names: set[str], configu
         name=None if name == implementation else name,
         api_key=api_key,
         api_base=credential.api_base,
-        client_args=credential.client_args or None,
+        client_args=client_args or None,
     )
     return PlannedMove(public, create=create, name=name, updated_at=credential.updated_at)
 

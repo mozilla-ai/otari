@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
-import { resetSetupConfetti } from "@/features/onboarding/setupConfetti"
 import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
@@ -22,6 +21,16 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The wave between the sheet and its payoff has tests of its own
+// (setupTransition.test.ts). Here the faces swap at once, which is what the
+// flow decides; how they are carried is not this file's subject.
+vi.mock("@/features/onboarding/setupTransition", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/onboarding/setupTransition")
+  >()),
+  useLandingTransition: (_face: unknown, landed: boolean) => landed,
+}))
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
@@ -141,10 +150,18 @@ function renderGuide(
   canServeRequests = true,
   deployment: DeploymentBootstrap = bootstrap(),
 ) {
+  return renderGuideWithClient(canServeRequests, deployment)
+}
+
+/** The guide, with the query client a test can refetch through. */
+async function renderGuideWithClient(
+  canServeRequests = true,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return renderWithRouter(
+  const rendered = await renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
@@ -154,6 +171,7 @@ function renderGuide(
       </DeploymentProvider>
     </QueryClientProvider>,
   )
+  return Object.assign(rendered, { queryClient: client })
 }
 
 /** The snippet on screen, which is a code block rather than a form field. */
@@ -185,7 +203,6 @@ function guideEvents() {
 
 describe("SetupGuide", () => {
   beforeEach(() => {
-    resetSetupConfetti()
     resetTelemetrySpy()
   })
 
@@ -326,7 +343,7 @@ describe("SetupGuide", () => {
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
-    expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+    expect(snippet("curl")).toHaveTextContent(`export OTARI_API_KEY=${KEY}`)
 
     await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
     expect(screen.getByLabelText("Your API key")).toHaveValue(CONCEALED_KEY)
@@ -345,7 +362,9 @@ describe("SetupGuide", () => {
       "••••••••••••••••",
     )
     await user.click(screen.getByRole("button", { name: "cURL" }))
-    expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
+    expect(snippet("curl")).toHaveTextContent(
+      "export OTARI_API_KEY='••••••••••••••••'",
+    )
   })
 
   it("copies the full activation key while keeping its fingerprint on screen", async () => {
@@ -401,10 +420,11 @@ describe("SetupGuide", () => {
       const hint =
         label === "Agent"
           ? screen.getByText(/Works with Claude Code/)
-          : screen.getByText(/Hidden keys use a stand-in/)
+          : label === "cURL"
+            ? screen.getByText(/Hidden keys use a stand-in/)
+            : screen.getByText(/Reads your key from OTARI_API_KEY/)
       const original = hint.textContent
-      if (label !== "Agent") {
-        expect(hint).toHaveTextContent("Hidden keys use a stand-in")
+      if (label === "cURL") {
         expect(hint).toHaveTextContent("copies include your real key")
       }
       await user.click(
@@ -489,9 +509,7 @@ describe("SetupGuide", () => {
     // A failure is news, not the end of the guide: the panel keeps its shape
     // and "Check now" stays where it was.
     expect(screen.getByText(/Still listening/)).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Open budgets" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open rules" })).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Check now" }),
     ).toBeInTheDocument()
@@ -533,7 +551,9 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await screen.findByRole("heading", { name: "Send your first request" })
+    const sheet = await screen.findByRole("dialog", {
+      name: "Send your first request",
+    })
     // The request lands while the sheet is open. The poll interval is longer
     // than a test should sleep for, and "Check now" is the same refetch an
     // operator can trigger.
@@ -552,6 +572,11 @@ describe("SetupGuide", () => {
       }),
     ).toBeInTheDocument()
     expect(screen.getByText(/412 ms/)).toBeInTheDocument()
+    // The payoff is the sheet's second face: the same frame, never closed
+    // and reopened, which is what lets the wave carry one into the other.
+    expect(
+      screen.getByRole("dialog", { name: "Your first call went through" }),
+    ).toBe(sheet)
   })
 
   it("does not congratulate a workspace that had already activated on arrival", async () => {
@@ -606,6 +631,83 @@ describe("SetupGuide", () => {
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
   })
 
+  describe("return after step 2", () => {
+    const issued = {
+      key_id: "88888888-8888-8888-8888-888888888888",
+      key_prefix: "gw-setup-g",
+      key_suffix: "JYnT",
+    }
+
+    it("offers the key already issued and keeps it without minting", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••JYnT.")
+      expect(
+        screen.queryByRole("button", { name: "Create API key" }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText("The old key stops working.")).toBeVisible()
+      expect(screen.queryByText(/The examples read it from/)).toBeNull()
+
+      await user.click(screen.getByRole("button", { name: "Use it" }))
+
+      expect(await screen.findByText(/Using your setup key/)).toHaveTextContent(
+        "Using your setup key ending ••JYnT.",
+      )
+      expect(screen.getByText("Listening for your first request")).toBeVisible()
+      await user.click(screen.getByRole("button", { name: "cURL" }))
+      expect(snippet("curl")).toHaveTextContent("Bearer $OTARI_API_KEY")
+      expect(snippet("curl")).not.toHaveTextContent("export OTARI_API_KEY")
+      expect(mintCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it("withdraws the choice once the key is rotated elsewhere", async () => {
+      const api = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      const { queryClient } = await renderGuideWithClient()
+
+      await user.click(await screen.findByRole("button", { name: "Use it" }))
+      await screen.findByText(/Using your setup key/)
+
+      api.setActivation(
+        workspaceActivation({ issued_key: { ...issued, key_suffix: "Q9zX" } }),
+      )
+      await act(() => queryClient.refetchQueries())
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••Q9zX.")
+      expect(screen.getByRole("button", { name: "Use it" })).toBeVisible()
+    })
+
+    it("replaces the key only when asked, and shows the new one", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Replace it" }),
+      )
+
+      expect(await screen.findByLabelText("Your API key")).toHaveValue(
+        CONCEALED_KEY,
+      )
+      expect(mintCalls(fetchMock)).toHaveLength(1)
+      expect(
+        screen.queryByText(/You already have a setup key/),
+      ).not.toBeInTheDocument()
+    })
+  })
+
   it("skipping retires the guide for the workspace and takes the sheet away", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
@@ -642,7 +744,7 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await user.click(await screen.findByRole("link", { name: "Open budgets" }))
+    await user.click(await screen.findByRole("link", { name: "Open rules" }))
 
     await waitFor(() => {
       expect(
@@ -790,9 +892,7 @@ describe("SetupGuide", () => {
       const user = userEvent.setup()
       await renderGuide()
 
-      await user.click(
-        await screen.findByRole("link", { name: "Open budgets" }),
-      )
+      await user.click(await screen.findByRole("link", { name: "Open rules" }))
 
       expect(recordEvent).toHaveBeenCalledWith(
         TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,

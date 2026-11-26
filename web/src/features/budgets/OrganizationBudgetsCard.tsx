@@ -9,6 +9,7 @@ import {
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
 } from "@/shared/api/budgets"
+import { BudgetIdCell } from "./BudgetIdCell"
 import { budgetLabeler } from "./budgetLabel"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { limitLabel, periodLabel } from "./organizationBudget"
@@ -55,6 +56,11 @@ export function OrganizationBudgetsCard() {
       header: "Budget",
       isRowHeader: true,
       cell: (row) => <span className="text-body">{nameBudget(row)}</span>,
+    },
+    {
+      id: "id",
+      header: "ID",
+      cell: (row) => <BudgetIdCell budgetId={row.budget_id} />,
     },
     {
       id: "limit",

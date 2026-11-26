@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
+from gateway.api.routes.code_execution import SANDBOX_RUNS_NO_PYTHON_DETAIL
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
@@ -32,7 +33,10 @@ from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.ports.billing_port import InsufficientFundsError
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReachableError, SandboxSessionGoneError
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
+from gateway.services.tools._code_execution_admission import SANDBOX_NOT_ENABLED_DETAIL
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
+
+from .conftest import ALL_SERVICE_KEY_SCOPES
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ENDPOINT = f"{API_ROOT}/code/execute"
@@ -48,8 +52,10 @@ class _FakeSession:
     def discard(self) -> None:
         self.holds_across_requests = False
 
-    async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
-        self._port.executed.append({"code": code, "timeout_s": timeout_s, "session": self.session_id})
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> ResultBlock:
+        self._port.executed.append(
+            {"code": code, "language": language, "timeout_s": timeout_s, "session": self.session_id}
+        )
         if self._port.unreachable:
             raise SandboxNotReachableError("connect failed")
         self._port.workspace.update(self._port.writes)
@@ -68,6 +74,7 @@ class _FakeSession:
 
 class _FakePort:
     label = "fake-provider"
+    languages: tuple[str, ...] = ("python",)
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []
@@ -221,6 +228,74 @@ def test_uploads_are_put_in_the_sandbox_and_written_files_come_back(
     assert content.content == b"png-bytes"
 
 
+def test_staging_an_upload_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A run can print what it is given, so a key that may not read a file may not stage it."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resp = client.post(
+        _ENDPOINT,
+        json={"code": "print(open('data.csv').read())", "file_ids": [upload.json()["id"]]},
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "'files:read'" in resp.json()["detail"]
+    assert resp.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+    assert port.opened == []
+
+
+def test_resuming_a_container_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A held container keeps what a run staged in it, so resuming one reaches those files again."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    staged = client.post(
+        _ENDPOINT,
+        json={"code": "x = 1", "file_ids": [upload.json()["id"]], "container": "auto"},
+        headers=api_key_header,
+    )
+    assert staged.status_code == 200, staged.text
+    container_id = staged.headers["Otari-Container-Id"]
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resumed = client.post(_ENDPOINT, json={"code": "print(1)", "container": container_id}, headers=api_key_header)
+
+    assert resumed.status_code == 403, resumed.text
+    assert "'files:read'" in resumed.json()["detail"]
+    assert resumed.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+
+
 def test_an_upload_the_caller_cannot_reach_is_a_400(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:
@@ -229,6 +304,42 @@ def test_an_upload_the_caller_cannot_reach_is_a_400(
     assert resp.status_code == 400, resp.text
     assert "file-nope" in resp.json()["detail"]
     assert port.opened == []
+
+
+def test_a_service_key_reads_back_what_an_end_users_run_wrote(
+    client: TestClient, port: _FakePort, master_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    """The key names the end user on the upload, the run and the download, and owns nothing of theirs itself."""
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "code-service",
+            "user_id": "code-service",
+            "is_service_key": True,
+            "scopes": ALL_SERVICE_KEY_SCOPES,
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=headers,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data", "user": "fxa-123"},
+    )
+    assert upload.status_code == 200, upload.text
+    port.writes = {"chart.png": b"png-bytes"}
+
+    resp = client.post(
+        _ENDPOINT, json={"code": "print(1)", "file_ids": [upload.json()["id"]], "user": "fxa-123"}, headers=headers
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert port.seeded == {"data.csv": b"a,b\n1,2\n"}
+    (written,) = resp.json()["files"]
+    url = f"{API_ROOT}/files/{written['file_id']}/content"
+    assert client.get(url, headers=headers, params={"user": "fxa-123"}).content == b"png-bytes"
+    assert client.get(url, headers=headers).status_code == 404
 
 
 def test_auto_holds_the_sandbox_and_its_id_runs_there_again(
@@ -290,7 +401,7 @@ def test_a_workspace_with_code_execution_off_is_refused(
     resp = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
 
     assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"] == "code execution is not enabled for this workspace"
+    assert resp.json()["detail"] == SANDBOX_NOT_ENABLED_DETAIL
     assert port.opened == []
     (row,) = _rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["status"], row["status_code"]) == ("error", 403)
@@ -329,6 +440,18 @@ def test_an_unpriced_run_is_refused_where_pricing_is_required(
     assert resp.status_code == 402, resp.text
     assert "otari:code_execution" in resp.json()["detail"]
     assert COST_USD_HEADER not in resp.headers, "a refused run was not charged"
+    assert port.opened == []
+
+
+def test_a_sandbox_that_runs_no_python_is_refused_before_anything_is_reserved(
+    client: TestClient, port: _FakePort, api_key_header: dict[str, str]
+) -> None:
+    port.languages = ("bash",)
+
+    resp = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == SANDBOX_RUNS_NO_PYTHON_DETAIL
     assert port.opened == []
 
 
@@ -454,6 +577,7 @@ def test_a_service_key_bills_the_end_user_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "code-service",
             "user_id": "code-service",
             "is_service_key": True,

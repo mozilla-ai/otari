@@ -282,3 +282,20 @@ def provider_latency_ms_of(usage: CompletionUsage, provider: str | None) -> int 
     if not math.isfinite(scaled):
         return None
     return round(scaled)
+
+
+# Below this many output tokens a request's rate is mostly fixed overhead (the
+# connection, the prompt, the first token), so it says little about how fast the
+# provider generates.
+MIN_THROUGHPUT_TOKENS = 20
+
+
+def output_tokens_per_second(completion_tokens: int | None, latency_ms: int | None) -> float | None:
+    """Output tokens over the request's whole duration, time to first token included.
+
+    The same definition OpenRouter publishes, so the two numbers compare. ``None``
+    for a response shorter than ``MIN_THROUGHPUT_TOKENS`` or with no duration.
+    """
+    if completion_tokens is None or completion_tokens < MIN_THROUGHPUT_TOKENS or not latency_ms or latency_ms <= 0:
+        return None
+    return completion_tokens * 1000 / latency_ms

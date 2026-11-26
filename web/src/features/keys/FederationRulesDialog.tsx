@@ -159,7 +159,8 @@ export function FederationRulesDialog({
                       />
                       <RowAction
                         icon={FiTrash2}
-                        label="Delete rule"
+                        label="Delete rule…"
+                        isDestructive
                         ariaLabel={`Delete rule for ${ruleIdentity(rule)}`}
                         onPress={() => setPendingDelete(rule)}
                       />

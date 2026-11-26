@@ -11,9 +11,9 @@ const BUDGET = "Engineering monthly"
 const CEILING = "Whole organization"
 
 /**
- * Sign in as an organization admin, which is who docs/set-a-budget-and-ceiling.md is written
- * for: the master key signs in as the deployment operator, and an operator's
- * Spend & budgets is the deployment-wide page instead (`BudgetsPage`).
+ * Sign in as an organization admin, which is who docs/set-a-budget-and-ceiling.md
+ * is written for. The master key signs in as the deployment operator, whose
+ * screenshots would show the operator's rail around the same page.
  */
 async function signInAsAdmin(page: Page): Promise<void> {
   const invited = await page.request.post(
@@ -23,7 +23,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await expectOk(invited, "invite the admin")
   const { accept_link } = (await invited.json()) as { accept_link: string }
   const token = decodeURIComponent(
-    /[?&]token=([^&]+)/.exec(accept_link)?.[1] ?? "",
+    /[?&#]token=([^&]+)/.exec(accept_link)?.[1] ?? "",
   )
   let accepted = await page.request.post(`${API_ROOT}/invitations/accept`, {
     data: { token, password: ADMIN_PASSWORD, terms_accepted: true },
@@ -40,7 +40,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(ADMIN)
   await page.getByLabel("Password").fill(ADMIN_PASSWORD)
   await page.getByRole("button", { name: "Sign in", exact: true }).click()
-  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()
+  await expect(nav(page).getByRole("link", { name: "Home" })).toBeVisible()
 }
 
 /**

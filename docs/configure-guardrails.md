@@ -12,6 +12,8 @@ Every field, header and state is in the [Guardrails reference](guardrails-refere
 
 On a deployment you run, a guardrail can also come from a service of your own that `guardrails_url` points at, which can be any service that speaks the [guardrails service contract](guardrails-reference.md#what-a-guardrails-service-answers).
 
+The catalog's guardrails each need a vendor key. With none, [host your own guardrail](host-your-own-guardrail.md) on an open-weight safety model: a small service you run, which an organization or a single request names by `url`, on otari.ai or on a deployment you run.
+
 ## Configure a guardrail
 
 Only organization owners and admins can add, edit, or delete guardrails.
@@ -55,13 +57,13 @@ Before applying a guardrail, you can test how it evaluates specific content. Ent
 
 ## Edit or delete a guardrail
 
-In **Guardrails**, click **Edit** on the guardrail you want to update to modify its credentials or configuration parameters.
+In **Guardrails**, choose **Edit** from the menu at the end of the guardrail you want to update to modify its credentials or configuration parameters.
 
-To delete a guardrail, make sure it is no longer mandated. If the guardrail is still in use, click **Remove** on each of its mandates first. Once all mandates have been removed, click **Remove** on the guardrail itself.
+To delete a guardrail, make sure it is no longer mandated. If the guardrail is still in use, choose **Remove** from the menu of each of its mandates first. Once all mandates have been removed, choose **Remove** from the guardrail's own menu.
 
 Deleting a guardrail is permanent and cannot be undone. Make sure you no longer need the guardrail before confirming the deletion.
 
-To stop a mandate without removing it, click **Pause** on its row. Other mandates on the same guardrail keep running.
+To stop a mandate without removing it, choose **Pause** from its row's menu. Other mandates on the same guardrail keep running.
 
 ## Ask for a guardrail in a request
 
@@ -87,10 +89,12 @@ curl https://api.otari.ai/api/v1/chat/completions \
 
 In otari.ai's EU region use `https://eu.api.otari.ai/api/v1`; on your own deployment, its own address.
 
-- In `block` mode, a flagged request is refused with `403` and `guardrail_violation`.
+- In `block` mode, a flagged request is refused with `403` and `guardrail_violation`. Each guardrail in the body lists in `categories` what it says fired, such as `prompt_attack` or `pii/phone_number` ([Modes](guardrails-reference.md#modes)).
 - In `monitor` mode, the request is served and the verdict comes back in the `Otari-Guardrails` response header ([Reading the header](guardrails-reference.md#reading-the-otari-guardrails-header)).
 
 A request can tighten a mandate but never loosen it ([How the layers compose](guardrails-reference.md#how-the-layers-compose)). The model never sees the guardrail and cannot decline it.
+
+A guardrail from the catalog runs only once it is mandated, on otari.ai as on any deployment, so mandate it before you ask for it in `block` mode. A request can otherwise name only a profile on a guardrails service: one at the `url` the entry gives, or on a deployment you run, the one `guardrails_url` points at. A `block` entry with neither is refused with `424` and `guardrail_not_configured` rather than served unchecked; a `monitor` one is served, and the header reports the check as `not_configured`.
 
 ## Configure a guardrail over the API
 

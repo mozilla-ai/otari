@@ -46,7 +46,7 @@ EmptyState: { title, description?, actionLabel?, onAction?, isActionDisabled?,
   children? }
 EmptyMessage: { children, minHeight? }
 PageLoading: { label = "Loading…" }
-PageError: { error: unknown, children? }
+PageError: { error: unknown, children?, action? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
 FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
@@ -60,8 +60,17 @@ ErrorBoundary: { children, resetKey? }
 ```
 
 `PageError` is `PageLoading`'s counterpart, for a failure that took the whole page
-rather than a band inside one: a gateway that never answered, and the two catch
-boundaries below. Its `children` is the sentence about what to do next.
+rather than a band inside one: the two catch boundaries below. Its `children` is
+the sentence about what to do next, and `action` the one control that does it
+where there is one.
+
+A gateway that never answered is not a `PageError`. Before the bootstrap answers
+there is no app to fail inside, so `app/DeploymentGate.tsx` draws the sign-in
+shell's frame (`app/BootFrame.tsx`) with the failure in its card, at the sign-in
+card's exact place, so the gateway answering swaps the card's contents and
+nothing moves. The card's diagnostics update silently after each background
+attempt, and a screen reader is told only of the first failure, a change in
+which failure it is, and a pressed Retry failing.
 
 `ErrorBoundary` is not one a page reaches for: it is the catch above the router in
 `App.tsx`, and the only one the pre-session screens have. Everything inside
@@ -181,10 +190,15 @@ get-started strip, a first-run panel".
 
 ## Dialog isScanning
 
-The one piece of decorative motion in this system, and it earns its place by
-being literally true: an arc travels the frame's edge **only while the product is
-watching for something that has not arrived**, and stops when it has. Anywhere
-else, motion on an edge is noise.
+The one piece of decorative motion in this system, with the wave that ends it,
+and it earns its place by being literally true: an arc travels the frame's edge
+**only while the product is watching for something that has not arrived**, and
+stops when it has. When it has, the first-run sheet carries itself into its
+payoff in the same frame (see [motion-and-access.md](motion-and-access.md)).
+The boot screen's card is the one frame outside a dialog that sweeps, in danger
+ink, while the dashboard keeps asking a gateway that has not answered; it stops
+on a failure that waits for the reader instead. Anywhere else, motion on an
+edge is noise.
 
 It is a masked conic gradient on an `::after`, with the angle animated through
 an `@property`, so there is no dependency behind it and at radius 0 there is no
@@ -256,15 +270,13 @@ one question; a form is a place to work.
 <FormDialog title="Create key" submitLabel="Save" …>
 ```
 
-**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, `lg` 640 for
-tabs or six fields and up, and `xl` 928 for the one shape the others cannot
-hold: a body that is two columns side by side, where `lg` leaves the second one
-too narrow for its own controls. `ShareDialog` is the only one. Below a 640px
-viewport every size is a full-screen sheet. None of those widths can be spelled
-at a call site: `design-system.css` pins `.modal__dialog` unlayered, which outranks
-`@layer utilities` and puts a 448px floor under it, so the four sizes are
-modifier classes declared beside the rule they have to beat, and a `w-[…]` on a
-dialog compiles, lints, ships and loses. `Dialog` shares the family.
+**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, and `lg` 640 for
+tabs or six fields and up. Below a 640px viewport every size is a full-screen
+sheet. None of those widths can be spelled at a call site: `design-system.css`
+pins `.modal__dialog` unlayered, which outranks `@layer utilities` and puts a
+448px floor under it, so the three sizes are modifier classes declared beside
+the rule they have to beat, and a `w-[…]` on a dialog compiles, lints, ships
+and loses. `Dialog` shares the family.
 
 **A field reserves its message line only where it has a description**, which is
 [forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an

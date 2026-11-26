@@ -11,7 +11,7 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.exceptions import MissingApiKeyError
@@ -20,9 +20,9 @@ from any_llm.utils.exception_handler import convert_exception
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_details import ProviderDetail
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 
@@ -33,11 +33,11 @@ _LEAKED_KEY = "sk-proj-AAAAAAAAAAAAAAAAAAAA"
 
 def _rejected(status_code: int = 401) -> Exception:
     """The provider's refusal of the gateway's key, as any-llm hands it back."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     error_type = openai.AuthenticationError if status_code == 401 else openai.PermissionDeniedError
     upstream = error_type(
         f"Error code: {status_code} - Incorrect API key provided: {_LEAKED_KEY}",
-        response=httpx.Response(status_code, request=request),
+        response=httpx2.Response(status_code, request=request),
         body=None,
     )
     return convert_exception(upstream, "openai")
@@ -53,7 +53,7 @@ def _assert_credential_rejected_body(response: Any) -> None:
     _assert_credential_rejected(response)
     body = response.json()
     assert body["code"] == PROVIDER_CREDENTIAL_REJECTED
-    assert body["detail"] == PROVIDER_CREDENTIALS_DETAIL
+    assert body["detail"] == ProviderDetail.CREDENTIALS
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -105,7 +105,7 @@ def test_the_responses_route_answers_the_same_way(
             headers=api_key_header,
         )
     _assert_credential_rejected(response)
-    assert PROVIDER_CREDENTIALS_DETAIL in response.text
+    assert ProviderDetail.CREDENTIALS in response.text
 
 
 def test_the_messages_route_answers_in_its_own_envelope(
@@ -120,7 +120,7 @@ def test_the_messages_route_answers_in_its_own_envelope(
             headers=api_key_header,
         )
     _assert_credential_rejected(response)
-    assert response.json()["error"]["message"] == PROVIDER_CREDENTIALS_DETAIL
+    assert response.json()["error"]["message"] == ProviderDetail.CREDENTIALS
 
 
 @pytest.mark.parametrize(
@@ -242,11 +242,11 @@ _LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
 
 def _request_fault_403() -> Exception:
     """OpenAI's 403 for logprobs on a model without them, sent with a valid key."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     error = {"message": _LOGPROBS_MSG, "type": "invalid_request_error", "param": None, "code": None}
     upstream = openai.PermissionDeniedError(
         f"Error code: 403 - {{'error': {error}}}",
-        response=httpx.Response(403, request=request, json={"error": error}),
+        response=httpx2.Response(403, request=request, json={"error": error}),
         body=error,
     )
     return convert_exception(upstream, "openai")

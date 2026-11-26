@@ -9,7 +9,6 @@ domain's migration reaches them (`DOMAINS.md`).
 """
 
 from gateway.services.providers._country_gate import (
-    CountryGate,
     CountryNotServedError,
     ensure_hosted_country,
     ensure_provider_country,
@@ -22,6 +21,7 @@ from gateway.services.providers._hosted_catalog_update import (
 )
 from gateway.services.providers._hosted_credentials import last4, normalize_api_base, public_api_base
 from gateway.services.providers._hosted_name_index import (
+    HostedRegionIndex,
     hosted_implementation,
     load_hosted_names_at_startup,
     reset_hosted_name_index,
@@ -34,6 +34,8 @@ from gateway.services.providers._hosted_provider_service import (
     ResolvedHostedProvider,
 )
 from gateway.services.providers._hosted_runtime import (
+    HostedServing,
+    HostedServingBuilder,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
     hosted_credential_for,
@@ -47,7 +49,13 @@ from gateway.services.providers._missing_credential import (
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
-from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client, owned_endpoint_sdk_client
+from gateway.services.providers._owned_endpoint_network import (
+    OwnedEndpointHttpx2Transport,
+    OwnedEndpointSyncTransport,
+    OwnedEndpointTransport,
+    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
+)
 from gateway.services.providers._platform_connect import (
     PLATFORM_PROVIDER_NAME,
     PlatformClient,
@@ -82,17 +90,24 @@ from gateway.services.providers._workspace_hosted_access import (
     workspace_may_use_hosted,
     workspace_requires_zero_data_retention,
 )
+from gateway.types.country_gate import CountryGate
 
 __all__ = [
     "CountryGate",
     "CountryNotServedError",
     "HostedCatalogUpdate",
     "HostedProviderService",
+    "HostedRegionIndex",
+    "HostedServing",
+    "HostedServingBuilder",
     "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
+    "OwnedEndpointHttpx2Transport",
+    "OwnedEndpointSyncTransport",
+    "OwnedEndpointTransport",
     "PLATFORM_PROVIDER_NAME",
     "PlatformClient",
     "PlatformConnectService",

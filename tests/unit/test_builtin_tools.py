@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
-from gateway.api.routes.tools import _managed_tools, _WorkspaceSwitches
+from gateway.api.routes.tools import _DirectAvailability, _managed_tools, _WorkspaceSwitches
 from gateway.core.config import GatewayConfig
 from gateway.schemas.usage_and_telemetry import GATEWAY_TOOL_NAMES
 from gateway.services._tool_loop import ToolBackend
@@ -19,6 +19,7 @@ from gateway.services.tools import (
     BuiltinTool,
     Dialect,
     NativeCall,
+    Refusal,
     Tool,
     native_rendering,
 )
@@ -71,14 +72,6 @@ def test_usage_filters_on_exactly_the_listed_tools() -> None:
     assert set(GATEWAY_TOOL_NAMES) == {tool.name for tool in BUILTIN_TOOLS}
 
 
-@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
-def test_a_definition_names_its_tool_and_is_new_on_every_call(tool: BuiltinTool) -> None:
-    definition = tool.definition()
-    assert definition["type"] == "function"
-    assert definition["function"]["name"] == tool.name
-    assert tool.definition() is not definition, "a caller mutating one definition must not change the next"
-
-
 def test_a_listed_tool_can_be_put_in_a_set() -> None:
     """A tool is identified by its name, so its renderings must not cost it its hash."""
     assert len(set(BUILTIN_TOOLS)) == len(BUILTIN_TOOLS)
@@ -95,12 +88,29 @@ def _backend_for(tool: BuiltinTool) -> ToolBackend:
     raise AssertionError(f"no backend case for listed tool {tool.name!r}")
 
 
+def _definition_of(tool: BuiltinTool, backend: ToolBackend) -> dict[str, Any]:
+    [definition] = [entry for entry in backend.openai_tools if entry["function"]["name"] == tool.name]
+    return definition
+
+
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
-def test_the_backend_that_runs_a_tool_advertises_its_listed_definition(tool: BuiltinTool) -> None:
+def test_the_backend_that_runs_a_tool_advertises_a_new_definition_of_it_on_every_read(tool: BuiltinTool) -> None:
     backend = _backend_for(tool)
-    assert tool.definition() in backend.openai_tools
+    definition = _definition_of(tool, backend)
+    assert definition["type"] == "function"
+    assert _definition_of(tool, backend) is not definition, "a caller mutating one definition must not change the next"
     assert backend.owns_tool(tool.name)
     assert tool.name in dict(backend.purpose_hints())
+
+
+def test_the_listing_publishes_the_code_execution_definition_the_model_is_given() -> None:
+    port = ProtocolCodeExecutionAdapter("http://sandbox.invalid")
+    config = GatewayConfig(sandbox_url="http://sandbox.invalid")
+    listed = _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability(), port.languages)
+    [code_execution] = [tool for tool in listed if tool.id == Tool.CODE_EXECUTION]
+    [given] = SandboxBackend(port=port).openai_tools
+    assert code_execution.input_schema == given["function"]["parameters"]
+    assert code_execution.description == given["function"]["description"]
 
 
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
@@ -149,6 +159,30 @@ def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_i
     assert rendered == expected
 
 
+@pytest.mark.parametrize("dialect", list(Dialect))
+def test_a_code_execution_is_never_refused_for_a_call_limit(dialect: Dialect) -> None:
+    rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+    assert rendering is not None
+
+    assert rendering.refused(NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {}), Refusal.CALL_LIMIT) == []
+
+
+def test_a_code_execution_with_invalid_input_is_reported_failed_in_every_dialect() -> None:
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {})
+
+    def rendered(dialect: Dialect) -> list[Any]:
+        rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+        assert rendering is not None
+        return rendering.refused(call, Refusal.INVALID_INPUT)
+
+    [entry] = rendered(Dialect.CHAT)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "invalid_input")
+    _use, result = rendered(Dialect.MESSAGES)
+    assert result.content.error_code == "invalid_tool_input"
+    [item] = rendered(Dialect.RESPONSES)
+    assert (item.type, item.status) == ("code_interpreter_call", "failed")
+
+
 def test_a_name_the_registry_does_not_list_has_no_rendering() -> None:
     """An MCP server may expose a tool of its own; nothing announces it natively."""
     assert native_rendering("a_tool_an_mcp_server_supplied", Dialect.MESSAGES) is None
@@ -191,6 +225,45 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches())}
+    listed = _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability(), ())
+    reported = {tool.id: tool.available for tool in listed}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
+
+
+# The vocabularies a request reaches the scope gate in, and the one it cannot.
+# NOTE: Gemini's untyped ``{"code_execution": {}}`` is absent because the route
+# rewrites it to a typed entry before the gate reads the declarations.
+_DECLARATIONS: dict[str, tuple[list[dict[str, Any]], set[str]]] = {
+    "the gateway's own types": (
+        [{"type": "otari_web_search"}, {"type": "otari_web_fetch"}, {"type": "otari_code_execution"}],
+        {WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "anthropic's dated keywords": (
+        [{"type": "web_search_20250305"}, {"type": "web_fetch_20250910"}, {"type": "code_execution_20250522"}],
+        {WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "openai's keywords": (
+        [{"type": "web_search_preview"}, {"type": "code_interpreter"}],
+        {WEB_SEARCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "a caller's own function of the same name": (
+        [{"type": "function", "function": {"name": "web_search"}}, {"type": "function", "name": "code_execution"}],
+        set(),
+    ),
+    "nothing": ([], set()),
+}
+
+
+@pytest.mark.parametrize("vocabulary", list(_DECLARATIONS))
+def test_each_tool_recognizes_a_declaration_of_itself_and_no_other(vocabulary: str) -> None:
+    """``declares`` decides whether a key needs the tool's scope, so a wrong answer refuses or admits wrongly."""
+    tools, expected = _DECLARATIONS[vocabulary]
+
+    assert {tool.name for tool in BUILTIN_TOOLS if tool.declares(tools)} == expected
+
+
+@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
+def test_no_tool_reads_an_entry_that_is_not_a_mapping(tool: BuiltinTool) -> None:
+    assert not tool.declares(None)
+    assert not tool.declares(["web_search", None])  # type: ignore[list-item]

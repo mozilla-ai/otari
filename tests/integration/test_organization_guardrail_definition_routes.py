@@ -2,7 +2,7 @@
 
 The rules and the storage are covered at the service layer in
 `test_organization_guardrail_definition_service.py`. What is here is the composition in
-`api/deps.py`, which is new for this surface: the service is built on the
+`api/deps/`, which is new for this surface: the service is built on the
 request's Unit of Work and takes the session only for the role gate.
 
 Every case acts as the bootstrap operator, who is the owner of a standalone
@@ -57,7 +57,7 @@ def test_the_surface_needs_a_credential(client: TestClient) -> None:
 
 
 def test_crud_over_http(client: TestClient, master_key_header: dict[str, str], _secret_key: None) -> None:
-    """The wiring in `api/deps.py`: one Unit of Work over the request's session.
+    """The wiring in `api/deps/`: one Unit of Work over the request's session.
 
     The bootstrap operator is the owner of a standalone deployment's one
     organization, so this is the identity a dashboard form actually arrives as.
@@ -134,6 +134,31 @@ def test_a_refused_definition_answers_400_with_the_reason(
     assert live_object.status_code == 400
     assert "aws_access_key_id" in live_object.json()["detail"]
 
+    for endpoint in ("https://[::1/", "https://evil.example\\@api.lakera.ai/v2/guard"):
+        malformed = client.post(
+            f"{API_ROOT}/organizations/me/guardrail-definitions",
+            json={
+                "name": "malformed",
+                "guardrail_name": "lakera_guard",
+                "create_kwargs": {"api_key": "lakera-key", "endpoint": endpoint},
+            },
+            headers=master_key_header,
+        )
+        assert malformed.status_code == 400, malformed.text
+        assert "'endpoint' is not an address this gateway may dial" in malformed.json()["detail"]
+
+    not_text = client.post(
+        f"{API_ROOT}/organizations/me/guardrail-definitions",
+        json={
+            "name": "falsy-key",
+            "guardrail_name": "openai_moderation",
+            "create_kwargs": {"api_key": False, "base_url": "https://example.com/v1"},
+        },
+        headers=master_key_header,
+    )
+    assert not_text.status_code == 400, not_text.text
+    assert "api_key" in not_text.json()["detail"]
+
 
 def test_storing_a_credential_without_a_secret_key_blames_the_deployment(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
@@ -164,7 +189,7 @@ def test_storing_a_credential_without_a_secret_key_blames_the_deployment(
         json={
             "name": "env-lakera",
             "guardrail_name": "lakera_guard",
-            "create_kwargs": {"endpoint": "https://api.lakera.ai"},
+            "create_kwargs": {},
         },
         headers=master_key_header,
     )
@@ -233,7 +258,7 @@ def test_a_disabled_definition_says_so_rather_than_waiting_to_be_built(
         json={
             "name": "prod-lakera",
             "guardrail_name": "lakera_guard",
-            "create_kwargs": {"endpoint": "https://api.lakera.ai"},
+            "create_kwargs": {},
         },
         headers=master_key_header,
     )

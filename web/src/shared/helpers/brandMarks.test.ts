@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest"
 import {
+  hasHarnessMark,
+  hasLanguageMark,
   hasProviderMark,
   isProductMarkProvider,
 } from "@/shared/helpers/brandMarkKeys"
-import { makerMark, providerMark } from "@/shared/helpers/brandMarks"
+import {
+  harnessMark,
+  languageMark,
+  makerMark,
+  providerMark,
+} from "@/shared/helpers/brandMarks"
 
 describe("providerMark", () => {
   it("resolves a provider id to geometry", () => {
@@ -199,23 +206,23 @@ describe("makerMark", () => {
     expect(makerMark("google")).not.toEqual(providerMark("gemini"))
   })
 
-  it("tiles the two makers that have no usable mark", () => {
-    // Amazon's only mark in the set is the aws wordmark, unreadable at these
-    // steps, so it tiles like the SageMaker row. OpenBMB has none.
+  it("tiles makers that have no usable mark", () => {
+    // Amazon's only company mark in the set is the aws wordmark, unreadable at these
+    // steps, so it tiles like the SageMaker row. Writer has no vector mark.
     expect(makerMark("amazon")).toBeUndefined()
-    expect(makerMark("openbmb")).toBeUndefined()
+    expect(makerMark("writer")).toBeUndefined()
   })
 
   it("marks the makers this list names, and tiles the two it does not", () => {
     // Not a coverage gate, and it does not claim to be: the list below is
     // hand-typed and would drift the moment the gateway's vocabulary grows.
     // `tests/unit/test_provider_mark_coverage.py` is the gate, asserted where
-    // the vocabulary is defined and against the two dicts that define it, so a
-    // maker added there fails in the change that adds it.
+    // a maker is added and against the two dicts it is added to, so a maker
+    // added there fails in the change that adds it.
     //
-    // What this pins is the outcome a reader of this module expects today: the
-    // two exemptions, and that everything else resolves.
-    const TILED = ["amazon", "openbmb"]
+    // What this pins is the outcome a reader of this module expects today: two
+    // of the exemptions, and that everything else resolves.
+    const TILED = ["amazon", "writer"]
     const SAMPLE = [
       "ai21",
       "alibaba",
@@ -241,5 +248,61 @@ describe("makerMark", () => {
     expect(SAMPLE.filter((slug) => makerMark(slug) === undefined)).toEqual(
       TILED,
     )
+  })
+})
+
+describe("harnessMark", () => {
+  it("resolves the name a session shows its harness by", () => {
+    expect(harnessMark("claude-code")?.shapes.length).toBeGreaterThan(0)
+    expect(harnessMark(" Kilo-Code ")).toEqual(harnessMark("kilo-code"))
+    expect(hasHarnessMark("roo-code")).toBe(true)
+  })
+
+  it("draws the harnesses known only by their User-Agent, and curl as a terminal", () => {
+    for (const harness of [
+      "hermes-agent",
+      "openclaw",
+      "oh-my-pi",
+      "mistral-vibe",
+      "kimi-code",
+      "qwen-code",
+      "github-copilot",
+      "zed",
+      "curl",
+    ]) {
+      expect(harnessMark(harness)?.shapes.length).toBeGreaterThan(0)
+    }
+    expect(harnessMark("curl")?.source).toBe("BsTerminalFill")
+  })
+
+  it("has no mark for a harness LobeHub does not draw, or one a client named itself", () => {
+    // The caller tiles these: Crush has no mark in the source set, and any
+    // other `User-Agent` product can reach a session as its harness.
+    expect(harnessMark("crush")).toBeUndefined()
+    expect(hasHarnessMark("my-agent")).toBe(false)
+    expect(harnessMark("constructor")).toBeUndefined()
+    expect(hasHarnessMark("toString")).toBe(false)
+  })
+})
+
+describe("languageMark", () => {
+  it("draws each language a client's headers can name", () => {
+    for (const language of [
+      "python",
+      "javascript",
+      "go",
+      "java",
+      "rust",
+      "ruby",
+    ]) {
+      expect(languageMark(language)?.shapes.length).toBeGreaterThan(0)
+      expect(hasLanguageMark(language)).toBe(true)
+    }
+    expect(languageMark(" Python ")).toEqual(languageMark("python"))
+  })
+
+  it("has no mark for a language it does not know, or a prototype key", () => {
+    expect(languageMark("cobol")).toBeUndefined()
+    expect(hasLanguageMark("constructor")).toBe(false)
   })
 })

@@ -258,6 +258,22 @@ describe("TabRow", () => {
     expect([...row.classList]).toContain("overflow-x-auto")
     expect([...row.classList]).toContain("max-w-full")
   })
+
+  it("wraps whole tabs onto another line when asked to", () => {
+    const { container } = render(
+      <TabRow wraps>
+        <Tab isActive onPress={() => undefined}>
+          Requests
+        </Tab>
+        <Tab isActive={false} onPress={() => undefined}>
+          Errors
+        </Tab>
+      </TabRow>,
+    )
+    const row = container.firstElementChild as HTMLElement
+    expect([...row.classList]).toContain("flex-wrap")
+    expect([...row.classList]).not.toContain("overflow-x-auto")
+  })
 })
 
 describe("Segmented", () => {
@@ -426,13 +442,14 @@ describe("Segmented", () => {
 
   it("shows the focus ring on the label, since the input cannot show one", () => {
     // The input is visually hidden, so a focus ring drawn on it is invisible.
-    // `has-[:focus-visible]` moves it to the segment the user can actually see.
+    // `has-[:focus-visible]` moves it to the segment the user can actually see,
+    // and inside it, since the scrolling track clips a ring drawn outside.
     setup()
     const label = screen
       .getByRole("radio", { name: "Week" })
       .closest("label") as HTMLElement
     expect([...label.classList]).toContain(
-      "has-[:focus-visible]:otari-focus-ring",
+      "has-[:focus-visible]:otari-focus-ring-inset",
     )
   })
 

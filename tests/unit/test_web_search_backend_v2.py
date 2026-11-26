@@ -41,7 +41,6 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import RequestTrace
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, TrustedProxyAsyncHTTPTransport
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules, canonicalize_web_url
 from gateway.types.tool_charges import LabelCalls, instance_rate_key
@@ -782,9 +781,16 @@ def test_a_request_option_the_provider_does_not_take_is_refused_and_a_workspace_
     assert dict(search.search.options) == {"hits": _HITS, "cost": 0.01}
 
 
-def test_the_legacy_provider_pair_resolves_to_no_in_loop_search_on_the_libraries() -> None:
+def test_the_legacy_provider_pair_resolves_to_in_loop_search_on_tavilys_adapter() -> None:
     legacy_pair = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
-    assert resolve_in_loop_search(legacy_pair, None) is None
+    in_loop = resolve_in_loop_search(legacy_pair, None)
+
+    assert in_loop is not None
+    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
+        "tavily",
+        "library",
+        "otari:web_search",
+    )
     assert resolve_in_loop_search(GatewayConfig(), None) is None
 
 
@@ -828,11 +834,9 @@ def test_a_request_on_the_libraries_gets_its_search_and_fetch_as_two_backends_wi
     search_only = _context(config, search=True, fetch=False).build_web_backends()
     context = _context(config, search=True, fetch=True)
     both = context.build_web_backends()
-    fetch_only = _context(config, search=False, fetch=True).build_web_backends()
 
     assert [type(backend) for backend in search_only] == [WebSearchBackend]
     assert [type(backend) for backend in both] == [WebSearchBackend, WebFetchBackend]
-    assert [type(backend) for backend in fetch_only] == [WebRetrievalBackend], "a fetch alone keeps the old backend"
     search, fetch = both
     assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
     assert search._cap is context.web_call_cap is fetch._cap
@@ -844,6 +848,17 @@ def test_a_request_on_the_libraries_gets_its_search_and_fetch_as_two_backends_wi
         WEB_SEARCH_TOOL_NAME,
         WEB_FETCH_TOOL_NAME,
     ]
+
+
+def test_a_request_that_declares_only_fetch_gets_the_fetch_backend_on_the_requests_cap() -> None:
+    context = _context(_config(), search=False, fetch=True)
+
+    (fetch,) = context.build_web_backends()
+
+    assert isinstance(fetch, WebFetchBackend)
+    assert fetch._cap is context.web_call_cap
+    assert fetch._resolved is context.web.fetch
+    assert [tool["function"]["name"] for tool in fetch.openai_tools] == [WEB_FETCH_TOOL_NAME]
 
 
 def test_the_requests_cap_is_the_deployments_call_limit() -> None:

@@ -31,10 +31,9 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
-from gateway.services._tool_loop import FINAL_ROUND_NOTE
+from gateway.services._tool_loop import FINAL_ROUND_NOTE, INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
-    MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -223,6 +222,52 @@ def test_inject_purpose_hints_anthropic_prepends_existing_list_system() -> None:
     assert out["system"][1]["cache_control"] == {"type": "ephemeral"}
 
 
+class _RoundGate:
+    """Admits every round and records how long each round's request was."""
+
+    def __init__(self) -> None:
+        self.asked: list[int] = []
+
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        self.asked.append(prompt_chars)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_round_is_held_on_its_whole_request_its_system_prompt_included(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every round resends the system prompt as well as the conversation, and is held for both."""
+    responses = iter(
+        [
+            _message_response(stop_reason="tool_use", content=[_tool_use("tu_1", "fetch_url", {})]),
+            _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return next(responses)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    gate = _RoundGate()
+    system = "S" * 40_000
+
+    await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "max_tokens": 10,
+            "system": system,
+            "messages": [{"role": "user", "content": "go"}],
+        },
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+        round_gate=gate,
+    )
+
+    assert len(gate.asked) == 1
+    assert gate.asked[0] > len(system)
+
+
 # ---------- non-streaming loop ----------
 
 
@@ -405,18 +450,22 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round."""
+
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         return _message_response(stop_reason="tool_use", content=[_tool_use("tu", "fetch_url", {})])
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await anthropic_tool_loop(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
-            pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
-            max_iterations=2,
-        )
+    out = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=2,
+    )
+
+    assert out.content == []
+    assert out.stop_reason == "end_turn"
 
 
 _CALLER_TOOL = {"name": "get_weather", "description": "", "input_schema": {"type": "object"}}
@@ -911,6 +960,53 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_stream_refuses_a_tool_use_whose_input_is_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[list[dict[str, Any]]] = []
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "fetch_url"),
+                _input_json_delta(0, '{"u":'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        captured.append(list(kwargs["messages"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _event in anthropic_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == []
+    assert captured[1][-1] == {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": INVALID_ARGUMENTS_ERROR}],
+    }
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
 async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPatch) -> None:
     """Iteration 1 emits a tool_use block; the loop executes it server-side and
     drops the intermediate ``message_delta`` / ``message_stop``. Iteration 2 runs
@@ -970,6 +1066,35 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     # sent the matching tool_result, because the loop consumed it.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return _async_iter(
+            _msg_start_event(),
+            _tool_use_block_start(0, "tu_1", "fetch_url"),
+            _input_json_delta(0, "{}"),
+            _content_block_stop(0),
+            _msg_delta_event("tool_use"),
+            _msg_stop_event(),
+        )
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    assert [e.type for e in events] == ["message_start", "message_delta", "message_stop"]
+    assert cast(Any, events[1]).delta.stop_reason == "end_turn"
 
 
 @pytest.mark.asyncio
@@ -1720,12 +1845,14 @@ async def test_native_blocks_for_each_of_several_searches(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_native_max_uses_stops_further_searches_and_reports_an_error(
+async def test_native_max_uses_refuses_a_search_past_the_cap_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Two searches in one round with one left: the second is answered in Anthropic's vocabulary."""
     responses = [
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
+        _message_response(
+            stop_reason="tool_use", content=[_search_use("tu_1", "first"), _search_use("tu_2", "second")]
+        ),
         _message_response(stop_reason="end_turn", content=[_text_block("done")]),
     ]
     calls: list[list[dict[str, Any]]] = []
@@ -1757,12 +1884,13 @@ async def test_native_max_uses_stops_further_searches_and_reports_an_error(
     error_content = cast(Any, error_result.content)
     assert error_content.type == "web_search_tool_result_error"
     assert error_content.error_code == "max_uses_exceeded"
-    blocked_tool_result = calls[2][-1]["content"][0]
+    # The round after the cap is the last, so its note follows the tool results.
+    blocked_tool_result = calls[1][-2]["content"][1]
     assert blocked_tool_result["content"] == "[tool error] max_uses_exceeded"
 
 
 @pytest.mark.asyncio
-async def test_stream_native_max_uses_stops_further_searches_and_reports_an_error(
+async def test_stream_native_max_uses_refuses_a_search_past_the_cap_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     streams = iter(
@@ -1772,14 +1900,9 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
                 _tool_use_block_start(0, "tu_1", "web_search"),
                 _input_json_delta(0, '{"query": "first"}'),
                 _content_block_stop(0),
-                _msg_delta_event("tool_use"),
-                _msg_stop_event(),
-            ),
-            _async_iter(
-                _msg_start_event(),
-                _tool_use_block_start(0, "tu_2", "web_search"),
-                _input_json_delta(0, '{"query": "second"}'),
-                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_2", "web_search"),
+                _input_json_delta(1, '{"query": "second"}'),
+                _content_block_stop(1),
                 _msg_delta_event("tool_use"),
                 _msg_stop_event(),
             ),
@@ -1824,6 +1947,130 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
 
 
 @pytest.mark.asyncio
+async def test_stream_native_search_whose_input_is_cut_off_reports_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "web_search"),
+                _input_json_delta(0, '{"query": "fir'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_2", "web_search"),
+                _input_json_delta(0, '{"query": "first"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool()
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+            use_budget=_use_budget(1),
+        )
+    ]
+
+    assert pool.calls == [("web_search", {"query": "first"})], "the refused call spent none of the allowance"
+    native_starts = [event.content_block for event in events if event.type == "content_block_start"]
+    assert [block.type for block in native_starts[:4]] == [
+        "server_tool_use",
+        "web_search_tool_result",
+        "server_tool_use",
+        "web_search_tool_result",
+    ]
+    error_content = cast(Any, native_starts[1]).content
+    assert error_content.type == "web_search_tool_result_error"
+    assert error_content.error_code == "invalid_tool_input"
+
+
+def _offers_search(kwargs: dict[str, Any]) -> bool:
+    return any(tool.get("name") == "web_search" for tool in kwargs.get("tools") or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_native_max_uses_withholds_the_search_once_used_up(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """A model that keeps searching past ``max_uses`` gets one more round, without the search (#3183).
+
+    The round ends as the answer, so no ``max_uses_exceeded`` block is minted for the
+    search the model asked for anyway.
+    """
+    sent: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        block_id = f"tu_{len(sent)}"
+        if stream:
+            return _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, block_id, "web_search"),
+                _input_json_delta(0, '{"query": "q"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            )
+        return _message_response(stop_reason="tool_use", content=[_search_use(block_id, "q")])
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100}
+    native = frozenset({WEB_SEARCH_TOOL_NAME})
+
+    if stream:
+        events = [
+            event
+            async for event in anthropic_tool_loop_stream(
+                completion_kwargs=completion_kwargs,
+                pool=cast(Any, pool),
+                max_iterations=10,
+                native_tools=native,
+                use_budget=_use_budget(1),
+            )
+        ]
+        blocks = [event.content_block for event in events if event.type == "content_block_start"]
+    else:
+        result = await anthropic_tool_loop(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            native_tools=native,
+            use_budget=_use_budget(1),
+        )
+        assert result.stop_reason == "end_turn"
+        blocks = list(result.content)
+
+    assert [_offers_search(kwargs) for kwargs in sent] == [True, False]
+    assert sent[1]["messages"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    assert pool.calls == [("web_search", {"query": "q"})]
+    assert [block.type for block in blocks] == ["server_tool_use", "web_search_tool_result"]
+
+
+@pytest.mark.asyncio
 async def test_native_max_uses_error_block_is_anthropic_schema_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1834,8 +2081,9 @@ async def test_native_max_uses_error_block_is_anthropic_schema_only(
     nothing else.
     """
     responses = [
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
+        _message_response(
+            stop_reason="tool_use", content=[_search_use("tu_1", "first"), _search_use("tu_2", "second")]
+        ),
         _message_response(stop_reason="end_turn", content=[_text_block("done")]),
     ]
 

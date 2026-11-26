@@ -17,6 +17,11 @@ import {
   pricingResponse,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+} from "@/tests/rowMenu"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 import { WebSearchPage } from "./WebSearchPage"
@@ -431,11 +436,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi({ settings: { web_search_default_tool: "exa" } })
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: /^Stop using exa as the default/,
-      }),
-    )
+    await pressRowAction(user, /^Stop using exa as the default/)
     await waitFor(() =>
       expect(writes(requests, "PATCH", "/tool-settings")).toHaveLength(1),
     )
@@ -444,15 +445,14 @@ describe("WebSearchPage", () => {
     })
 
     // The model cannot search with searxng, so it cannot be the default.
-    expect(
-      screen.getByRole("button", {
-        name: /^Make local the default\. Unavailable/,
-      }),
-    ).toBeDisabled()
-
-    await user.click(
-      screen.getByRole("button", { name: "Make tabstack the default" }),
+    const local = await findRow("Search tools", "local")
+    expect(await getRowMenuItem(user, /^Make default/, local)).toHaveAttribute(
+      "aria-disabled",
+      "true",
     )
+    await user.keyboard("{Escape}")
+
+    await pressRowAction(user, "Make tabstack the default")
     await waitFor(() =>
       expect(writes(requests, "PATCH", "/tool-settings")).toHaveLength(2),
     )
@@ -468,19 +468,13 @@ describe("WebSearchPage", () => {
     })
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: /^Stop using tabstack as the default/,
-      }),
-    )
+    await pressRowAction(user, /^Stop using tabstack as the default/)
     await waitFor(() =>
       expect(writes(requests, "PATCH", "/tool-settings")[0]?.body).toEqual({
         web_fetch_default_tool: "builtin_fetch",
       }),
     )
-    await user.click(
-      screen.getByRole("button", { name: "Make builtin_fetch the default" }),
-    )
+    await pressRowAction(user, "Make builtin_fetch the default")
     await waitFor(() =>
       expect(writes(requests, "PATCH", "/tool-settings")[1]?.body).toEqual({
         web_fetch_default_tool: "builtin_fetch",
@@ -588,7 +582,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Test exa" }))
+    await pressRowAction(user, "Test exa")
 
     expect(await screen.findByText("Worked: 3 hits.")).toBeInTheDocument()
     expect(writes(requests, "POST", "/search-tools/exa/test")[0].body).toEqual({
@@ -602,7 +596,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    await pressRowAction(user, "Remove exa")
     const confirm = await screen.findByRole("alertdialog")
     expect(
       within(confirm).queryByText(/The price stored under exa:exa stays/),
@@ -634,9 +628,7 @@ describe("WebSearchPage", () => {
       })
       await renderPage()
 
-      await user.click(
-        await screen.findByRole("button", { name: "Remove exa" }),
-      )
+      await pressRowAction(user, "Remove exa")
       const confirm = await screen.findByRole("alertdialog")
       expect(
         await within(confirm).findByText(
@@ -658,7 +650,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi({ failingReads: ["model:exa:exa"] })
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    await pressRowAction(user, "Remove exa")
     const confirm = await screen.findByRole("alertdialog")
     expect(
       await within(confirm).findByText(
@@ -677,7 +669,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Edit exa" }))
+    await pressRowAction(user, "Edit exa")
     const dialog = await screen.findByRole("dialog", { name: "Configure exa" })
     expect(within(dialog).getByLabelText(/API key/)).toHaveAttribute(
       "placeholder",
@@ -813,7 +805,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi({ priceFailsOnce: true })
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Edit exa" }))
+    await pressRowAction(user, "Edit exa")
     const dialog = await screen.findByRole("dialog", { name: "Configure exa" })
     await user.type(within(dialog).getByLabelText(/API key/), "sk-rotated")
     const price = within(dialog).getByLabelText("Price per call, USD")
@@ -838,7 +830,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi({ priceFailsOnce: true })
     await renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Remove exa" }))
+    await pressRowAction(user, "Remove exa")
     const confirm = await screen.findByRole("alertdialog")
     await confirmRemoval(user, confirm)
     await waitFor(() =>
@@ -879,9 +871,7 @@ describe("WebSearchPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit the price of local" }),
-    )
+    await pressRowAction(user, "Edit the price of local")
     const listed = listingReads(requests).length
     await user.type(await screen.findByLabelText(/Price per call, USD/), "0.07")
     await user.click(screen.getByRole("button", { name: "Save" }))
@@ -903,6 +893,7 @@ describe("WebSearchPage", () => {
   })
 
   it("leaves a rate config.yml sets to config.yml", async () => {
+    const user = userEvent.setup()
     mockApi({ searchTools: withLocalPrice(0.003, "config") })
     await renderPage()
 
@@ -912,8 +903,8 @@ describe("WebSearchPage", () => {
       await within(local).findByText("Price in config.yml"),
     ).toBeInTheDocument()
     expect(
-      within(local).queryByRole("button", { name: "Edit the price of local" }),
-    ).not.toBeInTheDocument()
+      await findRowMenuItem(user, "Edit the price of local", local),
+    ).toBeNull()
   })
 
   it("shows the rate a tool is still priced at under its old key", async () => {

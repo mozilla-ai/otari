@@ -19,6 +19,7 @@ from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 # A declared key's name follows the budget id rule, so it reads the same in a
 # config file, a log line and the dashboard.
@@ -85,6 +86,14 @@ class ApiKeyConfig(BaseModel):
     reject_user_mismatch: bool | None = Field(
         default=None, description="Per-key override of reject_user_mismatch; null inherits the deployment setting."
     )
+    scopes: list[KeyScope] | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The endpoint groups the key may reach. Unset gives every scope that existed when scopes were "
+            "introduced, the end-users scopes only to a service key, and never a scope added since."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -110,13 +119,28 @@ class ApiKeyConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _scopes_fit_the_key(self) -> Self:
+        if self.scopes is not None:
+            KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
+        return self
+
+    def held_scopes(self) -> KeyScopeSet:
+        """The scopes the declared key holds: its own, or else what a key that names none holds."""
+        if self.scopes is None:
+            return KeyScopeSet.unscoped(is_service_key=self.is_service_key)
+        return KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
+
     def declaration_digest(self) -> str:
         """A digest of this entry, which changes when any field config.yml sets for it, or its secret, does.
 
         The secret enters as its own SHA-256, so the digest stored beside the key
         says no more about it than the key's hash already does.
         """
-        entry = self.model_dump(mode="json", exclude={"secret"})
+        # An entry naming no scopes digests as it did before ``scopes`` existed, so
+        # upgrading does not rewrite the key, and with it switch back on one an
+        # operator switched off. The migration gave such a key what ``held_scopes`` would.
+        entry = self.model_dump(mode="json", exclude={"secret"} | ({"scopes"} if self.scopes is None else set()))
         entry["secret_sha256"] = hashlib.sha256(self.secret.get_secret_value().encode()).hexdigest()
         return declaration_digest(entry)
 

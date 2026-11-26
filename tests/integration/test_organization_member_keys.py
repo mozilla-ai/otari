@@ -506,6 +506,57 @@ def test_a_member_key_cannot_exceed_their_own_model_default(
     assert code == status.HTTP_200_OK, body
 
 
+def test_a_catalog_id_on_a_member_key_stands_for_the_offerings_they_may_use(
+    client: TestClient,
+    world: _World,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A member held to groq picks a model groq and together both serve, on create and on edit (otari#3069)."""
+    for selector in ("groq:openai/gpt-oss-20b", "together:openai/gpt-oss-20b"):
+        seeded = client.post(
+            f"{API_ROOT}/pricing",
+            json={"model_key": selector, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+            headers=master_key_header,
+        )
+        assert seeded.status_code in {status.HTTP_200_OK, status.HTTP_201_CREATED}, seeded.text
+    refreshed = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
+    assert refreshed.status_code == status.HTTP_200_OK, refreshed.text
+    session = db_session_factory()
+    try:
+        session.add(BillingUser(user_id=str(world.users["alpha_member"]), allowed_models=["groq:*"]))
+        session.add(BillingUser(user_id=str(world.users["alpha_colleague"]), allowed_models=["anthropic:*"]))
+        session.commit()
+    finally:
+        session.close()
+
+    code, created = _create(
+        client, world, "alpha_member", {"key_name": "picked", "allowed_models": ["openai/gpt-oss-20b"]}
+    )
+    assert code == status.HTTP_200_OK, created
+    assert created["allowed_models"] == ["groq:openai/gpt-oss-20b"]
+
+    code, plain = _create(client, world, "alpha_member", {"key_name": "edited"})
+    assert code == status.HTTP_200_OK, plain
+    code, edited = _request(
+        client,
+        world,
+        "alpha_member",
+        "PATCH",
+        f"{_PREFIX}/{plain['id']}",
+        json={"allowed_models": ["openai/gpt-oss-20b"]},
+    )
+    assert code == status.HTTP_200_OK, edited
+    assert edited["allowed_models"] == ["groq:openai/gpt-oss-20b"]
+
+    # A member who may use none of the offerings is still refused.
+    code, refused = _create(
+        client, world, "alpha_colleague", {"key_name": "too-wide", "allowed_models": ["openai/gpt-oss-20b"]}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, refused
+    assert "exceeds its user's default" in refused["detail"]
+
+
 def test_a_member_key_cannot_exceed_their_own_tool_default(
     client: TestClient, world: _World, db_session_factory: Callable[[], Session]
 ) -> None:
@@ -1353,6 +1404,56 @@ def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
     assert code == status.HTTP_200_OK, one
     assert [(row["external_id"], row["budget_id"]) for row in one] == [("bob", budget_id)]
 
+    code, counted = _request(client, world, "alpha_owner", "GET", f"{_PREFIX}/{key['id']}/end-user-count")
+    assert code == status.HTTP_200_OK, counted
+    assert counted == {"count": 2, "max_end_users": DEFAULT_ORGANIZATION_MAX_END_USERS}
+
     for who in ("alpha_member", "beta_owner"):
         code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-users")
         assert code == status.HTTP_404_NOT_FOUND, (who, body)
+        code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-user-count")
+        assert code == status.HTTP_404_NOT_FOUND, (who, body)
+
+
+# =============================================================================
+# Scopes: the same rules on the member surface
+# =============================================================================
+
+
+def test_a_member_key_gets_the_default_scopes_unless_it_names_its_own(client: TestClient, world: _World) -> None:
+    code, plain = _create(client, world, "alpha_member", {"key_name": "plain"})
+    assert code == status.HTTP_200_OK, plain
+    code, wider = _create(
+        client, world, "alpha_member", {"key_name": "wider", "scopes": ["usage:read", "inference:run"]}
+    )
+    assert code == status.HTTP_200_OK, wider
+
+    assert plain["scopes"] == ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"]
+    assert wider["scopes"] == ["inference:run", "usage:read"]
+
+
+def test_a_member_narrows_their_own_key(client: TestClient, world: _World) -> None:
+    code, created = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["inference:run", "usage:read"]})
+    assert code == status.HTTP_200_OK, created
+    headers = {API_KEY_HEADER: f"Bearer {created['key']}"}
+    assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_200_OK
+
+    code, updated = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["inference:run"]}
+    )
+
+    assert code == status.HTTP_200_OK, updated
+    assert updated["scopes"] == ["inference:run"]
+    assert client.get(f"{API_ROOT}/key/budget", headers=headers).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_a_member_cannot_give_a_plain_key_an_end_user_scope(client: TestClient, world: _World) -> None:
+    code, refused = _create(client, world, "alpha_member", {"key_name": "k", "scopes": ["end-users:delete"]})
+    assert code == status.HTTP_400_BAD_REQUEST, refused
+
+    code, created = _create(client, world, "alpha_member", {"key_name": "k"})
+    assert code == status.HTTP_200_OK, created
+    code, refused = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"scopes": ["end-users:read"]}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, refused

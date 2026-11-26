@@ -23,12 +23,15 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.budgets import BudgetScopeRequest
 from gateway.services.budgets._scoped_enforcement import get_scope_ceilings
 
+from .conftest import ALL_KEY_SCOPES, ALL_KEY_SCOPES_HELD
 from .tenancy_helpers import budget_service, create_budget, create_member, create_organization, create_workspace
 
 
 def _key(client: TestClient, master_key_header: dict[str, str], *, user_id: str, **fields: Any) -> dict[str, Any]:
     response = client.post(
-        f"{API_ROOT}/keys", json={"key_name": f"key-{user_id}", "user_id": user_id} | fields, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": f"key-{user_id}", "user_id": user_id} | fields,
+        headers=master_key_header,
     )
     assert response.status_code == 200, response.text
     created: dict[str, Any] = response.json()
@@ -204,7 +207,7 @@ def test_a_budget_exempt_key_is_not_gated(client: TestClient, master_key_header:
 
     body = client.get(f"{API_ROOT}/key/budget", headers=_auth(key)).json()
 
-    assert body == {"budgets_enforced": False, "remaining_usd": None, "limits": []}
+    assert body == {"budgets_enforced": False, "remaining_usd": None, "limits": [], "end_users": None}
 
 
 def test_only_an_api_key_may_ask(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -286,6 +289,33 @@ def test_a_key_does_not_read_a_sibling_keys_series(
     assert [group["key"] for group in response.json()["groups"]] == [mine["id"]]
 
 
+def test_a_key_reads_its_own_user_without_a_label(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The owner's alias can be the account email; an end user keeps the label its service gave it."""
+    key = _key(client, master_key_header, user_id="labeled-owner")
+    with db_session_factory() as db:
+        workspace_id = seed_workspace_id(db)
+        db.execute(update(User).where(User.user_id == "labeled-owner").values(alias="owner@example.com"))
+        db.add(User(user_id="end-user-1", alias="customer-42", parent_user_id="labeled-owner"))
+        own = _row(workspace_id, key["id"], "0.10", "jury")
+        own.user_id = "labeled-owner"
+        end_user = _row(workspace_id, key["id"], "0.20", "jury")
+        end_user.user_id = "end-user-1"
+        db.add_all([own, end_user])
+        db.commit()
+
+    summary = client.get(f"{API_ROOT}/key/usage/summary", params={"dimensions": "user"}, headers=_auth(key))
+    series = client.get(f"{API_ROOT}/key/usage/series", params={"group_by": "user_id"}, headers=_auth(key))
+
+    assert summary.status_code == 200, summary.text
+    assert series.status_code == 200, series.text
+    expected = {"labeled-owner": None, "end-user-1": "customer-42"}
+    assert {row["key"]: row["label"] for row in summary.json()["by_user"]} == expected
+    assert {group["key"]: group["label"] for group in series.json()["groups"]} == expected
+    assert "owner@example.com" not in summary.text + series.text
+
+
 def test_a_malformed_tag_filter_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     key = _key(client, master_key_header, user_id="tags")
 
@@ -309,7 +339,13 @@ async def test_a_members_key_lists_the_ceilings_the_gate_checks(async_db: AsyncS
     )
     assert organization_member is not None
     await get_or_create_attribution_user(async_db, user_id=str(volunteer.id), alias="Volunteer")
-    key = APIKey(id="volunteer-key", key_hash="hash-volunteer", workspace_id=workspace.id, user_id=str(volunteer.id))
+    key = APIKey(
+        id="volunteer-key",
+        key_hash="hash-volunteer",
+        workspace_id=workspace.id,
+        user_id=str(volunteer.id),
+        scopes=ALL_KEY_SCOPES_HELD,
+    )
     async_db.add(key)
     for scope_type, scope_id in (
         ("workspace_member", str(workspace_member.id)),

@@ -57,11 +57,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
+    McpSignedInServersDep,
     PlaygroundToolOfferDep,
     RequestSessionBillingPortDep,
     RequestSessionModelProviderPortDep,
     ToolPortsDep,
     WorkspaceCodeExecutionPoliciesDep,
+    WorkspaceWebSearchPoliciesDep,
     get_config,
     get_db,
     get_log_writer,
@@ -142,7 +144,10 @@ class PlaygroundToolStatus(BaseModel):
     fail at request time (otari-ai#1419).
     """
 
-    configured: bool = Field(description="Whether this deployment has a backend for the tool at all.")
+    configured: bool = Field(
+        description="Whether the menu lists the tool: the deployment, or for web search the workspace's "
+        "organization search key, provides it. Whether it can be attached, and why not, are enabled and reason."
+    )
     enabled: bool = Field(description="Whether the caller's workspace may attach it.")
     reason: str | None = Field(
         default=None,
@@ -157,12 +162,18 @@ class PlaygroundMcpServer(BaseModel):
     name: str
     purpose_hint: str | None = None
     enabled: bool
+    sign_in_required: bool = Field(
+        default=False,
+        description="The server sends each user's own credential and the caller has not signed in to it, "
+        "so a message that attaches it is refused with mcp_sign_in_required until they do",
+    )
 
 
 class PlaygroundToolsResponse(BaseModel):
     """What the caller's workspace may attach to a Playground message."""
 
     web_search: PlaygroundToolStatus
+    web_fetch: PlaygroundToolStatus = Field(description="Whether a message may declare otari_web_fetch.")
     code_execution: PlaygroundToolStatus
     files: PlaygroundToolStatus = Field(description="Whether a message may attach a file uploaded here.")
     mcp_servers: list[PlaygroundMcpServer]
@@ -234,6 +245,8 @@ async def read_playground_tools(
     config: Annotated[GatewayConfig, Depends(get_config)],
     offer: PlaygroundToolOfferDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    web_policies: WorkspaceWebSearchPoliciesDep,
+    signed_in: McpSignedInServersDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -251,11 +264,14 @@ async def read_playground_tools(
         config=config,
         offer=offer,
         code_execution_policies=code_execution_policies,
+        web_policies=web_policies,
+        signed_in=signed_in,
         workspace_id=resolved,
         user_id=str(identity.id),
     )
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),
+        web_fetch=_tool_status(availability.web_fetch),
         code_execution=_tool_status(availability.code_execution),
         files=_tool_status(availability.files),
         mcp_servers=[
@@ -264,6 +280,7 @@ async def read_playground_tools(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.sign_in_required,
             )
             for server in availability.mcp_servers
         ],

@@ -29,9 +29,11 @@ repo-wide facts this skill leans on: the test notes and the generated artifacts.
    integration for route or database behavior). Mock the dashboard at the `apiFetch` boundary,
    not the hooks. Never weaken coverage, and never add a global pytest rerun policy: a genuinely
    flaky test carries `@pytest.mark.flaky(reruns=...)` and a stated reason.
-5. **Checks** must be green before opening (see [Running checks](#running-checks)), and
+5. **Checks.** Run the fast checks and the tests covering the paths you changed, and
    **regenerate whatever the change made stale** (see
-   [Generated artifacts](#generated-artifacts-a-pr-can-owe)).
+   [Generated artifacts](#generated-artifacts-a-pr-can-owe)). CI runs the rest on the PR;
+   [Running checks](#running-checks) says what is worth running locally and what to leave to
+   CI.
 6. **Commit.** Conventional Commits. End every message with a `Co-Authored-By:` trailer naming
    the model that wrote it (`Co-Authored-By: <your model> <noreply@anthropic.com>`). Fill in your
    own identity; do not copy a model name out of an example or another commit.
@@ -40,11 +42,8 @@ repo-wide facts this skill leans on: the test notes and the generated artifacts.
    `perf`, `security`, `revert`, `chore`, `build`, `ci`, `docs`, `style`, `refactor`, `test`),
    because the repo squash-merges and git-cliff parses that title into the changelog. A breaking
    change carries `!` after the type or scope; see
-   [Breaking changes](../../../RELEASE.md#breaking-changes). Keep the
-   template's `## PR Type`, `## Checklist` and `## AI Usage` sections: `pr-template-check.yml`
-   fails and labels the PR `missing-template` if any of the three is absent. Fill in AI Usage
-   honestly, including the AI-agent checkbox. Two further sections are expected on every PR
-   and are gated by nobody, which makes them the ones an agent drops: `## Description` in
+   [Breaking changes](../../../RELEASE.md#breaking-changes). The body carries two sections,
+   gated by nobody, which makes them the ones an agent drops: `## Description` in
    plain English for a reader with no context on the area (what changes for someone using
    Otari, and why, no file paths), and `## How to test it locally` with the steps a reviewer
    runs plus the automated checks that already cover it. No labels are required here. No em
@@ -60,6 +59,14 @@ repo-wide facts this skill leans on: the test notes and the generated artifacts.
     approval on top of your instruction.
 
 ## Running checks
+
+CI runs every check a PR's paths call for: the unit and integration shards, `lint`,
+`typecheck`, the OSS-edition smoke gate and the rest. Each workflow's `paths` filter decides
+which of those a PR gets, so a docs-only PR runs few and a web-only one skips the Python
+matrix; a check that skips is one whose inputs the PR did not touch. The local run is for fast
+signal before you push, not for reproducing that set: run `make lint`, `make typecheck` and the
+tests covering the paths you changed, then let CI be the gate for the rest. Running the whole suite locally duplicates CI and
+buys nothing.
 
 From the repo root:
 
@@ -100,13 +107,7 @@ PR with almost no CI, and neither of them reports anything:
 - **A base that is not `main`.** A PR stacked on another feature branch matches no workflow, so
   it gets only the `pull_request_target` checks. Retargeting a stacked PR onto its parent branch
   is what usually causes this, and the trade is invisible in the direction you are looking: the
-  diff gets smaller and the check count drops from seven to one or two. Both ends of that range
-  depend on when you look, and it is worth knowing why: `otari-pr-title.yml` lists `synchronize`, so
-  `Lint PR title` re-runs on every push and is attached to the current head, while
-  `pr-template-check.yml` lists only `opened` and `edited`, so `check-template` stays attached to
-  the sha the PR was opened (or last edited) at. So the ceiling is seven on that sha and six on
-  every head after a push, and the floor is two and then one. Measured on four stacked heads: one
-  row each, `Lint PR title`, with no `check-template` on any of them. Keep a stacked PR on base `main` and
+  diff gets smaller and the check count drops to one, `Lint PR title`. Keep a stacked PR on base `main` and
   live with the inherited diff until its parent merges.
 
   A GitHub stack is the exception. A PR that `gh stack submit` (the `github/gh-stack`
@@ -137,10 +138,10 @@ them has covered nothing.
 A small set is not always one of the two faults above, though. Every one of these workflows also
 carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
 nothing: a PR editing only `.github/skills/`, or a `docs/` file other than
-`public/openapi.json`, gets the title and template checks and no more, and that is the right
+`public/openapi.json`, gets the title check and no more, and that is the right
 answer rather than a symptom. The spec is the exception: `otari-dashboard.yml` watches it,
 because the dashboard generates its client from it, so a one-line edit to it runs more than
-the title and template checks. The
+the title check. The
 question to ask is whether the set matches the change, not whether the set is large.
 
 ## Generated artifacts a PR can owe
@@ -292,7 +293,7 @@ tool, `isolation: "worktree"`), each executing the cycle above.
 
 - Never push to `main`; never merge unless told; confirm before any other outward-facing action,
   including posting a review or commenting on somebody else's PR.
-- Every PR: `Fixes #<n>`, a Conventional-Commit title, the three template sections, and commit
+- Every PR: `Fixes #<n>`, a Conventional-Commit title, the Description and How to test sections, and commit
   messages carrying a `Co-Authored-By:` trailer for the model that wrote them.
 - A behavior-preserving refactor changes structure, not observable behavior. That is the bar.
 - `make lint` before declaring done, not `ruff check`: the architecture check runs first and is

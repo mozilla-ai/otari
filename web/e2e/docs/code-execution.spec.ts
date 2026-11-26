@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test"
 
-import { login, openNested } from "../helpers"
+import { login, openTab } from "../helpers"
 import { docScreenshot } from "./fixtures"
 
 // The e2e gateway names a sandbox (e2e/otari.yml), so the policy is live. No
 // code runs.
 test("a workspace's code execution policy", async ({ page }) => {
   await login(page)
-  await openNested(page, "Tools", "Code execution")
+  await openTab(page, "Tools", "Code execution")
 
   await expect(page.getByText("Allow in Default workspace")).toBeVisible()
   await expect(

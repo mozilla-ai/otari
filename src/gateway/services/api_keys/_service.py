@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from datetime import datetime
 from typing import Any, NamedTuple
 
 from gateway.auth.models import hash_key, key_suffix
@@ -36,6 +37,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 
 class KeySummary(NamedTuple):
@@ -61,19 +63,41 @@ class ApiKeyService:
         self._federation_rules = repositories.federation_rules
         self._users = users
 
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Revoke every key in these workspaces, so none of them can be enabled again."""
+        async with self._uow:
+            await self._keys.revoke_in_workspaces(workspace_ids)
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
 
     async def issue_app_key(
-        self, *, user: User, workspace_id: uuid.UUID, client_id: str, app_name: str, key_format: ApiKeyFormatPort
-    ) -> str:
-        """Mint a budget-enforced app credential inside the caller's authority transaction."""
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        app_name: str,
+        scopes: Iterable[KeyScope],
+        key_format: ApiKeyFormatPort,
+        expires_at: datetime | None = None,
+    ) -> tuple[str, str]:
+        """Mint a budget-enforced app credential inside the caller's authority transaction.
+
+        Returns:
+            The key and its ID.
+
+        Raises:
+            ValueError: ``scopes`` is empty or names one an app key may not hold.
+        """
+        held = KeyScopeSet.checked(scopes, is_service_key=False)
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
             raise AppKeyOwnerInactiveError
         key = key_format.mint()
+        key_id = str(uuid.uuid4())
         await self._keys.issue_app_key(
-            key_id=str(uuid.uuid4()),
+            key_id=key_id,
             key_hash=hash_key(key),
             prefix=key_format.fingerprint(key),
             suffix=key_suffix(key),
@@ -81,8 +105,10 @@ class ApiKeyService:
             user_id=str(user.id),
             workspace_id=workspace_id,
             client_id=client_id,
+            scopes=held,
+            expires_at=expires_at,
         )
-        return key
+        return key, key_id
 
     async def revoke_key_by_token(self, token: str) -> None:
         """Permanently revoke the presented API key, preserving its usage history."""
@@ -229,7 +255,13 @@ class ApiKeyService:
             await self._federation_rules.delete(row)
 
     async def update_owned(
-        self, config: GatewayConfig, key: APIKey, changes: Mapping[str, Any], *, owner_id: str
+        self,
+        config: GatewayConfig,
+        key: APIKey,
+        changes: Mapping[str, Any],
+        *,
+        owner_id: str,
+        organization_id: uuid.UUID | None = None,
     ) -> None:
         """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
 
@@ -251,6 +283,8 @@ class ApiKeyService:
                 AccessLists(changes.get("allowed_models", stored.models), changes.get("allowed_tools", stored.tools)),
                 stored=stored,
                 owner_id=owner_id,
+                workspace_id=key.workspace_id,
+                organization_id=organization_id,
             )
             for column, value in changes.items():
                 setattr(key, column, value)
@@ -258,30 +292,47 @@ class ApiKeyService:
             key.allowed_tools = access.tools
 
     async def check_access_lists(
-        self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None
+        self,
+        config: GatewayConfig,
+        requested: AccessLists,
+        *,
+        stored: AccessLists,
+        owner_id: str | None,
+        workspace_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> AccessLists:
         """The ``allowed_models`` and ``allowed_tools`` to store on a key or a user, each checked only if it changes.
 
         A list sent back unchanged grants nothing new, so it is not checked again: a
         tool deleted since, or an owner narrowed since, would otherwise refuse an
         unrelated edit. A key's changed list must fit its owner's (``owner_id``;
-        ``None`` for a user, or a key with no owner). The owner is read in a block of
-        its own, whose commit would also store what the caller had staged, so a route
-        calls this first.
+        ``None`` for a user, or a key with no owner), and a catalog ID in it stands
+        for the offerings the owner may use. The owner is read in a block of its own,
+        whose commit would also store what the caller had staged, so a route calls
+        this first. ``workspace_id`` or ``organization_id`` names whose catalog a
+        catalog ID in a changed list is read from.
 
         Raises:
             ValueError: a changed list names something unknown, or grants more than the owner's.
         """
         models_changed = requested.models != stored.models
         tools_changed = requested.tools != stored.tools
+        owner = None
+        if owner_id is not None and (models_changed or tools_changed):
+            async with self._uow:
+                owner = await self._users.lists(owner_id)
         checked = AccessLists(
-            validate_allowed_models(config, requested.models) if models_changed else stored.models,
+            validate_allowed_models(
+                config,
+                requested.models,
+                workspace_id=workspace_id,
+                organization_id=organization_id,
+                within=owner.models if owner is not None else None,
+            )
+            if models_changed
+            else stored.models,
             validate_allowed_tools(config, requested.tools) if tools_changed else stored.tools,
         )
-        if owner_id is None or not (models_changed or tools_changed):
-            return checked
-        async with self._uow:
-            owner = await self._users.lists(owner_id)
         if owner is None:
             return checked
         tool_keys = config.legacy_search_tool_keys()

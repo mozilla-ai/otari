@@ -34,7 +34,7 @@ limit and the public-catalog limit count failures per client address, so ten
 wrong passwords from one visitor lock everyone out of the dashboard for a
 minute. A [country file](#the-country-file) also looks up the client address.
 
-Use `*` only where the proxy is the only path to the container, as on Railway:
+Use `*` only where the proxy is the only path to the container:
 any peer in the list can set its own client address. When the setting is unset,
 uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that only `127.0.0.1` is
 trusted.
@@ -66,6 +66,7 @@ dashboard can follow one provider's errors, latency and spend:
 | `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status of a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure with no status, such as a stream that ended without reporting usage. `fallback` is `true` for any candidate after the first |
 | `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, for the first candidate only |
 | `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for the first candidate only |
+| `gateway_output_tokens_per_second` | `provider`, `model` | A successful attempt's output tokens over its whole duration, time to first token included, for the first candidate only and for responses of 20 output tokens or more |
 | `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
 | `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
 | `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
@@ -100,11 +101,6 @@ To test source changes, add `docker-compose.build.yml`:
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
 
-## Managed deployment templates
-
-- [Railway](../deploy/railway/README.md): that page owns its image tag,
-  variables, platform limits and maintenance steps.
-
 ## Optional services
 
 Compose profiles start the bundled service backends:
@@ -117,8 +113,8 @@ docker compose --profile object-storage up -d
 
 - `object-storage` runs an S3-compatible store for uploaded files; see
   [Object storage with Docker Compose](files.md#object-storage-with-docker-compose).
-- Web search needs no container when `web_search_provider` names a licensed API
-  (`tavily` or `brave`) and `web_search_provider_api_key` holds its key.
+- Web search needs no container when a search tool names a licensed API, such
+  as `tavily` or `brave`, with its key; see [Search tools](configuration.md#search-tools).
 
 A request that needs a backend you have not configured fails; ordinary
 inference is unaffected. See [Built-in tools](tools.md) and

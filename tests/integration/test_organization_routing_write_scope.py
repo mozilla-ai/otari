@@ -19,8 +19,9 @@ routers must still refuse a tenant, or a change here would have reopened
 otari-ai#1880.
 """
 
+import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,6 +38,7 @@ from gateway.models.provider_keys import (
 )
 from gateway.models.routing import RoutingPolicy
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.services import catalog as selectors
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
@@ -255,6 +257,138 @@ def test_every_static_candidate_is_checked_not_only_the_default(client: TestClie
     body = _policy_body(world, name="fallback-borrowed")
     body["spec"] = {"select": [{"default": _ALPHA_TARGET}], "on_failure": [_BETA_TARGET]}
     refused = _post(client, world, "alpha_admin", _POLICIES, body)
+    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+
+
+_ALPHA_CATALOG_ID = "acme/mini"
+_BETA_CATALOG_ID = "acme/haiku"
+
+
+@pytest.fixture
+def _idle_index_refresher(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+
+
+@pytest.fixture
+def catalog_ids(_idle_index_refresher: None, client: TestClient) -> Iterator[None]:
+    """A selector index with one catalog ID on each tenant's provider, not rebuilt under the test."""
+    rows = [
+        selectors.OfferingRow(_ALPHA_TARGET, "openai", "openai", 1.0),
+        selectors.OfferingRow(_BETA_TARGET, "anthropic", "anthropic", 1.0),
+    ]
+    identities = {
+        _ALPHA_CATALOG_ID: (_ALPHA_CATALOG_ID, (_ALPHA_TARGET,)),
+        _BETA_CATALOG_ID: (_BETA_CATALOG_ID, (_BETA_TARGET,)),
+    }
+    selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+    yield
+    selectors.reset_selector_index()
+
+
+def test_a_policy_may_name_a_catalog_id_the_organization_reaches(
+    catalog_ids: None, client: TestClient, world: _World
+) -> None:
+    """A request accepts a catalog ID, so a policy does: it is held to the offering the ID resolves to."""
+    created = _post(
+        client, world, "alpha_admin", _POLICIES, _policy_body(world, name="by-id", target=_ALPHA_CATALOG_ID)
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+    assert created.json()["spec"]["select"] == [{"default": _ALPHA_CATALOG_ID}]
+
+
+def test_a_catalog_id_does_not_widen_what_the_organization_reaches(
+    catalog_ids: None, client: TestClient, world: _World
+) -> None:
+    refused = _post(
+        client, world, "alpha_admin", _POLICIES, _policy_body(world, name="borrowed-id", target=_BETA_CATALOG_ID)
+    )
+
+    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+    assert _BETA_CATALOG_ID in refused.json()["detail"]
+
+
+def _slugged_key(db_session_factory: Callable[[], Session], organization_id: uuid.UUID, slug: str) -> None:
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKey(
+                organization_id=organization_id,
+                provider="openai",
+                name=slug,
+                slug=slug,
+                api_base="https://api.synthetic.new/openai/v1",
+                encrypted_api_key=encrypt_secret(f"sk-{slug}"),
+                last4="1234",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_a_fallback_may_name_the_organizations_keys_by_their_request_prefix(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    for slug in ("synth-a", "synth-b"):
+        _slugged_key(db_session_factory, world.alpha, slug)
+    body = _policy_body(world, name="synthetic")
+    body["spec"] = {"select": [{"default": "synth-a:hf:zai-org/GLM-4.7"}], "on_failure": ["synth-b:hf:zai-org/GLM-4.7"]}
+
+    created = _post(client, world, "alpha_admin", _POLICIES, body)
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_a_request_prefix_reaches_the_same_key_in_slash_form(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="slashed", target="synth-a/hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_an_alias_elsewhere_named_like_a_request_prefix_does_not_block_it(
+    client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Alias names span every workspace, so another workspace's alias can share a key's prefix."""
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+    elsewhere = client.post(
+        f"{API_ROOT}/aliases", json={"name": "synth-a", "target": _ALPHA_TARGET}, headers=master_key_header
+    )
+    assert elsewhere.status_code == status.HTTP_200_OK, elsewhere.text
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="prefixed", target="synth-a:hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_another_organizations_request_prefix_is_not_a_target(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _slugged_key(db_session_factory, world.beta, "beta-synth")
+
+    refused = _post(
+        client, world, "alpha_admin", _ALIASES, _alias_body(world, name="borrowed-prefix", target="beta-synth:glm")
+    )
+
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
 
 

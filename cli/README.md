@@ -11,6 +11,7 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 | `otari guardrails generate` | Proposes guardrail gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
 | `otari guardrails validate` | Checks the composed guardrail offline, and dry-runs it against a command or a path. |
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
+| `otari operator handover` | Hands the bootstrap operator role to another operator on a gateway, with the master key; see `docs/run-the-dashboard.md`. |
 | `otari --version` | The version this distribution was built as, or `OTARI_VERSION` where a deployment sets it (the Docker image does). |
 
 ## Install

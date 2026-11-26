@@ -25,18 +25,22 @@ import { Popover } from "@/design-system/overlays/Popover"
 export function ToolsMenu({
   tools,
   isWebSearchOn,
+  isWebFetchOn,
   isCodeExecutionOn,
   selectedMcpIds,
   onToggleWebSearch,
+  onToggleWebFetch,
   onToggleCodeExecution,
   onToggleMcpServer,
   isDisabled,
 }: {
   tools: PlaygroundTools | undefined
   isWebSearchOn: boolean
+  isWebFetchOn: boolean
   isCodeExecutionOn: boolean
   selectedMcpIds: readonly string[]
   onToggleWebSearch: (isOn: boolean) => void
+  onToggleWebFetch: (isOn: boolean) => void
   onToggleCodeExecution: (isOn: boolean) => void
   onToggleMcpServer: (id: string, isOn: boolean) => void
   isDisabled?: boolean
@@ -44,12 +48,15 @@ export function ToolsMenu({
   const [isOpen, setIsOpen] = useState(false)
 
   const webSearch = tools?.web_search
+  const webFetch = tools?.web_fetch
   const codeExecution = tools?.code_execution
   const mcpServers = tools?.mcp_servers ?? []
   // Configured, not enabled: a tool this workspace disabled still has a row,
   // carrying the reason.
   const hasGatewayTools =
-    (webSearch?.configured ?? false) || (codeExecution?.configured ?? false)
+    (webSearch?.configured ?? false) ||
+    (webFetch?.configured ?? false) ||
+    (codeExecution?.configured ?? false)
   const hasAnything = hasGatewayTools || mcpServers.length > 0
 
   return (
@@ -92,6 +99,19 @@ export function ToolsMenu({
                     }
                   />
                 ) : null}
+                {webFetch?.configured ? (
+                  <ToolRow
+                    name="Web fetch"
+                    isSelected={isWebFetchOn}
+                    isDisabled={!webFetch.enabled}
+                    onChange={onToggleWebFetch}
+                    note={
+                      webFetch.enabled
+                        ? "Reads a web page by its URL."
+                        : (webFetch.reason ?? undefined)
+                    }
+                  />
+                ) : null}
                 {codeExecution?.configured ? (
                   <ToolRow
                     name="Code execution"
@@ -120,12 +140,14 @@ export function ToolsMenu({
                     key={server.id}
                     name={server.name}
                     isSelected={selectedMcpIds.includes(server.id)}
-                    isDisabled={!server.enabled}
+                    isDisabled={!server.enabled || server.sign_in_required}
                     onChange={(isOn) => onToggleMcpServer(server.id, isOn)}
                     note={
-                      server.enabled
-                        ? (server.purpose_hint ?? undefined)
-                        : "Turned off for this workspace."
+                      !server.enabled
+                        ? "Turned off for this workspace."
+                        : server.sign_in_required
+                          ? "Connect your account under Tools, MCP servers, to use it."
+                          : (server.purpose_hint ?? undefined)
                     }
                   />
                 ))}
@@ -184,6 +206,8 @@ function ToolRow({
   return (
     <div className="flex flex-col gap-0.5">
       <Checkbox
+        hasTouchTarget
+        className="md:min-h-0 md:min-w-0"
         isSelected={isSelected}
         isDisabled={isDisabled}
         onChange={onChange}

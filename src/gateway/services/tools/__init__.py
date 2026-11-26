@@ -10,7 +10,20 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 ``read_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
-``McpGrantMembershipListener`` removes a member's MCP grants as they leave a workspace,
+``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
+``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are,
+``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
+``McpServerLogoService`` reads each stored server's logo and sets or removes an admin's own,
+``McpServerRequestService`` takes a member's request for a catalog server and records a manager's answer, within
+``MAX_PENDING_REQUESTS_PER_MEMBER`` and ``MAX_REQUESTS_PER_MEMBER_PER_DAY``,
+``WorkspaceMcpServerHealth`` is what the gateway last learned by talking to a stored server, ``server_health`` reads
+one from a check, and ``mcp_server_contacts`` (a ``McpServerContacts``) records one from real request traffic,
+``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
+through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
+that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in;
+``sign_in_link`` mints the link a conversation shows a user to start their sign-in, which names a
+``SignInLinkTarget``, and ``McpSignInBackend`` gives a
+request's tool loop one stand-in tool per server ``McpSignInNeeded`` names, whose result carries that link,
 ``refuse_shadowed_builtin_tools`` refuses connected MCP servers whose tool names shadow a declared built-in,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits, refusing it with
 ``web_access_disabled_refusal`` where the workspace turned web access off.
@@ -41,7 +54,8 @@ any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs th
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
 ``DirectToolService`` runs a direct tool call, from its billed user to its settled cost, over the
 interfaces beside it (``DirectToolAccounts``, ``DirectToolLedger``, ``DirectToolGates``,
-``WorkspaceWebPolicies``), which the request's builder implements.
+``WorkspaceWebPolicies``), which the request's builder implements, and ``DirectToolAvailability``
+says whether one naming no tool would be admitted, without running it.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
 search endpoint's rules and run its call, ``unpriced_direct_search_detail`` names the row one
 ``require_pricing`` cannot bill is missing, their ``_fetch`` twins do the same for the direct fetch
@@ -57,6 +71,7 @@ environment, ``store_sandbox_api_key`` and ``clear_sandbox_api_key`` change the 
 and ``retargeted_tool_choice`` points a forced ``tool_choice`` at the search tool a declaration was renamed to.
 """
 
+from gateway.services.tools._attached_mcp_servers import AttachedMcpServerIndex
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._candidate_tools import CandidateTools, ProviderToolDeclaration, decide_candidate_tools
 from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, mcp_entry, without_otari_tool_calls
@@ -95,6 +110,7 @@ from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CA
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
 from gateway.services.tools._declarations import Tool
+from gateway.services.tools._direct_tool_availability import DirectToolAvailability
 from gateway.services.tools._direct_tool_call import (
     DirectCaller,
     DirectToolAccounts,
@@ -111,16 +127,42 @@ from gateway.services.tools._direct_tool_call import (
 from gateway.services.tools._legacy_search_settings import LegacySearchValues, warn_about_legacy_search_settings
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import (
+    AdmittedMcpServers,
     admit_mcp_servers,
     declares_provider_mcp,
     refuse_shadowed_builtin_tools,
 )
+from gateway.services.tools._mcp_connections import (
+    CompletedConnection,
+    FlowLanding,
+    LinkSignIn,
+    McpConnectionEligibility,
+    McpConnectionService,
+    McpRevocation,
+    McpServerRef,
+    McpUserTokens,
+    SignInLinkTarget,
+    StoredMcpOAuthClient,
+)
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
+from gateway.services.tools._mcp_server_health import (
+    McpServerContact,
+    McpServerContacts,
+    WorkspaceMcpServerHealth,
+    mcp_server_contacts,
+)
+from gateway.services.tools._mcp_server_logos import McpServerLogoService
+from gateway.services.tools._mcp_server_requests import (
+    McpServerRequestService,
+)
+from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
+from gateway.services.tools._mcp_signed_in_servers import McpSignedInServers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
     NativeCall,
     NativeRendering,
+    Refusal,
 )
 from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
@@ -234,8 +276,10 @@ from gateway.services.tools._web_search_responses import (
 )
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._web_tool_failure import WebToolFailure
+from gateway.services.tools._workspace_mcp_server_urls import WorkspaceMcpServerUrls
 
 __all__ = [
+    "AttachedMcpServerIndex",
     "DirectCaller",
     "DirectToolAccounts",
     "DirectToolCall",
@@ -244,6 +288,7 @@ __all__ = [
     "DirectToolOutcome",
     "DirectToolRate",
     "DirectToolResult",
+    "DirectToolAvailability",
     "DirectToolService",
     "DirectToolUsage",
     "WorkspaceWebPolicies",
@@ -280,6 +325,7 @@ __all__ = [
     "Dialect",
     "NativeCall",
     "NativeRendering",
+    "Refusal",
     "Tool",
     "ToolRateInForce",
     "ToolUseBudget",
@@ -301,6 +347,28 @@ __all__ = [
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "McpGrantMembershipListener",
+    "CompletedConnection",
+    "FlowLanding",
+    "LinkSignIn",
+    "McpConnectionEligibility",
+    "McpConnectionService",
+    "McpServerRequestService",
+    "McpSignedInServers",
+    "McpServerContact",
+    "McpServerContacts",
+    "McpServerLogoService",
+    "WorkspaceMcpServerHealth",
+    "mcp_server_contacts",
+    "McpRevocation",
+    "McpServerRef",
+    "SignInLinkTarget",
+    "McpUserTokens",
+    "McpSignInBackend",
+    "McpSignInNeeded",
+    "McpSignInReason",
+    "StoredMcpOAuthClient",
+    "AdmittedMcpServers",
+    "WorkspaceMcpServerUrls",
     "admit_mcp_servers",
     "declares_provider_mcp",
     "admit_web_access",

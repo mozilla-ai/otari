@@ -31,6 +31,7 @@
     "@tanstack/react-router": "^1.170.46",
     "canvas-confetti": "^1.9.4",
     "react": "^19.3.1",
+    "react-aria": "3.53.1",
     "react-aria-components": "1.22.1",
     "react-dom": "^19.3.1",
     "react-icons": "^5.7.0",

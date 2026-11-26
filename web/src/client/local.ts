@@ -115,6 +115,9 @@ export interface UsageFilters {
   // analytics previous-period query so its window does not overlap the current one.
   end_date?: string
   status?: string
+  // One HTTP status a request was answered with ("403"), for a link that names
+  // the failures it counted rather than every error.
+  status_code?: string
   // The three entity filters accept several values on every usage endpoint: they go
   // on the wire as repeated query params and match any of them, so one chart can
   // compare a handful of models / users / keys and the request log can be scoped to
@@ -139,6 +142,8 @@ export interface UsageFilters {
   // and pinning it to the two built-ins forced a cast at the one call site that
   // drills into a named tool.
   tool?: string
+  // Who paid the provider: true = only rows a hosted provider served, false = the rest.
+  deployment_paid?: boolean
 }
 
 /** Which tool/guardrail service a settings test targets. A path parameter in the

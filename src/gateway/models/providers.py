@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from sqlalchemy import (
     JSON,
@@ -20,7 +20,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
-from gateway.models.secret_fields import redact_secret_like_values
 
 
 class ModelAlias(Base):
@@ -109,32 +108,16 @@ class ProviderCredential(Base):
     api_base: Mapped[str | None] = mapped_column()
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column()
-    client_args: Mapped[dict[str, Any]] = mapped_column("client_args", JSON, default=dict)
+    # A Bedrock instance keeps its ``aws_secret_access_key`` here, so the SDK
+    # client extras are as much a credential as ``encrypted_api_key`` is and are
+    # held the same way.
+    encrypted_client_args: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-
-    def to_public_dict(self) -> dict[str, Any]:
-        """Serialize for the API. Never includes the secret, only ``last4``.
-
-        ``client_args`` is masked by key name the same way
-        ``OrgProviderKey.to_public`` masks its own: a Bedrock instance
-        keeps its ``aws_secret_access_key`` there, so the field this table holds
-        in clear is as much a credential as ``encrypted_api_key`` is, and it must
-        not round-trip over the API either.
-        """
-        return {
-            "instance": self.instance,
-            "provider_type": self.provider_type,
-            "api_base": self.api_base,
-            "last4": self.last4,
-            "client_args": redact_secret_like_values(self.client_args) or {},
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
 
 
 class ProviderEndpoint(Base):
@@ -184,8 +167,10 @@ class ProviderEndpoint(Base):
     api_base: Mapped[str] = mapped_column(String(1024))
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column(String(8))
-    # Fields sent in every request body beneath the caller's own.
-    default_params: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # Fields sent in every request body beneath the caller's own. A model server
+    # behind an edge can want a credential among them, so they are held encrypted
+    # the way the key above is.
+    encrypted_default_params: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -241,6 +226,48 @@ class HostedProvider(Base):
     # The ISO country codes whose requests this provider serves, or None for
     # every country. Checked as well as ``provider_supported_countries``.
     supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # Where the upstream processes and stores request data, as the operator
+    # declares it: an ISO country code, ``EU``, or ``GLOBAL``. None is undeclared.
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
+    # The upstream's own policies, linked from the public Providers pages.
+    terms_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    privacy_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class HostedProviderRegion(Base):
+    """One region a hosted provider serves from, and what it changes about the provider.
+
+    A provider with no rows here serves from its own connection, as one region.
+    Once it has rows, they are its regions, tried in ``position`` order: a
+    request is served by the first enabled one whose countries admit it, and a
+    selector ``<name>@<slug>:<model>`` pins one. Every nullable column inherits
+    the provider's value: the key, the endpoint, the countries and the data
+    location, and the SDK extras are merged over the provider's. Roster,
+    switches and policies stay the provider's; prices may be set per region,
+    keyed ``<name>@<slug>:<model>``, and fall back to the provider's.
+    """
+
+    __tablename__ = "hosted_provider_regions"
+    __table_args__ = (UniqueConstraint("hosted_provider_id", "slug", name="uq_hosted_provider_regions_provider_slug"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    hosted_provider_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("hosted_providers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(32))
+    label: Mapped[str] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
+    encrypted_api_key: Mapped[str | None] = mapped_column(default=None)
+    api_key_last4: Mapped[str | None] = mapped_column(String(4), default=None)
+    api_base: Mapped[str | None] = mapped_column(String(1024), default=None)
+    encrypted_client_args: Mapped[str | None] = mapped_column(default=None)
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
@@ -286,6 +313,28 @@ class HostedProviderModel(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
+
+
+class HostedProviderDisabledVendor(Base):
+    """A vendor whose models one hosted provider does not serve.
+
+    A row is the switch turned off: dispatch refuses every model of that
+    vendor on that provider, including models a later refresh offers, while
+    each model's own switch is kept for when the row is deleted. ``provider``
+    holds the hosted provider's name rather than a foreign key, as
+    ``hosted_provider_models`` does, because a provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "hosted_provider_disabled_vendors"
+    __table_args__ = (
+        UniqueConstraint("provider", "vendor", name="uq_hosted_provider_disabled_vendors_provider_vendor"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    vendor: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class ConfiguredProviderImport(Base):
@@ -344,11 +393,17 @@ class WorkspaceProviderPolicy(Base):
     """
 
     __tablename__ = "workspace_provider_policies"
+    # Recorded on the request's span when they change (core/change_audit.py).
+    __audited__: ClassVar[tuple[str, ...]] = ("require_zero_data_retention", "allowed_data_locations")
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
     )
     require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The data locations a hosted provider region must declare to serve the
+    # workspace, or None for any. An undeclared region never matches a list.
+    # SQL NULL rather than JSON null when cleared, so the cache query filters it out.
+    allowed_data_locations: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

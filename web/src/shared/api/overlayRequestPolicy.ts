@@ -13,7 +13,7 @@
  * module can settle its answer (a stored choice, a directory it has to fetch)
  * ahead of the first request that depends on it. Resolving means the answer is
  * settled; rejecting means no deployment could be chosen, and the dashboard
- * then shows the gateway as unreachable rather than reading a bootstrap from
+ * then says no gateway was chosen rather than reading a bootstrap from
  * wherever the policy happened to point (`app/boot.ts`). A replacing module
  * that wants the page's own origin as its fallback resolves with it.
  *

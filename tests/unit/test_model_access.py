@@ -2,12 +2,23 @@
 
 import uuid
 from collections.abc import Iterator
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.catalog import (
+    OfferingRow,
+    build_organization_selectors,
+    build_selector_index,
+    reset_selector_index,
+    set_selector_index,
+)
 from gateway.services.model_access import (
     effective_allowlist,
     effective_tool_allowlist,
@@ -18,12 +29,14 @@ from gateway.services.model_access import (
     is_tool_allowlist_subset,
     key_model_refusal,
     legacy_tool_grants,
+    misspelled_model_refusal,
     org_model_refusal,
     tool_not_allowed_detail,
     tools_within_user,
     validate_allowed_models,
     validate_allowed_tools,
 )
+from gateway.services.organizations import AccessLists
 from gateway.services.tenancy import org_provider_key_service as org_store
 from gateway.services.tenancy.org_provider_key_service import KeyOffer
 
@@ -138,6 +151,160 @@ def test_validate_passthrough_and_dedup() -> None:
 def test_validate_rejects_bad_entries(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_allowed_models(GatewayConfig(), [bad])
+
+
+# --- catalog IDs in allowed_models ---------------------------------------------
+
+_ORG = uuid.uuid4()
+_ORG_WORKSPACE = uuid.uuid4()
+
+
+@pytest.fixture
+def author_namespace_catalog() -> Iterator[None]:
+    """Catalog IDs named for the model's author, which names no provider (otari#3069).
+
+    ``mistralai/mistral-small-3`` is on two instances, ``openai/gpt-4o`` on its
+    own provider and another, and ``alibaba/qwen3.8-flash`` only on one
+    organization's keys, one of them reached by its slug.
+    """
+    deployment = [
+        OfferingRow("deepinfra:mistralai/mistral-small-3", "deepinfra", "deepinfra", 0.10),
+        OfferingRow("groq:mistralai/mistral-small-3", "groq", "groq", 0.20),
+        OfferingRow("openai:gpt-4o", "openai", "openai", 2.50),
+        OfferingRow("azure:gpt-4o", "azure", "azure", 2.00),
+    ]
+    organization = [
+        OfferingRow("deepinfra:alibaba/qwen3.8-flash", "deepinfra", "deepinfra", 0.05),
+        OfferingRow("team-key:qwen3.8-flash", "team-key", "together", 0.01),
+    ]
+    identities = {
+        "mistralai/mistral-small-3": ("mistralai/mistral-small-3", tuple(row.selector for row in deployment[:2])),
+        "openai/gpt-4o": ("openai/gpt-4o", ("openai:gpt-4o", "azure:gpt-4o")),
+        "alibaba/qwen3.8-flash": ("alibaba/qwen3.8-flash", tuple(row.selector for row in organization)),
+    }
+    view = build_organization_selectors(deployment, organization, identities)
+    set_selector_index(
+        build_selector_index(
+            deployment, identities, organizations={_ORG: view}, workspace_organization={_ORG_WORKSPACE: _ORG}
+        )
+    )
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_stores_a_catalog_id_as_its_offerings() -> None:
+    """The picker offers catalog IDs; the stored list holds the selectors dispatch matches."""
+    stored = validate_allowed_models(GatewayConfig(), ["mistralai/mistral-small-3"])
+
+    assert stored == ["deepinfra:mistralai/mistral-small-3", "groq:mistralai/mistral-small-3"]
+    assert is_model_allowed(stored, "groq:mistralai/mistral-small-3")
+    assert not is_model_allowed(stored, "groq:mistralai/mistral-large-3")
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_dedupes_a_catalog_id_against_its_own_offerings() -> None:
+    assert validate_allowed_models(
+        GatewayConfig(), ["groq:mistralai/mistral-small-3", "MistralAI/Mistral-Small-3"]
+    ) == ["groq:mistralai/mistral-small-3", "deepinfra:mistralai/mistral-small-3"]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize(
+    ("within", "expected"),
+    [
+        (["groq:*"], ["groq:mistralai/mistral-small-3"]),
+        (["deepinfra:mistralai/mistral-small-3"], ["deepinfra:mistralai/mistral-small-3"]),
+        # Covering none keeps every offering, so the owner check refuses the list.
+        (["anthropic:*"], ["deepinfra:mistralai/mistral-small-3", "groq:mistralai/mistral-small-3"]),
+    ],
+)
+def test_validate_narrows_a_catalog_id_to_the_offerings_the_owner_covers(
+    within: list[str], expected: list[str]
+) -> None:
+    assert validate_allowed_models(GatewayConfig(), ["mistralai/mistral-small-3"], within=within) == expected
+
+
+def test_validate_never_narrows_an_entry_that_names_its_offering() -> None:
+    """Only a catalog ID's expansion is narrowed; a selector the caller wrote is kept, and refused if it exceeds."""
+    assert validate_allowed_models(GatewayConfig(), ["openai:gpt-4o"], within=["groq:*"]) == ["openai:gpt-4o"]
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+def test_validate_reads_a_catalog_id_whose_author_is_also_a_provider_as_the_model() -> None:
+    """``openai/gpt-oss-20b`` was stored as ``openai:gpt-oss-20b``, which OpenAI does not serve."""
+    assert validate_allowed_models(GatewayConfig(), ["openai/gpt-oss-20b"]) == ["groq:openai/gpt-oss-20b"]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_keeps_the_legacy_spelling_of_a_served_offering_to_that_offering() -> None:
+    """Reading it as the catalog ID would widen an existing restriction to every provider of the model."""
+    assert validate_allowed_models(GatewayConfig(), ["openai/gpt-4o"]) == ["openai:gpt-4o"]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_reads_a_catalog_id_from_the_callers_organization() -> None:
+    with pytest.raises(ValueError, match="unknown provider or instance 'alibaba'"):
+        validate_allowed_models(GatewayConfig(), ["alibaba/qwen3.8-flash"])
+
+    # The offering on the key reached by its slug is one no entry can name.
+    expected = ["deepinfra:alibaba/qwen3.8-flash"]
+    assert validate_allowed_models(GatewayConfig(), ["alibaba/qwen3.8-flash"], organization_id=_ORG) == expected
+    assert validate_allowed_models(GatewayConfig(), ["alibaba/qwen3.8-flash"], workspace_id=_ORG_WORKSPACE) == expected
+
+
+def test_validate_refuses_a_catalog_id_served_only_on_a_key_reached_by_its_slug() -> None:
+    rows = [OfferingRow("team-key:qwen3.8-flash", "team-key", "together", 0.01)]
+    identities = {"alibaba/qwen3.8-flash": ("alibaba/qwen3.8-flash", ("team-key:qwen3.8-flash",))}
+    view = build_organization_selectors([], rows, identities)
+    set_selector_index(build_selector_index([], identities, organizations={_ORG: view}))
+    try:
+        with pytest.raises(ValueError, match="served only through providers an allowed_models entry cannot name"):
+            validate_allowed_models(GatewayConfig(), ["alibaba/qwen3.8-flash"], organization_id=_ORG)
+    finally:
+        reset_selector_index()
+
+
+def test_validate_keeps_a_provider_spelling_whose_model_no_entry_can_name_as_before() -> None:
+    """``openai/gpt-4o`` served only on a renamed hosted provider was accepted before catalog IDs were read."""
+    rows = [OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", 2.0)]
+    set_selector_index(build_selector_index(rows, {"openai/gpt-4o": ("openai/gpt-4o", ("openai-eu:gpt-4o",))}))
+    try:
+        assert validate_allowed_models(GatewayConfig(), ["openai/gpt-4o"]) == ["openai:gpt-4o"]
+    finally:
+        reset_selector_index()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"organization_id": _ORG},
+        {"workspace_id": _ORG_WORKSPACE},
+        {"workspace_id": uuid.uuid4(), "organization_id": _ORG},
+    ],
+)
+async def test_a_changed_key_list_reads_a_catalog_id_from_the_keys_organization(scope: dict[str, uuid.UUID]) -> None:
+    """An edit reads the catalog the key was created against, also for a workspace the index has not mapped yet."""
+    service = ApiKeyService(cast(UnitOfWork, MagicMock()), cast(Any, MagicMock()), users=cast(Any, MagicMock()))
+
+    access = await service.check_access_lists(
+        GatewayConfig(),
+        AccessLists(["alibaba/qwen3.8-flash"], None),
+        stored=AccessLists(None, None),
+        owner_id=None,
+        **scope,
+    )
+
+    assert access.models == ["deepinfra:alibaba/qwen3.8-flash"]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize("entry", ["acme/no-such-model", "mistralai/*", "mistralai/mistral-small-*"])
+def test_validate_refuses_a_slash_spelling_that_names_no_catalog_model(entry: str) -> None:
+    with pytest.raises(ValueError, match="unknown provider or instance"):
+        validate_allowed_models(GatewayConfig(), [entry])
 
 
 # --- search tool access ------------------------------------------------------
@@ -357,7 +524,16 @@ def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbid
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
     assert "no-such-model" in refusal.detail
-    assert "'provider:model' selector, an alias, or a model id from the catalog" in refusal.detail
+
+
+def test_an_unresolvable_selector_points_to_the_workspace_routing_policies() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], None, selector="faber-verify")
+    assert refusal is not None
+    assert refusal.detail == (
+        "Unknown or unsupported model 'faber-verify'. Send a catalog model id such as 'vendor/model', "
+        "a 'provider:model' selector, or an alias or routing policy name. "
+        "GET /api/v1/models lists the model ids, aliases and routing policies you can use."
+    )
 
 
 def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
@@ -442,3 +618,38 @@ def test_intersect_allowlists_permits_exactly_what_both_permit(
 
 def test_intersect_allowlists_of_two_unrestricted_lists_is_unrestricted() -> None:
     assert intersect_allowlists(None, None) is None
+
+
+@pytest.fixture
+def gpt_oss_catalog() -> Iterator[None]:
+    """Two gpt-oss models offered on groq."""
+    offerings = {"openai/gpt-oss-120b": "groq:openai/gpt-oss-120b", "openai/gpt-oss-20b": "groq:openai/gpt-oss-20b"}
+    rows = [OfferingRow(selector, "groq", "groq", 0.15) for selector in offerings.values()]
+    models = {model: (model, (selector,)) for model, selector in offerings.items()}
+    set_selector_index(build_selector_index(rows, models))
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+def test_a_misspelled_model_is_refused_naming_the_nearest_ids() -> None:
+    refusal = misspelled_model_refusal(
+        None, instance="openai", provider="openai", model="gpt-oss-12", selector="OpenAI/gpt-oss-12"
+    )
+
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Unknown model 'OpenAI/gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b?"
+        " See GET /api/v1/models."
+    )
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+@pytest.mark.parametrize(
+    ("instance", "model"),
+    [("openai", "gpt-oss-120b"), ("mistral", "no-such-model")],
+    ids=["a model the catalog has", "a prefix the catalog has nothing under"],
+)
+def test_a_model_that_does_not_look_misspelled_is_not_refused(instance: str, model: str) -> None:
+    assert misspelled_model_refusal(None, instance=instance, provider=instance, model=model, selector=model) is None

@@ -105,6 +105,59 @@ _FIXTURES: dict[str, dict[str, Any]] = {
             {"role": "assistant", "content": "Done."},
         ],
     },
+    "tool result blocks with no part of their own": {
+        "tools": _TOOLS,
+        "messages": [
+            {"role": "user", "content": "find a tool, then search"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_s", "name": "read", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_s",
+                        "content": [
+                            {"type": "text", "text": "Found:"},
+                            {"type": "tool_reference", "tool_name": "WebFetch"},
+                            {
+                                "type": "search_result",
+                                "title": "Firefox",
+                                "source": "https://example.com",
+                                "content": [{"type": "text", "text": "160.0.1"}],
+                            },
+                            {"type": "text", "text": "done"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    },
+    "a browser state leading a tool result": {
+        "tools": _TOOLS,
+        "messages": [
+            {"role": "user", "content": "open the release notes"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_b", "name": "read", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_b",
+                        "content": [
+                            {
+                                "type": "browser_state",
+                                "tabs": [{"id": 1, "url": "https://example.com/notes", "active": True}],
+                                "state_changes": ["navigated"],
+                                "ignored": "not a field the model is told",
+                            },
+                            {"type": "text", "text": "page loaded"},
+                            {"type": "text", "text": " from cache"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    },
     "forced tool, sequential": {
         "tools": _TOOLS,
         "tool_choice": {"type": "tool", "name": "read", "disable_parallel_tool_use": True},

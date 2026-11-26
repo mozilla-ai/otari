@@ -6,6 +6,7 @@ token and cost metrics carry, so a dashboard joins them on one key.
 
 from __future__ import annotations
 
+from gateway.core.usage import output_tokens_per_second
 from gateway.metrics import REGISTRY, Counter, Histogram
 
 ABANDONED_ATTEMPTS = Counter(
@@ -54,6 +55,17 @@ ATTEMPT_DURATION_SECONDS = Histogram(
     registry=REGISTRY,
 )
 
+# A slow reasoning model to a fast inference chip.
+_THROUGHPUT_BUCKETS = (5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 120.0, 160.0, 250.0, 400.0, 800.0, 1500.0)
+
+OUTPUT_TOKENS_PER_SECOND = Histogram(
+    "gateway_output_tokens_per_second",
+    "Output tokens over a successful attempt's duration, time to first token included",
+    ["provider", "model"],
+    buckets=_THROUGHPUT_BUCKETS,
+    registry=REGISTRY,
+)
+
 
 def record_attempt(
     provider: str,
@@ -64,6 +76,7 @@ def record_attempt(
     fallback: bool,
     latency_ms: int | None,
     ttft_ms: int | None,
+    completion_tokens: int | None,
 ) -> None:
     """Record how one upstream attempt ended.
 
@@ -75,7 +88,9 @@ def record_attempt(
 
     The timings are measured from the start of the request, so they are observed
     only for a plan's first candidate, where that is also the attempt's start: a
-    fallback's would include the time its predecessors took.
+    fallback's would include the time its predecessors took. Throughput is
+    observed for a success alone, and only for a response long enough to measure
+    (``output_tokens_per_second``).
     """
     outcome = "error" if failed else "success"
     status = "200" if not failed else str(status_code) if status_code is not None else "none"
@@ -88,3 +103,5 @@ def record_attempt(
         ATTEMPT_DURATION_SECONDS.labels(provider=provider, model=model, outcome=outcome).observe(latency_ms / 1000)
     if ttft_ms is not None:
         TIME_TO_FIRST_TOKEN_SECONDS.labels(provider=provider, model=model).observe(ttft_ms / 1000)
+    if not failed and (rate := output_tokens_per_second(completion_tokens, latency_ms)) is not None:
+        OUTPUT_TOKENS_PER_SECOND.labels(provider=provider, model=model).observe(rate)

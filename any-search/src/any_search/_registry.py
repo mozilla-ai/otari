@@ -15,26 +15,34 @@ if TYPE_CHECKING:
 
 def _providers() -> dict[str, type["AnySearch"]]:
     # Imported on first use: each provider subclasses AnySearch, whose module imports this one.
+    from any_search.providers.brave import BraveProvider
     from any_search.providers.deepseek import DeepSeekProvider
     from any_search.providers.exa import ExaProvider
     from any_search.providers.fake import FakeProvider
+    from any_search.providers.keenable import KeenableProvider
     from any_search.providers.mojeek import MojeekProvider
     from any_search.providers.perplexity import PerplexityProvider
     from any_search.providers.searxng import SearxngProvider
     from any_search.providers.serply import SerplyProvider
     from any_search.providers.synthetic import SyntheticProvider
+    from any_search.providers.tavily import TavilyProvider
+    from any_search.providers.youdotcom import YouDotComProvider
 
     return {
         provider.METADATA.name: provider
         for provider in (
+            BraveProvider,
             DeepSeekProvider,
             ExaProvider,
             FakeProvider,
+            KeenableProvider,
             MojeekProvider,
             PerplexityProvider,
             SearxngProvider,
             SerplyProvider,
             SyntheticProvider,
+            TavilyProvider,
+            YouDotComProvider,
         )
     }
 

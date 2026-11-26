@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type {
   CreateHostedModelRequest,
+  CreateHostedProviderRegionRequest,
   CreateHostedProviderRequest,
   DeploymentProviderMigration,
   DeploymentProviderMigrationReviewedRow,
@@ -12,21 +13,28 @@ import type {
   HostedModel,
   HostedModels,
   HostedModelsRefresh,
+  HostedPriceReset,
   HostedProvider,
   HostedProviders,
   HostedProviderTestResult,
+  HostedVendor,
+  HostedVendorModelsSwitch,
   PlatformConnectStart,
   PlatformConnectStatus,
   ReencryptHostedProvidersResult,
+  SwitchHostedVendorModelsRequest,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
+  UpdateHostedProviderRegionRequest,
   UpdateHostedProviderRequest,
+  UpdateHostedVendorRequest,
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   HOSTED_CATALOG_UPDATE_PREVIEW,
+  HOSTED_PRICE_RESET_PREVIEW,
   HOSTED_PROVIDER_AVAILABLE_MODELS,
   HOSTED_PROVIDERS,
   MODELS,
@@ -57,6 +65,9 @@ import {
  */
 const PROVIDER_PAGE_LIMIT = 1000
 
+/** The API's maximum for one provider's models. */
+const MODEL_LIST_LIMIT = 1000
+
 const providerPath = (provider: string) =>
   `/hosted-providers/${encodeURIComponent(provider)}`
 
@@ -72,14 +83,24 @@ function useInvalidateHosted() {
   }
 }
 
-export function useHostedProviders(enabled = true) {
+/**
+ * Every hosted provider. `isFresh` reads the list again rather than trusting a
+ * cached one, for a page opened on one provider by name, which must not answer
+ * "not found" from a list cached before that provider was added elsewhere.
+ */
+export function useHostedProviders(
+  enabled = true,
+  { isFresh = false }: { isFresh?: boolean } = {},
+) {
   return useQuery({
     queryKey: [HOSTED_PROVIDERS, "list"],
     queryFn: () =>
       apiFetch<HostedProviders>(
         `/hosted-providers?limit=${PROVIDER_PAGE_LIMIT}`,
       ),
-    staleTime: 30_000,
+    // Zero rather than `refetchOnMount`, which never fires for a query that
+    // is still waiting on the operator gate when the page mounts.
+    staleTime: isFresh ? 0 : 30_000,
     enabled,
   })
 }
@@ -129,6 +150,86 @@ export function useDeleteHostedProvider() {
       // Removing the connected provider is how a deployment disconnects.
       void queryClient.invalidateQueries({ queryKey: [PLATFORM_CONNECT] })
     },
+  })
+}
+
+// A provider's regions (`/hosted-providers/{provider}/regions`). Each write
+// answers the whole provider, whose list row is what every page reads, so the
+// hosted reads are invalidated rather than patched.
+
+const regionPath = (provider: string, slug: string) =>
+  `${providerPath(provider)}/regions/${encodeURIComponent(slug)}`
+
+/**
+ * Every region write answers the whole provider, which is put into the cached
+ * list at once (keeping its list-only model counts) before the list is read
+ * again: a second move pressed before the reread lands must see the new order.
+ */
+function useApplyRegionWrite() {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateHosted()
+  return (provider: HostedProvider) => {
+    queryClient.setQueryData<HostedProviders>(
+      [HOSTED_PROVIDERS, "list"],
+      (list) =>
+        list && {
+          ...list,
+          data: list.data.map((row) =>
+            row.name === provider.name
+              ? { ...provider, models: row.models }
+              : row,
+          ),
+        },
+    )
+    invalidate()
+  }
+}
+
+/**
+ * Add a region after the provider's others. The first one also turns the
+ * provider's own connection into a region ahead of it, named by
+ * `primary_slug` and `primary_label`.
+ */
+export function useAddHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: (body: CreateHostedProviderRegionRequest) =>
+      apiFetch<HostedProvider>(`${providerPath(provider)}/regions`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: applyRegionWrite,
+  })
+}
+
+/** Change, switch or move one region; `position` is its new place, from 0. */
+export function useUpdateHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: ({
+      slug,
+      body,
+    }: {
+      slug: string
+      body: UpdateHostedProviderRegionRequest
+    }) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: applyRegionWrite,
+  })
+}
+
+/** Remove one region. Removing the last leaves the provider on its own connection. */
+export function useRemoveHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: (slug: string) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "DELETE",
+      }),
+    onSuccess: applyRegionWrite,
   })
 }
 
@@ -213,41 +314,104 @@ export function useCancelPlatformConnect() {
 }
 
 /**
- * One page of a provider's offered models.
+ * A provider's offered models, all of them, with each vendor's switch and counts.
+ *
+ * Not paged: the models are shown under their vendors, and a vendor's models
+ * split across pages would hide what its switch covers. The API's maximum is
+ * the bound, which no provider here comes near.
  *
  * The provider is part of the key, so the placeholder is kept only while the
- * same provider pages: a bare `keepPreviousData` would paint one provider's
- * models under another's name for a frame when a different row is opened.
+ * same provider is shown: a bare `keepPreviousData` would paint one provider's
+ * models under another's name for a frame.
  */
 export function useHostedModels(
   provider: string,
-  page: number,
-  pageSize: number,
   /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
   type = "",
-  /** Only models whose name contains this text; empty for every model. */
+  /** Only models whose name or vendor contains this text; empty for every model. */
   search = "",
   /** Only served models, or only withheld ones; undefined for both. */
   served?: boolean,
 ) {
   return useQuery({
-    queryKey: [
-      HOSTED_PROVIDERS,
-      "models",
-      provider,
-      page,
-      pageSize,
-      type,
-      search,
-      served,
-    ],
+    queryKey: [HOSTED_PROVIDERS, "models", provider, type, search, served],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
+        `${providerPath(provider)}/models?limit=${MODEL_LIST_LIMIT}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === provider ? previous : undefined,
+  })
+}
+
+/** Switch one vendor on or off on a provider; its models keep their own switches. */
+export function useSetHostedVendor(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: UpdateHostedVendorRequest) =>
+      apiFetch<HostedVendor>(`${providerPath(provider)}/vendors`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/** Set every model of one vendor's switch at once. */
+export function useSwitchHostedVendorModels(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: SwitchHostedVendorModelsRequest) =>
+      apiFetch<HostedVendorModelsSwitch>(
+        `${providerPath(provider)}/models/switch`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: invalidate,
+  })
+}
+
+/**
+ * What putting a provider's operator-set prices back on the default would
+ * change, read once per opening of the sync dialog.
+ *
+ * A dry-run POST read as a query, keyed on the opening for the reason
+ * `useHostedCatalogUpdatePreview` gives: a reopen shows the pending state
+ * rather than the last opening's answer.
+ */
+export function useHostedPriceResetPreview(
+  provider: string,
+  opening: number,
+  /** One vendor's models; empty for every vendor. */
+  vendor = "",
+) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [HOSTED_PRICE_RESET_PREVIEW, provider, opening, vendor],
+    queryFn: () =>
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        {
+          method: "POST",
+          body: JSON.stringify({ dry_run: true, vendor: vendor || null }),
+        },
+      ),
+    enabled: opening > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
+  })
+}
+
+/** Put the named models back on the default price. */
+export function useResetHostedModelPrices(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (models: string[]) =>
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        { method: "POST", body: JSON.stringify({ models, dry_run: false }) },
+      ),
+    onSuccess: invalidate,
   })
 }
 

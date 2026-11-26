@@ -65,7 +65,8 @@ the only type that calls a model, and it can only be `advisory`.
 
 ## Registering the hook
 
-Run `otari hook setup` inside the Git repository you want to guard.
+Run `otari hook setup` inside the Git repository you want to guard. `--harness pi`
+installs an extension rather than writing a settings file, so it also runs outside one.
 
 ### Claude Code
 
@@ -99,6 +100,28 @@ project's hooks only after you accept them: start Codex in the repository and ru
 The Codex integration is newer than the Claude Code one; see
 [Registering it for Codex](agent-guardrails-reference.md#registering-it-for-codex)
 for what it cannot see.
+
+### pi
+
+pi is wired by the pi-otari extension, not by a settings file:
+
+```bash
+otari hook setup --harness pi
+```
+
+installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
+writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
+not on `PATH` it prints those install instructions instead. If the extension is
+already installed for your user it says so, offers `pi update` when the installed
+version predates guardrail support, and otherwise asks before installing. Inside a Git
+repository it also offers the same starter `.otari/guardrails.yml` as the other
+harnesses; outside one it installs the extension only. The extension
+calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
+`edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
+path is an edit target, a `read` path is a read target, and a `bash` command is
+a command. On `Stop` the extension sends the session's commands as
+`bash_commands`; pi's session file is never parsed. Exit codes and output are
+the same as for Claude Code.
 
 ## Writing a gate
 
@@ -277,12 +300,16 @@ key where the agent runs:
 
 ```bash
 export OTARI_URL="http://localhost:8000"     # your gateway's URL
-export OTARI_API_KEY="tk-your-import-key"    # must be budget-exempt
+export OTARI_API_KEY="tk-your-import-key"    # budget-exempt, with telemetry:write and agents
 ```
 
 - **The key must be budget-exempt.** Only a deployment's operator can create one
   (see [Enforcement boundary](../../docs/external-usage-reference.md#enforcement-boundary)), so
   reporting works on a gateway you run, not on otari.ai today.
+- **The key needs the `telemetry:write` and `agents` scopes**: the spans go to
+  `/otlp/v1/traces` and the gates to `/api/v1/hooks/guardrails`. In the key
+  form, choose **Custom** under **Access** and tick both. A key without them is
+  refused, and its reports wait in `~/.otari/outbox/` until they expire.
 - **Claude Code** does not pass these variables to its hooks; set them in the
   `env` block of `~/.claude/settings.json`, beside the exporter variables of
   [Send Claude Code sessions to Otari](../../docs/claude-code.md#send-claude-code-sessions-to-otari).
@@ -314,8 +341,8 @@ CLAUDE.md when that is the only one:
 otari guardrails generate
 ```
 
-1. Confirm the model CLI it names (`claude -p` or `codex exec`) before it sends
-   the file.
+1. Confirm the model CLI it names (`claude -p`, `codex exec` or `pi -p`) before
+   it sends the file.
 2. Answer each proposal with `y`, `n`, `e` (edit) or `q`. Only accepted gates are
    written.
 3. Run `otari guardrails validate` on the result.

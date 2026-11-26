@@ -51,10 +51,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_db, verify_master_key
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.exceptions.identity_exceptions import CurrentPasswordRequiredError, EmailChangeNotSupportedError
+from gateway.models.identity import AddressAuthority
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH, validated_email
+from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.user_service import set_password, update_password
 
@@ -124,7 +126,7 @@ class SetPasswordRequest(BaseModel):
     # number when lower-casing lengthens the string.
     email: str | None = Field(
         default=None,
-        max_length=MAX_EMAIL_LENGTH,
+        max_length=MAX_STORED_ADDRESS_LENGTH,
         description=(
             "The address to sign in with. Required when the identity has none, which is the state "
             "first boot leaves the operator in, including when the master key is what authenticates "
@@ -230,11 +232,17 @@ async def set_dashboard_password(
             keep_session_token_hash=keep_session,
         )
     else:
+        # An account with no address is not evidence of deployment authority: an account
+        # provisioned by an organization's own connection holds none either. So the
+        # authority is derived from what the caller actually proved rather than from the
+        # state of the account, and a session records an address nobody has proved.
+        holds_deployment_authority = by_master_key or (claims_the_deployment and not was_already_claimed)
         await set_password(
             db,
             identity,
             new_password=body.new_password,
             sso_enforcement=connections,
+            authority=AddressAuthority.OPERATOR if holds_deployment_authority else AddressAuthority.SESSION,
             email=body.email,
             keep_session_token_hash=keep_session,
         )

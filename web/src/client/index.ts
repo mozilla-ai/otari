@@ -34,6 +34,7 @@ export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 // knows whether it can authenticate at all.
 // ---------------------------------------------------------------------------
 export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
+export type MailReadiness = Schemas["MailReadiness"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -55,6 +56,9 @@ export type PasswordResponse = Schemas["PasswordResponse"]
 // ---------------------------------------------------------------------------
 export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
 export type UpdateAvatarRequest = Schemas["UpdateAvatarRequest"]
+// Deleting the signed-in account (`DELETE /v1/auth/account`), confirmed by its
+// address and, where it has one, its password.
+export type DeleteAccountRequest = Schemas["DeleteAccountRequest"]
 
 // ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
@@ -219,6 +223,7 @@ export type User = Schemas["UserResponse"]
 export type UpdateUserRequest = Schemas["UpdateUserRequest"]
 export type ApiKey = Schemas["KeyInfo"]
 export type ApiKeyDisabledReason = Schemas["DisabledReason"]
+export type KeyScope = Schemas["KeyScope"]
 export type CreateKeyRequest = Schemas["CreateKeyRequest"]
 export type CreateKeyResponse = Schemas["CreateKeyResponse"]
 export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
@@ -229,6 +234,7 @@ export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
 export type FederationRule = Schemas["FederationRulePublic"]
 export type CreateFederationRuleRequest = Schemas["FederationRuleCreate"]
 export type EndUser = Schemas["EndUserPublic"]
+export type EndUserCount = Schemas["KeyEndUsersPublic"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
@@ -270,6 +276,12 @@ export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
+// The same catalog folded by provider instance (`/v1/catalog/providers`): the
+// list of providers this deployment serves, and one provider with its models.
+export type CatalogProvidersResponse = Schemas["CatalogProvidersResponse"]
+export type CatalogProviderSummary = Schemas["CatalogProviderSummary"]
+export type CatalogProviderDetail = Schemas["CatalogProviderDetail"]
+export type CatalogProviderModel = Schemas["CatalogProviderModel"]
 export type ModelMetadataOverride = Schemas["ModelMetadataOverrideRequest"]
 export type ModelInputModality = NonNullable<
   ModelMetadataOverride["input_modalities"]
@@ -332,6 +344,8 @@ export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 // tenant and every workspace in it inherits it. The deployment's own keys are
 // `HostedProvider` below.
 export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
+// The credential an edge proxy in front of a key's own address requires.
+export type EndpointAuth = Schemas["EndpointAuthPublic"]
 // No alias for the list wrapper: this surface is read through `fetchAllPaged`,
 // which types the envelope itself, so a name for it would have no consumer.
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
@@ -407,6 +421,15 @@ export type CreateHostedProviderRequest = Defaulted<
   "enabled"
 >
 export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
+// A region a hosted provider serves from: its own key, endpoint and data
+// location where it has them, null wherever it uses the provider's.
+export type HostedProviderRegion = Schemas["HostedProviderRegionPublic"]
+export type CreateHostedProviderRegionRequest = Defaulted<
+  Schemas["HostedProviderRegionCreateRequest"],
+  "enabled"
+>
+export type UpdateHostedProviderRegionRequest =
+  Schemas["HostedProviderRegionUpdateRequest"]
 export type HostedModel = Schemas["HostedModelPublic"]
 
 // The decision models that pick a subagent's model when a coding agent asks,
@@ -417,10 +440,34 @@ export type AgentRecommender = Schemas["AgentRecommenderPublic"]
 export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
 export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
 export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
+
+// What the subagent router saved: the tokens routed subagents consumed, priced
+// at the models they ran on and at the models they would have started on.
+export type SubagentSavings = Schemas["SubagentSavingsPublic"]
+export type SavingsAmounts = Schemas["SavingsAmounts"]
+export type SubagentSavingsTotals = Schemas["SubagentSavingsTotals"]
+export type SubagentSavingsPoint = Schemas["SubagentSavingsPoint"]
+export type SavingsByAgentType = Schemas["SavingsByAgentType"]
+export type SavingsBySwap = Schemas["SavingsBySwap"]
 export type HostedModels = Schemas["HostedModelsPublic"]
 export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
 export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
 export type HostedModelsRefresh = Schemas["HostedModelsRefreshPublic"]
+export type HostedModelRates = Schemas["HostedModelRates"]
+export type HostedProviderModelSummary = Schemas["HostedProviderModelSummary"]
+export type HostedVendor = Schemas["HostedVendorPublic"]
+export type UpdateHostedVendorRequest = Schemas["HostedVendorUpdateRequest"]
+export type SwitchHostedVendorModelsRequest = Defaulted<
+  Schemas["HostedVendorModelsSwitchRequest"],
+  "only_unpriced"
+>
+export type HostedVendorModelsSwitch = Schemas["HostedVendorModelsSwitchPublic"]
+export type HostedPriceResetRequest = Defaulted<
+  Schemas["HostedPriceResetRequest"],
+  "dry_run"
+>
+export type HostedPriceReset = Schemas["HostedPriceResetPublic"]
+export type HostedPriceResetChange = Schemas["HostedPriceResetChangePublic"]
 export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
@@ -632,6 +679,9 @@ export type AcceptInvitationRequest = Defaulted<
   "terms_accepted"
 >
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
+// Accepting from the invitee's own inbox answers the membership alone: that
+// caller is already signed in, so there is no next step to carry.
+export type AcceptedMembership = Schemas["AcceptedMembershipPublic"]
 
 // The invitee's side of the same flow: what is waiting on the signed-in
 // identity, rather than what this organization has sent out. Addressed by
@@ -671,6 +721,8 @@ export type SetWorkspaceHostedProviderRequest =
   Schemas["WorkspaceHostedProviderAccessRequest"]
 // What one workspace requires of every provider serving it.
 export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
+export type SetWorkspaceProviderPolicyRequest =
+  Schemas["WorkspaceProviderPolicyRequest"]
 
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see
@@ -679,6 +731,7 @@ export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
 export type WorkspaceActivation = Schemas["WorkspaceActivationPublic"]
 export type ActivationAttempt = Schemas["ActivationAttemptPublic"]
 export type ActivationApiKey = Schemas["ActivationApiKeyPublic"]
+export type ActivationIssuedKey = Schemas["ActivationIssuedKeyPublic"]
 /** The failure classes the guide's copy is written for. */
 export type ActivationErrorCategory = NonNullable<
   ActivationAttempt["error_category"]
@@ -756,6 +809,8 @@ export type GuardrailTestResult =
 // `src/gateway/services/tenancy/workspace_mcp_server_service.py`. The stored
 // bearer token is write-only, so the public shape reports only `has_token`.
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
+export type WorkspaceMcpServerLogo = Schemas["WorkspaceMcpServerLogoPublic"]
+export type WorkspaceMcpServerLogos = Schemas["WorkspaceMcpServerLogosPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
 export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
 // A stored server's access list (`everyone_tools` and the grants that override
@@ -768,6 +823,9 @@ export type CreateWorkspaceMcpServerGrantsRequest =
 export type WorkspaceMcpServerAccessCheck =
   Schemas["WorkspaceMcpServerAccessCheck"]
 export type WorkspaceMcpServerKeyAccess = Schemas["WorkspaceMcpServerKeyAccess"]
+// The tools the caller may use on one server, under their own access rule.
+export type WorkspaceMcpServerMyTools = Schemas["WorkspaceMcpServerMyTools"]
+export type McpToolSummary = Schemas["McpToolSummary"]
 export type McpServerCheckFailure = Schemas["CheckFailure"]
 export type CheckWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCheckRequest"]
@@ -775,6 +833,29 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+export type McpCredentialMode = Schemas["McpCredentialMode"]
+export type McpConnection = Schemas["McpConnectionPublic"]
+export type McpConnections = Schemas["McpConnectionsPublic"]
+export type McpConnectionStarted = Schemas["McpConnectionStarted"]
+export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
+export type McpServerConnection = Schemas["McpServerConnectionPublic"]
+export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+
+// The catalog of remote MCP servers a workspace can add, the logos it knows,
+// and the sync that fills it from the MCP Registry.
+export type McpCatalogServer = Schemas["McpCatalogServerPublic"]
+export type McpCatalogServers = Schemas["McpCatalogServersPublic"]
+export type McpCatalogSyncStatus = Schemas["McpCatalogSyncStatus"]
+
+// A member asking a workspace's admins for a catalog server: the member's own
+// requests, and everyone waiting for one server as an admin sees them.
+export type McpServerRequest = Schemas["McpServerRequestPublic"]
+export type McpServerRequests = Schemas["McpServerRequestsPublic"]
+export type McpServerRequester = Schemas["McpServerRequesterPublic"]
+export type McpServerRequestGroup = Schemas["McpServerRequestGroupPublic"]
+export type McpServerRequestGroups = Schemas["McpServerRequestGroupsPublic"]
+export type CreateMcpServerRequest = Schemas["McpServerRequestCreate"]
+export type DeclineMcpServerRequests = Schemas["McpServerRequestDecline"]
 
 // ---------------------------------------------------------------------------
 // Playground
@@ -839,5 +920,7 @@ export type FeedbackSubmission =
   operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]
 
 export type AppDetails = components["schemas"]["AppDetails"]
+export type AppAuthorizationRequest =
+  components["schemas"]["AppAuthorizationRequest"]
 export type AppAuthorizationResponse =
   components["schemas"]["AppAuthorizationResponse"]

@@ -63,10 +63,13 @@ const { PostSignInGate } = await vi.importActual<
 
 describe("the base post-sign-in gate", () => {
   it("renders its children unchanged", () => {
+    // Off, so the welcome it also mounts stays away and asks nothing.
     render(
-      <PostSignInGate>
-        <p>CHILD</p>
-      </PostSignInGate>,
+      <DeploymentProvider value={bootstrap({ platform_connect: false })}>
+        <PostSignInGate>
+          <p>CHILD</p>
+        </PostSignInGate>
+      </DeploymentProvider>,
     )
 
     expect(screen.getByText("CHILD")).toBeInTheDocument()
@@ -107,7 +110,7 @@ describe("the shell's mount point", () => {
     await renderShell(<p>PAGE</p>)
 
     expect(await screen.findByText("PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
   })
 
   it("is above the chrome, so a step replaces the rails rather than covering them", async () => {
@@ -118,9 +121,7 @@ describe("the shell's mount point", () => {
     await renderShell(<p>PAGE</p>)
 
     expect(await screen.findByText("STEP")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("link", { name: "Overview" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Home" })).not.toBeInTheDocument()
     expect(screen.queryByText("PAGE")).not.toBeInTheDocument()
   })
 
@@ -157,6 +158,6 @@ describe("the shell's mount point", () => {
 
     expect(await screen.findByText("ASKING")).toBeInTheDocument()
     expect(screen.getByText("PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
   })
 })

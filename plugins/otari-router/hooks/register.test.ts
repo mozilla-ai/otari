@@ -32,14 +32,39 @@ type Question = { url: string; init?: { method?: string; headers?: Record<string
 type Answer = { status: number; ok: boolean; text: string }
 
 const HAIKU: Answer = { status: 200, ok: true, text: JSON.stringify({ model: 'haiku', reason: 'mock' }) }
+// The answer of a gateway that records its decisions.
+const RECORDED: Answer = {
+  status: 200,
+  ok: true,
+  text: JSON.stringify({ model: 'haiku', reason: 'mock', decision_id: 'decision-1' }),
+}
+
+const usageOn = (model: string, output_tokens: number) => ({
+  model,
+  input_tokens: 10,
+  output_tokens,
+  cache_read_input_tokens: 300,
+  cache_creation_input_tokens: 40,
+})
+
+// The end of one turn of the subagent `resolve` started.
+const turnEnd = {
+  answer: 'done',
+  durationMs: 2000,
+  isAborted: false,
+  turnId: 'turn-1',
+  reason: 'answer',
+  agentId: 'agent-1',
+  usage: usageOn('claude-haiku-5', 50),
+} as const
 
 // The world beneath the mod: a held clock, a session id, a transcript, and an
 // Otari that gives the same answer to every question. A stand-in for a mods
 // API call answers `{ value }`, as the kit requires.
-const world = (on: Parameters<Parameters<typeof test>[2]>[1], answer: Answer = HAIKU) => {
+const world = (on: Parameters<Parameters<typeof test>[2]>[1], answer: Answer = HAIKU, outcome?: () => Promise<Answer>) => {
   const questions: Question[] = []
   const logs: string[] = []
-  mock.clock(on)
+  const clock = mock.clock(on)
   on('session.id', () => ({ value: 'session-1' }))
   on('ui.log', ($, e) => {
     logs.push(e.text)
@@ -47,10 +72,12 @@ const world = (on: Parameters<Parameters<typeof test>[2]>[1], answer: Answer = H
   })
   on('http.fetch', ($, e) => {
     questions.push(e)
+    if (outcome !== undefined && e.url.endsWith('/outcome')) return outcome().then((value) => ({ value: { headers: {}, ...value } }))
     return { value: { headers: {}, ...answer } }
   })
   on('agent.spawn', resolve)
-  return { questions, logs }
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  return { questions, logs, clock }
 }
 
 test("Otari's model is used, even when the caller asked for another", OPTIONS, async ($, on) => {
@@ -135,4 +162,123 @@ test('a remote gateway over https is asked', REMOTE_HTTPS, async ($, on) => {
   expect(questions.length).toBe(1)
   expect(questions[0].url).toBe('https://otari.example.com/api/v1/routing/recommend')
   expect(modelOf(spawned)).toBe('haiku')
+})
+
+test("a routed subagent's token counts go back to Otari under its decision", OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  // The engine's totals for the subagent: an earlier turn on another model, and this one.
+  on('agent.list', () => ({
+    value: [{ id: 'agent-1', usage: [usageOn('claude-haiku-5', 50), usageOn('claude-sonnet-5', 7)] }],
+  }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  await $.turn.complete(turnEnd)
+  expect(questions.length).toBe(2)
+  const report = questions[1]
+  expect(report.url).toBe('http://localhost:8010/api/v1/routing/decisions/decision-1/outcome')
+  expect(report.init?.method).toBe('PUT')
+  expect(report.init?.headers?.authorization).toBe('Bearer tk-test')
+  expect(JSON.parse(report.init?.body ?? '{}')).toEqual({
+    usage: [
+      { model: 'claude-haiku-5', input_tokens: 10, output_tokens: 50, cache_read_tokens: 300, cache_write_tokens: 40 },
+      { model: 'claude-sonnet-5', input_tokens: 10, output_tokens: 7, cache_read_tokens: 300, cache_write_tokens: 40 },
+    ],
+  })
+})
+
+test("without the engine's totals, the turn's own counts are sent", OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  on('agent.list', () => ({ value: [] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  await $.turn.complete(turnEnd)
+  expect(JSON.parse(questions[1].init?.body ?? '{}')).toEqual({
+    usage: [{ model: 'claude-haiku-5', input_tokens: 10, output_tokens: 50, cache_read_tokens: 300, cache_write_tokens: 40 }],
+  })
+})
+
+test('a subagent Otari kept no decision for is not reported', OPTIONS, async ($, on) => {
+  const { questions } = world(on)
+  on('agent.list', () => ({ value: [] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  await $.turn.complete(turnEnd)
+  expect(questions.length).toBe(1)
+})
+
+test("the main loop's turn is not reported", OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  on('agent.list', () => ({ value: [] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  const { agentId: _, ...mainTurn } = turnEnd
+  await $.turn.complete(mainTurn)
+  expect(questions.length).toBe(1)
+})
+
+test('a report Otari does not take leaves the turn as it was', OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  on('agent.list', () => {
+    throw new Error('no roster')
+  })
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  const ended = await $.turn.complete(turnEnd)
+  expect((ended as { text?: string }).text).toBe('done')
+  expect(questions.length).toBe(1)
+})
+
+test("a missing roster entry sends the totals of every turn, not the last turn's", OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  on('agent.list', () => ({ value: [] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  await $.turn.complete(turnEnd)
+  await $.turn.complete({ ...turnEnd, turnId: 'turn-2', usage: usageOn('claude-haiku-5', 7) })
+  await $.turn.complete({ ...turnEnd, turnId: 'turn-3', usage: usageOn('claude-sonnet-5', 9) })
+  expect(JSON.parse(questions[1].init?.body ?? '{}')).toEqual({
+    usage: [{ model: 'claude-haiku-5', input_tokens: 10, output_tokens: 50, cache_read_tokens: 300, cache_write_tokens: 40 }],
+  })
+  expect(JSON.parse(questions[2].init?.body ?? '{}')).toEqual({
+    usage: [{ model: 'claude-haiku-5', input_tokens: 20, output_tokens: 57, cache_read_tokens: 600, cache_write_tokens: 80 }],
+  })
+  expect(JSON.parse(questions[3].init?.body ?? '{}')).toEqual({
+    usage: [
+      { model: 'claude-haiku-5', input_tokens: 20, output_tokens: 57, cache_read_tokens: 600, cache_write_tokens: 80 },
+      { model: 'claude-sonnet-5', input_tokens: 10, output_tokens: 9, cache_read_tokens: 300, cache_write_tokens: 40 },
+    ],
+  })
+})
+
+test('a roster entry with no usage falls back to the totals kept here', OPTIONS, async ($, on) => {
+  const { questions } = world(on, RECORDED)
+  on('agent.list', () => ({ value: [{ id: 'agent-1', usage: [] }] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  await $.turn.complete(turnEnd)
+  expect(questions.length).toBe(2)
+  expect(JSON.parse(questions[1].init?.body ?? '{}')).toEqual({
+    usage: [{ model: 'claude-haiku-5', input_tokens: 10, output_tokens: 50, cache_read_tokens: 300, cache_write_tokens: 40 }],
+  })
+})
+
+test('a report that fails after the deadline surfaces nowhere', OPTIONS, async ($, on) => {
+  let refuse: (reason: Error) => void = () => {}
+  const slow = new Promise<Answer>((_, reject) => {
+    refuse = reject
+  })
+  const { clock } = world(on, RECORDED, () => slow)
+  on('agent.list', () => ({ value: [] }))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  const ending = $.turn.complete(turnEnd)
+  await clock.settle()
+  await clock.advance(2000)
+  expect(((await ending) as { text?: string }).text).toBe('done')
+  // An unhandled rejection fails the run, so reaching the end is the assertion.
+  refuse(new Error('connection reset'))
+  await new Promise((resolve) => setTimeout(resolve, 10))
+})
+
+test('a roster that never answers does not hold the turn past the deadline', OPTIONS, async ($, on) => {
+  const { questions, clock } = world(on, RECORDED)
+  on('agent.list', () => new Promise(() => {}))
+  await $.agent.spawn({ ...spawn, subagentType: 'Explore' })
+  const ending = $.turn.complete(turnEnd)
+  await clock.settle()
+  await clock.advance(2000)
+  expect(((await ending) as { text?: string }).text).toBe('done')
+  expect(questions.length).toBe(1)
 })

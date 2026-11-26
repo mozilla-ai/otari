@@ -1,10 +1,17 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
+import uuid
 from enum import StrEnum
 
 from fastapi import status
 
-from gateway.core.error_codes import PRICING_REQUIRED, WEB_ACCESS_DISABLED
+from gateway.core.error_codes import (
+    MCP_OAUTH_ISSUER_CHANGED,
+    MCP_SIGN_IN_REQUIRED,
+    PRICING_REQUIRED,
+    REQUEST_MCP_SERVERS_DISALLOWED,
+    WEB_ACCESS_DISABLED,
+)
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -100,6 +107,45 @@ class WorkspaceMcpServerCheckBusyError(TenancyError):
         super().__init__("Too many MCP server checks are running on this gateway; try again shortly")
 
 
+class McpServerRequestNotFoundError(TenancyNotFoundError):
+    def __init__(self, request_id: object):
+        super().__init__(f"MCP server request {request_id} not found")
+
+
+class McpCatalogServerNotListedError(TenancyNotFoundError):
+    def __init__(self, catalog_name: str):
+        super().__init__(f"The MCP catalog lists no server named {catalog_name}")
+
+
+class McpServerAlreadyRequestedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("You already asked for this server; the request is waiting for an admin")
+
+
+class McpServerAlreadyAddedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This workspace already has that server")
+
+
+class McpServerRequestDecidedError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This request was already answered or withdrawn")
+
+
+class McpServerRequestPendingError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("This request is still waiting for an answer")
+
+
+class McpServerRequestLimitError(TenancyError):
+    """A member reached a bound on how many servers they may ask for.
+
+    A 429: it clears on its own, when a request is answered or the day's count ages out.
+    """
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+
 class ContainerOnManagedCredentialError(TenancyValidationError):
     """A request named a container on a provider account this gateway shares across workspaces."""
 
@@ -111,8 +157,135 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
         )
 
 
+class McpSignInRequiredError(TenancyForbiddenError):
+    """A per-user MCP server the caller may reach, whose user has no connection to it.
+
+    A result of its own and not a missing server: the caller's access rules admitted it, and what is
+    absent is the user's sign-in. It names the server and the user, so a caller can offer that sign-in.
+    """
+
+    error_code = MCP_SIGN_IN_REQUIRED
+
+    def __init__(self, mcp_server_id: uuid.UUID, *, name: str, user_id: str):
+        super().__init__(
+            f"MCP server '{name}' ({mcp_server_id}) uses each user's own account, and this user has not "
+            "signed in to it yet. Connect it under MCP servers in the dashboard."
+        )
+        self.mcp_server_id = mcp_server_id
+        self.name = name
+        self.user_id = user_id
+
+
+class McpCheckSignInRequiredError(TenancyConflictError):
+    """A per-user server was asked to be checked without a sign-in made for the check.
+
+    It holds no token of its own, and a check never borrows anyone's connection, so a check of one
+    starts with a sign-in. The message is for the dashboard, which offers that sign-in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Checking a Personal server needs a sign-in. Use Check, which opens one.")
+
+
+class McpConnectionUnavailableError(TenancyError):
+    """A user's connection to a per-user MCP server has an expired token that could not be renewed right now."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self, mcp_server_id: uuid.UUID):
+        super().__init__(f"The sign-in to MCP server {mcp_server_id} could not be renewed; try again shortly")
+        self.mcp_server_id = mcp_server_id
+
+
+class McpConnectionNotFoundError(TenancyNotFoundError):
+    def __init__(self, mcp_server_id: object):
+        super().__init__(f"No connection to MCP server {mcp_server_id}")
+
+
+class McpConnectionModeError(TenancyConflictError):
+    """A sign-in was asked of a server in the other mode: a user's own of a shared one, or the reverse."""
+
+    def __init__(self, mcp_server_id: object, *, mode: str = "shared"):
+        super().__init__(
+            f"MCP server {mcp_server_id} uses one shared account; members do not sign in to it"
+            if mode == "shared"
+            else f"MCP server {mcp_server_id} uses each member's own account; it has no shared one"
+        )
+
+
+class McpConnectionSetupError(TenancyValidationError):
+    """Per-user sign-in cannot be set up on a server as it is configured, or on this deployment."""
+
+
+class McpOAuthIssuerChangedError(McpConnectionSetupError):
+    """A server's sign-ins now go to another authorization server than the one its saved OAuth client was used with.
+
+    Refused before the client's secret is sent anywhere: a server that names a new authorization
+    server could be pointing it at one that collects secrets. A manager approves the move by saving
+    the client again.
+    """
+
+    error_code = MCP_OAUTH_ISSUER_CHANGED
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This server now sends sign-ins to a different authorization server than the one its OAuth client "
+            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
+            "page, to approve the new sign-in server."
+        )
+
+
+class McpConnectionFlowError(TenancyValidationError):
+    """A sign-in could not be finished: its state is unknown, used, expired, or another person's."""
+
+
+class McpSignInLinkUsedError(McpConnectionFlowError):
+    """A sign-in link has already started its sign-in, and each starts one at most."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link was already used. Ask again for a new one.")
+
+
+class McpSignInLinkOtherUserError(TenancyForbiddenError):
+    """A sign-in link was opened in the dashboard session of somebody other than the user it was made for."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link was made for another user")
+
+
+class McpSignInLinkNeedsSessionError(TenancyForbiddenError):
+    """A sign-in link made for a dashboard account was confirmed in a browser not signed in as that account."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link continues only in a dashboard session of the user it was made for")
+
+
+class WorkspaceMcpServerCheckOriginError(TenancyValidationError):
+    """A connection check asked to send a stored server's credential to another origin than that server's."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A stored server's credential is only sent to that server's own address. "
+            "To test another address, enter a token for it."
+        )
+
+
+class McpConnectionUpstreamError(TenancyValidationError):
+    """The MCP server or its authorization server refused or failed a sign-in step.
+
+    A 4xx and not a 502, so the person signing in is shown what failed: the message is written here
+    and never repeats what the remote party sent.
+    """
+
+
 class McpServerDeclarationError(TenancyValidationError):
     """A request's MCP servers cannot be reached as it declared them."""
+
+
+class RequestMcpServersDisallowedError(McpServerDeclarationError):
+    """A request named an MCP server by URL, in a workspace whose ``request_mcp_servers_allowed`` is off."""
+
+    error_code = REQUEST_MCP_SERVERS_DISALLOWED
 
 
 class McpServerConfigurationError(TenancyError):
@@ -155,13 +328,21 @@ class WebAccessRefusedError(Exception):
         self.message = message
 
 
+def workspace_switch_hint(page: str) -> str:
+    """Where a workspace turns a tool on, for a refusal its switch caused.
+
+    The switch is the workspace's own, which its owners and admins change, so a caller can act on it.
+    """
+    return f"An owner or admin of the workspace allows it under Tools > {page} in the dashboard."
+
+
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
 
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web access is not enabled for this workspace")
+        super().__init__(f"web access is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
@@ -177,7 +358,7 @@ class WebSearchNotEnabledError(WebAccessRefusedError):
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web search is not enabled for this workspace")
+        super().__init__(f"web search is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebSearchPolicyResolutionFailure(StrEnum):
@@ -278,10 +459,28 @@ class WebSearchKeyUnknownProviderError(TenancyValidationError):
 
 
 class WebSearchKeyIncompleteError(TenancyValidationError):
-    """A key lacks what its provider needs, which a call would otherwise take from the server's own settings."""
+    """A key lacks the API key or endpoint a key on its provider must carry.
+
+    Without it, a call would take the server's own settings, or run keyless from the server's address.
+    """
 
     def __init__(self, provider: str, missing: str):
         super().__init__(f"A key on {provider} needs {missing}")
+
+
+class WebSearchKeyOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the admin enters the options in full, which is what a
+    rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
 
 
 class WebSearchKeySettingRefusedError(TenancyValidationError):
@@ -346,6 +545,21 @@ class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
 
 
+class SearchToolOptionsUnreadableError(TenancyValidationError):
+    """A masked option was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    backend. Refused so the operator enters the options in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked option keeps the stored value, and there is none that can be read back. "
+            "Enter the options in full."
+        )
+
+
 class SearchToolRefusedError(TenancyValidationError):
     """A search or fetch instance the instance rules refuse to write or test.
 
@@ -408,8 +622,8 @@ class SearchToolSelectionError(TenancyValidationError):
 class DirectSearchFieldRefusedError(TenancyValidationError):
     """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
 
-    A ``searxng`` instance until its adapter, and a Tavily or Brave organization
-    key until theirs.
+    Such a call runs on the old search client: a key on a provider any-search
+    does not serve, an organization's or the legacy settings'.
     """
 
     def __init__(self, provider: str) -> None:
@@ -518,7 +732,9 @@ class WebSearchCredentialRefusedError(TenancyError):
 
     One without a key or base URL its provider needs, which the library or the
     old code would fill from the server's own settings, so the deployment's key
-    or endpoint would serve the tenant; or one naming a base URL the code that
+    or endpoint would serve the tenant; one without the key a provider with an
+    address of its own takes, whose calls would run keyless from the
+    deployment's address; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
     provider's public endpoint instead. A 502: the fault is in a stored
     credential, not in the request.
@@ -532,6 +748,13 @@ class WebSearchCredentialRefusedError(TenancyError):
 
 
 __all__ = [
+    "McpConnectionFlowError",
+    "McpConnectionModeError",
+    "McpConnectionNotFoundError",
+    "McpConnectionSetupError",
+    "McpConnectionUnavailableError",
+    "McpConnectionUpstreamError",
+    "McpSignInRequiredError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",
@@ -550,6 +773,7 @@ __all__ = [
     "SearchToolKeyUnstorableError",
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
+    "SearchToolOptionsUnreadableError",
     "SearchToolRefusedError",
     "SearchToolSelectionError",
     "StoredSearchToolNotFoundError",
@@ -567,3 +791,12 @@ __all__ = [
     "WorkspaceMcpServerUnsafeUrlError",
     "WorkspaceWebSearchDomainsExcludedError",
 ]
+
+
+class McpLogoInvalidError(TenancyError):
+    """An uploaded MCP server logo is not a PNG the gateway can read, or the tile is not one of the choices."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    def __init__(self) -> None:
+        super().__init__("The logo must be a PNG of at most 512 KB, and the tile auto, always or never")

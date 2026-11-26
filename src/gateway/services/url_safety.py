@@ -2,17 +2,18 @@
 
 Five call sites with overlapping but not identical threat models:
 
-* **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
-  request body. We block private/link-local/reserved IPs to prevent SSRF.
-  Loopback is allowed by default (useful for same-host sidecar deployments)
-  and gated by ``OTARI_MCP_ALLOW_LOOPBACK``. Also enforces TLS when a
-  bearer token is supplied.
+* **MCP server endpoints** (:func:`validate_mcp_url`): a workspace, an
+  organization or the caller chose the URL, never the operator, so it must reach
+  a public address and nothing else. No setting relaxes that. Also enforces TLS
+  when a bearer token is supplied. This check is what a person sees when they
+  save or send a URL; the MCP clients dial through the pinned, no-redirect
+  transport in ``services/providers/_owned_endpoint_network.py``, which applies
+  the same rule to the address it connects to.
 
-* **Guardrail definition endpoints** (:func:`validate_mcp_url` again, with a
-  label of its own) — an organization admin writes them into a stored
-  definition and a later step builds a vendor client from them, so the same
-  private/link-local block applies. TLS is enforced unconditionally there,
-  a definition holding a vendor credential beside its endpoint.
+* **Guardrail endpoints** (:func:`validate_mcp_url` again, with a label of its
+  own): an organization admin or the caller writes them, so the same rule
+  applies. TLS is enforced unconditionally for a stored definition, which holds
+  a vendor credential beside its endpoint.
 
 * **Web-search result URLs** (:func:`validate_outbound_fetch_url`) — URL
   comes from a third-party search engine via the configured search backend.
@@ -27,7 +28,10 @@ Five call sites with overlapping but not identical threat models:
   home-lab / self-hosted use case depends on private-network endpoints
   (``localhost``, RFC 1918), so the check is off unless an operator opts in via
   ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, at which point it blocks the
-  same private/link-local/reserved ranges as the web-search path.
+  same private/link-local/reserved ranges as the web-search path. An
+  ``api_base`` a tenant chose (an organization's provider or search key, an
+  owned endpoint) is never checked here: it is held to public addresses and
+  dialed through the pinned client in ``services/providers/_owned_endpoint_network.py``.
 
 * **Workload identity discovery and JWKS** (:func:`validate_federation_url`):
   the issuer is operator-configured and its signing-key location comes from
@@ -38,9 +42,10 @@ Each check validates a URL's shape before its address: a host no HTTP client can
 dial is refused as invalid, so an address check only ever reports on the host
 the caller wrote.
 
-These checks are intentionally conservative: DNS rebinding can defeat host-based
-allowlists. Production deployments should also enforce egress policy at the
-network layer.
+A check here resolves the host once, so on its own it does not stop DNS
+rebinding: a client that must not be re-pointed dials the address that was
+checked (see ``web_retrieval_network``). Production deployments should also
+enforce egress policy at the network layer.
 """
 
 from __future__ import annotations
@@ -48,11 +53,14 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import ParseResult, parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
 
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.core.settings.providers import https_or_loopback_problem
+from gateway.core.settings.tools import PrivateHostEntry, canonical_host, parse_mcp_private_hosts
 
 
 def redact_url_secrets(value: str) -> str:
@@ -102,7 +110,11 @@ def redact_url_secrets(value: str) -> str:
 
 
 class UnsafeURLError(ValueError):
-    """Raised when an MCP server URL is rejected by the safety checks."""
+    """Raised when a URL is rejected by the safety checks."""
+
+
+class UnresolvableHostError(UnsafeURLError):
+    """A URL's host did not resolve when it was checked, which a later check may answer differently."""
 
 
 def _authority_detail(label: str) -> str:
@@ -141,16 +153,72 @@ def _parse_safe_url(url: str, *, label: str) -> ParseResult:
     return parsed
 
 
-def _allow_loopback() -> bool:
-    return otari_env("MCP_ALLOW_LOOPBACK", "true").lower() not in {"0", "false", "no"}
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+# Metadata services reachable at an address none of the range tests below calls
+# link-local: AWS's IPv6 one sits in a ULA range, Alibaba Cloud's in shared space.
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+_METADATA_ADDRESSES = frozenset({ipaddress.ip_address("fd00:ec2::254"), ipaddress.ip_address("100.100.100.200")})
 
 
-def _allow_private_hosts() -> bool:
-    return otari_env("MCP_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
+@dataclass(frozen=True, slots=True)
+class PrivateHosts:
+    """The operator's ``mcp_private_hosts``: exact hosts an MCP server URL may name on a private address."""
+
+    entries: frozenset[PrivateHostEntry]
+
+    def admits(self, host: str | None, port: int | None, scheme: str) -> bool:
+        """Whether a URL's host, and its port where the entry names one, is listed exactly."""
+        if not host:
+            return False
+        name = canonical_host(host)
+        effective_port = port if port is not None else _DEFAULT_PORTS.get(scheme.lower())
+        return (name, None) in self.entries or (name, effective_port) in self.entries
 
 
-async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: str = "MCP server") -> None:
-    """Reject URLs that are unsafe for the gateway to fetch.
+def mcp_private_hosts() -> PrivateHosts:
+    """The deployment's ``mcp_private_hosts``, read from the environment the config bridges it into."""
+    return _parsed_private_hosts(otari_env("MCP_PRIVATE_HOSTS", ""))
+
+
+@lru_cache(maxsize=4)
+def _parsed_private_hosts(raw: str) -> PrivateHosts:
+    return PrivateHosts(parse_mcp_private_hosts(raw))
+
+
+def never_admitted_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str | None:
+    """Why ``addr`` is refused even for a host the operator listed, or ``None``.
+
+    Link-local (the cloud metadata range among it), unspecified, multicast and the
+    metadata addresses outside link-local. An IPv6 address that carries an IPv4
+    one (IPv4-mapped, 6to4 in ``2002::/16``, NAT64 in ``64:ff9b::/96``) is read as
+    the IPv4 address it carries, since a translator on the path delivers it there.
+    """
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
+        elif addr.sixtofour is not None:
+            addr = addr.sixtofour
+        elif addr in _NAT64_PREFIX:
+            addr = ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+    if addr in _METADATA_ADDRESSES:
+        return "a cloud metadata address"
+    if addr.is_link_local:
+        return "link-local"
+    if addr.is_unspecified:
+        return "unspecified (0.0.0.0/::)"
+    if addr.is_multicast:
+        return "multicast"
+    return None
+
+
+async def validate_mcp_url(
+    url: str,
+    *,
+    has_authorization_token: bool,
+    label: str = "MCP server",
+    private_hosts: PrivateHosts | None = None,
+) -> None:
+    """Refuse a URL a tenant chose unless it is http(s) and every address its host resolves to is public.
 
     Async because DNS resolution (:func:`_resolve_all_async`) must not block
     the event loop: this is called from the request pipeline, not from
@@ -159,10 +227,17 @@ async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: st
 
     ``label`` names the surface the URL was written for, so a caller that is
     not an MCP server does not tell its own admin about one: the organization
-    guardrail definition store passes ``guardrail endpoint``. Only the wording
-    moves. Every caller is governed by the one
-    ``OTARI_MCP_ALLOW_PRIVATE_HOSTS`` flag the messages quote, whatever the
-    label says, which is why the hint is not parameterized too.
+    guardrail definition store passes ``guardrail endpoint``.
+
+    A host that does not resolve is refused, since a later lookup could answer
+    with an internal address. Passing this check does not make a later
+    connection safe on its own: the name can be re-pointed afterwards, which is
+    why the clients that dial these URLs pin the address they connect to.
+
+    ``private_hosts`` is the operator's list, passed only for an MCP server's URL
+    and the sign-in addresses it leads to. A URL whose host (and port, where the
+    entry names one) is listed exactly may resolve to a loopback or private
+    address, never to one :func:`never_admitted_reason` refuses.
 
     Raises :class:`UnsafeURLError` on rejection. Returns ``None`` on accept.
     """
@@ -176,38 +251,44 @@ async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: st
     host = parsed.hostname
     if not host:
         raise UnsafeURLError(f"{label} URL must include a hostname")
-
-    if _allow_private_hosts():
-        return
+    if host.endswith("."):
+        # The pinned transport dials the name without the dot, so a URL written with one never connects.
+        raise UnsafeURLError(f"{label} host {host!r} ends with a dot; write the host without it")
+    listed = private_hosts is not None and private_hosts.admits(host, parsed.port, scheme)
 
     try:
         literal = ipaddress.ip_address(host)
         addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
     except ValueError:
+        # Before resolving: platforms read ``0177.0.0.1`` or ``127.1`` differently, and a
+        # single-label or ``.local`` name only means something on the gateway's own network.
+        problem = None if listed else _host_text_problem(host.rstrip(".").lower())
+        if problem is not None:
+            raise UnsafeURLError(
+                f"{label} {problem}; rejecting to prevent SSRF. The {label} must be on a public address."
+            ) from None
         addresses = await _resolve_all_async(host)
         if not addresses:
-            # Couldn't resolve the host at validation time. Rejecting is the
-            # safer default: a hostname that fails to resolve here could
-            # later resolve to an internal address at fetch time (the
-            # classic DNS-rebinding TOCTOU). Operators that explicitly want
-            # to allow unresolvable hostnames (private DNS,
-            # hosts-file-driven setups, etc.) can opt in via
-            # OTARI_MCP_ALLOW_PRIVATE_HOSTS, which short-circuits this
-            # whole function above.
-            raise UnsafeURLError(
+            raise UnresolvableHostError(
                 f"{label} host {host!r} could not be resolved at validation time; "
                 "rejecting to avoid DNS-rebinding (a later lookup could resolve to a "
-                "private address). Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override."
+                "private address)."
             )
 
     for addr in addresses:
-        if addr.is_loopback and _allow_loopback():
+        if listed:
+            reason = never_admitted_reason(addr)
+            if reason is not None:
+                raise UnsafeURLError(
+                    f"{label} host {host!r} resolves to {addr} which is {reason}, which is refused even for "
+                    "a host in mcp_private_hosts."
+                )
             continue
         reason = _blocked_reason(addr)
         if reason is not None:
             raise UnsafeURLError(
                 f"{label} host {host!r} resolves to {addr} which is {reason}; "
-                "rejecting to prevent SSRF. Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override."
+                f"rejecting to prevent SSRF. The {label} must be on a public address."
             )
 
 
@@ -261,9 +342,9 @@ async def validate_outbound_fetch_url(url: str) -> None:
     """Reject URLs that are unsafe for the gateway to fetch on behalf of a request.
 
     Used for per-page fetches that the gateway initiates against URLs supplied
-    by third-party content (search-engine results, etc.). Stricter than
-    :func:`validate_mcp_url`: loopback is blocked by default because the
-    gateway has no legitimate reason to fetch user-search results from itself.
+    by third-party content (search-engine results, etc.). Loopback is blocked
+    because the gateway has no legitimate reason to fetch user-search results
+    from itself.
 
     Async to keep the event loop unblocked under fan-out — see
     :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection.
@@ -290,8 +371,8 @@ async def _reject_internal_host(host: str, *, host_label: str, override_var: str
     validation and allow-flag short-circuit first, then hand the bare hostname
     here. An unresolvable host is rejected (DNS-rebinding TOCTOU). ``host_label``
     names the host in error messages; ``override_var`` is the OTARI_ env var
-    quoted in the rejection hint. Note ``validate_mcp_url`` does not use this: its
-    loop has extra loopback-allowance semantics.
+    quoted in the rejection hint. ``validate_mcp_url`` does not use this, since
+    no setting relaxes it and so it has no override to quote.
     """
     try:
         literal = ipaddress.ip_address(host)
@@ -381,6 +462,45 @@ async def validate_federation_url(url: str, *, allow_private_hosts: bool = False
     if allow_private_hosts:
         return
     await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")
+
+
+def validate_public_https_url_shape(url: str, *, label: str) -> None:
+    """Refuse a URL whose text alone shows the gateway should not offer it, without resolving its host.
+
+    For a URL read in bulk from a public listing, where a lookup per entry is
+    not affordable: it must be https, carry no credentials, and name a host
+    that is neither an internal address literal nor a local name. It is a
+    screen, not the SSRF check: whoever dials the URL still runs
+    :func:`validate_mcp_url`, which resolves the host.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = _parse_safe_url(url, label=label)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeURLError(f"{label} URL must use https")
+    if parsed.username is not None or parsed.password is not None:
+        raise UnsafeURLError(f"{label} URL must not carry credentials")
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        raise UnsafeURLError(f"{label} URL must include a hostname")
+    problem = _host_text_problem(host)
+    if problem is not None:
+        raise UnsafeURLError(f"{label} {problem}")
+
+
+def _host_text_problem(host: str) -> str | None:
+    """Why ``host``, as written and unresolved, is not a public one, or ``None``."""
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        if "." not in host or host.endswith((".localhost", ".local", ".internal")):
+            return f"host {host!r} is a local name"
+        # No top-level domain is a number, so this is an address in a short or non-decimal form (127.1, 0x7f.1).
+        if host.rpartition(".")[2].isdigit() or host.rpartition(".")[2].startswith("0x"):
+            return f"host {host!r} is an address written as a name"
+        return None
+    reason = _blocked_reason(literal)
+    return None if reason is None else f"host {host!r} is {reason}"
 
 
 def validate_credential_address(url: str, *, label: str) -> None:

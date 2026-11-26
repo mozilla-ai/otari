@@ -7,6 +7,7 @@ import type { SsoAuthorizeResponse, SsoSessionPublic } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { SsoCallbackPage } from "@/features/auth/SsoCallbackPage"
 import { API_ROOT } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
@@ -22,7 +23,7 @@ const STATE_KEY = "otari.sso.state"
 const SLUG_KEY = "otari.sso.slug"
 const NAME_KEY = "otari.sso.name"
 const TERMS_KEY = "otari.sso.terms-accepted"
-const RETURN_KEY = "otari.sso.return-hash"
+const RETURN_KEY = "otari.sso.return-route"
 const COMPANY_KEY = "otari.dashboard.rememberedCompany"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -45,20 +46,20 @@ function sessionBody(
 }
 
 /** The page in isolation, with a signed-in marker to assert against. */
-function Harness({ hash }: { hash: string }) {
+function Harness({ route }: { route: string }) {
   const { isAuthenticated } = useAuth()
   return isAuthenticated ? (
     <div>SIGNED IN</div>
   ) : (
-    <SsoCallbackPage hash={hash} />
+    <SsoCallbackPage route={route} />
   )
 }
 
-function renderCallback(hash: string) {
+function renderCallback(route: string) {
   return render(
     <AppProviders>
       <DeploymentProvider value={bootstrap()}>
-        <Harness hash={hash} />
+        <Harness route={route} />
       </DeploymentProvider>
     </AppProviders>,
   )
@@ -74,7 +75,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
   window.localStorage.clear()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 describe("SsoCallbackPage", () => {
@@ -86,7 +87,7 @@ describe("SsoCallbackPage", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(sessionBody()))
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=the-state")
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     const [url, init] = fetchMock.mock.calls[0] ?? []
@@ -114,7 +115,7 @@ describe("SsoCallbackPage", () => {
       new Promise<Response>(() => {}),
     )
 
-    renderCallback("#/auth/sso/callback?state=the-state&code=the-code")
+    renderCallback("/sign-in/sso/callback?state=the-state&code=the-code")
 
     expect(
       await screen.findByText("Finishing your sign-in with Acme Corp"),
@@ -127,7 +128,7 @@ describe("SsoCallbackPage", () => {
     window.sessionStorage.setItem(SLUG_KEY, "acme")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(sessionBody()))
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=the-state")
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     expect(window.localStorage.getItem(COMPANY_KEY)).toBeNull()
@@ -141,7 +142,7 @@ describe("SsoCallbackPage", () => {
       .mockResolvedValue(jsonResponse(sessionBody()))
 
     renderCallback(
-      "#/auth/sso/callback?code=the-code&state=the-state&iss=https://idp.acme.example",
+      "/sign-in/sso/callback?code=the-code&state=the-state&iss=https://idp.acme.example",
     )
 
     await screen.findByText("SIGNED IN")
@@ -158,7 +159,7 @@ describe("SsoCallbackPage", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(sessionBody()))
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
     const [, init] = fetchMock.mock.calls[0] ?? []
@@ -172,7 +173,7 @@ describe("SsoCallbackPage", () => {
       jsonResponse({ detail: "Not registered here." }, 401),
     )
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=the-state")
 
     await screen.findByRole("heading", {
       name: "That sign-in did not complete",
@@ -184,7 +185,7 @@ describe("SsoCallbackPage", () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=somebody-elses")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=somebody-elses")
 
     expect(
       await screen.findByRole("heading", {
@@ -204,7 +205,7 @@ describe("SsoCallbackPage", () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/sso/callback?state=the-state")
+    renderCallback("/sign-in/sso/callback?state=the-state")
 
     expect(
       await screen.findByText(
@@ -218,7 +219,7 @@ describe("SsoCallbackPage", () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/sso/callback?error=access_denied&state=the-state")
+    renderCallback("/sign-in/sso/callback?error=access_denied&state=the-state")
 
     expect(await screen.findByText(/You may have declined/)).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -231,12 +232,12 @@ describe("SsoCallbackPage", () => {
     render(
       <AppProviders>
         <DeploymentProvider value={bootstrap()}>
-          <SsoCallbackPage hash="#/auth/sso/callback?code=the-code&state=spent" />
+          <SsoCallbackPage route="/sign-in/sso/callback?code=the-code&state=spent" />
         </DeploymentProvider>
       </AppProviders>,
     )
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(recordEvent).not.toHaveBeenCalled()
   })
@@ -244,13 +245,13 @@ describe("SsoCallbackPage", () => {
   it("returns to the page the sign-in started from", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     window.sessionStorage.setItem(SLUG_KEY, "acme")
-    window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+    window.sessionStorage.setItem(RETURN_KEY, "/organization/billing")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(sessionBody()))
 
-    renderCallback("#/auth/sso/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/sso/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
-    expect(window.location.hash).toBe("#/organization/billing")
+    expect(currentRoute()).toBe("/organization/billing")
   })
 
   it("tells the person when the sign-in removed their earlier password", async () => {
@@ -263,7 +264,7 @@ describe("SsoCallbackPage", () => {
     render(
       <AppProviders>
         <DeploymentProvider value={bootstrap()}>
-          <SsoCallbackPage hash="#/auth/sso/callback?code=the-code&state=the-state" />
+          <SsoCallbackPage route="/sign-in/sso/callback?code=the-code&state=the-state" />
         </DeploymentProvider>
       </AppProviders>,
     )
@@ -282,11 +283,11 @@ describe("SsoCallbackPage", () => {
     const realLocation = window.location
     const TERMS_URL = "https://otari.example.com/terms"
 
-    function renderWithTerms(hash: string) {
+    function renderWithTerms(route: string) {
       return render(
         <AppProviders>
           <DeploymentProvider value={bootstrap({ terms_url: TERMS_URL })}>
-            <Harness hash={hash} />
+            <Harness route={route} />
           </DeploymentProvider>
         </AppProviders>,
       )
@@ -302,7 +303,7 @@ describe("SsoCallbackPage", () => {
     it("asks for the terms a new account needs, and retries through the same connection", async () => {
       window.sessionStorage.setItem(STATE_KEY, "the-state")
       window.sessionStorage.setItem(SLUG_KEY, "acme")
-      window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+      window.sessionStorage.setItem(RETURN_KEY, "/organization/billing")
       const assign = vi.fn()
       Object.defineProperty(window, "location", {
         configurable: true,
@@ -326,7 +327,7 @@ describe("SsoCallbackPage", () => {
         .mockResolvedValueOnce(jsonResponse(authorized))
       const user = userEvent.setup()
 
-      renderWithTerms("#/auth/sso/callback?code=the-code&state=the-state")
+      renderWithTerms("/sign-in/sso/callback?code=the-code&state=the-state")
 
       expect(
         await screen.findByRole("heading", {
@@ -354,7 +355,7 @@ describe("SsoCallbackPage", () => {
       expect(window.sessionStorage.getItem(STATE_KEY)).toBe("the-next-state")
       expect(window.sessionStorage.getItem(TERMS_KEY)).toBe("true")
       expect(window.sessionStorage.getItem(RETURN_KEY)).toBe(
-        "#/organization/billing",
+        "/organization/billing",
       )
     })
 
@@ -385,7 +386,7 @@ describe("SsoCallbackPage", () => {
         )
       const user = userEvent.setup()
 
-      renderWithTerms("#/auth/sso/callback?code=the-code&state=the-state")
+      renderWithTerms("/sign-in/sso/callback?code=the-code&state=the-state")
 
       await screen.findByRole("heading", {
         name: "Accept the terms to continue",
@@ -417,7 +418,7 @@ describe("SsoCallbackPage", () => {
       <StrictMode>
         <AppProviders>
           <DeploymentProvider value={bootstrap()}>
-            <Harness hash="#/auth/sso/callback?code=the-code&state=the-state" />
+            <Harness route="/sign-in/sso/callback?code=the-code&state=the-state" />
           </DeploymentProvider>
         </AppProviders>
       </StrictMode>,

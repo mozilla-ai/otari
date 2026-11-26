@@ -1,7 +1,15 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
-import { login, nav, openOrganization, pickOption, tableRows } from "./helpers"
+import {
+  login,
+  nav,
+  openOrganization,
+  pickOption,
+  pressRowAction,
+  rowMenuItem,
+  tableRows,
+} from "./helpers"
 
 // The tenancy pages against a real gateway: the organization a first boot
 // provisions, its roster, and the workspaces under it. Each flow creates what it
@@ -108,9 +116,12 @@ test.describe("tenancy", () => {
     // The last active owner cannot be demoted or removed: doing so would leave
     // the organization with nobody able to manage or delete it.
     await expect(role).toBeDisabled()
-    await expect(
-      operator.getByRole("button", { name: "Remove" }),
-    ).toBeDisabled()
+    // Refused, the item stays in the row's menu with its reason.
+    await expect(await rowMenuItem(operator, "Remove")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await page.keyboard.press("Escape")
     // Status is shown, not set: suspending is what Remove does, behind a
     // confirmation, and a suspended membership leaves the roster entirely.
     await expect(
@@ -144,7 +155,7 @@ test.describe("tenancy", () => {
       inviteDialog.getByText(/Otari did not send the email/),
     ).toBeVisible()
     const link = await inviteDialog
-      .getByText(/^http:\/\/.+#\/accept-invitation\?token=/)
+      .getByText(/^http:\/\/.+\/accept-invitation#token=/)
       .textContent()
     expect(link).toBeTruthy()
     await inviteDialog.getByRole("button", { name: "Done" }).click()
@@ -187,7 +198,7 @@ test.describe("tenancy", () => {
     // Removal suspends rather than deletes, and a suspended membership is not
     // listable, so the row leaves the roster while the attribution behind it
     // survives.
-    await memberRow(page, email).getByRole("button", { name: "Remove" }).click()
+    await pressRowAction(memberRow(page, email), "Remove")
     await page.getByRole("button", { name: "Remove member" }).click()
     await expect(memberRow(page, email)).toHaveCount(0)
 
@@ -203,7 +214,7 @@ test.describe("tenancy", () => {
     // Leave the roster as this spec found it. The invitee's identity keeps its
     // password, so later specs see a sign-in screen offering both credentials,
     // which `login` handles.
-    await memberRow(page, email).getByRole("button", { name: "Revoke" }).click()
+    await pressRowAction(memberRow(page, email), "Revoke")
     await page.getByRole("button", { name: "Revoke invitation" }).click()
     await expect(memberRow(page, email)).toHaveCount(0)
   })
@@ -239,7 +250,7 @@ test.describe("tenancy", () => {
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()
 
-    await renamed.getByRole("button", { name: "Delete" }).click()
+    await pressRowAction(renamed, "Delete")
     await page.getByRole("button", { name: "Delete workspace" }).click()
     await expect(workspaceRow(page, RENAMED_WORKSPACE)).toHaveCount(0)
   })
@@ -251,7 +262,9 @@ test.describe("tenancy", () => {
     // the same component on two rails. That copy is gone, so this is the only
     // place it renders and the only place it can be covered.
     await login(page)
-    await nav(page).getByRole("link", { name: "Members", exact: true }).click()
+    // No rail row of its own: People links to it.
+    await nav(page).getByRole("link", { name: "People", exact: true }).click()
+    await page.getByRole("link", { name: "Workspace members" }).click()
 
     // A workspace's members are a subset of the organization's, and a fresh
     // deployment has exactly one identity, which owns every workspace it made.
@@ -306,7 +319,7 @@ test.describe("tenancy", () => {
 
     // An edit of the mandate touches no secret, so the key stays set without
     // being typed again.
-    await mandated.getByRole("button", { name: `Edit ${PROFILE}` }).click()
+    await pressRowAction(mandated, `Edit ${PROFILE}`)
     const edit = page.getByRole("dialog", { name: "Mandated guardrail" })
     await pickOption(page, "Mode", "Block", edit)
     await edit.getByRole("button", { name: "Save mandate" }).click()
@@ -316,10 +329,10 @@ test.describe("tenancy", () => {
 
     // Leave the organization as this spec found it: the mandate first, since
     // the definition cannot go while one still names it.
-    await mandated.getByRole("button", { name: `Remove ${PROFILE}` }).click()
+    await pressRowAction(mandated, `Remove ${PROFILE}`)
     await page.getByRole("button", { name: "Remove permanently" }).click()
     await expect(guardrailRow(page, "Where they run", PROFILE)).toHaveCount(0)
-    await defined.getByRole("button", { name: `Remove ${GUARDRAIL}` }).click()
+    await pressRowAction(defined, `Remove ${GUARDRAIL}`)
     await page.getByRole("button", { name: "Remove permanently" }).click()
     await expect(
       guardrailRow(page, "Guardrails you have configured", GUARDRAIL),

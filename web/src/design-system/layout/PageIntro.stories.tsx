@@ -4,7 +4,8 @@ import { Button } from "../actions/Button"
 import { PageIntro } from "./PageIntro"
 
 /**
- * A page's name, its one-line explanation, and the one action the page is for.
+ * A page's name and the one action the page is for. No sentence explains the
+ * page under its title; `detail` is a line about the record the page shows.
  *
  * `title` is `text-display`, the top of the ladder: nothing inside a page may
  * be larger than the page's own name. That is why a 30px KPI figure does not
@@ -26,11 +27,9 @@ type Story = StoryObj<typeof meta>
 /** Title alone, for a page whose name is the whole explanation. */
 export const Default: Story = {}
 
-export const WithDescription: Story = {
-  args: {
-    children:
-      "A key authenticates a caller against this gateway. Each one carries its own budget and model scope.",
-  },
+/** A record's own facts under its name: the one line a page keeps. */
+export const WithDetail: Story = {
+  args: { title: "Wei Zhang", detail: "Admin · wei@example.com" },
 }
 
 /**
@@ -38,9 +37,22 @@ export const WithDescription: Story = {
  * `primary`. A page with both this and a group's Save has two primaries, and
  * that is correct: each is the one thing its own band is for.
  */
+export const WithLeadingMark: Story = {
+  args: {
+    title: "Sentry",
+    leading: (
+      <span
+        aria-hidden
+        className="flex size-11 items-center justify-center rounded-md border border-control-border bg-surface-alt text-title text-muted"
+      >
+        S
+      </span>
+    ),
+  },
+}
+
 export const WithAction: Story = {
   args: {
-    children: "A key authenticates a caller against this gateway.",
     action: <Button variant="primary">Create key</Button>,
   },
 }
@@ -48,34 +60,11 @@ export const WithAction: Story = {
 /** Two actions, where the second drops to a ghost rather than competing. */
 export const TwoActions: Story = {
   args: {
-    children: "A key authenticates a caller against this gateway.",
     action: (
       <>
         <Button>Export CSV</Button>
         <Button variant="primary">Create key</Button>
       </>
     ),
-  },
-}
-
-/**
- * `docsHref` trails the description rather than taking the action slot, which
- * is the distinction worth keeping: the action slot is the one thing the band
- * exists to do, and a link to the manual competing for it is how a page ends up
- * with two things claiming to be that.
- */
-export const WithDocsLink: Story = {
-  args: {
-    children: "A key authenticates a caller against this gateway.",
-    docsHref: "https://example.com/docs/api-keys",
-  },
-}
-
-/** Both, so the link and the primary action are visibly not the same slot. */
-export const DocsLinkAndAction: Story = {
-  args: {
-    children: "A key authenticates a caller against this gateway.",
-    docsHref: "https://example.com/docs/api-keys",
-    action: <Button variant="primary">Create key</Button>,
   },
 }

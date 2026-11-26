@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { Button } from "../actions/Button"
@@ -164,5 +165,24 @@ describe("Dialog", () => {
     expect(
       await screen.findByRole("heading", { name: "First run" }),
     ).toHaveClass("text-display-sub")
+  })
+
+  it("hands a caller the one element that holds its face, header to footer", async () => {
+    // For a transition that pictures and hides one face of the frame while
+    // another takes its place: it needs the face as one element, inside the
+    // frame, holding everything the frame shows.
+    const faceRef = createRef<HTMLDivElement>()
+    open({
+      faceRef,
+      status: <p>listening</p>,
+      actions: <Button>Skip</Button>,
+    })
+
+    const dialog = await screen.findByRole("dialog")
+    const face = faceRef.current
+    expect(face?.parentElement).toBe(dialog)
+    expect(face).toContainElement(screen.getByRole("heading"))
+    expect(face).toContainElement(screen.getByText("listening"))
+    expect(face).toContainElement(screen.getByRole("button", { name: "Skip" }))
   })
 })

@@ -27,6 +27,7 @@ from typing import Annotated, Any, Literal, TypedDict, get_args
 from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.core.sql import utc_iso
+from gateway.core.usage import output_tokens_per_second
 from gateway.models.money import as_float
 from gateway.models.usage import SERVED_HERE_SLUG, StreamCutBy, UsageLog
 
@@ -208,6 +209,14 @@ class UsageEntry(BaseModel):
     timestamp: str
     model: str
     provider: str | None
+    data_location: str | None = Field(
+        default=None,
+        description=(
+            "Where the hosted provider or region that served the request declared it keeps request data when the "
+            "row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it "
+            "or nothing was declared."
+        ),
+    )
     endpoint: str
     prompt_tokens: int | None
     completion_tokens: int | None
@@ -227,11 +236,19 @@ class UsageEntry(BaseModel):
     status_code: int | None
     latency_ms: int | None
     provider_latency_ms: int | None
+    # Milliseconds to the first streamed chunk; null on a request that did not stream.
+    ttft_ms: int | None
+    # Output tokens over the whole request, as the catalog's throughput counts them;
+    # null on a response too short to measure or a stream cut short, whose count may be estimated.
+    output_tokens_per_second: float | None
     source: str
     source_label: str | None
     # The request's tags (from its ``metadata``); null when it sent none.
     tags: dict[str, str] | None = None
     counts_toward_budget: bool
+    # True where the request was served on a credential the deployment pays for (a
+    # hosted provider); false where the organization's own key or endpoint served it.
+    deployment_paid: bool = False
     # Whether the bulk operator mutations can reach this row: the fixed scope
     # ``_selection_conditions`` pins them to, which is provenance *and* budget
     # participation. Derived here rather than left to the client, because a client
@@ -244,6 +261,9 @@ class UsageEntry(BaseModel):
     # are excluded from `error_count` and from `request_count`, since the request
     # they belong to is counted once by the attempt that served it.
     policy_name: str | None = None
+    # The model name the caller sent, before an alias or a policy resolved it into
+    # `model`; null on rows written before it was recorded.
+    requested_model: str | None = None
     selection_reason: str | None = None
     attempt_position: int | None = None
     attempt_count: int | None = None
@@ -268,11 +288,14 @@ class UsageEntry(BaseModel):
             timestamp=utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
+            data_location=log.data_location,
             endpoint=log.endpoint,
             source=log.source,
             source_label=log.source_label,
             tags=log.tags,
             counts_toward_budget=log.counts_toward_budget,
+            # A row not yet flushed holds None until its column default applies.
+            deployment_paid=bool(log.deployment_paid),
             bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
@@ -289,7 +312,12 @@ class UsageEntry(BaseModel):
             status_code=log.status_code,
             latency_ms=log.latency_ms,
             provider_latency_ms=log.provider_latency_ms,
+            ttft_ms=log.ttft_ms,
+            output_tokens_per_second=(
+                None if log.stream_cut_by else output_tokens_per_second(log.completion_tokens, log.latency_ms)
+            ),
             policy_name=log.policy_name,
+            requested_model=log.requested_model,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
@@ -360,6 +388,11 @@ class UsageTotals(BaseModel):
     # ``completion_tokens`` residual would drift, even negative, whenever a
     # row's meter and column disagree).
     billed_output_tokens: int = 0
+    # The part of ``cost`` the deployment's account ran (hosted models, and tool
+    # calls it ran whoever paid for the model call); the rest ran on the
+    # organization's own keys and endpoints. A row written before the split was
+    # recorded counts whole where its model call was deployment-paid.
+    deployment_paid_cost: float = 0.0
 
 
 class UsageGroupRow(BaseModel):
@@ -373,11 +406,18 @@ class UsageGroupRow(BaseModel):
 
     key: str | None
     # Display name for an opaque key (a user's alias, an API key's name), resolved
-    # in the same GROUP BY. Only ever set for the ``user`` and ``api_key``
-    # dimensions, and null there too when the entity has no label or is gone; a
-    # client falls back to ``key``. Its purpose is to let a client build a user or
-    # key filter from this breakdown alone, rather than reading both whole tables.
+    # in the same GROUP BY. Set for the ``user`` and ``api_key`` dimensions, and
+    # null there too when the entity has no label or is gone; a client falls back
+    # to ``key``. Its purpose is to let a client build a user or key filter from
+    # this breakdown alone, rather than reading both whole tables. A ``model`` row
+    # carries the model's name, the same on every spelling of one model.
     label: str | None = None
+    # A ``model`` row's grouping key, shared by every spelling of one model:
+    # providers name one model differently (``accounts/fireworks/models/glm-5p3``,
+    # ``zai-org/GLM-5.3``) and usage records the spelling sent. The rows stay one
+    # per spelling, since ``key`` is what a model filter matches; this is what lets
+    # a client show them as one. Null on every other dimension and on the fold.
+    model_group: str | None = None
     cost: float
     tokens: int
     requests: int

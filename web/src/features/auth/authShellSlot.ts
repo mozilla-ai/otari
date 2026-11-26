@@ -1,3 +1,5 @@
+import { routePath } from "@/shared/helpers/appLocation"
+
 /**
  * What `overlayAuthShellSlot` is handed, off the seam so a build that replaces
  * it can import the props; see `shared/api/requestPolicy.ts` for why.
@@ -24,15 +26,13 @@ export interface AuthShellSlotProps {
 }
 
 const SHELL_PAGES: Record<string, AuthShellPage> = {
-  "": "login",
   "/": "login",
   "/signup": "signup",
   "/recover-password": "recover-password",
   "/resend-verification": "resend-verification",
 }
 
-/** The shell page a `location.hash` is, or `null` when it is not one of them. */
-export function authShellPage(hash: string): AuthShellPage | null {
-  const path = hash.replace(/^#/, "").split("?")[0] ?? ""
-  return SHELL_PAGES[path] ?? null
+/** The shell page a route is, or `null` when it is not one of them. */
+export function authShellPage(route: string): AuthShellPage | null {
+  return SHELL_PAGES[routePath(route)] ?? null
 }

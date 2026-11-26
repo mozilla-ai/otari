@@ -6,7 +6,8 @@ Search, in order:
    endpoint sets. The instance runs with its own key, unless
    ``direct_credential``, the workspace's organization key for an unnamed
    call, is given: the key's provider, key and options then serve the call,
-   and the instance keeps its name and timeout.
+   and the instance keeps its name and timeout. On a deployment with no
+   instance, ``requested`` may name the legacy backend instead.
 2. Else the policy's credential: the workspace's organization key.
 3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
@@ -24,8 +25,8 @@ carries its own key and base URL, ``""`` where it has none, which the
 libraries read as passed rather than fall back to the environment, and a
 credential without a key or base URL its provider needs is refused.
 
-Options are layered lowest first: otari's defaults for the provider, the
-instance's, the credential's, the workspace's and the request's. The direct
+Options are layered lowest first: the instance's (the legacy settings' own,
+for a search on them), the credential's, the workspace's and the request's. The direct
 endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes no workspace layer, which holds search
 options, and a request layer on the direct endpoint alone. The count the
@@ -35,8 +36,7 @@ runs the call, each option is checked as the instance's are: a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
 names the layer and the key, never the value. What the old code runs takes
-the layers unchecked and without otari's defaults, which that code applies
-itself.
+the layers unchecked.
 """
 
 import functools
@@ -51,7 +51,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
-    PROVIDER_DEFAULT_OPTIONS,
     WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
@@ -80,7 +79,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search._cost_tier import refused_cost_tier
-from gateway.services.tools._web_search._default import in_loop_default
+from gateway.services.tools._web_search._default import direct_search_fallback, in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
     ORGANIZATION_KEY_LABEL_PREFIX,
@@ -208,7 +207,7 @@ def resolve_search(
     if requested is not None:
         instance = effective_search_instances(config).get(requested)
         if instance is None:
-            raise SearchToolNotFoundError(requested)
+            return _search_on_fallback(config, requested, direct_credential, request)
         timeout = instance.timeout or DIRECT_TIMEOUT_S
         if direct_credential is not None:
             on_key = _search_on_credential(
@@ -359,7 +358,6 @@ def _search_on_instance(
         "search",
         instance.provider,
         checked=runner == "library",
-        defaults=instance.provider_defaults,
         instance=(f"search instance '{instance.name}'", own, instance.dropped_options),
         workspace=workspace,
         request=request,
@@ -392,16 +390,38 @@ def _search_on_instance(
     )
 
 
+def _search_on_fallback(
+    config: ToolSettings,
+    requested: str,
+    direct_credential: WebSearchCredential | None,
+    request: Mapping[str, Any],
+) -> ResolvedSearch:
+    """A direct search on the legacy backend, which a deployment with no search instance serves under its name."""
+    fallback = direct_search_fallback(config)
+    if fallback is None or fallback.name != requested:
+        raise SearchToolNotFoundError(requested)
+    if direct_credential is not None:
+        on_key = _search_on_credential(
+            direct_credential, name=fallback.name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request
+        )
+        if on_key is not None:
+            return on_key
+    return _search_on_synthesized(fallback, workspace=_NO_OPTIONS, request=request, timeout=DIRECT_TIMEOUT_S)
+
+
 def _search_on_synthesized(
-    synthesized: SynthesizedSearchInstance, *, workspace: Mapping[str, Any], request: Mapping[str, Any]
+    synthesized: SynthesizedSearchInstance,
+    *,
+    workspace: Mapping[str, Any],
+    request: Mapping[str, Any],
+    timeout: float = IN_LOOP_TIMEOUT_S,
 ) -> ResolvedSearch:
     runner: Runner = "library" if synthesized.provider in any_search.AnySearch.get_supported_providers() else "old"
-    legacy = {"engines": ",".join(synthesized.engines)} if synthesized.engines else {}
+    legacy = {**synthesized.options, **({"engines": ",".join(synthesized.engines)} if synthesized.engines else {})}
     options = _layered(
         "search",
         synthesized.provider,
         checked=runner == "library",
-        defaults=synthesized.provider_defaults,
         instance=("legacy search settings", legacy, frozenset()),
         workspace=workspace,
         request=request,
@@ -415,7 +435,7 @@ def _search_on_synthesized(
         api_base=_base(synthesized.api_base),
         options=MappingProxyType(options),
         max_results=max_results,
-        timeout=IN_LOOP_TIMEOUT_S,
+        timeout=timeout,
         label=_SEARCH_FALLBACK_RATE,
         rate_keys=(_SEARCH_FALLBACK_RATE,),
     )
@@ -436,10 +456,10 @@ def _search_on_credential(
     if provider in any_search.AnySearch.get_supported_providers():
         runner = "library"
         metadata = any_search.AnySearch.get_provider_metadata(provider)
-        requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
+        requires_key, default_base = credential_needs_api_key(metadata), metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
     elif provider in WEB_SEARCH_PROVIDERS:
-        # Tavily and Brave, which any-search has no adapter for.
+        # A provider of the old search code that any-search does not serve.
         runner = "old"
         requires_key, default_base, requires_base = True, None, False
     else:
@@ -447,7 +467,7 @@ def _search_on_credential(
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
     if runner == "old" and _base(credential.api_base):
-        # The old code calls Tavily and Brave at their public endpoints, where the key would go instead.
+        # The old code calls the provider's public endpoint, where the key would go instead.
         raise WebSearchCredentialRefusedError(
             provider, f"names a base URL, which this gateway's {provider} client cannot use"
         )
@@ -455,7 +475,6 @@ def _search_on_credential(
         "search",
         provider,
         checked=runner == "library",
-        defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         credential=(_CREDENTIAL_LAYER, credential.options),
         workspace=workspace,
         request=request,
@@ -498,7 +517,6 @@ def _fetch_on_instance(
         "fetch",
         instance.provider,
         checked=True,
-        defaults=instance.provider_defaults,
         instance=(f"fetch instance '{instance.name}'", instance.options, instance.dropped_options),
         request=request,
     )
@@ -543,14 +561,13 @@ def _fetch_on_credential(
     metadata = any_fetch.AnyFetch.get_provider_metadata(provider)
     _check(
         credential,
-        requires_key=metadata.requires_api_key,
+        requires_key=credential_needs_api_key(metadata),
         requires_base=metadata.requires_api_base and not metadata.default_api_base,
     )
     options = _layered(
         "fetch",
         provider,
         checked=True,
-        defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         credential=(_CREDENTIAL_LAYER, credential.options),
         request=request,
     )
@@ -581,10 +598,23 @@ def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
     )
 
 
+def credential_needs_api_key(metadata: any_search.ProviderMetadata | any_fetch.ProviderMetadata) -> bool:
+    """Whether an organization's key on the provider must carry an API key.
+
+    A key brings the organization's own account or its own server. A provider
+    that requires a key, or that has an address of its own, takes the account:
+    without one, a call would run keyless from this deployment's address, under
+    the allowance the provider gives that address.
+    """
+    return metadata.requires_api_key or bool(metadata.default_api_base)
+
+
 def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: bool) -> None:
-    """Refuse a credential the library or the old code would complete from the server's own settings."""
+    """Refuse a credential that would run on the server's own settings or address."""
     if requires_key and not credential.api_key:
-        raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which the provider requires")
+        raise WebSearchCredentialRefusedError(
+            credential.provider, "carries no API key, which every key on this provider must carry"
+        )
     if requires_base and not _base(credential.api_base):
         raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
 
@@ -599,7 +629,6 @@ def _layered(
     provider: str,
     *,
     checked: bool,
-    defaults: Mapping[str, Any],
     instance: tuple[str, Mapping[str, Any], frozenset[str]] | None = None,
     credential: tuple[str, Mapping[str, Any]] | None = None,
     workspace: Mapping[str, Any] = _NO_OPTIONS,
@@ -609,8 +638,8 @@ def _layered(
 
     ``instance`` is the instance's layer with the keys its load recorded as
     breaking the rules; ``credential`` is a credential's. Unless ``checked``,
-    the layers pass as they are, without otari's defaults. Each dropped option
-    is warned about once, not on every call.
+    the layers pass as they are. Each dropped option is warned about once, not
+    on every call.
     """
     instance_name, instance_options, broken = instance or ("", _NO_OPTIONS, frozenset())
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
@@ -621,7 +650,6 @@ def _layered(
         key, problem = next(iter(refused.items()))
         raise WebSearchOptionRefusedError(key, problem)
     return {
-        **defaults,
         **_kept(
             instance_options,
             instance_name,

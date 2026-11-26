@@ -68,6 +68,8 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes.keys import (
+    CREATE_SCOPES_DESCRIPTION,
+    UPDATE_SCOPES_DESCRIPTION,
     CreateKeyResponse,
     KeyInfo,
     _load_key_in_organization,
@@ -85,7 +87,7 @@ from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
-from gateway.schemas.budgets import EndUserPublic
+from gateway.schemas.budgets import EndUserPublic, KeyEndUsersPublic
 from gateway.services.api_keys import (
     DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
@@ -93,6 +95,7 @@ from gateway.services.api_keys import (
     organization_key_changes,
     refuse_service_key_flag_change,
 )
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -101,9 +104,10 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 router = APIRouter(
     prefix="/organizations/me/keys",
@@ -140,6 +144,9 @@ class CreateOwnKeyRequest(BaseModel):
         description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, "
         "[] = no tool, or search and fetch tool names ('*' for every tool). "
         "A key can only narrow your own tool access.",
+    )
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: list(DEFAULT_KEY_SCOPES), min_length=1, description=CREATE_SCOPES_DESCRIPTION
     )
     reject_user_mismatch: bool | None = Field(
         default=None,
@@ -211,6 +218,8 @@ class UpdateOwnKeyRequest(BaseModel):
     allowed_models: list[str] | None = None
     # Tri-state the same way: null = inherit your own search tool access.
     allowed_tools: list[str] | None = None
+    # Not nullable on the key, so absent and null both leave it unchanged.
+    scopes: list[KeyScope] | None = Field(default=None, min_length=1, description=UPDATE_SCOPES_DESCRIPTION)
     is_service_key: bool | None = None
     # A service key's alone. Tri-state via model_fields_set: absent = unchanged,
     # null = end users this key creates from now on are uncapped.
@@ -229,8 +238,8 @@ async def _load_own_writable_key(
     key_id: str,
     *,
     revoking: bool = False,
-) -> APIKey:
-    """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
+) -> tuple[Organization, APIKey]:
+    """The caller's organization and one of their own keys in it, or 404, refused with 403 to a viewer of its workspace.
 
     An owner or admin also reaches the organization's service keys. A viewer
     still lists their keys; changing, rotating or revoking one is a write, and an
@@ -243,7 +252,7 @@ async def _load_own_writable_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
     )
-    return key
+    return organization, key
 
 
 async def _load_member_key(
@@ -342,8 +351,9 @@ async def create_own_key(
     )
 
     try:
-        allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_models = validate_allowed_models(config, request.allowed_models, organization_id=organization.id)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
+        scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -369,6 +379,14 @@ async def create_own_key(
     )
     # A key must not grant more than its user's default, the same narrow-only
     # rule the operator surface enforces; here the user is always the caller.
+    # A catalog ID stands for the offerings that default covers.
+    if owner.allowed_models is not None:
+        try:
+            allowed_models = validate_allowed_models(
+                config, request.allowed_models, organization_id=organization.id, within=owner.allowed_models
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not is_allowlist_subset(allowed_models, owner.allowed_models, tool_keys=config.legacy_search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
     if not tools_within_user(config, allowed_tools, user_tools=owner.allowed_tools, user_models=owner.allowed_models):
@@ -397,6 +415,7 @@ async def create_own_key(
         expires_at=request.expires_at,
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
+        scopes=scopes,
         exclude_from_budget=False,
         self_service=True,
         reject_user_mismatch=request.reject_user_mismatch,
@@ -492,15 +511,22 @@ async def update_own_key(
     """Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin."""
     fields = request.model_fields_set
     switching_off = fields == {"is_active"} and request.is_active is False
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
+    organization, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
     refuse_service_key_flag_change(key, request.is_service_key)
 
     # Tri-state via model_fields_set: the nullable columns take null to clear
-    # them, so "absent" and "null" have to be told apart. ``is_active`` and
-    # ``metadata`` are not nullable, so ``is not None`` is the whole distinction there.
-    changes = request.model_dump(include=fields - {"is_active", "metadata", "is_service_key"} - END_USER_SETTINGS)
+    # them, so "absent" and "null" have to be told apart. ``is_active``,
+    # ``metadata`` and ``scopes`` are not nullable, so ``is not None`` is the whole distinction there.
+    changes = request.model_dump(
+        include=fields - {"is_active", "metadata", "is_service_key", "scopes"} - END_USER_SETTINGS
+    )
     if request.is_active is not None:
         changes["is_active"] = request.is_active
+    if request.scopes is not None:
+        try:
+            changes["scopes"] = KeyScopeSet.checked(request.scopes, is_service_key=key.is_service_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if request.metadata is not None:
         changes["metadata_"] = request.metadata
     changes |= await organization_key_changes(
@@ -513,7 +539,7 @@ async def update_own_key(
     )
 
     try:
-        await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id))
+        await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id), organization_id=organization.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except DATABASE_ERRORS as exc:
@@ -536,7 +562,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    key = await _load_own_writable_key(db, organizations, identity, key_id)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -566,7 +592,7 @@ async def delete_own_key(
     organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
     await db.delete(key)
     try:
@@ -610,6 +636,23 @@ async def list_own_key_end_users(
     return await budgets.list_end_users(
         api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
     )
+
+
+@router.get("/{key_id}/end-user-count")
+async def get_own_key_end_user_count(
+    key_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+    budgets: BudgetServiceDep,
+) -> KeyEndUsersPublic:
+    """How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+
+    The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+    """
+    organization = await organizations.get_active_organization_for_user(identity)
+    key = await _load_member_key(db, organizations, identity, organization, key_id)
+    return await budgets.end_user_seats(api_key=key)
 
 
 async def _federation_rule_key(

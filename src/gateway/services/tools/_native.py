@@ -27,6 +27,15 @@ class Dialect(StrEnum):
     RESPONSES = "responses"
 
 
+class Refusal(StrEnum):
+    """Why the gateway refused a call before it ran."""
+
+    # The request's use cap for the tool was spent.
+    CALL_LIMIT = "call_limit"
+    # The model's arguments were not a JSON object.
+    INVALID_INPUT = "invalid_input"
+
+
 # Marks a Messages ``server_tool_use`` ID as one this gateway minted. Anthropic issues
 # ``srvtoolu_``-prefixed IDs of its own, so a reserved prefix is what lets an echoed
 # transcript be told apart from one describing a call the provider really ran.
@@ -39,7 +48,8 @@ class NativeCall:
 
     ``id`` is the ID the caller's own transcript gave the call. A rendering that needs an
     ID of its own mints one carrying the gateway's prefix instead. ``failed`` is whether the
-    call ran and answered with a tool error. ``token`` is minted once per call: a rendering
+    call ran and answered with a tool error, and ``raised`` whether running it raised instead,
+    so the tool kept no failure of its own. ``token`` is minted once per call: a rendering
     that announces a call both when it starts and when it ends builds the ID of both from
     it, so a caller can match the two.
     """
@@ -48,6 +58,7 @@ class NativeCall:
     id: str
     arguments: Mapping[str, Any]
     failed: bool = False
+    raised: bool = False
     token: str = field(default_factory=lambda: uuid.uuid4().hex, compare=False)
 
 
@@ -66,6 +77,6 @@ class NativeRendering(Protocol):
         """Wire items announcing a call the gateway ran, empty where there is nothing to report."""
         ...
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """Wire items announcing a call the request's use cap refused, empty where the dialect has none."""
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """Wire items announcing a call refused for ``reason`` before it ran, empty where the dialect has none."""
         ...

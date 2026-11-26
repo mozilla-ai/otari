@@ -58,7 +58,7 @@ def test_lists_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> None:
     # The schema advertised is the one the model is actually given.
     assert web_search["input_schema"]["required"] == ["query"]
     assert "query" in web_search["input_schema"]["properties"]
-    assert tools["otari_code_execution"]["input_schema"]["required"] == ["code"]
+    assert tools["otari_code_execution"]["input_schema"]["required"] == ["language", "code"]
     web_fetch = tools["otari_web_fetch"]
     assert web_fetch["available"] is True
     assert web_fetch["accepted_types"] == ["otari_web_fetch"]
@@ -73,6 +73,8 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (False, "not_configured")
+    # A deployment with no sandbox runs no language, so none is listed.
+    assert "enum" not in tools["otari_code_execution"]["input_schema"]["properties"]["language"]
 
 
 def test_configured_tools_report_available(tmp_path: Path) -> None:
@@ -86,6 +88,8 @@ def test_configured_tools_report_available(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (True, None)
+    # The languages listed are the ones the deployment's sandbox runs.
+    assert tools["otari_code_execution"]["input_schema"]["properties"]["language"]["enum"] == ["python"]
 
 
 def test_accepted_types_are_canonical_only_by_default(tmp_path: Path) -> None:
@@ -143,3 +147,17 @@ def test_a_configured_sandbox_advertises_the_provider_keywords_it_may_claim(tmp_
 
     assert auto == ["otari_code_execution", "code_execution", "code_interpreter", "code_execution_<date>"]
     assert provider_only == ["otari_code_execution"]
+
+
+def test_direct_availability_follows_what_the_deployment_runs(tmp_path: Path) -> None:
+    """Search and fetch say whether their direct endpoints would run; code execution has none here."""
+    with _client(tmp_path) as client:
+        unconfigured = _tools(client)
+    reset_config()
+    reset_db()
+    with _client(tmp_path, web_fetch_enabled=True, web_search_url="http://searxng:8080") as client:
+        configured = _tools(client)
+
+    assert [unconfigured[t]["direct_available"] for t in ("otari_web_search", "otari_web_fetch")] == [False, False]
+    assert [configured[t]["direct_available"] for t in ("otari_web_search", "otari_web_fetch")] == [True, True]
+    assert configured["otari_code_execution"]["direct_available"] is None

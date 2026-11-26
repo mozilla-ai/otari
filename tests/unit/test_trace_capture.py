@@ -220,6 +220,39 @@ def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
     }
 
 
+def test_a_guardrail_span_names_what_fired() -> None:
+    trace = _trace()
+    trace.record_guardrail(
+        profile="lakera",
+        mode="block",
+        valid=False,
+        started=_T0,
+        ended=_T0,
+        categories=("prompt_attack", "pii/phone_number"),
+    )
+
+    [span] = trace.spans
+    assert span.attributes["otari.guardrail.categories"] == "prompt_attack,pii/phone_number"
+
+
+def test_a_guardrail_span_keeps_the_categories_that_fit_and_the_span() -> None:
+    """A stored list attribute is capped as a whole, so the categories past the cap are left off, not the span."""
+    named = tuple(f"{'x' * 60}_{i}" for i in range(4))
+    trace = _trace()
+    trace.record_guardrail(profile="pi", mode="block", valid=False, started=_T0, ended=_T0, categories=named)
+
+    [span] = trace.spans
+    assert span.attributes["otari.guardrail.categories"] == ",".join(named[:2])
+
+
+def test_a_guardrail_span_that_names_nothing_has_no_categories() -> None:
+    trace = _trace()
+    trace.record_guardrail(profile="pi", mode="block", valid=False, started=_T0, ended=_T0)
+
+    [span] = trace.spans
+    assert "otari.guardrail.categories" not in span.attributes
+
+
 def test_spans_past_the_cap_are_counted_not_kept() -> None:
     trace = _trace(max_spans=2)
 

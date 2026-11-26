@@ -1,6 +1,8 @@
 """The inference domain: idempotent completion requests, structured decisions and dialect bridges."""
 
 from gateway.services.inference._audio_length import audio_seconds
+from gateway.services.inference._batch_line_errors import BatchLineError
+from gateway.services.inference._batch_results import BatchResultsService
 from gateway.services.inference._client_country import (
     CountryDatabaseError,
     client_country,
@@ -78,6 +80,7 @@ from gateway.services.inference._passthrough_usage import (
     transcription_usage,
     video_usage,
 )
+from gateway.services.inference._provider_errors import ProviderErrorMapping, UpstreamFailure
 from gateway.services.inference._responses_bridge import (
     REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
@@ -89,12 +92,16 @@ from gateway.services.inference._responses_bridge import (
 from gateway.services.inference._responses_input import strip_gateway_minted_items
 from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
 from gateway.services.inference._sweeper import run_idempotency_sweeper
+from gateway.services.inference._unavailable_models import (
+    ProviderRefusalListener,
+    UnavailableModel,
+    UnavailableModelReporter,
+)
 from gateway.services.inference._upstream_errors import (
     EMPTY_COMPLETION_DETAIL,
     EmptyCompletionError,
     UpstreamErrorKind,
     is_empty_completion,
-    is_model_unavailable_error,
     is_provider_billing_error,
     is_provider_credential_rejection,
     is_provider_cut,
@@ -148,8 +155,13 @@ __all__ = [
     "UPSTREAM_USER_FIELD",
     "RERANK_BILLING",
     "VIDEO_BILLING",
+    "ProviderRefusalListener",
+    "UnavailableModel",
+    "UnavailableModelReporter",
     "PassthroughBilling",
     "Admission",
+    "BatchLineError",
+    "BatchResultsService",
     "BlockedCaller",
     "Claimed",
     "CountryDatabaseError",
@@ -160,12 +172,14 @@ __all__ = [
     "InferenceService",
     "InvalidKey",
     "KeyReused",
+    "ProviderErrorMapping",
     "Replay",
     "ReportedUsage",
     "StillInFlight",
     "UnknownDecisionProviderError",
     "UnidentifiedEndUserError",
     "UnknownCaller",
+    "UpstreamFailure",
     "aresponses_via_chat_completions",
     "audio_seconds",
     "bind_upstream_user",
@@ -216,7 +230,6 @@ __all__ = [
     "EmptyCompletionError",
     "UpstreamErrorKind",
     "is_empty_completion",
-    "is_model_unavailable_error",
     "is_provider_billing_error",
     "is_provider_credential_rejection",
     "is_provider_cut",

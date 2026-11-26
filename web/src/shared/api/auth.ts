@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   CallerIdentity,
+  DeleteAccountRequest,
   MailedLinkStatusResponse,
   OrganizationContext,
   Passkey,
@@ -41,9 +42,10 @@ import { createPasskey } from "@/shared/helpers/webauthn"
 
 export function useRotateMasterKey() {
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (currentPassword: string) =>
       apiFetch<RotateMasterKeyResponse>("/settings/master-key/rotate", {
         method: "POST",
+        body: JSON.stringify({ current_password: currentPassword }),
       }),
   })
 }
@@ -314,15 +316,6 @@ export function useDeletePasskey() {
   })
 }
 
-/**
- * The deployment's outgoing-mail configuration, for the Settings page.
- *
- * Distinct from `useDeployment().mail_ready`, which the shell already carries:
- * that one boolean gates a mail-dependent affordance anywhere in the app, while
- * this reports *why* mail is (un)available and is worth a request only on the
- * page that shows it.
- */
-
 export function useSignup() {
   return useMutation({
     mutationFn: (body: SignupRequest) =>
@@ -407,5 +400,16 @@ export function useResetPassword() {
   })
 }
 
-// `enabled` lets a page that only sometimes offers a workspace control (the
-// organization-wide Usage page's filter) skip the read everywhere else.
+/**
+ * Delete the signed-in account (`DELETE /v1/auth/account`). The server ends
+ * every session it held, so the caller signs out locally once this succeeds.
+ */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: (body: DeleteAccountRequest) =>
+      apiFetch<void>("/auth/account", {
+        method: "DELETE",
+        body: JSON.stringify(body),
+      }),
+  })
+}

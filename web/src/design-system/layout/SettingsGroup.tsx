@@ -132,3 +132,12 @@ export function SettingsGroup({
     </>
   )
 }
+
+/**
+ * Free-form content inside a bounded group: a status line, a summary, a short
+ * form. Inset like a `SettingRow` and like a table's cells, so a group mixing
+ * the three keeps one left edge and nothing sits flush against the frame.
+ */
+export function SettingsBlock({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col gap-3 px-4 py-3">{children}</div>
+}

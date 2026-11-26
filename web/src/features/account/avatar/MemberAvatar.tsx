@@ -6,17 +6,24 @@ import { avatarFace } from "./avatarChoice"
  * member row's `avatar_face`), else the one their user id gives them.
  *
  * A row with no identity yet (an invitation not accepted) gets an empty square
- * of the same size, so names stay on one lane down the list.
+ * of the same size, so names stay on one lane down the list. `isCompact` is
+ * the 20px face a table cell shows beside a name, and draws nothing for a row
+ * with no identity: a cell has no lane of names to hold.
  */
 export function MemberAvatar({
   userId,
   face,
+  isCompact = false,
 }: {
   userId: string | null | undefined
   face: number | null | undefined
+  isCompact?: boolean
 }) {
-  // The account control's own 26px box, so a person reads the same in the
-  // sidebar and in the roster.
+  if (isCompact) {
+    return userId ? (
+      <AvatarFace id={avatarFace(userId, face)} className="size-5 shrink-0" />
+    ) : null
+  }
   const box = "h-[1.625rem] w-[1.625rem]"
   if (!userId) {
     return (

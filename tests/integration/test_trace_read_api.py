@@ -86,6 +86,8 @@ def _trace(session: Session, workspace_id: uuid.UUID, trace_id: str, *, failed: 
             trace_id=trace_id,
             session_source="harness",
             harness="claude-code",
+            client_language="javascript",
+            client_version="2.1.291",
             started_at=_T0,
             last_activity_at=_T0 + timedelta(minutes=2),
             step_count=2,
@@ -271,6 +273,16 @@ def test_a_search_ignores_the_spaces_around_it(client: TestClient, world: dict[s
     listed = _operator_get(client, world, "/traces", {"q": "  ONE "}).json()
 
     assert [item["trace_id"] for item in listed["items"]] == ["s-one"]
+
+
+def test_a_listed_session_names_its_clients_language_and_version(client: TestClient, world: dict[str, str]) -> None:
+    [item] = _operator_get(client, world, "/traces", {"q": "one"}).json()["items"]
+
+    assert (item["harness"], item["client_language"], item["client_version"]) == (
+        "claude-code",
+        "javascript",
+        "2.1.291",
+    )
 
 
 def test_the_header_master_key_reads_the_default_organization(

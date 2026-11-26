@@ -55,6 +55,49 @@ class BootstrapOperatorProtectedError(TenancyValidationError):
     """
 
 
+class AccountDeletionUnconfirmedError(TenancyValidationError):
+    """An account deletion whose typed confirmation is not the account's own address."""
+
+    def __init__(self) -> None:
+        super().__init__("Type the account's email address to confirm its deletion")
+
+
+class AccountDeletionPasswordRequiredError(TenancyValidationError):
+    """An account deletion with no password, for an account that has one."""
+
+    def __init__(self) -> None:
+        super().__init__("The current password is required to delete the account")
+
+
+class AccountErasureFailedError(TenancyError):
+    """A store outside the deployment's transaction refused to erase a deleted account's records.
+
+    Some may already be erased, but the account is not deleted, so the deletion can be retried to finish.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Could not erase all of this account's telemetry and traces; the account was not deleted. Try again."
+        )
+
+
+class BootstrapHandoverRefusedError(TenancyValidationError):
+    """A handover of the bootstrap operator role that would not leave a usable anchor.
+
+    A 400 rather than a 403 even when the caller is the reason, because the dashboard's
+    `apiFetch` ends the session on a 403 and the caller here is an operator in good standing.
+    """
+
+
+class MasterKeyRotationRefusedError(TenancyValidationError):
+    """A session-authenticated master-key rotation that did not prove the bootstrap operator's password.
+
+    A 400 rather than a 403 for the reason ``BootstrapHandoverRefusedError`` gives: the
+    dashboard's ``apiFetch`` ends the session on a 403, and the caller is an operator in good
+    standing who has not proved the password this action requires.
+    """
+
+
 class EmptyDeploymentUserUpdateError(TenancyValidationError):
     """A change request that names neither flag.
 
@@ -746,9 +789,14 @@ class BlockedEmailEntryNotFoundError(TenancyNotFoundError):
 
 
 __all__ = [
+    "AccountDeletionPasswordRequiredError",
+    "AccountDeletionUnconfirmedError",
+    "AccountErasureFailedError",
     "BlockedEmailEntryExistsError",
     "BlockedEmailEntryNotFoundError",
     "BlockedEmailError",
+    "BootstrapHandoverRefusedError",
+    "MasterKeyRotationRefusedError",
     "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",

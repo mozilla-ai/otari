@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { API_ROOT } from "@/shared/api/client"
 import { entry, mockApi, renderPage } from "@/tests/activity"
 import { flushRouter } from "@/tests/router"
 import { RequestDetail } from "./RequestDetail"
@@ -28,6 +29,21 @@ describe("RequestDetail", () => {
     expect(
       screen.getByText("no pricing configured for openai:gpt-4o"),
     ).toBeInTheDocument()
+  })
+
+  it("names where the serving provider keeps data, only when it declared it", async () => {
+    mockApi()
+    const { unmount } = renderPage(
+      <RequestDetail entry={entry({ data_location: "SG" })} />,
+    )
+    await flushRouter()
+    expect(screen.getByText("Data location")).toBeInTheDocument()
+    expect(screen.getByText("Singapore")).toBeInTheDocument()
+    unmount()
+
+    renderPage(<RequestDetail entry={entry({ data_location: null })} />)
+    await flushRouter()
+    expect(screen.queryByText("Data location")).toBeNull()
   })
 
   it("shows the Otari-Request-ID the request was answered under, not the row's own id", async () => {
@@ -164,6 +180,33 @@ describe("RequestDetail", () => {
     expect(
       screen.getByText("Reasoning tokens").parentElement,
     ).toHaveTextContent("—")
+  })
+
+  it("shows the path a served request was called on", async () => {
+    mockApi()
+    renderPage(<RequestDetail entry={entry()} />)
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      `${API_ROOT}/chat/completions`,
+    )
+  })
+
+  it("shows an imported row's endpoint as its source reported it", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ source: "claude_code", endpoint: "/v1/messages" })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      "/v1/messages",
+    )
+    expect(screen.getByText("Endpoint").parentElement).not.toHaveTextContent(
+      API_ROOT,
+    )
   })
 
   it("names a row's tool calls and what they cost", async () => {
@@ -401,5 +444,21 @@ describe("RequestDetail", () => {
       selector: "span.text-overline",
     })
     expect(label.parentElement?.textContent).toContain("156 ms")
+  })
+
+  it("shows the time to first token and the throughput a streamed request got", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ ttft_ms: 420, output_tokens_per_second: 87.4 })}
+      />,
+    )
+    await flushRouter()
+
+    const field = (name: string) =>
+      screen.getByText(name, { selector: "span.text-overline" }).parentElement
+        ?.textContent
+    expect(field("Time to first token")).toContain("420 ms")
+    expect(field("Throughput")).toContain("87 tok/s")
   })
 })

@@ -5,9 +5,11 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -20,10 +22,11 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, MetaData, create_engine, text
+from sqlalchemy import Engine, MetaData, create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlmodel import col
 from testcontainers.postgres import PostgresContainer
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -35,6 +38,7 @@ if "gateway" in sys.modules:
 
 from gateway.api.deps import (
     build_hosted_provider_service,
+    build_unavailable_model_reporter,
     get_membership_listener,
     set_config,
 )
@@ -42,13 +46,31 @@ from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
+from gateway.models.tenancy import DashboardSession, OrganizationMember, OrganizationMemberRole
+from gateway.models.tenancy import User as TenancyUser
+from gateway.models.users import User as AttributionUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
+from gateway.types.key_scope import END_USER_SCOPES, KeyScope, KeyScopeSet
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+# Every scope a key that is not a service key may hold, for a test of something other than scopes.
+ALL_KEY_SCOPES_HELD = KeyScopeSet.checked((s for s in KeyScope if s not in END_USER_SCOPES), is_service_key=False)
+# The same scopes as a request body names them.
+ALL_KEY_SCOPES = ALL_KEY_SCOPES_HELD.stored
+# Every scope, which only a service key may hold.
+ALL_SERVICE_KEY_SCOPES = [scope.value for scope in KeyScope]
+
+
+def all_scopes(settings: dict[str, Any]) -> list[str]:
+    """Every scope a key created with ``settings`` may hold."""
+    return ALL_SERVICE_KEY_SCOPES if settings.get("is_service_key") else ALL_KEY_SCOPES
+
+
 # The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
 # enrich its hits through.
 FAKE_SEARCH = "fake-search"
@@ -244,6 +266,22 @@ def clean_database(postgres_url: str) -> None:
     """
     _run_alembic_migrations(postgres_url)
     reset_database(postgres_url)
+
+
+@pytest.fixture
+def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve every hostname to a public address, so a tenant's ``api_base`` passes the address check without DNS.
+
+    An address literal is never resolved, so a test naming a private one still sees it refused.
+    """
+    import ipaddress
+
+    from gateway.services.web_retrieval_network import SystemAddressResolver
+
+    async def resolve(self: SystemAddressResolver, host: str, port: int) -> tuple[ipaddress.IPv4Address, ...]:
+        return (ipaddress.IPv4Address("1.1.1.1"),)
+
+    monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
 
 
 @pytest.fixture
@@ -444,6 +482,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         membership_listener=get_membership_listener,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
+    app.state.unavailable_model_reporter = build_unavailable_model_reporter(config)
     install_rate_limits(app, config)
 
 
@@ -569,10 +608,10 @@ def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
 
 @pytest.fixture
 def api_key_obj(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
-    """Create a test API key and return its details."""
+    """Create a test API key holding every scope a key that is not a service key may, and return its details."""
     response = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "test-key"},
+        json={"key_name": "test-key", "scopes": ALL_KEY_SCOPES},
         headers=master_key_header,
     )
     assert response.status_code == 200
@@ -687,3 +726,107 @@ def live_server(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> Gene
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@dataclass(frozen=True)
+class SeededMember:
+    """The identity and membership rows one seeded member is made of."""
+
+    user_id: uuid.UUID
+    organization_member_id: uuid.UUID
+
+
+@pytest.fixture
+def seed_member(
+    db_session: Session, client: TestClient, master_key_header: dict[str, str]
+) -> Callable[..., SeededMember]:
+    """Put a member at an address into the operator's organization, writing the rows directly.
+
+    Yields a function taking the address and the role, for a test that needs a
+    member to exist before the behavior it covers runs.
+
+    The organization is resolved once, here, rather than per call: the request
+    that resolves it also provisions the tenancy root on a deployment that has
+    none, and a dashboard session set later in the test would otherwise answer
+    for its own organization instead of the operator's.
+
+    NOTE: Rows are written on ``db_session`` and committed, so a caller holding
+    an open write on the organization row elsewhere will block against itself.
+
+    NOTE: The seeded identity holds the address and nothing else: no password,
+    ``email_verified_at`` unset and ``email_proven_at`` unset. An address is
+    recorded as proved only where whoever controls it took part, and nobody did
+    here.
+
+    NOTE: Each call mints an identity, so an address must be seeded once per
+    test. Seeding one twice is a mistake rather than a case to handle.
+    """
+    active = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
+    assert active.status_code == 200, active.text
+    organization_id = uuid.UUID(active.json()["organization"]["id"])
+
+    def _seed(*, email: str, role: OrganizationMemberRole = "member") -> SeededMember:
+        address = email.strip().lower()
+        # Matched the way the application matches an address, because the unique
+        # index is case-sensitive and an exact match would miss a row it holds.
+        held = db_session.scalars(select(TenancyUser).where(func.lower(col(TenancyUser.email)) == address)).first()
+        assert held is None, f"{address} already has an identity, so seeding it again would conflict"
+
+        user = TenancyUser(
+            email=address,
+            full_name=None,
+            active_organization_id=organization_id,
+            default_organization_id=organization_id,
+        )
+        db_session.add(user)
+        db_session.flush()
+        membership = OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active")
+        db_session.add(membership)
+        # Keys, budgets and usage hang off this row rather than off the identity,
+        # and nothing joins the two, so a member without one cannot own a key.
+        db_session.add(AttributionUser(user_id=str(user.id), alias=address))
+        db_session.commit()
+        return SeededMember(user_id=user.id, organization_member_id=membership.id)
+
+    return _seed
+
+
+@pytest.fixture
+def signed_in_member(
+    db_session: Session, client: TestClient, seed_member: Callable[..., SeededMember]
+) -> Callable[..., TenancyUser]:
+    """Seed a member and sign the client in as them, returning the identity it signed in as.
+
+    Yields a function taking the address and the role, for a test that acts as
+    an ordinary member rather than as the operator.
+
+    NOTE: The client keeps the cookie for the rest of the test, so a later
+    request made without clearing it speaks for this member and not the
+    operator, whatever credential it carries.
+
+    NOTE: The address is verified, unlike the one :func:`seed_member` leaves.
+    Signing in refuses an unverified address, and every path that mints a
+    session stamps it, so a member holding one has always verified. It stays
+    unproved, which is the state a claim through a shared link leaves.
+    """
+
+    def _signed_in(*, email: str, role: OrganizationMemberRole = "member") -> TenancyUser:
+        seeded = seed_member(email=email, role=role)
+        identity = db_session.get(TenancyUser, seeded.user_id)
+        assert identity is not None
+        token = f"session-{uuid.uuid4().hex}"
+        now = datetime.now(UTC)
+        identity.email_verified_at = now
+        db_session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=identity.id,
+                created_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+        db_session.commit()
+        client.cookies.set(SESSION_COOKIE_NAME, token)
+        return identity
+
+    return _signed_in

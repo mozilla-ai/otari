@@ -65,6 +65,7 @@ from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs, cached_org_slug_provider
+from gateway.types.endpoint_auth import ENDPOINT_AUTH_HEADERS_KEY
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 if TYPE_CHECKING:
@@ -72,7 +73,14 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api", "request_fields")
+_INSTANCE_META_KEYS = (
+    "provider_type",
+    "models",
+    "max_retries",
+    "messages_api",
+    "request_fields",
+    ENDPOINT_AUTH_HEADERS_KEY,
+)
 
 # How long a Bedrock client waits for the next byte of a response. botocore's
 # default of 60s fails a stream whose model goes quiet for a minute, which a model
@@ -318,8 +326,12 @@ class HostedLookup:
     own_name_only: bool
 
     def accepts(self, response_provider: str, instance: str) -> bool:
-        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate."""
-        return not self.own_name_only or response_provider == instance
+        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate.
+
+        A region of the provider (``ollama@eu``) answers for the provider's own
+        name; a candidate that already names a region takes that region alone.
+        """
+        return not self.own_name_only or response_provider == instance or _region_parent(response_provider) == instance
 
 
 def hosted_lookup(provider: LLMProvider) -> HostedLookup:
@@ -346,6 +358,21 @@ def _no_hosted_names(_name: str) -> str | None:
 # composition root (``configure_hosted_names``) as pricing's provider types
 # are: the names live in ``services/providers``, which imports this module.
 _hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def _no_region_parent(_name: str) -> str | None:
+    return None
+
+
+# The hosted provider a name is a region of, registered by the composition root
+# as the hosted names are.
+_region_parent: Callable[[str], str | None] = _no_region_parent
+
+
+def configure_region_parents(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider region's name to its provider's; None unregisters it."""
+    global _region_parent  # noqa: PLW0603
+    _region_parent = resolver or _no_region_parent
 
 
 def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:
@@ -551,10 +578,12 @@ def get_provider_kwargs(
     lookup = instance if instance is not None else provider.value
     kwargs: dict[str, Any] = {}
     raw_config = config.providers.get(lookup)
+    tenant_endpoint = False
     if raw_config is None and workspace_id is not None:
         # A slug names one key of its own; any other instance reads the provider's.
         named = lookup if cached_org_slug_provider(workspace_id, lookup) is not None else provider.value
         raw_config = cached_org_provider_kwargs(workspace_id, named)
+        tenant_endpoint = raw_config is not None and bool(raw_config.get("api_base"))
     if raw_config is not None:
         provider_config = {k: v for k, v in raw_config.items() if k not in _INSTANCE_META_KEYS}
 
@@ -602,6 +631,26 @@ def get_provider_kwargs(
     placeholder = keyless_placeholder_api_key(kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder
+
+    if tenant_endpoint:
+        # An organization chose this address, so the SDK dials it only through
+        # the client that checks it is public on every request and connects to
+        # the address it checked. Imported here: the providers package imports
+        # this module through model discovery.
+        from gateway.services.providers import owned_endpoint_sdk_client
+
+        pinned_args: dict[str, Any] = {
+            **(kwargs.get("client_args") or {}),
+            "http_client": owned_endpoint_sdk_client(provider),
+        }
+        # Built by the gateway from a validated field, never taken from the
+        # tenant's own client_args, which may not name headers at all.
+        if endpoint_headers := (raw_config or {}).get(ENDPOINT_AUTH_HEADERS_KEY):
+            pinned_args["default_headers"] = {
+                **(pinned_args.get("default_headers") or {}),
+                **endpoint_headers,
+            }
+        kwargs["client_args"] = pinned_args
 
     return kwargs
 
@@ -688,13 +737,20 @@ class ProviderAccounts:
         """The account ``credential`` reaches.
 
         The instance is left out of the digest, because renaming one does not
-        move its account.
+        move its account. A header carried on every request is in it, because a
+        proxy in front of one address can reach a different account for each
+        credential it accepts.
         """
-        canonical = json.dumps(
-            {"provider": provider.value, "api_base": credential.api_base, "api_key": credential.api_key},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        fields: dict[str, Any] = {
+            "provider": provider.value,
+            "api_base": credential.api_base,
+            "api_key": credential.api_key,
+        }
+        # Added only where there are headers, so an account named before this
+        # field was read keeps its name, and the copies recorded under it.
+        if headers := credential.request_headers:
+            fields["request_headers"] = headers
+        canonical = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return ProviderAccount(
             provider=provider,
             instance=instance,
@@ -1002,12 +1058,14 @@ def resolve_static_policy_target(
 
     ``None`` for a name that is not a policy, for a dynamic policy (whose target
     depends on the request), and when routing is disabled. Scoped like an alias, so
-    a user-scoped policy in this workspace resolves to that user's target.
+    a user-scoped policy in this workspace resolves to that user's target. A
+    target written as a catalog spelling is the offering it resolves to, as it
+    is where the completion routes compile the policy.
     """
     spec = resolve_effective_policy(config, model_selector, user_id, workspace_id=workspace_id)
     if spec is None or spec.is_dynamic:
         return None
-    return spec.default_target
+    return resolve_catalog_selector(spec.default_target, workspace_id=workspace_id) or spec.default_target
 
 
 def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:

@@ -21,16 +21,21 @@
 * [Web search](web-search.md)
 * [Code execution](code-execution.md)
 * [MCP servers](mcp-servers.md)
+* [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
+* [Connect an MCP server on a private network](connect-a-private-mcp-server.md)
 
 ## Integrations
 
 * [Claude Code](claude-code.md)
 * [Codex](codex.md)
+* [Cursor](cursor.md)
 * [Junie](junie.md)
 * [opencode](opencode.md)
 * [pi](pi.md)
 * [oh-my-pi](oh-my-pi.md)
 * [Hermes Agent](hermes.md)
+* [Mistral Vibe](vibe.md)
+* [DeepSeek Harness](deepseek-harness.md)
 * [Pydantic AI](pydantic-ai.md)
 * [LangChain](langchain.md)
 * [LangGraph](langgraph.md)
@@ -49,6 +54,7 @@
 * [Set a budget and ceiling](set-a-budget-and-ceiling.md)
 * [Create a multi-provider routing](create-a-multi-provider-routing.md)
 * [Configure guardrails](configure-guardrails.md)
+* [Host your own guardrail](host-your-own-guardrail.md)
 * [Track spend per end user](end-users.md)
 
 ## Organize
@@ -58,6 +64,7 @@
 * [Billing](billing.md)
 * [Manage workspaces](manage-workspaces.md)
 * [Members and invitations](members.md)
+* [Set up single sign-on](set-up-single-sign-on.md)
 
 # Self-Hosting
 
@@ -71,8 +78,10 @@
 
 ## Providers
 
+* [Connect otari.ai](providers/otari-ai.md)
 * [Connect OpenAI](providers/openai.md)
 * [Connect Gemini](providers/gemini.md)
+* [Connect Azure OpenAI](providers/azureopenai.md)
 * [Connect a llama.cpp server](providers/llamacpp.md)
 * [Use with a ChatGPT subscription](chatgpt-subscription.md)
 * [Hosted providers and BYO credentials](hosted-providers.md)
@@ -82,6 +91,7 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [MCP server catalog](mcp-catalog.md)
 * [Update check](update-check.md)
 * [Store agent traces](trace-storage.md)
 * [Service keys on a deployment you run](operator-service-keys.md)
@@ -112,4 +122,4 @@
 
 * [Data Collection](privacy/data-collection.md)
 * [Agent Session Content](privacy/agent-session-content.md)
-* [Zero Data Retention](privacy/zdr.md)
+* [Data Retention](privacy/zdr.md)

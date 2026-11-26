@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "error": {
+      "code": "SUBSCRIPTION_TOKEN_INVALID",
+      "detail": "The provided subscription token is invalid.",
+      "meta": {
+        "component": "authentication"
+      },
+      "status": 422
+    },
+    "type": "ErrorResponse"
+  }
+}

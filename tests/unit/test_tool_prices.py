@@ -216,10 +216,13 @@ def test_the_fetch_tool_that_reads_the_deployments_pages_is_named_for_the_startu
     assert enriching_fetch_tool(GatewayConfig(web_search_default_tool="none")) is None
 
 
-def test_a_search_on_the_legacy_provider_pair_is_checked_on_its_tools_own_row() -> None:
+def test_a_search_on_the_legacy_provider_pair_is_checked_like_one_on_the_legacy_url() -> None:
     config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
 
-    assert configured_tools_to_price(config) == [_SEARCH_ON_ITS_OWN_ROW]
+    assert configured_tools_to_price(config) == [
+        PricedTool(WEB_SEARCH_TOOL_NAME, "otari:web_search", ("otari:web_search",), True),
+        replace(_BUILTIN_FETCH, name=WEB_SEARCH_TOOL_NAME, enrichment=True),
+    ]
 
 
 def test_a_tool_the_deployment_cannot_run_is_not_checked() -> None:

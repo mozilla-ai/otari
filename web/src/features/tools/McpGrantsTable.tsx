@@ -122,7 +122,7 @@ export function McpGrantsTable({
             <RowActionRow>
               <RowAction
                 icon={FiEdit2}
-                label="Edit"
+                label="Edit…"
                 ariaLabel="Edit the default policy"
                 onPress={onEditDefault}
               />
@@ -134,13 +134,14 @@ export function McpGrantsTable({
           <RowActionRow>
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit the rule for ${name}`}
               onPress={() => onEdit(row.grant)}
             />
             <RowAction
               icon={FiX}
-              label="Delete"
+              label="Delete…"
+              isDestructive
               ariaLabel={`Delete the rule for ${name}`}
               onPress={() => onRemove(row.grant)}
             />
@@ -153,7 +154,7 @@ export function McpGrantsTable({
   return (
     <TableScrollFrame className="otari-mcp-grants-table">
       <DataTable
-        ariaLabel="ACL"
+        ariaLabel="Access rules"
         columns={columns}
         rows={rows}
         getRowKey={(row) => (row.kind === "rule" ? row.grant.id : "default")}

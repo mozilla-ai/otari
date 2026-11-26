@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.deps import ToolPorts, get_workspace_search_keys
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
@@ -34,6 +35,7 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
+    WorkspaceMcpServerCheckOriginError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
@@ -68,6 +70,8 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 )
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
+
+from .conftest import ALL_KEY_SCOPES_HELD
 
 pytestmark = pytest.mark.asyncio
 
@@ -418,6 +422,39 @@ async def test_a_token_on_a_plain_http_url_is_rejected(async_db: AsyncSession) -
         )
 
 
+@pytest.mark.parametrize(
+    ("url", "resolves_to"),
+    [
+        ("http://127.0.0.1:8000/mcp", None),
+        ("http://127.1:8000/mcp", None),
+        ("http://0177.0.0.1:8000/mcp", None),
+        ("http://[::1]:8000/mcp", None),
+        ("http://localhost:8000/mcp", "127.0.0.1"),
+        ("https://10.0.0.5/mcp", None),
+        ("https://mcp.internal.corp.example/mcp", "192.168.1.20"),
+    ],
+)
+async def test_a_loopback_or_private_url_is_rejected_whatever_the_retired_flags_say(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, url: str, resolves_to: str | None
+) -> None:
+    """A workspace chose the URL, so it must be public: the gateway's own task is not a destination."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    if resolves_to is not None:
+
+        async def resolve(_host: str) -> list[object]:
+            return [ipaddress.ip_address(resolves_to)]
+
+        monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolve)
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+
+    with pytest.raises(WorkspaceMcpServerUnsafeUrlError):
+        await service.create_server(user=owner, workspace_id=workspace.id, request=_create(url=url))
+
+
 async def test_a_non_http_scheme_is_rejected(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
@@ -697,6 +734,7 @@ def _request_context(
     refused before reaching what these cases are about.
     """
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=db,
         uow=UnitOfWork(db),
@@ -1402,17 +1440,45 @@ async def test_an_edit_form_tests_with_the_stored_token_unless_it_sends_one(
         user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
     )
 
+    other_path = PUBLIC_URL.replace("/mcp", ":443/v2/mcp")
     for token in (None, "", "ghp_typed"):
         await service.check_connection(
             user=owner,
             workspace_id=workspace.id,
-            request=WorkspaceMcpServerCheckRequest(
-                url=OTHER_PUBLIC_URL, authorization_token=token, server_id=created.id
-            ),
+            request=WorkspaceMcpServerCheckRequest(url=other_path, authorization_token=token, server_id=created.id),
         )
 
     assert [seen.authorization_token for seen in check.seen[1:]] == ["ghp_stored", None, "ghp_typed"]
-    assert all(seen.url == OTHER_PUBLIC_URL for seen in check.seen[1:])
+    assert all(seen.url == other_path for seen in check.seen[1:])
+
+
+async def test_a_stored_token_is_never_tested_against_another_origin(async_db: AsyncSession, check: _FakeCheck) -> None:
+    """A manager cannot have the stored token sent to an address they type: only a token they typed goes there."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
+    )
+
+    for url in (OTHER_PUBLIC_URL, PUBLIC_URL.replace("/mcp", ":8443/mcp"), PUBLIC_URL.replace("https:", "http:")):
+        with pytest.raises(WorkspaceMcpServerCheckOriginError):
+            await service.check_connection(
+                user=owner,
+                workspace_id=workspace.id,
+                request=WorkspaceMcpServerCheckRequest(url=url, server_id=created.id),
+            )
+    assert len(check.seen) == 1, "nothing was sent anywhere but by the create's own check"
+
+    await service.check_connection(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMcpServerCheckRequest(
+            url=OTHER_PUBLIC_URL, authorization_token="ghp_typed", server_id=created.id
+        ),
+    )
+    assert (check.seen[-1].url, check.seen[-1].authorization_token) == (OTHER_PUBLIC_URL, "ghp_typed")
 
 
 async def test_a_test_refuses_an_unsafe_url_the_way_a_create_does(async_db: AsyncSession, check: _FakeCheck) -> None:
@@ -1472,7 +1538,13 @@ async def test_an_empty_allow_list_admits_no_tools(async_db: AsyncSession, check
 async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None = None) -> APIKey:
     if user_id is not None and await db.get(BillingUser, user_id) is None:
         db.add(BillingUser(user_id=user_id))
-    key = APIKey(id=str(uuid.uuid4()), workspace_id=workspace_id, key_hash=uuid.uuid4().hex, user_id=user_id)
+    key = APIKey(
+        id=str(uuid.uuid4()),
+        workspace_id=workspace_id,
+        key_hash=uuid.uuid4().hex,
+        user_id=user_id,
+        scopes=ALL_KEY_SCOPES_HELD,
+    )
     db.add(key)
     await db.flush()
     return key

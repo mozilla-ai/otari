@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { dismissComboBoxInDialog, login, nav, openNested } from "../helpers"
+import { dismissComboBoxInDialog, login, nav, openTab } from "../helpers"
 import { docScreenshot } from "./fixtures"
 
 // The guide's provider key and API key steps are the dialogs the
@@ -26,9 +26,11 @@ test("create a fallback policy", async ({ page }) => {
   await page.getByRole("link", { name: /^Back to / }).click()
 
   await nav(page).getByRole("link", { name: "API keys" }).click()
-  await expect(page.getByRole("button", { name: "Create key" })).toBeVisible()
+  await expect(
+    page.getByRole("main").getByRole("button", { name: "Create API key" }),
+  ).toBeVisible()
 
-  await openNested(page, "Routing", "Policies")
+  await openTab(page, "Rules", "Routing")
   await page.getByRole("button", { name: "Create policy" }).first().click()
   const dialog = page.getByRole("dialog")
   for (const kind of [

@@ -12,12 +12,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionDisabledError,
@@ -41,6 +42,7 @@ from gateway.models.tenancy import (
     WebAuthnCredential,
 )
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
@@ -48,7 +50,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.mail import Mailer
-from gateway.services.organizations import OrganizationClaimedDomains
+from gateway.services.organizations import BootstrapOperatorMarker, OrganizationClaimedDomains
 from gateway.services.password_service import hash_password
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import (
@@ -56,7 +58,6 @@ from gateway.services.tenancy import (
     OrganizationService,
     VerifiedDomainLookup,
     forget_unproven_access,
-    hash_token,
     sso_blocks_membership,
 )
 
@@ -199,6 +200,7 @@ def _identity_service(db: AsyncSession) -> IdentityService:
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow).bootstrap_marker),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),
@@ -1448,7 +1450,7 @@ async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(asyn
     signed_in = await _identity_service(async_db).sign_in(bystander, asserted_email=None)
     assert signed_in.active_organization_id == elsewhere.id
 
-    link = await _identity_service(async_db).issue_password_link(bystander.id)
+    link = await _identity_service(async_db).issue_password_link(account_id=bystander.id, by_master_key=True)
     assert link.link is not None
 
 
@@ -1499,7 +1501,7 @@ async def test_a_password_link_is_refused_for_a_member_of_an_enforcing_organizat
     await async_db.commit()
 
     with pytest.raises(PasswordLinkUnavailableError):
-        await _identity_service(async_db).issue_password_link(member.id)
+        await _identity_service(async_db).issue_password_link(account_id=member.id, by_master_key=True)
 
 
 async def test_setting_a_dashboard_password_is_refused_for_a_member_of_an_enforcing_organization(
@@ -1914,3 +1916,101 @@ async def test_switching_into_a_non_enforcing_organization_is_unaffected(
 
     assert response.status_code == 200, response.text
     assert response.json()["organization"]["id"] == str(organization.id)
+
+
+async def test_the_rule_refuses_a_person_with_no_link_joining(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="joining-unlinked")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    stranger = await _member_with_email(
+        async_db, organization, role="member", email="unlinked@acme.example", full_name="No Link"
+    )
+    service = OrganizationService(async_db, membership_listener=None)
+
+    refused = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=False, role="member", user=stranger
+    )
+
+    assert refused is True
+
+
+async def test_the_rule_admits_a_person_joining_with_a_link(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="joining-linked")
+    organization.sso_required = True
+    async_db.add(organization)
+    joiner = await _member_with_email(
+        async_db, organization, role="member", email="linked@acme.example", full_name="Has Link"
+    )
+    service = OrganizationService(async_db, membership_listener=None)
+
+    refused = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=True, role="member", user=joiner
+    )
+
+    assert refused is False
+
+
+async def test_the_rule_admits_the_break_glass_owner_joining_as_owner_alone(async_db: AsyncSession) -> None:
+    """The exception is for the owner it names, which is why the role they join as decides it."""
+    organization = await create_organization(async_db, slug="joining-break-glass")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="glass@acme.example", full_name="Ada Owner"
+    )
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = owner.id
+    async_db.add(organization)
+    await async_db.flush()
+    service = OrganizationService(async_db, membership_listener=None)
+
+    as_owner = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=False, role="owner", user=owner
+    )
+    as_member = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=False, role="member", user=owner
+    )
+
+    assert (as_owner, as_member) == (False, True)
+
+
+async def test_the_port_answers_for_a_person_who_is_not_a_member_yet(async_db: AsyncSession) -> None:
+    """``blocks_membership`` cannot: it reads an active membership and answers False when there is none."""
+    organization = await create_organization(async_db, slug="joining-port")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    await async_db.flush()
+    stranger = await UserRepository(async_db).create_local_identity(
+        full_name="Stranger", active_organization_id=organization.id, email="stranger@acme.example"
+    )
+    await async_db.flush()
+    service = _connection_service(async_db)
+
+    assert await service.blocks_membership(user=stranger, organization=organization) is False
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is True
+
+
+async def test_the_port_reads_the_enforcement_as_it_stands_not_as_an_instance_holds_it(
+    async_db: AsyncSession,
+) -> None:
+    """The decision is made under a lock a caller took after resolving the organization.
+
+    An instance resolved before that lock holds whatever was true then, so the row decides.
+    """
+    organization = await create_organization(async_db, slug="turned-on-later")
+    stranger = await UserRepository(async_db).create_local_identity(
+        full_name="Stranger", active_organization_id=organization.id, email="later@acme.example"
+    )
+    await async_db.flush()
+    service = _connection_service(async_db)
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is False
+
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization.id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+        .execution_options(synchronize_session=False)
+    )
+
+    assert organization.sso_required is False, "the instance in hand is stale, which is the point"
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is True

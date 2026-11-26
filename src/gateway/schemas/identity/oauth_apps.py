@@ -1,13 +1,24 @@
 """RFC 6749 public-client authorization, token and revocation contracts."""
 
+from collections.abc import Callable
+from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+from gateway.types.key_scope import KeyScope
 
 OAuthClientId = Annotated[str, Field(min_length=1, max_length=128)]
 OAuthRedirectUri = Annotated[str, Field(max_length=2048)]
 OAuthState = Annotated[str, Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")]
 PKCECodeChallenge = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{43}$")]
+AppKeyExpiration = Literal["1-hour", "1-day", "7-days", "30-days", "90-days", "180-days", "1-year", "never"]
+AppKeyLimit = Annotated[Decimal, Field(gt=0, lt=1_000_000, decimal_places=2)]
+
+
+def _suggestion(max_length: int) -> Callable[[object], object]:
+    """Drop a suggestion too long to be valid, so the consent screen falls back as it does for any bad one."""
+    return lambda value: None if isinstance(value, str) and len(value) > max_length else value
 
 
 class AppAuthorizationParameters(BaseModel):
@@ -22,6 +33,16 @@ class AppAuthorizationParameters(BaseModel):
     code_challenge: PKCECodeChallenge
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"
+    limit: Annotated[str | None, BeforeValidator(_suggestion(32))] = Field(
+        default=None,
+        description="A spending limit in USD to suggest for the key. The person can change it on the consent "
+        "screen, and one the screen cannot use is left blank.",
+    )
+    expiration: Annotated[str | None, BeforeValidator(_suggestion(16))] = Field(
+        default=None,
+        description="An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, "
+        "1-year or never. The person can change it, and any other value leaves it at never.",
+    )
 
 
 class AppTokenRequest(BaseModel):
@@ -35,9 +56,22 @@ class AppTokenRequest(BaseModel):
 
 
 class AppDetails(BaseModel):
+    """What the consent screen shows about an app before a person approves it."""
+
     name: str
     redirect_uri: str
     issuer: str
+    scopes: list[KeyScope] = Field(
+        description="The scopes each key this app is issued will hold, from its registration."
+    )
+    verified: bool = Field(
+        description="Whether the operator registered this app. An unregistered app is named after "
+        "its site, which nothing has checked beyond its callback being on it."
+    )
+    spend_limits: bool = Field(
+        description="Whether a spending limit the person sets binds the key. It does not where the "
+        "deployment has turned budget enforcement off, so the consent screen does not offer one."
+    )
 
 
 class AppAuthorizationResponse(BaseModel):
@@ -45,8 +79,15 @@ class AppAuthorizationResponse(BaseModel):
 
 
 class AppTokenResponse(BaseModel):
+    """A minted app key, as RFC 6749 section 5.1 shapes it."""
+
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"
+    scope: str = Field(
+        description="The scopes the key holds, space delimited. Fewer than the registration names "
+        "where the person approved it before an operator narrowed it."
+    )
+    manage_url: str = Field(description="The absolute URL of the page where the person sees this key, and revokes it.")
 
 
 class AppRevocationRequest(BaseModel):

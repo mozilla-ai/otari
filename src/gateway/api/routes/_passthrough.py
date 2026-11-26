@@ -8,7 +8,7 @@ that scaffold; each route supplies only its endpoint-specific pieces: the budget
 estimate, the provider call, and its ``PassthroughBilling``, which says what the
 result reports. The pricing domain prices that report; no route prices itself.
 
-Provider failures are classified by ``classify_provider_error``, the helper the
+Provider failures are classified by :class:`UpstreamFailure`, the classifier the
 chat, messages, and responses routes use, so a provider's refusal of the
 caller's request (an upstream 400 or 404, an operation or parameter the provider
 does not support) answers with the same 4xx and redacted detail there, a
@@ -48,6 +48,7 @@ from gateway.api.deps import (
     get_config,
     get_db,
     get_log_writer,
+    get_unavailable_model_reporter,
     model_provider_port_on,
 )
 from gateway.api.request_id import set_request_id
@@ -61,19 +62,12 @@ from gateway.api.routes._helpers import (
 )
 from gateway.api.routes._pipeline import (
     HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
-    PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
     _raise_for_unresolvable_model,
-    _stored_error_message,
-    classify_provider_error,
-    failure_status_code,
     log_gateway_rejection,
-    provider_error_headers,
-    provider_failure_detail,
     request_started,
     throttle_early_rejection,
 )
-from gateway.api.routes._unavailable_models import note_unavailable_model
 from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.error_codes import (
@@ -81,10 +75,12 @@ from gateway.core.error_codes import (
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
+    USER_MISMATCH,
     RefusalException,
     body_fields_of,
     error_headers,
 )
+from gateway.core.error_details import ProviderDetail
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
@@ -93,7 +89,7 @@ from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
-from gateway.models.usage import UsageLog
+from gateway.models.usage import DECISIONS_ENDPOINT, UsageLog
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, NO_TOOLS, BillingPort, InsufficientFundsError
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import check_rate_limit, rate_limit_headers
@@ -124,6 +120,7 @@ from gateway.services.inference import (
     PassthroughBilling,
     ReportedUsage,
     UnknownDecisionProviderError,
+    UpstreamFailure,
     admit_deployment_paid,
     billed_model,
     decision_body,
@@ -140,7 +137,7 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
-    unresolvable_model_detail,
+    unresolvable_selector_detail,
 )
 from gateway.services.pricing import NO_FACTS, PriceFacts, UsageCharge, apply_rules, can_price, price_usage
 from gateway.services.pricing_service import (
@@ -170,7 +167,7 @@ from gateway.services.providers import (
     serve_on_hosted_provider,
     unpriced_model_refusal,
 )
-from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
+from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL, stored_error_message
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -187,17 +184,18 @@ def provider_call_failure(exc: Exception) -> HTTPException:
     if is_provider_credential_rejection(exc):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=PROVIDER_CREDENTIALS_DETAIL,
+            detail=ProviderDetail.CREDENTIALS,
             headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
         )
-    mapping = classify_provider_error(exc)
+    failure = UpstreamFailure(exc)
+    mapping = failure.mapping
     if mapping is not None:
         return HTTPException(
             status_code=mapping.status_code,
             detail=mapping.detail,
-            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+            headers=with_retry_hint(exc, mapping.status_code, failure.headers),
         )
-    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ProviderDetail.ERROR)
 
 
 def parse_provider(provider: str) -> LLMProvider:
@@ -317,6 +315,7 @@ def resolve_passthrough_user_id(
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=USER_MISMATCH_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=reject_mismatch,
     )
@@ -440,6 +439,7 @@ async def run_passthrough(
     # `request_group_id`, as the completion pipeline does.
     request_id = str(uuid.uuid4())
     set_request_id(raw_request, response, request_id)
+    unavailable_model_reporter = get_unavailable_model_reporter(raw_request)
     # Anchor request latency at the earliest point in the scaffold (monotonic,
     # so it is immune to wall-clock steps); recorded on the usage log below.
     started_at = time.monotonic()
@@ -483,6 +483,7 @@ async def run_passthrough(
                 api_key_id=api_key_id,
                 user_id=api_key.user_id,
                 model=model,
+                requested_model=model,
                 provider=None,
                 endpoint=endpoint,
                 detail=str(exc.detail),
@@ -493,6 +494,10 @@ async def run_passthrough(
         raise
 
     rate_limit_info = await check_rate_limit(raw_request, user_id)
+    # After the user and rate-limit checks, so a refused or throttled request
+    # pays no adapter read, and before anything is reserved, so a failure or
+    # cancellation in that read leaves no hold behind.
+    country_gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
 
     async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a gateway-side rejection of this request.
@@ -508,6 +513,7 @@ async def run_passthrough(
             api_key_id=api_key_id,
             user_id=user_id,
             model=row_model,
+            requested_model=model,
             provider=row_provider,
             endpoint=endpoint,
             detail=detail,
@@ -618,7 +624,7 @@ async def run_passthrough(
                 served,
                 status.HTTP_402_PAYMENT_REQUIRED,
                 exc.public_message,
-                **error_headers(INSUFFICIENT_FUNDS),
+                **error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
             ) from exc
         except Exception as exc:
             logger.error(
@@ -662,7 +668,7 @@ async def run_passthrough(
             resolved,
             organization_id=organization_id,
             workspace_id=workspace_id,
-            country_gate=country_gate_for(config, raw_request),
+            country_gate=country_gate,
         )
         if served is None:
             return None
@@ -734,13 +740,14 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
+            detail = unresolvable_selector_detail(config, model, user_id, workspace_id=workspace_id)
             await _log_rejection(
-                unresolvable_model_detail(model),
+                detail,
                 row_model=model,
                 row_provider=None,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-            _raise_for_unresolvable_model(model, exc)
+            _raise_for_unresolvable_model(model, exc, detail=detail)
         if lookup_pricing:
             # Unlike the branch below, the reservation is already held here, so a
             # failed lookup must refund before propagating or the estimate leaks.
@@ -767,13 +774,14 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             # Nothing is reserved yet on this branch, so there is no refund to do.
+            detail = unresolvable_selector_detail(config, model, user_id, workspace_id=workspace_id)
             await _log_rejection(
-                unresolvable_model_detail(model),
+                detail,
                 row_model=model,
                 row_provider=None,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-            _raise_for_unresolvable_model(model, exc)
+            _raise_for_unresolvable_model(model, exc, detail=detail)
         if lookup_pricing:
             found_pricing = await resolve_model_pricing(
                 db,
@@ -863,7 +871,6 @@ async def run_passthrough(
             headers=error_headers(refusal.code),
         )
 
-    country_gate = country_gate_for(config, raw_request)
     try:
         ensure_provider_country(config, country_gate, resolved.instance)
     except CountryNotServedError as exc:
@@ -964,6 +971,7 @@ async def run_passthrough(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=resolved.model,
+            requested_model=model,
             provider=resolved.instance,
             endpoint=endpoint,
             status=row_status,
@@ -1050,6 +1058,7 @@ async def run_passthrough(
             fallback=False,
             latency_ms=usage_log.latency_ms,
             ttft_ms=None,
+            completion_tokens=usage_log.completion_tokens,
         )
         await log_writer.put(usage_log)
         # The measured total, so a token ceiling counts this endpoint's traffic.
@@ -1068,14 +1077,15 @@ async def run_passthrough(
         raise
     except Exception as e:
         if hosted_instance is not None:
-            note_unavailable_model(
-                config, hosted_instance, resolved.model, e, deployment_paid=deployment_charge is not None
+            unavailable_model_reporter.report(
+                e, instance=hosted_instance, model=resolved.model, uses_deployment_credential=True
             )
         caller_params = frozenset(request_params) - SENSITIVE_PARAM_FIELDS
+        failure = UpstreamFailure(e, request_params=caller_params)
         failed_row = _usage_row(
             "error",
-            error_message=_stored_error_message(str(e)),
-            status_code=failure_status_code(e, request_params=caller_params),
+            error_message=stored_error_message(str(e)),
+            status_code=failure.logged_status,
         )
         if not served:
             record_attempt(
@@ -1086,6 +1096,7 @@ async def run_passthrough(
                 fallback=False,
                 latency_ms=failed_row.latency_ms,
                 ttft_ms=None,
+                completion_tokens=None,
             )
         await log_writer.put(failed_row)
         await refund_reservation(db, reservation)
@@ -1099,7 +1110,7 @@ async def run_passthrough(
         if mapped is not None:
             raise mapped from e
 
-        mapping = classify_provider_error(e, request_params=caller_params)
+        mapping = failure.mapping
         if mapping is not None:
             logger.warning(
                 "Provider call failed for %s:%s (status %s)", resolved.provider, resolved.model, mapping.status_code
@@ -1113,14 +1124,14 @@ async def run_passthrough(
                     model=resolved.model,
                     dispatch_model=resolved.dispatch_model,
                 ),
-                headers=with_retry_hint(e, mapping.status_code, provider_error_headers(e, mapping.status_code)),
+                headers=with_retry_hint(e, mapping.status_code, failure.headers),
             ) from e
 
         _, error_class = classify_local_attempt_error(e)
         logger.error("Provider call failed for %s:%s (%s): %s", resolved.provider, resolved.model, error_class, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(e, PASSTHROUGH_PROVIDER_ERROR_DETAIL),
+            detail=failure.unclassified_detail(PASSTHROUGH_PROVIDER_ERROR_DETAIL),
             headers=with_retry_hint(e, status.HTTP_502_BAD_GATEWAY, None),
         ) from e
 
@@ -1168,9 +1179,6 @@ def _billable_tokens(reported: ReportedUsage) -> BillableUsage | None:
     )
 
 
-DECISIONS_ENDPOINT = "/v1/decisions"
-"""The usage-log label for every decisions path. See chat.USAGE_ENDPOINT."""
-
 # An answer is a handful of tokens (one label, or a number), so the reservation
 # holds this many output tokens per question rather than a completion's default.
 ESTIMATED_OUTPUT_TOKENS_PER_QUESTION = 32
@@ -1215,6 +1223,19 @@ class DecisionOutcome(Generic[ResultT]):
     output_tokens: int
     charge: Decimal | None = None
     """The final price where the call names one. ``None`` prices the tokens, or settles the quote."""
+
+
+@dataclass(frozen=True)
+class DecisionSettled(Generic[ResultT]):
+    """A decision call that was answered and settled, and whom it was settled against."""
+
+    result: ResultT
+    request_id: str
+    """The id the call's usage row carries as ``request_group_id``."""
+    workspace_id: uuid.UUID
+    user_id: str
+    cost: Decimal | None
+    """What the caller was charged. ``None`` where the call had no price."""
 
 
 class DecisionUnavailableError(Exception):
@@ -1277,7 +1298,7 @@ def decision_status_error(status_code: int | None) -> HTTPException:
     if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=PROVIDER_CREDENTIALS_DETAIL,
+            detail=ProviderDetail.CREDENTIALS,
             headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
         )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL)
@@ -1323,7 +1344,9 @@ class SelectorDecision:
             result = DecisionResponse.model_validate(await request_decision(self._provider, body))
         except DecisionProviderError as exc:
             raise DecisionCallError(
-                str(exc), logged_status=failure_status_code(exc), response=decision_status_error(exc.status_code)
+                str(exc),
+                logged_status=UpstreamFailure(exc).logged_status,
+                response=decision_status_error(exc.status_code),
             ) from exc
         except ValidationError as exc:
             # The error's own text quotes the upstream body, so only its size is kept.
@@ -1355,7 +1378,7 @@ async def run_decision(
     prompt_chars: int,
     default_output_tokens: int,
     call: DecisionCall[ResultT],
-) -> ResultT:
+) -> DecisionSettled[ResultT]:
     """Run the decisions scaffold around ``call``: resolve, gate, reserve, call, log, settle.
 
     The same steps as :func:`run_passthrough`, which cannot run them: it resolves the model
@@ -1389,6 +1412,7 @@ async def run_decision(
                 api_key_id=api_key_id,
                 user_id=api_key.user_id,
                 model=selector,
+                requested_model=selector,
                 provider=None,
                 endpoint=DECISIONS_ENDPOINT,
                 detail=str(exc.detail),
@@ -1407,6 +1431,7 @@ async def run_decision(
             api_key_id=api_key_id,
             user_id=user_id,
             model=row_model,
+            requested_model=selector,
             provider=row_provider,
             endpoint=DECISIONS_ENDPOINT,
             detail=detail,
@@ -1432,7 +1457,8 @@ async def run_decision(
         await log_rejection(not_allowed_detail, row_model=model, row_provider=provider_name, status_code=403)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
     try:
-        ensure_provider_country(config, country_gate_for(config, raw_request), quote.served_by or provider_name)
+        gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
+        ensure_provider_country(config, gate, quote.served_by or provider_name)
     except CountryNotServedError as exc:
         refused = country_not_supported(exc.gate, quoted)
         await log_rejection(str(refused.detail), row_model=model, row_provider=provider_name, status_code=403)
@@ -1543,6 +1569,7 @@ async def run_decision(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
+            requested_model=selector,
             provider=provider_name,
             endpoint=DECISIONS_ENDPOINT,
             latency_ms=_elapsed_ms(started_at),
@@ -1624,7 +1651,7 @@ async def run_decision(
         )
     except DecisionCallError as exc:
         await log_writer.put(
-            usage_row(status="error", error_message=_stored_error_message(str(exc)), status_code=exc.logged_status)
+            usage_row(status="error", error_message=stored_error_message(str(exc)), status_code=exc.logged_status)
         )
         await undo()
         logger.error("Decision failed for %s:%s: %s", provider_name, model, exc)
@@ -1637,7 +1664,9 @@ async def run_decision(
     if rate_limit_info:
         for header, value in rate_limit_headers(rate_limit_info).items():
             response.headers[header] = value
-    return outcome.result
+    return DecisionSettled(
+        result=outcome.result, request_id=request_id, workspace_id=workspace_id, user_id=user_id, cost=cost
+    )
 
 
 @dataclass(frozen=True)
@@ -1659,7 +1688,7 @@ class DecisionScaffold:
     ) -> DecisionResponse:
         """Run the scaffold for one decisions request, against the provider its selector names."""
         call = SelectorDecision(self.config, request)
-        return await self.run_call(
+        settled = await self.run_call(
             raw_request=raw_request,
             response=response,
             auth_result=auth_result,
@@ -1669,6 +1698,7 @@ class DecisionScaffold:
             default_output_tokens=call.default_output_tokens,
             call=call,
         )
+        return settled.result
 
     async def run_call(
         self,
@@ -1681,7 +1711,7 @@ class DecisionScaffold:
         prompt_chars: int,
         default_output_tokens: int,
         call: DecisionCall[ResultT],
-    ) -> ResultT:
+    ) -> DecisionSettled[ResultT]:
         """Run the scaffold around ``call``, with ``selector`` as the name a refusal reports."""
         return await run_decision(
             raw_request=raw_request,

@@ -35,6 +35,8 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.services.traces import _otlp as trace_otlp
 
+from .conftest import ALL_KEY_SCOPES
+
 
 def _usd(tokens: int, rate_per_million: str) -> Decimal:
     """One meter's exact charge, the way the cost core computes it."""
@@ -82,7 +84,7 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: 
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "cc-otlp", "user_id": user_id, "exclude_from_budget": True},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "cc-otlp", "user_id": user_id, "exclude_from_budget": True},
         headers=master_key_header,
     )
     assert resp.status_code == 200, resp.text
@@ -195,7 +197,7 @@ def test_otlp_requires_exempt_key(client: TestClient, master_key_header: dict[st
     client.post(f"{API_ROOT}/users", json={"user_id": "bob"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
         headers=master_key_header,
     ).json()["key"]
     resp = client.post(_PATH, json=_otlp(_api_request_record()), headers={"Otari-Key": f"Bearer {key}"})
@@ -946,7 +948,7 @@ def test_otlp_agent_spans_from_a_budgeted_key_are_not_traced(
     client.post(f"{API_ROOT}/users", json={"user_id": "bob"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
         headers=master_key_header,
     ).json()["key"]
     writer = _install_writer(client, monkeypatch)

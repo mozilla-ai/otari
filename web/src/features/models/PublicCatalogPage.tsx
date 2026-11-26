@@ -7,14 +7,15 @@ import {
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
-import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { publicCatalogRoute } from "@/features/models/publicCatalog"
+import { navigateTo } from "@/shared/helpers/appLocation"
 import { parseSearch } from "@/shared/helpers/search"
 import { readUrlState } from "@/shared/helpers/urlState"
 
 // The catalog ahead of a session, where the deployment has opened it
 // (`public_catalog`). Rendered by `DeploymentRoot` before the auth gate, like
 // the public auth pages, so there is no router, no shell and no organization:
-// links are hash paths, the catalog is read anonymously at the deployment's
+// links are plain anchors, the catalog is read anonymously at the deployment's
 // list rates, and a model's "Use this model" starts an account.
 //
 // Its own bar rather than `AuthPageShell`'s: that one pins a 520px column for
@@ -22,19 +23,19 @@ import { readUrlState } from "@/shared/helpers/urlState"
 // own navbar destinations; see `PublicCatalogBar`.
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
   // A link can name the list it opens (the website's "See models" links pass
-  // `?provider=`), so the first list is read off the hash. Later changes stay
-  // in memory: the page is keyed on the hash, and writing one would remount it.
+  // `?provider=`), so the first list is read off the URL. Later changes stay
+  // in memory: the page is keyed on the route, and writing one would remount it.
   const [list, setList] = useState(() =>
     catalogListFromUrl(
       readUrlState(
-        parseSearch(window.location.hash.split("?")[1] ?? ""),
+        parseSearch(window.location.search.replace(/^\?/, "")),
         CATALOG_URL_DEFAULTS,
       ),
     ),
   )
   return (
     <div className="flex min-h-full flex-col">
-      <PublicCatalogBar onList={!modelId} />
+      <PublicCatalogBar current={modelId ? null : "models"} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
         {modelId ? (
           <ModelDetailView modelId={modelId} publicView />
@@ -44,7 +45,7 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
             onListChange={setList}
             publicView
             onOpen={(id) => {
-              window.location.hash = publicCatalogHref(id)
+              navigateTo(publicCatalogRoute(id))
             }}
           />
         )}

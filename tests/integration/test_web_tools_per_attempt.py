@@ -159,7 +159,7 @@ def _responses_reply() -> Response:
         tools=[],
         usage=ResponseUsage(
             input_tokens=5,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
             output_tokens=2,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
             total_tokens=7,
@@ -261,7 +261,7 @@ def _fake_web_backend(seen: _Seen) -> Any:
 
 
 def _fake_web_search_backends(seen: _Seen) -> Any:
-    """What a search on an instance opens, as one fake backend that serves the search and the fetch."""
+    """What a request's web tools open, as one fake backend that serves the search and the fetch."""
     build = _fake_web_backend(seen)
 
     def _build(*_args: Any, **kwargs: Any) -> list[_FakeWebBackend]:
@@ -336,9 +336,6 @@ def _post_messages(
     )
     with ExitStack() as stack:
         stack.enter_context(patch("gateway.api.routes.messages.amessages", new=fake_amessages))
-        stack.enter_context(
-            patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen))
-        )
         if not real_search_backends:
             stack.enter_context(
                 patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen))
@@ -623,7 +620,18 @@ def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
 class _McpPool:
     """An MCP pool whose one server exposes a tool no built-in is named."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
+    # No server here refused an ended sign-in.
+    signed_out: tuple[()] = ()
+
+    def __init__(
+        self,
+        configs: Any,
+        *,
+        tally: Any = None,
+        trace: Any = None,
+        ceded_tool_names: Any = (),
+        contacts: Any = None,
+    ) -> None:
         return None
 
     async def __aenter__(self) -> _McpPool:
@@ -648,7 +656,7 @@ def test_a_streamed_mcp_only_loop_candidates_failure_falls_over_to_the_next_cand
 ) -> None:
     """A stream whose only gateway tools are MCP servers is held for its first chunk like any other."""
     body = _messages_body(
-        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}], stream=True
+        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://93.184.216.34/mcp"}], stream=True
     )
 
     with patch("gateway.api.routes._pipeline.MCPClientPool", new=_McpPool):
@@ -755,7 +763,18 @@ def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_
 class _ShadowingMcpPool:
     """An MCP pool whose one server exposes a tool named ``web_search``."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None, ceded_tool_names: Any = ()) -> None:
+    # No server here refused an ended sign-in.
+    signed_out: tuple[()] = ()
+
+    def __init__(
+        self,
+        configs: Any,
+        *,
+        tally: Any = None,
+        trace: Any = None,
+        ceded_tool_names: Any = (),
+        contacts: Any = None,
+    ) -> None:
         return None
 
     async def __aenter__(self) -> _ShadowingMcpPool:
@@ -783,7 +802,7 @@ def test_an_mcp_tool_shadowing_a_builtin_only_the_fallback_runs_is_refused_befor
     body = _messages_body(
         "claude-then-vertex",
         _SEARCH,
-        mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}],
+        mcp_servers=[{"name": "docs", "url": "http://93.184.216.34/mcp"}],
         **({"stream": True} if stream else {}),
     )
 
@@ -846,7 +865,6 @@ def test_attempts_searching_on_an_instance_share_one_call_allowance(
         assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
         caps |= {id(search._cap), id(fetch._cap)}
     assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
-    assert seen.web_backends == [], "the old backend served none of them"
 
 
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(
@@ -906,7 +924,6 @@ def _post_responses(
     with (
         patch("gateway.api.routes.responses.aresponses", new=fake_aresponses),
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen)),
         patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen)),
     ):
         response = client.post(f"{API_ROOT}/responses", json=body, headers=headers)

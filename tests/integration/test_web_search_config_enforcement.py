@@ -30,10 +30,13 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
+from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tools import WebSearchBackend
 from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
 from gateway.services.web_retrieval_policy import canonicalize_domain_rules
+
+from .conftest import ALL_KEY_SCOPES
 
 _REQUEST = {
     "model": "anthropic:claude-3-5-sonnet-20241022",
@@ -98,7 +101,12 @@ def _post_with_search_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen.ran = True
         return _text_response("via-search-loop")
@@ -264,7 +272,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     assert response.status_code == 403
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
     detail = response.json()
-    assert detail["error"]["message"] == "web search is not enabled for this workspace"
+    assert detail["error"]["message"] == WebSearchNotEnabledError().message
     assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert seen.ran is False, "the tool loop must never have run"
 
@@ -286,19 +294,21 @@ def test_a_search_with_nothing_to_search_with_is_refused_without_naming_a_settin
     assert seen.ran is False
 
 
-def test_a_disabled_workspace_is_refused_before_its_search_is_found_to_have_nothing_to_run_on(
+def test_a_disabled_workspace_with_nothing_to_search_with_is_told_what_the_deployment_lacks(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Turning the switch on would not let this search run, so the refusal names the missing search."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
 
-    response, _ = _post_with_search_patched(client, api_key_header, _REQUEST)
+    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
-    assert response.status_code == 403
-    assert response.json()["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == WEB_SEARCH_NOT_CONFIGURED_DETAIL
+    assert seen.ran is False
 
 
 def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(
@@ -463,7 +473,7 @@ def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    """The ceiling and the block list reach the old backend, which serves the legacy Tavily pair."""
+    """The ceiling and the block list reach the search backend the legacy Tavily pair runs on."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setattr(test_config, "web_search_provider", "tavily")
     monkeypatch.setattr(test_config, "web_search_provider_api_key", "tvly-key")
@@ -471,25 +481,22 @@ def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
     _set_config(
         client, master_key_header, workspace_id, enabled=True, max_results=2, blocked_domains=["banned.example"]
     )
-    built: dict[str, Any] = {}
+    pools: list[Any] = []
 
-    def fake_backend(**kwargs: Any) -> Any:
-        built.update(kwargs)
-        backend = AsyncMock()
-        backend.purpose_hints = lambda: []
-        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
+    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **_extra: Any) -> MessageResponse:
+        pools.append(pool)
+        return _text_response("via-search-loop")
 
     tool = {"type": "otari_web_search", "max_results": 15, "blocked_domains": ["noise.example"]}
-    with (
-        patch("gateway.api.routes.messages.anthropic_tool_loop", new=AsyncMock(return_value=_text_response())),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
-    ):
+    with patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop):
         response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "tools": [tool]}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
-    assert built["provider"] == "tavily"
-    assert built["max_results"] == 2
-    assert set(built["blocked_domains"]) == {"noise.example", "banned.example"}
+    [search] = pools
+    assert isinstance(search, WebSearchBackend)
+    assert search._search.provider == "tavily"
+    assert search._max_results == 2
+    assert search._policy.blocked == canonicalize_domain_rules(["noise.example", "banned.example"])
 
 
 def test_a_request_allow_list_is_intersected_with_the_workspace_one(
@@ -633,7 +640,12 @@ def test_a_streaming_request_gets_the_same_narrowing(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.ran = True
         yield MessageStopEvent(type="message_stop")
@@ -824,7 +836,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     client.post(f"{API_ROOT}/users", json={"user_id": "direct-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "direct-search-key", "user_id": "direct-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "direct-search-key", "user_id": "direct-search-user"},
         headers=master_key_header,
     ).json()
 
@@ -836,7 +848,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
         )
 
     assert response.status_code == 403, response.text
-    assert response.json()["detail"] == "web search is not enabled for this workspace"
+    assert response.json()["detail"] == WebSearchNotEnabledError().message
     assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert ran.await_count == 0
 
@@ -848,6 +860,32 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     assert len(rows) == 1
     assert rows[0]["status"] == "error"
     assert rows[0]["status_code"] == 403
+
+
+def test_the_direct_search_endpoint_tells_a_disabled_workspace_there_is_nothing_to_search_with(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning the switch on would not let this search run, so the refusal names the missing search tool."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
+    client.post(f"{API_ROOT}/users", json={"user_id": "no-search-user"}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "no-search-key", "user_id": "no-search-user"},
+        headers=master_key_header,
+    ).json()
+
+    response = client.post(
+        f"{API_ROOT}/search",
+        json={"query": "anything"},
+        headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"].startswith("No search tools are configured.")
+    assert response.headers.get(ERROR_CODE_HEADER) != WEB_ACCESS_DISABLED
 
 
 def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
@@ -868,7 +906,11 @@ def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
     client.post(f"{API_ROOT}/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "invalid-config-search-key",
+            "user_id": "invalid-config-search-user",
+        },
         headers=master_key_header,
     ).json()
 
@@ -893,7 +935,7 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
     client.post(f"{API_ROOT}/users", json={"user_id": "open-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "open-search-key", "user_id": "open-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "open-search-key", "user_id": "open-search-user"},
         headers=master_key_header,
     ).json()
 
@@ -938,7 +980,7 @@ def test_no_row_is_refused_like_a_disabled_row_where_web_access_is_opt_in(
     refused, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert refused.status_code == 403
-    assert refused.json()["error"]["message"] == "web search is not enabled for this workspace"
+    assert refused.json()["error"]["message"] == WebSearchNotEnabledError().message
     assert seen.ran is False
 
     _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=True)
@@ -957,7 +999,7 @@ def test_the_direct_search_endpoint_refuses_a_workspace_with_no_row_where_web_ac
     client.post(f"{API_ROOT}/users", json={"user_id": "opt-in-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
         headers=master_key_header,
     ).json()
 
@@ -969,5 +1011,5 @@ def test_the_direct_search_endpoint_refuses_a_workspace_with_no_row_where_web_ac
         )
 
     assert response.status_code == 403, response.text
-    assert response.json()["detail"] == "web search is not enabled for this workspace"
+    assert response.json()["detail"] == WebSearchNotEnabledError().message
     assert ran.await_count == 0

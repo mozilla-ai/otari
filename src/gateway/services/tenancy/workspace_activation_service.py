@@ -61,8 +61,10 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, Us
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -165,6 +167,14 @@ class ActivationAttemptPublic(BaseModel):
     latency_ms: int | None = None
 
 
+class ActivationIssuedKeyPublic(BaseModel):
+    """The setup key the guide already issued, identified as the Keys page lists it. Never its plaintext."""
+
+    key_id: str
+    key_prefix: str | None
+    key_suffix: str | None
+
+
 class WorkspaceActivationPublic(BaseModel):
     """Where a workspace stands on its first successful request."""
 
@@ -190,6 +200,15 @@ class WorkspaceActivationPublic(BaseModel):
         )
     )
     dismissed: bool = Field(description="Whether someone skipped the guide for this workspace.")
+    issued_key: ActivationIssuedKeyPublic | None = Field(
+        default=None,
+        description=(
+            "The setup key the guide already issued, so a reopened guide can offer it instead of "
+            "rotating it. Null until one is issued, once it is revoked, deleted or expired, when "
+            "the caller is not the one it was issued to, and whenever the guide is not offered to "
+            "this caller."
+        ),
+    )
 
 
 class ActivationApiKeyPublic(BaseModel):
@@ -249,11 +268,13 @@ class WorkspaceActivationService:
             )
 
         latest = await self._latest_request(workspace.id)
+        eligible = await self._is_eligible(user=user, workspace=workspace, dismissed=dismissed)
         return WorkspaceActivationPublic(
             status="failed" if latest is not None else "waiting",
             latest_attempt=_attempt_public(latest) if latest is not None else None,
-            experience_eligible=await self._is_eligible(user=user, workspace=workspace, dismissed=dismissed),
+            experience_eligible=eligible,
             dismissed=dismissed,
+            issued_key=await self._usable_issued_key(state, user=user) if eligible else None,
         )
 
     # ------------------------------------------------------------------
@@ -317,6 +338,8 @@ class WorkspaceActivationService:
                 key_suffix=key_suffix(plaintext),
                 key_name=ACTIVATION_KEY_NAME,
                 user_id=owner.user_id,
+                # The guide's one job is a first model call.
+                scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
             )
             self.db.add(record)
         else:
@@ -329,8 +352,10 @@ class WorkspaceActivationService:
             # against the first one's ceilings.
             record.user_id = owner.user_id
             # A key the operator revoked from the Keys page and then asked the
-            # guide for again is being asked for deliberately.
+            # guide for again is being asked for deliberately, and a new
+            # plaintext must not be born expired.
             record.is_active = True
+            record.expires_at = None
 
         now = datetime.now(UTC)
         if state.first_presented_at is None:
@@ -468,6 +493,21 @@ class WorkspaceActivationService:
         if state is None or state.api_key_id is None:
             return None
         return await self.db.get(APIKey, state.api_key_id)
+
+    async def _usable_issued_key(
+        self, state: WorkspaceActivationState | None, *, user: User
+    ) -> ActivationIssuedKeyPublic | None:
+        """The issued key, offered back only to the caller holding its plaintext while it still authenticates.
+
+        Rotation moves the row to whoever asked last, so another manager is
+        offered a key of their own instead of one they never saw.
+        """
+        record = await self._existing_key(state)
+        if record is None or record.user_id != str(user.id):
+            return None
+        if key_refusal(record, datetime.now(UTC)) is not None:
+            return None
+        return ActivationIssuedKeyPublic(key_id=record.id, key_prefix=record.key_prefix, key_suffix=record.key_suffix)
 
     async def _first_successful_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
         """The oldest successful gateway request in the workspace, which is the activation.

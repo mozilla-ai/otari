@@ -1,5 +1,8 @@
 """Errors the organization and workspace surfaces raise, and the HTTP status each carries."""
 
+from datetime import UTC, datetime
+from enum import StrEnum
+
 from fastapi import status
 
 from gateway.exceptions import (
@@ -21,6 +24,35 @@ class NoActiveOrganizationError(TenancyNotFoundError):
 
     def __init__(self) -> None:
         super().__init__("You are not an active member of any organization")
+
+
+class InvitationAddressMismatchError(TenancyForbiddenError):
+    """An invitation opened by an account that does not hold the invited address.
+
+    Names the address, because the person reading it holds the link that was sent there.
+    """
+
+    def __init__(self, invited_email: object):
+        super().__init__(f"This invitation is for {invited_email}. Sign in as that address to accept it.")
+
+
+class InvitationNeedsSsoSignInError(TenancyForbiddenError):
+    """An invitation to an organization whose members sign in through its own connection."""
+
+    def __init__(self, invited_email: object):
+        super().__init__(
+            f"Sign in through this organization's own connection as {invited_email} to accept this invitation."
+        )
+
+
+class InvitationNoLongerValidError(TenancyNotFoundError):
+    """An invitation link cannot be used: it was never one, or it expired, was declined, cancelled or blocked.
+
+    One answer for every case, so the link tells its holder nothing about which.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This invitation is no longer valid")
 
 
 class OrganizationMemberNotFoundError(TenancyNotFoundError):
@@ -55,6 +87,17 @@ class NotAuthorizedError(TenancyForbiddenError):
 
 class MembershipUpdateError(TenancyValidationError):
     """A membership change the organization's own rules refuse (e.g. the last owner)."""
+
+
+class AccountDeletionLastOwnerError(TenancyConflictError):
+    """An account deletion that would leave an organization with members and no owner."""
+
+    def __init__(self, organization_names: list[str]) -> None:
+        super().__init__(
+            "Make another member an owner of "
+            + ", ".join(organization_names)
+            + " before deleting your account, or the organization would have nobody to manage it"
+        )
 
 
 class NotAnOrganizationMemberError(TenancyValidationError):
@@ -92,7 +135,7 @@ class OrganizationMemberAddressUnresolvedError(TenancyConflictError):
 
 
 class OrganizationMemberAddressUnprovenError(TenancyConflictError):
-    """An address another organization vouched for, added or invited by a different one.
+    """An address only another organization recorded, added or invited by a different one.
 
     A password chosen through an invitation link is the inviting organization's
     word for the address, and that organization's admins held the link. Letting a
@@ -404,6 +447,92 @@ class InvitationPasswordNotAcceptedError(TenancyValidationError):
         super().__init__(f"This link cannot set a password for this address. Accept without one, then {way_in}.")
 
 
+class AddressAlreadyInvitedError(TenancyConflictError):
+    """This organization already holds an invitation for the address.
+
+    Raised whether or not the invitee has declined it.
+    A decline is recorded quietly, so this refusal must not be how an admin learns one happened.
+    """
+
+    def __init__(self, email: str) -> None:
+        super().__init__(
+            f"{email} already has an invitation to this organization. "
+            "Resend it, or cancel it to invite with other terms."
+        )
+
+
+class DuplicateInvitationAddressError(TenancyValidationError):
+    """One invitation request named the same address more than once."""
+
+    def __init__(self, email: str) -> None:
+        super().__init__(f"{email} is listed more than once")
+
+
+class InvitationsNeedSsoError(TenancyForbiddenError):
+    """The organization requires single sign-on, so its admins do not hand out invitations."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This organization requires single sign-on (SSO). People join it by signing in through its connection."
+        )
+
+
+class InvitationLimitCeiling(StrEnum):
+    """Which daily ceiling on inviting an address was reached.
+
+    ADDRESS is the narrower cap on inviting one particular address in a day.
+    DAILY is the organization's or the inviting account's overall cap for the day.
+    """
+
+    ADDRESS = "address"
+    DAILY = "daily"
+
+
+class InvitationLimitError(TenancyError):
+    """An organization, an inviting account, or one address has reached its daily invitation ceiling."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+    def __init__(self, ceiling: InvitationLimitCeiling) -> None:
+        detail = (
+            "This address has already been invited the most times allowed today."
+            if ceiling is InvitationLimitCeiling.ADDRESS
+            else "Too many invitations were asked for today. Try again tomorrow."
+        )
+        super().__init__(detail)
+
+
+class InvitationResendLimitError(TenancyConflictError):
+    """An invitation has already been resent the most times the deployment's settings allow."""
+
+    def __init__(self) -> None:
+        super().__init__("This invitation has been resent the most times allowed.")
+
+
+class InvitationResendTooSoonError(TenancyConflictError):
+    """A resend was asked for before the deployment's wait since the invitation's last send had passed."""
+
+    def __init__(self, available_at: datetime) -> None:
+        shown = available_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        super().__init__(f"This invitation can be resent at {shown} UTC.")
+
+
+class InvitationRequestTooLargeError(TenancyValidationError):
+    """One invitation request named more addresses or workspaces than it may, or named a workspace twice."""
+
+    @classmethod
+    def too_many_addresses(cls, limit: int) -> "InvitationRequestTooLargeError":
+        return cls(f"A single request may invite at most {limit} addresses")
+
+    @classmethod
+    def too_many_workspaces(cls, limit: int) -> "InvitationRequestTooLargeError":
+        return cls(f"A single request may offer at most {limit} workspaces")
+
+    @classmethod
+    def duplicate_workspace(cls, workspace_id: object) -> "InvitationRequestTooLargeError":
+        return cls(f"Workspace {workspace_id} is offered more than once")
+
+
 class WorkspaceActivationUnavailableError(TenancyConflictError):
     """The first-request setup guide is not on offer for this workspace.
 
@@ -433,16 +562,28 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 
 __all__ = [
+    "AccountDeletionLastOwnerError",
+    "AddressAlreadyInvitedError",
     "DefaultOrganizationDeletionError",
     "DirectMemberAddUnavailableError",
+    "DuplicateInvitationAddressError",
     "ForeignTenancyError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
     "InvitationAlreadyUsedError",
     "InvitationClosedError",
     "InvitationExpiredError",
+    "InvitationLimitCeiling",
+    "InvitationAddressMismatchError",
+    "InvitationLimitError",
+    "InvitationNeedsSsoSignInError",
+    "InvitationNoLongerValidError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
+    "InvitationRequestTooLargeError",
+    "InvitationResendLimitError",
+    "InvitationResendTooSoonError",
+    "InvitationsNeedSsoError",
     "LastOrganizationError",
     "LastWorkspaceError",
     "MembershipActivationNeedsAcceptanceError",

@@ -67,14 +67,21 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
+import httpx
 from any_guardrail import AnyGuardrail, Guardrail, GuardrailName, GuardrailOutput
+from any_guardrail.guardrails.openai_moderation.openai_moderation import OpenaiModeration
 
 from gateway.core.env import otari_env
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository
 from gateway.services.guardrails import GuardrailsNotReachableError
-from gateway.services.tenancy.organization_guardrail_definition_service import build_arguments
+from gateway.services.providers import OwnedEndpointSyncTransport
+from gateway.services.tenancy.organization_guardrail_definition_service import (
+    build_arguments,
+    stored_arguments_problem,
+)
+from gateway.services.url_safety import UnresolvableHostError
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -122,7 +129,7 @@ _threads: ThreadPoolExecutor | None = None
 
 @dataclass(frozen=True)
 class GuardrailCheck:
-    """One in-process verdict, in the three fields the remote path also reports.
+    """One in-process verdict, in the fields the remote path also reports.
 
     Deliberately not any-guardrail's own `GuardrailOutput`: the caller is
     `services/guardrails`, which knows nothing about this package and must not
@@ -133,6 +140,8 @@ class GuardrailCheck:
     valid: bool
     explanation: str | None
     score: float | None
+    categories: tuple[str, ...] = ()
+    """The names of the categories the guardrail says fired, unfiltered: the caller holds them to its own rule."""
 
 
 @dataclass(frozen=True)
@@ -150,6 +159,9 @@ class _Held:
     fingerprint: datetime
     guardrail_name: str
     guardrail: Guardrail | None
+    # Set when the build was refused under one of the definition store's rules, which
+    # names an argument and never a value, so an admin can be told why.
+    refusal: str | None = None
 
 
 class OrganizationGuardrailHandle:
@@ -215,7 +227,14 @@ class OrganizationGuardrailHandle:
                 f"guardrail definition {self._definition_id} returned {type(output).__name__}, not one verdict",
                 public_detail="guardrail could not be evaluated",
             )
-        return GuardrailCheck(valid=output.valid, explanation=output.explanation, score=output.score)
+        # Only a category the guardrail decided fired: `triggered` is None where it
+        # reports a score and no verdict, which says nothing about why it flagged.
+        return GuardrailCheck(
+            valid=output.valid,
+            explanation=output.explanation,
+            score=output.score,
+            categories=tuple(category.name for category in output.categories if category.triggered is True),
+        )
 
 
 def handle(organization_id: uuid.UUID, definition_id: uuid.UUID) -> OrganizationGuardrailHandle | None:
@@ -250,6 +269,18 @@ def build_state(organization_id: uuid.UUID, definition_id: uuid.UUID, updated_at
     if entry is None or entry.fingerprint != updated_at:
         return "pending"
     return _state_of(entry)
+
+
+def build_refusal(organization_id: uuid.UUID, definition_id: uuid.UUID, updated_at: datetime) -> str | None:
+    """Why this worker refused to build the version of the definition stamped ``updated_at``, if it did.
+
+    Only a refusal under one of the definition store's rules, never a vendor's
+    error, which can repeat what it was sent.
+    """
+    entry = _held.get((organization_id, definition_id))
+    if entry is None or entry.fingerprint != updated_at:
+        return None
+    return entry.refusal
 
 
 def _state_of(entry: _Held) -> BuildState:
@@ -429,8 +460,31 @@ async def _build(definition: OrganizationGuardrailDefinition, *, seconds: float 
     """
     try:
         arguments = build_arguments(definition)
+        try:
+            problem = await stored_arguments_problem(definition.guardrail_name, arguments)
+        except UnresolvableHostError:
+            logger.warning(
+                "Guardrail %s for definition %s names a host that did not resolve; will retry",
+                definition.guardrail_name,
+                definition.id,
+            )
+            return None
+        if problem is not None:
+            # A row saved before the rule it breaks existed: refused here, not dialed.
+            logger.warning(
+                "Refusing to build guardrail %s for definition %s: %s",
+                definition.guardrail_name,
+                definition.id,
+                problem,
+            )
+            return _Held(
+                fingerprint=definition.updated_at,
+                guardrail_name=definition.guardrail_name,
+                guardrail=None,
+                refusal=problem,
+            )
         guardrail = await _in_a_thread(
-            lambda: AnyGuardrail.create(GuardrailName(definition.guardrail_name), **arguments),
+            lambda: _create(GuardrailName(definition.guardrail_name), arguments),
             seconds=seconds if seconds is not None else _BUILD_TIMEOUT_SECONDS,
         )
     except TimeoutError:
@@ -449,6 +503,63 @@ async def _build(definition: OrganizationGuardrailDefinition, *, seconds: float 
         )
         return _Held(fingerprint=definition.updated_at, guardrail_name=definition.guardrail_name, guardrail=None)
     return _Held(fingerprint=definition.updated_at, guardrail_name=definition.guardrail_name, guardrail=guardrail)
+
+
+# What a pinned vendor client waits for, matching the vendor SDKs' own order of magnitude.
+_PINNED_CLIENT_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+
+
+def _create(name: GuardrailName, arguments: dict[str, Any]) -> Guardrail:
+    """Build a definition's guardrail, dialing an address the definition names through the pinned client.
+
+    An organization admin wrote that address, so where the vendor's SDK takes an
+    HTTP client it gets :class:`OwnedEndpointSyncTransport`: every request
+    resolves the host again, refuses it unless every address is public, connects
+    to the address it checked and follows no redirect. watsonx takes a prebuilt
+    ``APIClient``, which sends its sign-in, project lookup and detection through
+    the client it is given; OpenAI moderation's client is rebuilt on one with
+    ``with_options``. The other vendors that take an address (Alinia, Lakera,
+    Patronus, Azure Prompt Shields, Azure Content Safety) build their own
+    connection, follow redirects and expose no client to hand over, so their
+    address is held to the vendor's own hosts instead, when saved and again by
+    the stored-row check before this runs. An address the operator's environment
+    supplies is not the tenant's, and is left as the vendor reads it.
+    """
+    if name is GuardrailName.WATSONX_GUARDIAN and arguments.get("url") and "api_client" not in arguments:
+        arguments = _watsonx_on_a_pinned_client(arguments)
+    guardrail = AnyGuardrail.create(name, **arguments)
+    if isinstance(guardrail, OpenaiModeration) and arguments.get("base_url"):
+        # Typed for httpx2 only, but the SDK takes an httpx client as well (its legacy-client branch).
+        guardrail.client = guardrail.client.with_options(http_client=_pinned_client())  # type: ignore[arg-type]
+    return guardrail
+
+
+def _pinned_client() -> httpx.Client:
+    return httpx.Client(transport=OwnedEndpointSyncTransport(), timeout=_PINNED_CLIENT_TIMEOUT, follow_redirects=False)
+
+
+def _watsonx_on_a_pinned_client(arguments: dict[str, Any]) -> dict[str, Any]:
+    """``arguments`` with watsonx's credentials turned into an ``APIClient`` on the pinned client.
+
+    From the definition alone: it names its own ``url``, so the operator's
+    ``WATSONX_*`` variables must not fill a gap and travel there. The stored-row
+    check refuses such a definition before this runs; this refuses it again.
+    """
+    api_key = arguments.get("api_key")
+    project_id = arguments.get("project_id")
+    space_id = arguments.get("space_id")
+    if not api_key or not (project_id or space_id):
+        raise ValueError("a watsonx definition that names its url needs its own api_key and project_id or space_id")
+    from ibm_watsonx_ai import APIClient, Credentials
+
+    api_client = APIClient(
+        Credentials(url=arguments["url"], api_key=api_key),
+        project_id=project_id,
+        space_id=space_id,
+        httpx_client=_pinned_client(),
+    )
+    remaining = {k: v for k, v in arguments.items() if k not in {"api_key", "url", "project_id", "space_id"}}
+    return {**remaining, "api_client": api_client}
 
 
 def _safe_reason(exc: BaseException) -> str:
@@ -528,6 +639,7 @@ __all__ = [
     "BuildState",
     "GuardrailCheck",
     "OrganizationGuardrailHandle",
+    "build_refusal",
     "build_state",
     "handle",
     "load_guardrail_runner_at_startup",

@@ -21,18 +21,34 @@ const SCREENSHOTS_DIR = path.resolve(
  *
  * The name is what a docs page links to, and
  * tests/unit/test_docs_screenshots.py reads it off this call, so pass it as a
- * string literal.
+ * string literal. `margin` widens an element's capture by that many CSS
+ * pixels on every side, for one that has no padding of its own.
  */
 export async function docScreenshot(
   target: Page | Locator,
   name: string,
+  { margin = 0 }: { margin?: number } = {},
 ): Promise<void> {
   const page = "page" in target ? target.page() : target
   await waitForStable(page)
-  await target.screenshot({
+  const options = {
     path: path.join(SCREENSHOTS_DIR, `${name}.png`),
     animations: "disabled",
     caret: "hide",
+  } as const
+  const box = margin > 0 && "page" in target ? await target.boundingBox() : null
+  if (box === null) {
+    await target.screenshot(options)
+    return
+  }
+  await page.screenshot({
+    ...options,
+    clip: {
+      x: box.x - margin,
+      y: box.y - margin,
+      width: box.width + 2 * margin,
+      height: box.height + 2 * margin,
+    },
   })
 }
 

@@ -606,13 +606,7 @@ export function OrganizationSsoPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Single sign-on">
-        Let this organization&rsquo;s own identity provider handle sign-in.
-        Otari does not trust an identity provider&rsquo;s own{" "}
-        <code>email_verified</code> claim: a domain&rsquo;s DNS proof, the same
-        one the Email domains page verifies, is what admits someone, never what
-        the provider asserts about their address.
-      </PageIntro>
+      <PageIntro title="Single sign-on" />
 
       <ErrorBanner error={context.error ?? sso.error} />
 

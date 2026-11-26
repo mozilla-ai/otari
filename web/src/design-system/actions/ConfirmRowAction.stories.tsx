@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { FiArchive, FiEdit2 } from "react-icons/fi"
+import { FiArchive, FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import { ConfirmRowAction } from "./ConfirmRowAction"
 import { RowAction, RowActionRow } from "./RowAction"
@@ -50,11 +50,18 @@ export const Default: Story = {}
 export const InALane: Story = {
   render: () => (
     <RowActionRow>
-      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
+      <RowAction icon={FiEdit2} label="Edit…" onPress={() => {}} />
       <ConfirmRowAction
         icon={FiArchive}
         label="Archive"
         confirmLabel="Archive permanently"
+        onConfirm={() => {}}
+      />
+      <ConfirmRowAction
+        icon={FiTrash2}
+        label="Remove the limit"
+        confirmLabel="Remove"
+        isDestructive
         onConfirm={() => {}}
       />
     </RowActionRow>

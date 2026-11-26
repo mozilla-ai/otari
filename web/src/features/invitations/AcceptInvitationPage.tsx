@@ -1,5 +1,5 @@
 /**
- * The page an accept link lands on: `#/accept-invitation?token=...`.
+ * The page an accept link lands on: `/accept-invitation#token=...`.
  *
  * Deliberately not one of `src/routes/`'s files. Every route there lives
  * behind `App.tsx`'s auth gate (`DeploymentRoot` renders `<Login/>` instead
@@ -9,15 +9,13 @@
  * same way it renders `<Login/>` as a plain component rather than a route.
  *
  * The link reaches the invitee by email or from an admin who copied it, and
- * this page works the same either way. When the preview says the invited
- * address has never signed in (`needs_password`), the page asks for a first
- * password and sends it with the accept, so the invitee can sign in straight
- * away with no verification
- * email: the link already proves what that email would, and it is the only
- * way in on a deployment that sends no mail. When the address can already
- * sign in, accepting is one button and the next step is signing in. When it
- * cannot and the link may not set its password either (another organization
- * has it too), the page names the way in the gateway offers instead.
+ * this page works the same either way. Otari chooses the step and this page
+ * renders it. `set_password` asks for a first password and sends it with
+ * the accept, so the invitee signs in straight away with no verification
+ * email: the link already proves what that email would, and it is the only way
+ * in on a deployment that sends no mail. `sign_in` is one button and the
+ * sign-in screen. `verify_email` and `use_another_way_in` name what the
+ * deployment offers instead.
  *
  * Accepting takes no identity, so the membership always goes to the invited
  * address whoever is signed in here. A session for a different address is
@@ -45,11 +43,11 @@ import {
   useAcceptInvitation,
   useValidateInvitation,
 } from "@/shared/api/organizations"
-import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { currentRoute } from "@/shared/helpers/appLocation"
+import { tokenFromRoute } from "@/shared/helpers/routeParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
 import { ClaimForm } from "./ClaimForm"
-import { waysInSentence } from "./waysIn"
+import { verificationPendingSentence, waysInSentence } from "./waysIn"
 
 /**
  * Whose session this browser holds, against the invited address.
@@ -93,13 +91,13 @@ function sessionStanding(
 }
 
 export function AcceptInvitationPage() {
-  // Read once, safely: App.tsx renders this keyed on the hash
-  // (`<AcceptInvitationPage key={hash} />`), so a *different* invitation link
+  // Read once, safely: App.tsx renders this keyed on the route
+  // (`<AcceptInvitationPage key={route} />`), so a *different* invitation link
   // opened in the same tab remounts a fresh instance of this component rather
   // than re-rendering this one with a stale token frozen in its initial
-  // state. Without that key, a same-type re-render on hashchange would keep
+  // state. Without that key, a same-type re-render on a route change would keep
   // this state (and its token) exactly as it was.
-  const [token] = useState(() => tokenFromHash(window.location.hash))
+  const [token] = useState(() => tokenFromRoute(currentRoute()))
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
   const { isAuthenticated, logout } = useAuth()
@@ -115,6 +113,16 @@ export function AcceptInvitationPage() {
   // provider, setting a password here is one way in rather than the only one.
   const providers = renderableOAuthProviders(deployment.oauth_providers)
   const offersProviderSignIn = providers.length > 0
+  // Which button this browser pressed, not a server fact: both land on
+  // `sign_in`, and only the copy differs.
+  const passwordSubmitted = accept.variables?.password != null
+  // Read defensively because a dashboard build that reaches several
+  // deployments can be newer than the one answering, and a deployment older
+  // than `next_step` sends neither field. The step then falls through to the
+  // same branch as `use_another_way_in`, which names a way in rather than
+  // ending at a sign-in screen the address cannot pass.
+  const previewWaysIn = preview.data?.ways_in ?? []
+  const acceptWaysIn = accept.data?.ways_in ?? []
 
   return (
     <LoginPageShell>
@@ -130,7 +138,7 @@ export function AcceptInvitationPage() {
             }
           />
           {/* A refusal still owes a door: Back onto a spent token lands here. */}
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       ) : accept.isSuccess ? (
         // Ahead of the preview's own branches, because the preview refuses a
@@ -145,7 +153,7 @@ export function AcceptInvitationPage() {
             member of <strong>{accept.data.organization_name}</strong>, with the{" "}
             <strong>{accept.data.role}</strong> role.
           </p>
-          {standing === "invited" && !accept.data.password_set ? (
+          {standing === "invited" && accept.data.next_step === "sign_in" ? (
             <>
               <p className="text-center text-xs text-muted">
                 You're already signed in, so there is nothing left to set up.
@@ -153,14 +161,13 @@ export function AcceptInvitationPage() {
               <Button
                 variant="primary"
                 fullWidth
-                onPress={() => goToPublicAuthPage("#/")}
+                onPress={() => goToPublicAuthPage("/")}
               >
                 Go to the dashboard
               </Button>
             </>
-          ) : !accept.data.password_set &&
-            !accept.data.verification_pending &&
-            preview.data?.needs_password &&
+          ) : accept.data.next_step === "use_another_way_in" &&
+            preview.data?.next_step === "set_password" &&
             offersProviderSignIn ? (
             // "Sign in with a provider instead": the providers are offered
             // here rather than on the sign-in screen, so the terms accepted
@@ -177,34 +184,37 @@ export function AcceptInvitationPage() {
           ) : (
             <>
               <p className="text-center text-xs text-muted">
-                {accept.data.password_set
-                  ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
-                  : accept.data.verification_pending
-                    ? `Verify ${preview.data?.email ?? "the invited address"} first: open the verification link we emailed when you signed up, then sign in.`
-                    : accept.data.can_sign_in === false
-                      ? `${invitedEmail ?? "The invited address"} has no password yet. To get started, ${waysInSentence(accept.data.ways_in ?? [], deployment.oauth_providers)}`
-                      : "Sign in to get started."}
+                {accept.data.next_step === "verify_email"
+                  ? `Verify ${preview.data?.email ?? "the invited address"} first: ${verificationPendingSentence(acceptWaysIn, deployment.oauth_providers)}`
+                  : accept.data.next_step === "sign_in"
+                    ? passwordSubmitted
+                      ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
+                      : "Sign in to get started."
+                    : `${invitedEmail ?? "The invited address"} can't sign in yet. To get started, ${waysInSentence(acceptWaysIn, deployment.oauth_providers)}`}
               </p>
               <Button
                 variant="primary"
                 fullWidth
                 onPress={() => {
                   if (invitedEmail) rememberSignInAddress(invitedEmail)
-                  goToPublicAuthPage("#/")
+                  goToPublicAuthPage("/")
                 }}
               >
                 Go to sign in
               </Button>
-              {accept.data.can_sign_in === false &&
-              accept.data.ways_in?.includes("password_reset") ? (
-                <PublicAuthLink to="#/recover-password">
+              {accept.data.next_step !== "verify_email" &&
+              accept.data.next_step !== "sign_in" &&
+              acceptWaysIn.includes("password_reset") ? (
+                <PublicAuthLink to="/recover-password">
                   Choose a password
                 </PublicAuthLink>
               ) : null}
               {/* Whoever signed up may not be this invitee, who then takes the
-                  address back by choosing a password through the mailbox. */}
-              {accept.data.verification_pending ? (
-                <PublicAuthLink to="#/recover-password">
+                  address back by choosing a password through the mailbox. A
+                  reset is always on offer here: this step is answered only
+                  where a link reaches the mailbox. */}
+              {accept.data.next_step === "verify_email" ? (
+                <PublicAuthLink to="/recover-password">
                   Didn't sign up? Set a password instead
                 </PublicAuthLink>
               ) : null}
@@ -216,7 +226,7 @@ export function AcceptInvitationPage() {
       ) : preview.error ? (
         <>
           <ErrorBanner error={preview.error} />
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       ) : preview.data ? (
         <>
@@ -239,7 +249,7 @@ export function AcceptInvitationPage() {
                 Sign out and continue
               </Button>
             </>
-          ) : preview.data.needs_password ? (
+          ) : preview.data.next_step === "set_password" ? (
             <ClaimForm
               token={token}
               preview={preview.data}
@@ -248,18 +258,20 @@ export function AcceptInvitationPage() {
             />
           ) : (
             <>
-              {/* Another organization has this address too, so neither link
-                  may choose its password; say which way in exists instead of
-                  ending at a sign-in screen it cannot pass. Compared with
-                  false because an older gateway sends no such field. */}
-              {preview.data.can_sign_in !== false ? null : (
+              {/* This link may not choose the address's password, either
+                  because a signup already chose one or because another
+                  organization holds the address too; say which way in exists
+                  instead of ending at a sign-in screen it cannot pass. */}
+              {preview.data.next_step === "sign_in" ? null : (
                 <InfoBanner>
                   This link can't set a password for {preview.data.email}.
                   Accept the invitation, then{" "}
-                  {waysInSentence(
-                    preview.data.ways_in ?? [],
-                    deployment.oauth_providers,
-                  )}
+                  {preview.data.next_step === "verify_email"
+                    ? verificationPendingSentence(
+                        previewWaysIn,
+                        deployment.oauth_providers,
+                      )
+                    : waysInSentence(previewWaysIn, deployment.oauth_providers)}
                 </InfoBanner>
               )}
               <ErrorBanner error={accept.error} />

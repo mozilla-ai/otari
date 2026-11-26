@@ -24,6 +24,7 @@ names nothing, and several search instances with no default between them.
 """
 
 import copy
+import ipaddress
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -50,6 +51,63 @@ WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # ``engines``.
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
 
+# What ``mcp_private_hosts`` holds once parsed: each listed host, canonical, with
+# the one port it is limited to or ``None`` for any port.
+PrivateHostEntry = tuple[str, int | None]
+
+
+def canonical_host(host: str) -> str:
+    """``host`` in the form an allowlist entry and a URL are compared in: lowercased, no trailing dot, IP canonical."""
+    host = host.strip().rstrip(".").lower()
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+def parse_mcp_private_hosts(value: str | None) -> frozenset[PrivateHostEntry]:
+    """The entries of ``mcp_private_hosts``: comma-separated exact hosts, each with an optional ``:port``.
+
+    A host is a name or an IP literal, an IPv6 one in brackets when a port follows.
+    Wildcards, CIDR ranges and URLs are refused rather than read as something
+    narrower, since an operator who writes one means a range this setting does not offer.
+
+    Raises:
+        ValueError: an entry is not an exact host.
+    """
+    entries: set[PrivateHostEntry] = set()
+    for raw in (value or "").split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if any(marker in entry for marker in ("*", "/", "@", " ")) or entry.startswith("."):
+            raise ValueError(f"mcp_private_hosts entry {entry!r} is not an exact host: no wildcards, ranges or URLs")
+        host, port = _split_host_and_port(entry)
+        if not host:
+            raise ValueError(f"mcp_private_hosts entry {entry!r} names no host")
+        entries.add((canonical_host(host), port))
+    return frozenset(entries)
+
+
+def _split_host_and_port(entry: str) -> tuple[str, int | None]:
+    if entry.startswith("["):
+        host, _, rest = entry[1:].partition("]")
+        if rest and not rest.startswith(":"):
+            raise ValueError(f"mcp_private_hosts entry {entry!r} is not an exact host")
+        return host, _port(entry, rest[1:]) if rest else None
+    if entry.count(":") > 1:
+        # An IPv6 literal with no port; one with a port has to be bracketed.
+        return entry, None
+    host, colon, port = entry.partition(":")
+    return host, _port(entry, port) if colon else None
+
+
+def _port(entry: str, port: str) -> int:
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError(f"mcp_private_hosts entry {entry!r} has a port that is not a number from 1 to 65535")
+    return int(port)
+
+
 # The fetch instance that always exists: the built-in fetcher, on any-fetch's
 # ``builtin`` provider, which no declared instance may use.
 BUILTIN_FETCH = "builtin_fetch"
@@ -67,10 +125,9 @@ DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
-# What otari has always sent these providers, applied below every other option
-# layer: page text from Tavily, so its hits need no enrichment. An instance that
-# sets the key wins.
-PROVIDER_DEFAULT_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
+# The options a search on the legacy settings sends its provider: page text from
+# Tavily, so its hits need no page fetches.
+LEGACY_SETTINGS_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
         "tavily": MappingProxyType({"include_raw_content": True}),
     }
@@ -280,10 +337,8 @@ class ToolInstance:
     ``library_backed`` is whether any-search or any-fetch serves the provider;
     ``dropped_options`` are the option keys the provider's schema does not know
     or refuses the value of, which load with a warning, for the resolver to
-    leave out of a call. ``provider_defaults`` are :data:`PROVIDER_DEFAULT_OPTIONS`' entry for
-    the provider, below every other option layer. Both option maps are read-only
-    copies, so a reader cannot change the configuration they came from, and are
-    left out of the hash.
+    leave out of a call. ``options`` is a read-only copy, so a reader cannot change
+    the configuration it came from, and is left out of the hash.
     """
 
     name: str
@@ -295,7 +350,6 @@ class ToolInstance:
     timeout: float | None = None
     options: Mapping[str, Any] = field(default=_NO_OPTIONS, repr=False, hash=False)
     dropped_options: frozenset[str] = frozenset()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
     fetch_tool: str | None = None
 
 
@@ -307,18 +361,20 @@ BUILTIN_FETCH_INSTANCE = ToolInstance(
 
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
-    """The in-loop search backend the legacy settings describe.
+    """The search backend the legacy settings describe, priced under ``otari:web_search``.
 
-    It is not in either map, so it cannot be named by a default or by the direct
-    endpoint's path, and it is priced under ``otari:web_search``. Its name is
-    its provider's.
+    It is not in either map, so no default can name it. The in-loop tool falls
+    back to it, and on a deployment with no search instance the direct endpoint
+    serves it too. Its name is its provider's,
+    so a search instance of that name can later replace it unnoticed.
+    ``options`` are what the legacy settings send their provider.
     """
 
     provider: str
     api_key: str | None = field(default=None, repr=False)
     api_base: str | None = field(default=None, repr=False)
     engines: tuple[str, ...] = ()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
+    options: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
 
     @property
     def name(self) -> str:
@@ -377,14 +433,15 @@ class ToolSettings(BaseModel):
     web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
-            "instead of the SearXNG-shaped service web_search_url names. Requires "
-            "web_search_provider_api_key. When both are set, web_search_url is not needed."
+            "Deprecated, and removed by a coming breaking release: use a search tool with provider tavily or "
+            "brave and its own api_key, named in web_search_default_tool. The licensed search API "
+            "('tavily' or 'brave') otari_web_search calls, with web_search_provider_api_key, when no search "
+            "tool is its default. When both are set, web_search_url is not needed."
         ),
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
         default=None,
-        description=("Credential for web_search_provider."),
+        description="Deprecated with web_search_provider: the key it searches with.",
     )
     web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
@@ -434,6 +491,16 @@ class ToolSettings(BaseModel):
             "admin turns on."
         ),
     )
+    mcp_private_hosts: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
+        description=(
+            "Exact hosts an MCP server URL may name although they resolve to a loopback or private address, "
+            "comma-separated, each a name or an IP literal with an optional :port (an IPv6 literal in brackets "
+            "when a port follows). No wildcards or ranges. Every tenant who can name an MCP server can reach a "
+            "listed host, so this is for a single-tenant or trusted deployment. Link-local and metadata "
+            "addresses are refused even for a listed host. Empty by default. Not settable at runtime."
+        ),
+    )
     web_search_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
@@ -473,9 +540,9 @@ class ToolSettings(BaseModel):
         default=None,
         ge=1,
         description=(
-            "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10. Requests the old search "
-            "backend serves keep a fixed limit of 10: see docs/configuration.md."
+            "How many search and fetch tool calls one request may make, together. Once reached, "
+            "later rounds no longer offer either tool, and a call past it gets a tool error the "
+            "model can recover from. When unset: 10."
         ),
     )
 
@@ -610,6 +677,16 @@ class ToolSettings(BaseModel):
         # An earlier release accepted null here, so a config still carrying it keeps the default.
         return True if value is None else value
 
+    @field_validator("mcp_private_hosts", mode="before")
+    @classmethod
+    def _validate_mcp_private_hosts(cls, value: object) -> object:
+        # A config file may write a list; the environment writes the comma-separated form it becomes.
+        if isinstance(value, list | tuple):
+            value = ",".join(str(item) for item in value)
+        if isinstance(value, str):
+            parse_mcp_private_hosts(value)
+        return value
+
     @field_validator("web_search_provider")
     @classmethod
     def _validate_web_search_provider(cls, value: str | None) -> str | None:
@@ -676,7 +753,6 @@ def _instance(kind: ToolKind, name: str, entry: Mapping[str, Any], *, library_ba
         timeout=float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else None,
         options=MappingProxyType(copy.deepcopy(options)),
         dropped_options=frozenset(option_problems(kind, provider, options)),
-        provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         fetch_tool=fetch_tool.strip() if isinstance(fetch_tool, str) and fetch_tool.strip() else None,
     )
 
@@ -781,8 +857,9 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider = settings.web_search_provider
         return SynthesizedSearchInstance(
             provider=provider,
-            api_key=settings.web_search_provider_api_key,
-            provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
+            # A key read from a file can end in a newline, which no HTTP header takes.
+            api_key=(settings.web_search_provider_api_key or "").strip() or None,
+            options=LEGACY_SETTINGS_OPTIONS.get(provider, _NO_OPTIONS),
         )
     url = (settings.web_search_url or otari_env("WEB_SEARCH_URL") or "").strip()
     if not url:
@@ -793,7 +870,6 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider="searxng",
         api_base=url,
         engines=engines or DEFAULT_SEARXNG_ENGINES,
-        provider_defaults=_NO_OPTIONS,
     )
 
 

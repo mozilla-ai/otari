@@ -21,7 +21,7 @@ of a definition answers two questions at once, what was saved and whether it is
 running, and the second belongs to the runner. The runner already imports this
 module, for the one function that undoes the secret split, so importing it back
 would close a cycle. The composition root passes the two functions in instead
-(`api/deps.py`), which is also what lets a test say what a worker holds without
+(`api/deps/`), which is also what lets a test say what a worker holds without
 one.
 
 **Almost every rule is read off the catalog.** A list of guardrails, arguments
@@ -49,11 +49,14 @@ in the old shape, and that seam is where it shows.
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Collection, Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from any_guardrail.base import GuardrailName
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -91,7 +94,12 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.services.url_safety import (
+    UnresolvableHostError,
+    UnsafeURLError,
+    validate_mcp_url,
+    validate_public_https_url_shape,
+)
 
 # What one organization may define. A different bound from
 # `MAX_GUARDRAILS_PER_ORGANIZATION` next door and bounding something else: that
@@ -113,6 +121,41 @@ _MAX_LIST_LIMIT = 1000
 # means that fallback, and the catalog states what upstream declares, so the rule
 # lives at the store that has an opinion about whose credentials are being spent.
 _BEDROCK_KEY_PAIR = ("aws_access_key_id", "aws_secret_access_key")
+
+# The hosts each guardrail whose vendor library dials its own connection may be
+# pointed at. Those libraries follow redirects to any host and scheme
+# (``requests.post``, azure-core's redirect policy) and give Otari no client to
+# pin, so an address of a tenant's own, public when saved, could answer with a
+# redirect to the metadata service or to this host. On the vendor's own domain,
+# neither a redirect nor a re-pointed name is a tenant's to make. An entry is an
+# exact host, or a suffix starting with a dot for a vendor that documents a
+# subdomain per resource.
+_VENDOR_HOSTS: dict[str, frozenset[str]] = {
+    # any-guardrail 0.7.7 sets no default endpoint and Alinia publishes no API
+    # host (the vendor site, alinia.ai, and mozilla.ai's integration post use a
+    # placeholder), so no address a definition names can be checked against one.
+    GuardrailName.ALINIA.value: frozenset(),
+    # any-guardrail 0.7.7 default ``https://api.lakera.ai/v2/guard``; the regional
+    # hosts are from Lakera's API reference,
+    # https://docs.lakera.ai/api-reference/lakera-api/guard/screen-content
+    GuardrailName.LAKERA_GUARD.value: frozenset(
+        {"api.lakera.ai", "eu.api.lakera.ai", "us.api.lakera.ai", "ap-southeast-1.api.lakera.ai"}
+    ),
+    # any-guardrail 0.7.7 default ``https://api.patronus.ai/v1/evaluate``.
+    GuardrailName.PATRONUS.value: frozenset({"api.patronus.ai"}),
+    # azure-ai-contentsafety 1.0.0 (``ContentSafetyClient``'s ``endpoint``):
+    # ``https://<resource-name>.cognitiveservices.azure.com``. Prompt Shields calls
+    # the same Content Safety resource.
+    GuardrailName.AZURE_CONTENT_SAFETY.value: frozenset({".cognitiveservices.azure.com"}),
+    GuardrailName.AZURE_PROMPT_SHIELDS.value: frozenset({".cognitiveservices.azure.com"}),
+}
+
+# The characters a host in a guardrail definition may hold, once IDNA-encoded.
+# The unpinned vendor libraries parse a URL with requests and urllib3, which read
+# a host differently from ``urlsplit`` around a backslash, userinfo or an escape
+# (``https://evil.example\x.cognitiveservices.azure.com``), so a host that is
+# not plainly letters, digits, dots and hyphens is refused rather than parsed twice.
+_HOST_CHARACTERS = re.compile(r"[a-z0-9.-]+")
 
 # What makes a stored value an address rather than a word. Seven of the eight
 # definable guardrails take one, under three spellings already (`endpoint`,
@@ -241,6 +284,8 @@ GuardrailBuildState = Literal["built", "failed", "pending", "disabled"]
 # imported: see the module docstring. Typed to the runner's three answers, so a
 # fourth one added there has to be accounted for here rather than narrowed away.
 BuildStateOf = Callable[[uuid.UUID, uuid.UUID, datetime], Literal["built", "failed", "pending"]]
+# Why this worker refused to build a definition's current version under one of this store's rules, or None.
+BuildRefusalOf = Callable[[uuid.UUID, uuid.UUID, datetime], str | None]
 RebuildDefinition = Callable[[UnitOfWork, uuid.UUID, uuid.UUID], Awaitable[Literal["built", "failed", "pending"]]]
 
 
@@ -303,8 +348,17 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
             "which is the answer right after a write and on any worker that has not caught up "
             "within the refresh interval; disabled means the definition is switched off and "
             "nothing is built on purpose. It answers for one worker, so two reads can disagree "
-            "while a write propagates. Why a build failed is never reported here: the reason is "
-            "in the gateway's log"
+            "while a write propagates. Why a build failed is not reported here: see build_refusal "
+            "for a rule this definition breaks, and the gateway's log for anything else"
+        ),
+    )
+    build_refusal: str | None = Field(
+        default=None,
+        description=(
+            "When build_state is failed because the definition breaks one of the gateway's own rules "
+            "(an address off the vendor's hosts or not public, or an endpoint without its own "
+            "credential), which rule and which argument. Null otherwise, including when the vendor's "
+            "library failed, whose reason stays in the gateway's log because it can repeat what was sent"
         ),
     )
     created_at: str
@@ -318,6 +372,7 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
         secret_names: list[str],
         secrets_decryptable: bool,
         build_state: GuardrailBuildState,
+        build_refusal: str | None = None,
     ) -> OrganizationGuardrailDefinitionPublic:
         return cls(
             id=definition.id,
@@ -329,6 +384,7 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
             secrets_decryptable=secrets_decryptable,
             enabled=definition.enabled,
             build_state=build_state,
+            build_refusal=build_refusal if build_state == "failed" else None,
             created_at=definition.created_at.isoformat(),
             updated_at=definition.updated_at.isoformat(),
         )
@@ -497,6 +553,156 @@ def _validate_arguments(spec: BuiltInGuardrailSpec, arguments: dict[str, Any]) -
             raise OrganizationGuardrailDefinitionArgumentsError(f"'{spec.guardrail_name}': {group.description}")
 
     _refuse_bedrock_without_keys(spec, arguments)
+    _refuse_mistyped_strings(spec, arguments)
+    _refuse_ambiguous_addresses(arguments)
+    _refuse_off_vendor_addresses(spec.guardrail_name, arguments)
+    _refuse_operator_values_beside_a_tenant_address(spec, arguments)
+
+
+def _refuse_mistyped_strings(spec: BuiltInGuardrailSpec, arguments: dict[str, Any]) -> None:
+    """Refuse a value the catalog types as a string that is not one.
+
+    A credential is the reason: the vendors read ``api_key or os.getenv(...)``, so
+    ``false``, ``0`` or ``[]`` would fall through to the operator's variable.
+    """
+    wrong = [
+        parameter.name
+        for parameter in spec.create_parameters
+        if parameter.type == "string"
+        and parameter.name in arguments
+        and arguments[parameter.name] is not None
+        and not isinstance(arguments[parameter.name], str)
+    ]
+    if wrong:
+        raise OrganizationGuardrailDefinitionArgumentsError(
+            f"'{spec.guardrail_name}' takes {_names(wrong)} as text, and was sent something else"
+        )
+
+
+def _address_shape_problem(url: str) -> str | None:
+    """Why ``url`` could be read as two different addresses, or ``None``. Reads the text only.
+
+    Refuses whitespace, control characters, a backslash or user information
+    anywhere, and a host that is neither an IP literal nor plain letters, digits,
+    dots and hyphens once IDNA-encoded.
+    """
+    if "\\" in url or any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F for character in url):
+        return "it contains whitespace, a control character or a backslash"
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        _ = parts.port
+    except ValueError:
+        return "it is not a valid URL"
+    if "@" in parts.netloc:
+        return f"host {host!r} is written with user information, which is not allowed here"
+    if not host:
+        return "it names no host"
+    try:
+        ipaddress.ip_address(host)
+        return None
+    except ValueError:
+        pass
+    try:
+        encoded = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return f"host {host!r} is not a valid name"
+    if not _HOST_CHARACTERS.fullmatch(encoded):
+        return f"host {host!r} holds characters other than letters, digits, dots and hyphens"
+    return None
+
+
+def _refuse_ambiguous_addresses(arguments: dict[str, Any]) -> None:
+    """Refuse an address in the arguments that HTTP libraries could read differently, before any host is compared."""
+    for argument, url in _dialable_urls(arguments):
+        problem = _address_shape_problem(url)
+        if problem is not None:
+            raise OrganizationGuardrailDefinitionUnsafeUrlError(argument, problem)
+
+
+def _refuse_operator_values_beside_a_tenant_address(spec: BuiltInGuardrailSpec, arguments: dict[str, Any]) -> None:
+    """Refuse a definition that names its own address and leaves a credential to the environment.
+
+    The guardrail would fill the gap from the operator's variable
+    (``LAKERA_API_KEY``, ``OPENAI_API_KEY``, ``WATSONX_APIKEY``) and send it to the
+    address the organization wrote. So once a definition names one, every secret
+    an environment variable could supply, and every requirement group one could
+    satisfy (watsonx's project or space), has to be in the definition itself. A
+    definition that names no address reaches the vendor the operator configured,
+    with the operator's key, as before.
+    """
+    if not any(True for _ in _dialable_urls(arguments)):
+        return
+    # Only text counts: a vendor reads ``api_key or os.getenv(...)``, so any falsy or blank value
+    # would be replaced by the operator's.
+    supplied = {name for name, value in arguments.items() if isinstance(value, str) and value.strip()}
+    missing = [
+        parameter.name
+        for parameter in spec.create_parameters
+        if parameter.secret and parameter.env_var and parameter.storable and parameter.name not in supplied
+    ]
+    missing.extend(
+        " or ".join(sorted(member for member in group.parameters if member != "api_client"))
+        for group in spec.requirement_groups
+        if group.env_vars and not set(group.parameters) & supplied
+    )
+    if missing:
+        raise OrganizationGuardrailDefinitionArgumentsError(
+            f"'{spec.guardrail_name}' names its own endpoint, so it needs {_names(missing)} in the definition: "
+            "the environment's values are the operator's and would be sent to that endpoint"
+        )
+
+
+def _refuse_off_vendor_addresses(guardrail_name: str, arguments: dict[str, Any]) -> None:
+    """Refuse an address, for a guardrail whose vendor library dials it unpinned, that is off the vendor's domain.
+
+    See ``_VENDOR_HOSTS``. Guardrails not listed there are dialed through the
+    pinned client, so their address is held to the public-address rule instead.
+    """
+    allowed = _VENDOR_HOSTS.get(guardrail_name)
+    if allowed is None:
+        return
+    for argument, url in _dialable_urls(arguments):
+        host = (urlsplit(url).hostname or "").rstrip(".").lower()
+        if host in allowed or any(entry.startswith(".") and host.endswith(entry) for entry in allowed):
+            continue
+        if not allowed:
+            reason = f"'{guardrail_name}' publishes no API host this gateway can check, so it takes no endpoint here"
+        else:
+            reason = f"'{guardrail_name}' is reached only on its vendor's own hosts ({_names(sorted(allowed))})"
+        raise OrganizationGuardrailDefinitionUnsafeUrlError(argument, reason)
+
+
+async def stored_arguments_problem(guardrail_name: str, arguments: dict[str, Any]) -> str | None:
+    """Why stored build arguments may not be built from now, or ``None``: the save-time rules, run again.
+
+    A row written before a rule existed is held to it when its guardrail is
+    built, so the runner refuses it rather than dialing what it names.
+
+    Raises:
+        UnresolvableHostError: an address's host did not resolve, which says
+            nothing lasting about the row; the runner tries again later.
+    """
+    spec = builtin_guardrail_spec(guardrail_name)
+    try:
+        _refuse_ambiguous_addresses(arguments)
+        if spec is not None:
+            _refuse_mistyped_strings(spec, arguments)
+        _refuse_off_vendor_addresses(guardrail_name, arguments)
+        if spec is not None:
+            _refuse_bedrock_without_keys(spec, arguments)
+            _refuse_operator_values_beside_a_tenant_address(spec, arguments)
+        for argument, url in _dialable_urls(arguments):
+            validate_public_https_url_shape(url, label=argument)
+        for argument, url in _dialable_urls(arguments):
+            await validate_mcp_url(url, has_authorization_token=True, label=argument)
+    except UnresolvableHostError:
+        raise
+    except (OrganizationGuardrailDefinitionArgumentsError, OrganizationGuardrailDefinitionUnsafeUrlError) as exc:
+        return str(exc)
+    except UnsafeURLError as exc:
+        return str(exc)
+    return None
 
 
 def _refuse_bedrock_without_keys(spec: BuiltInGuardrailSpec, arguments: dict[str, Any]) -> None:
@@ -667,7 +873,7 @@ def _arguments_after(
 
 
 def _public(
-    definition: OrganizationGuardrailDefinition, *, build_state: GuardrailBuildState
+    definition: OrganizationGuardrailDefinition, *, build_state: GuardrailBuildState, build_refusal: str | None = None
 ) -> OrganizationGuardrailDefinitionPublic:
     """The read shape, reporting an unreadable secret map rather than failing the listing.
 
@@ -678,10 +884,18 @@ def _public(
         secrets = _stored_secrets(definition)
     except (SecretBoxUnavailableError, SecretDecryptionError, json.JSONDecodeError):
         return OrganizationGuardrailDefinitionPublic.from_model(
-            definition, secret_names=[], secrets_decryptable=False, build_state=build_state
+            definition,
+            secret_names=[],
+            secrets_decryptable=False,
+            build_state=build_state,
+            build_refusal=build_refusal,
         )
     return OrganizationGuardrailDefinitionPublic.from_model(
-        definition, secret_names=sorted(secrets), secrets_decryptable=True, build_state=build_state
+        definition,
+        secret_names=sorted(secrets),
+        secrets_decryptable=True,
+        build_state=build_state,
+        build_refusal=build_refusal,
     )
 
 
@@ -699,6 +913,7 @@ class OrganizationGuardrailDefinitionService:
         organizations: OrganizationService,
         uow: UnitOfWork,
         build_state: BuildStateOf,
+        build_refusal: BuildRefusalOf,
         rebuild: RebuildDefinition,
         handle: HandleOf,
     ) -> None:
@@ -706,8 +921,15 @@ class OrganizationGuardrailDefinitionService:
         self._organizations = organizations
         self._uow = uow
         self._build_state = build_state
+        self._build_refusal = build_refusal
         self._rebuild = rebuild
         self._handle = handle
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the guardrail secrets these organizations hold, for the caller's transaction."""
+        await self._definitions.forget_secrets(organization_ids, workspace_ids)
 
     async def _rebuilt(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
         """Bring this worker in step with a row that just changed, and say what it holds.
@@ -735,6 +957,10 @@ class OrganizationGuardrailDefinitionService:
         if not definition.enabled:
             return "disabled"
         return self._build_state(definition.organization_id, definition.id, definition.updated_at)
+
+    def _refusal_of(self, definition: OrganizationGuardrailDefinition) -> str | None:
+        """Which of this store's rules the runner refused the definition's current version under, if any."""
+        return self._build_refusal(definition.organization_id, definition.id, definition.updated_at)
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.
@@ -764,7 +990,7 @@ class OrganizationGuardrailDefinitionService:
             rows = await self._definitions.list_in_organization(
                 organization_id, skip=skip, limit=min(limit, _MAX_LIST_LIMIT)
             )
-            data = [_public(row, build_state=self._state_of(row)) for row in rows]
+            data = [_public(row, build_state=self._state_of(row), build_refusal=self._refusal_of(row)) for row in rows]
         return OrganizationGuardrailDefinitionsPublic(data=data, count=total)
 
     async def create_definition(
@@ -800,7 +1026,9 @@ class OrganizationGuardrailDefinitionService:
             if not await self._definitions.add_unless_name_taken(definition):
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(request.name)
 
-        return _public(definition, build_state=await self._rebuilt(definition))
+        return _public(
+            definition, build_state=await self._rebuilt(definition), build_refusal=self._refusal_of(definition)
+        )
 
     async def update_definition(
         self, *, user: User, definition_id: uuid.UUID, request: OrganizationGuardrailDefinitionUpdate
@@ -849,7 +1077,9 @@ class OrganizationGuardrailDefinitionService:
             if not await self._definitions.flush_unless_name_taken():
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(attempted_name)
 
-        return _public(definition, build_state=await self._rebuilt(definition))
+        return _public(
+            definition, build_state=await self._rebuilt(definition), build_refusal=self._refusal_of(definition)
+        )
 
     async def test_definition(
         self, *, user: User, definition_id: uuid.UUID, request: OrganizationGuardrailDefinitionTest

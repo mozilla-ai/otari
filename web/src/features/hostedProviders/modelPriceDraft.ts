@@ -15,6 +15,8 @@
 import type {
   CreateHostedModelRequest,
   HostedModel,
+  HostedModelRates,
+  SetPricingRequest,
   UpdateHostedModelRequest,
 } from "@/client"
 import {
@@ -188,4 +190,29 @@ export function createBody(draft: PriceDraft): CreateHostedModelRequest {
 /** The PATCH body: a blanked cache box clears the stored rate, explicitly. */
 export function repriceBody(draft: PriceDraft): UpdateHostedModelRequest {
   return priceFields(draft)
+}
+
+/**
+ * A region's own price, as `POST /pricing` stores it under
+ * `<provider>@<slug>:<model>`. Same rates as a reprice: a blanked cache box
+ * clears the rate rather than inheriting the previous one.
+ */
+export function regionPriceBody(
+  draft: PriceDraft,
+  modelKey: string,
+): SetPricingRequest {
+  return { model_key: modelKey, ...priceFields(draft) }
+}
+
+/**
+ * The price a region sets of its own for a model, if it sets one. Read as an
+ * own property, since a slug such as `constructor` would otherwise find one on
+ * the object's prototype.
+ */
+export function regionRatesOf(
+  model: Pick<HostedModel, "region_rates">,
+  slug: string,
+): HostedModelRates | undefined {
+  const rates = model.region_rates
+  return rates && Object.hasOwn(rates, slug) ? rates[slug] : undefined
 }

@@ -62,7 +62,7 @@ Pick one of two fixes:
   Junie's value as an end user with its own spend, which you can put on a
   budget.
 - **Accept the field on the key**: set **Mismatched `user` field** to
-  **Always accept** under **Advanced** in the key form. All of Junie's usage
+  **Always accept** under **More options** in the key form. All of Junie's usage
   then lands on the key's user.
 
 Either way, spend stays within the key owner's account. See

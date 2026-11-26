@@ -1,17 +1,17 @@
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple, Never
 
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, and_, cast, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.usage import UsageLog
@@ -132,7 +132,7 @@ async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -
     return set(rows.scalars().all())
 
 
-async def lock_live_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
+async def lock_live_users(db: AsyncSession | UnitOfWork, user_ids: Sequence[str]) -> set[str]:
     """Lock the request-plane rows of ``user_ids`` until the caller commits, and return which are not deleted.
 
     What serializes a user's deletion against anything granting that user access: each takes this lock first, so
@@ -140,7 +140,8 @@ async def lock_live_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]
     """
     if not user_ids:
         return set()
-    rows = await db.execute(
+    session = session_for(db) if isinstance(db, UnitOfWork) else db
+    rows = await session.execute(
         select(User.user_id, User.deleted_at)
         .where(User.user_id.in_(list(user_ids)))
         .order_by(User.user_id)
@@ -238,8 +239,12 @@ def _on_roster_of(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     foreign key. This is what puts a member who has not minted a key yet in
     their own organization's scope.
     """
+    # SQLite stores a UUID column as CHAR(32) hex while ``users.user_id`` holds the
+    # hyphenated string form, so the two only compare equal once the hyphens are
+    # dropped from both sides. Comparing the raw text matched on PostgreSQL alone.
+    stored = func.replace(cast(col(OrganizationMember.user_id), String), "-", "")
     condition = select(col(OrganizationMember.id)).where(
-        cast(col(OrganizationMember.user_id), String) == User.user_id,
+        stored == func.replace(User.user_id, "-", ""),
     )
     if organization_id is not None:
         condition = condition.where(col(OrganizationMember.organization_id) == organization_id)
@@ -345,7 +350,7 @@ class AccessLists(NamedTuple):
 
 
 class UserAccessRepository(BaseRepository[User, Never, Never]):
-    """Read users' model and search tool access lists, and their display names."""
+    """Read users' model and search tool access lists and display names, and erase users."""
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, User)
@@ -368,6 +373,29 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
                 pass
             owner = (await self.db.execute(statement)).scalar_one()
         return owner.deleted_at is None and not owner.blocked
+
+    async def lock_with_end_users(self, user_id: str) -> list[str]:
+        """Lock ``user_id``'s row and its end users' rows, and return the ids of those that exist."""
+        statement = (
+            select(User.user_id)
+            .where(or_(User.user_id == user_id, User.parent_user_id == user_id))
+            .order_by(User.user_id)
+            .with_for_update()
+        )
+        return list((await self.db.execute(statement)).scalars().all())
+
+    async def add_tombstone(self) -> str:
+        """Stage a new deleted user with no name, for rows kept after the users they belonged to are gone."""
+        tombstone = User(user_id=str(uuid.uuid4()), alias=None, deleted_at=datetime.now(UTC))
+        self.db.add(tombstone)
+        await self.db.flush()
+        return tombstone.user_id
+
+    async def remove_all(self, user_ids: Collection[str]) -> None:
+        """Stage the deletion of these users, which takes their keys and the other rows that cascade with them."""
+        if not user_ids:
+            return
+        await self.db.execute(delete(User).where(User.user_id.in_(list(user_ids))))
 
     async def access_lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""

@@ -13,6 +13,7 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
+import { rowMenuTriggers } from "@/tests/rowMenu"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
@@ -158,7 +159,7 @@ function renderPage(
 describe("PublicCatalogPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
-    window.location.hash = ""
+    window.history.replaceState(null, "", "/")
   })
 
   it("lists the catalog for a visitor and nothing to edit", async () => {
@@ -169,7 +170,7 @@ describe("PublicCatalogPage", () => {
     // A plain hash link, since there is no router ahead of the session.
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
-    ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
+    ).toHaveAttribute("href", "/models/z-ai/glm-5.3")
     expect(screen.getByText(/cheapest offering/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
@@ -181,7 +182,11 @@ describe("PublicCatalogPage", () => {
 
   it("opens filtered on the list a link names", async () => {
     const fetchMock = mockApi()
-    window.location.hash = "#/models?provider=mistral&provider=nebius&q=glm"
+    window.history.replaceState(
+      null,
+      "",
+      "/models?provider=mistral&provider=nebius&q=glm",
+    )
     renderPage()
 
     await screen.findByRole("list", { name: "Models" })
@@ -211,12 +216,12 @@ describe("PublicCatalogPage", () => {
       within(grid).queryByRole("columnheader", { name: "Price from" }),
     ).toBeNull()
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
+    expect(rowMenuTriggers(grid)).toHaveLength(0)
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
     expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
       "href",
-      "#/models",
+      "/models",
     )
   })
 
@@ -225,7 +230,7 @@ describe("PublicCatalogPage", () => {
     renderPage("z-ai/glm-5.3")
 
     const use = await screen.findByRole("link", { name: "Use this model" })
-    expect(use).toHaveAttribute("href", "#/")
+    expect(use).toHaveAttribute("href", "/")
     // No drawer for a visitor: there is no key to send its request with.
     expect(screen.queryByRole("button", { name: "Use this model" })).toBeNull()
   })
@@ -251,7 +256,7 @@ describe("PublicCatalogPage", () => {
 
     expect(
       await screen.findByRole("link", { name: "Use this model" }),
-    ).toHaveAttribute("href", "#/signup")
+    ).toHaveAttribute("href", "/signup")
   })
 
   it("carries the site's navbar, and the logo goes back to the catalog without a site", async () => {
@@ -260,11 +265,11 @@ describe("PublicCatalogPage", () => {
 
     const nav = screen.getByRole("navigation", { name: "Site" })
     const models = within(nav).getByRole("link", { name: "Models" })
-    expect(models).toHaveAttribute("href", "#/models")
+    expect(models).toHaveAttribute("href", "/models")
     expect(models).toHaveAttribute("aria-current", "page")
     expect(within(nav).getByRole("link", { name: "Log in" })).toHaveAttribute(
       "href",
-      "#/",
+      "/",
     )
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),
@@ -277,7 +282,7 @@ describe("PublicCatalogPage", () => {
     expect(within(nav).queryByRole("link", { name: "Sign up" })).toBeNull()
     expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
       "href",
-      "#/models",
+      "/models",
     )
     await screen.findByRole("list", { name: "Models" })
   })
@@ -296,7 +301,7 @@ describe("PublicCatalogPage", () => {
     const nav = screen.getByRole("navigation", { name: "Site" })
     expect(within(nav).getByRole("link", { name: "Sign up" })).toHaveAttribute(
       "href",
-      "#/signup",
+      "/signup",
     )
     expect(
       within(nav).getByRole("link", { name: "Documentation" }),

@@ -5,7 +5,7 @@ Otari to put its requests under your budgets, usage tracking and traces.
 
 ## Route Claude Code through Otari
 
-1. On the dashboard's **API keys** page, create a key. Under **Advanced**, set
+1. On the dashboard's **API keys** page, create a key. Under **More options**, set
    **Mismatched `user` field** to **Always accept**. Claude Code puts its own
    telemetry value in that field, and a key left on the default refuses its
    requests with `403`. Spend still goes to the key's user; see
@@ -79,11 +79,87 @@ output tokens on a model it does not know, which is a large hold on an expensive
 model. When budgets are small, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower. See
 [Budgets](budgets.md).
 
+## Use your workspace's MCP servers
+
+Claude Code does not name Otari's MCP servers in its requests, so Otari adds
+them itself: a server a workspace manager has set to
+[attach to every request](mcp.md#attached-to-every-request) is offered to Claude
+Code beside its own tools, and Otari runs that server's tools for it. Your key
+needs the [`mcp:execute` scope](api-keys.md#scopes); nothing else changes in
+your Claude Code setup.
+
+When the server uses each person's own account and you have not signed in yet:
+
+1. Ask, for example "check my open Jira tasks".
+2. Claude answers with a sign-in link. Check that it starts with your
+   deployment's `public_base_url` exactly, without a trailing `/` if it has
+   one, followed by `/api/v1/mcp-connections/sign-in#ticket=`, then open it
+   within 30 minutes. It works once: if the sign-in does not finish, ask again
+   for a new one.
+   That address can differ from the one you send requests to; ask your operator
+   if you do not know it. The page names the Otari user your account will
+   be attached to: check that it is you, continue, and sign in with your own
+   account. Keep the link to yourself, and never open one someone else sent you:
+   whoever continues through a link connects their account to the user it was
+   made for.
+3. A page says you are signed in. Go back to Claude Code and ask again.
+
+The second ask runs against your own account. The key you set in
+`ANTHROPIC_AUTH_TOKEN` must belong to you for this to work: a key created
+without a user gets no link. See
+[Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md#connect-from-your-coding-agent-instead).
+
 ## Choosing a model
 
-Otari can serve Claude Code's requests from non-Anthropic models. Set Claude
-Code's default Opus, Sonnet and Haiku model variables when its built-in aliases
-do not exist on your deployment.
+Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
+name as the model's [catalog id](models.md#catalog-spellings), whether the
+catalog writes its version `5-5` or `5.5`, so no alias is needed. An alias of the same name wins, which is how to send it elsewhere.
+
+Otari can also serve Claude Code from non-Anthropic models. Keep that setup in a
+settings file of its own, such as `~/.claude/otari.json`, so a plain `claude`
+keeps yours, in a shell without the variables exported
+[above](#route-claude-code-through-otari) (`unset` them first). Use your
+region's or your gateway's base URL; see [Base URL](api-reference.md#base-url).
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.otari.ai/api",
+    "ANTHROPIC_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "z-ai/glm-5.3"
+  },
+  "modelPicker": {
+    "replaceBuiltInOptions": true,
+    "options": [
+      { "model": "z-ai/glm-5.3", "label": "GLM 5.3" },
+      { "model": "moonshotai/kimi-k3.1-pro", "label": "Kimi K3.1 Pro" }
+    ]
+  }
+}
+```
+
+Then start Claude Code with it, the key set for that command only, so a later
+plain `claude` does not send it to Anthropic:
+
+```bash
+ANTHROPIC_AUTH_TOKEN="<your-otari-key>" claude --settings ~/.claude/otari.json
+```
+
+- The Opus, Sonnet and Haiku variables name the models that background calls
+  and subagents get when they ask for those tiers.
+- `modelPicker` lists models in `/model` by the labels you give them.
+  `replaceBuiltInOptions` hides Opus, Sonnet and Haiku, which would otherwise
+  name whichever model they point at. It needs Claude Code 2.1.242 or later,
+  which reads it from user or managed settings or `--settings`, never from a
+  project.
+- Claude Code cannot list Otari's models itself: its gateway model discovery
+  keeps only ids that contain `claude` or `anthropic`. Add a model to
+  `modelPicker`, or start a session on it with `--model <id>`.
+- Picking a model with Enter in `/model`, or with `/model <id>`, saves it as
+  your Claude Code default, which a plain `claude` then sends to Anthropic.
+  Press `s` in the picker to keep the pick to the session.
 
 A non-Claude model may lose Anthropic-specific behavior such as extended
 thinking, prompt caching or tool semantics, and Anthropic's server-side context
@@ -94,9 +170,9 @@ To list only the open-weight models a key can use, ask the catalog for them:
 `GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
 are the names to configure.
 
-On a gateway you run, OpenAI reasoning models work better through the Responses
-API: their reasoning carries over between turns, and the codex and pro models
-become reachable. Set `messages_api: responses` on the OpenAI provider; see
+Otari serves OpenAI's models through OpenAI's Responses API, so a reasoning
+model can call Claude Code's tools with its reasoning on, its reasoning carries
+over between turns, and the codex and pro models are reachable; see
 [Messages through the Responses API](configuration.md#messages-through-the-responses-api).
 
 ## Let Otari choose a subagent's model
@@ -131,6 +207,13 @@ and why. If Otari does not answer, the subagent starts on the model it would
 have had anyway, and the line says so. Forks always inherit their parent's
 model.
 
+When a subagent Otari chose the model of finishes, the plugin (from version
+0.2.0) also sends Otari the models it ran on and its token counts, and no
+content. Otari prices those tokens at the model the subagent would have started
+on without the recommendation, which is how it works out what the
+recommendation saved; see
+[Agent model recommendations](routing.md#agent-model-recommendations).
+
 ## Send Claude Code sessions to Otari
 
 Otari can record each Claude Code session without routing its model traffic:
@@ -138,13 +221,12 @@ every prompt as a turn, with its model requests, tool calls and cost. Claude
 Code exports this over OpenTelemetry.
 
 This works on a gateway you run, not on otari.ai today. It needs a
-budget-exempt API key, which only the deployment's operator can create (with
-**Exempt from budget** under **Advanced** in the key form; see
-[Create an import key](external-usage.md#create-an-import-key)). To see Claude Code
+budget-exempt API key holding `telemetry:write`, which only the deployment's
+operator can create (see [Create an import key](external-usage.md#create-an-import-key)). To see Claude Code
 sessions on otari.ai, [route them through Otari](#route-claude-code-through-otari)
 instead.
 
-1. Have the operator create a budget-exempt key. Traces must be on
+1. Have the operator create an import key. Traces must be on
    (`OTARI_TRACE_CAPTURE_ENABLED`, the default).
 2. Add the variables to the `env` block of `~/.claude/settings.json`, with your
    gateway's URL:
@@ -198,7 +280,8 @@ appear twice.
 ## Import Claude Code usage without routing
 
 To record only usage and cost, without turns and tools, export just the logs.
-The same limit applies: it needs a budget-exempt key, so it works on a gateway
+The same limit applies: it needs an
+[import key](external-usage.md#create-an-import-key), so it works on a gateway
 you run, not on otari.ai today.
 
 ```bash
@@ -220,8 +303,9 @@ export a session you also route. See
 
 Claude Code keeps one transcript per session under `~/.claude/projects` (or
 under `CLAUDE_CONFIG_DIR`, if set). `otari import claude-code` imports them, so
-history from before you set up the exporter gets in too. It needs a
-budget-exempt key or the master key, so it works on a gateway you run, not on
+history from before you set up the exporter gets in too. It needs an
+[import key](external-usage.md#create-an-import-key) (budget-exempt, with
+`usage:write`) or the master key, so it works on a gateway you run, not on
 otari.ai today.
 
 Install the command on its own with `brew install mozilla-ai/tap/otari`, then:
@@ -232,7 +316,7 @@ export OTARI_URL="http://localhost:8000"   # your gateway's URL
 # Preview what is on disk. No credential needed: a dry run sends nothing.
 otari import claude-code --dry-run
 
-# Then import it, with a budget-exempt API key. Usage binds to that key's own
+# Then import it, with the import key. Usage binds to that key's own
 # user, so do not pass --user-id here.
 export OTARI_API_KEY="tk-your-import-key"
 otari import claude-code
@@ -242,8 +326,8 @@ otari import claude-code
 - Re-running imports only what is new.
 - Only token counts and identifiers are read, never prompts, completions or tool
   payloads.
-- Each session is labeled `<hostname>:<project>`, so you can group usage per
-  repository on the **Overview**.
+- Each session is labeled `<hostname>:<project>`, so the usage APIs can filter
+  usage per repository by session label.
 - The first event is sent on its own, so a rejection (an unknown user, a key that
   is not budget-exempt) shows before the rest is uploaded.
 

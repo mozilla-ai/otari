@@ -8,6 +8,7 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
 import { EntitlementProvider } from "@/shared/hooks/useEntitlements"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
+import { navItemForPath, PLAYGROUND_NAV_ITEM } from "./registry"
 import type { NavItem } from "./types"
 import { useNavVisibility } from "./useNavVisibility"
 
@@ -281,5 +282,54 @@ describe("useNavVisibility", () => {
         String(call[0]).includes(`${API_ROOT}/admin/access`),
       ),
     ).toBe(false)
+  })
+})
+
+describe("useNavVisibility on the caller's access", () => {
+  // Real entries rather than made-up ones: who may open a row is read off the
+  // registry entry at its path, so a synthetic item at "/" would be Home.
+  const entry = (path: string): NavItem => {
+    const found = navItemForPath(path)
+    if (!found) throw new Error(`${path} is not registered`)
+    return found
+  }
+  const SURFACES = ["tools", "workspaces", "playground", "keys"]
+
+  function mockRole(role: "owner" | "member" | "viewer") {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json(organizationContext({ role, deployment_operator: false })),
+    )
+  }
+
+  it("gives an owner the manager's rows and the Playground", async () => {
+    mockRole("owner")
+    const isVisible = await predicate(SURFACES)
+    expect(isVisible(entry("/tools/guardrails"))).toBe(true)
+    expect(isVisible(entry("/workspaces"))).toBe(true)
+    expect(isVisible(PLAYGROUND_NAV_ITEM)).toBe(true)
+  })
+
+  it("hides a manager's row from a member, and leaves them the rest", async () => {
+    mockRole("member")
+    const isVisible = await predicate(SURFACES)
+    expect(isVisible(entry("/tools/guardrails"))).toBe(false)
+    // A row on the organization rail is a manager's without saying so.
+    expect(isVisible(entry("/workspaces"))).toBe(false)
+    expect(isVisible(PLAYGROUND_NAV_ITEM)).toBe(true)
+    expect(isVisible(entry("/keys"))).toBe(true)
+  })
+
+  it("hides the Playground from a viewer, who may not run anything", async () => {
+    mockRole("viewer")
+    const isVisible = await predicate(SURFACES)
+    expect(isVisible(PLAYGROUND_NAV_ITEM)).toBe(false)
+    expect(isVisible(entry("/keys"))).toBe(true)
+  })
+
+  it("offers a manager's row when the read fails, as the page then opens", async () => {
+    mockCallerUnavailable()
+    const isVisible = await predicate(SURFACES)
+    expect(isVisible(entry("/tools/guardrails"))).toBe(true)
+    expect(isVisible(entry("/workspaces"))).toBe(true)
   })
 })

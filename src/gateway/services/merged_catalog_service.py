@@ -29,10 +29,14 @@ from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
+from gateway.repositories.organizations import BootstrapMarkerRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.alias_service import effective_aliases
 from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist, workspace_serves_target
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
+from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -52,7 +56,6 @@ from gateway.services.provider_kwargs import (
     split_selector,
 )
 from gateway.services.providers import narrow_hosted_models, workspace_requires_zero_data_retention
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
     hosted_allowlist_entries,
@@ -69,6 +72,7 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
 )
+from gateway.types.key_scope import KeyScope
 from gateway.types.models_dev import ModelsDevCatalog
 from gateway.types.price_rates import RatesDocument, stored_rates
 from gateway.types.price_unit import PriceUnit
@@ -120,6 +124,15 @@ class ModelPricingInfo(BaseModel):
             "unit, web_search, and the overrides and multipliers that change a price when a condition holds. "
             "The fields above are its text view. Null where the stored block cannot be read."
         ),
+    )
+
+
+def _deployment_access(db: AsyncSession) -> DeploymentAdministrationAccess:
+    """Build the reader that says whether a caller operates the deployment."""
+    return DeploymentAdministrationAccess(
+        UserRepository(db),
+        OrganizationMemberRepository(db),
+        BootstrapOperatorMarker(BootstrapMarkerRepository(db)),
     )
 
 
@@ -587,7 +600,7 @@ async def hosted_providers_withheld_from(
     """
     organization_id: uuid.UUID | None
     if session_identity is not None:
-        if await DeploymentAdministrationAccess(db).has_administration_access(session_identity):
+        if await _deployment_access(db).has_administration_access(session_identity):
             return frozenset()
         organization_id = session_identity.active_organization_id
     else:
@@ -661,9 +674,7 @@ async def catalog_scope(
             deployment_key_models=hosted_models,
         )
     if session_identity is not None:
-        if workspace_id is None and await DeploymentAdministrationAccess(db).has_administration_access(
-            session_identity
-        ):
+        if workspace_id is None and await _deployment_access(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
             # models. Not every organization's, which would cross the tenant line
             # the rest of this function draws, and not none: on a deployment with
@@ -1155,6 +1166,20 @@ async def viewer_organization(
         return None
     api_key, _ = caller
     return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+def viewer_reads_usage(caller: tuple[APIKey | None, bool] | None) -> bool:
+    """Whether this viewer reads usage at all, before the organization it would read is known.
+
+    A visitor the public catalog admits reads none. An API key needs
+    ``usage:read``, the scope the usage routes require, so a key that only calls
+    models learns nothing about what its organization spends. The master key and
+    a dashboard session read. Which organization is the caller's own question.
+    """
+    if caller is None:
+        return False
+    api_key, _ = caller
+    return api_key is None or KeyScope.USAGE_READ in api_key.scopes
 
 
 @dataclass(frozen=True)

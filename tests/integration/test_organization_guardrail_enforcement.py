@@ -45,6 +45,16 @@ _REQUEST = {
 
 
 @pytest.fixture(autouse=True)
+def _vendor_hosts_resolve_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The definitions here name Lakera's own host, which a build checks again; no test here should need DNS."""
+
+    async def public(_host: str) -> list[object]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", public)
+
+
+@pytest.fixture(autouse=True)
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
@@ -492,14 +502,13 @@ def test_the_check_is_sent_the_stored_secret_parameter_and_not_the_mask(
 def _definition(client: TestClient, master_key_header: dict[str, str], **overrides: Any) -> dict[str, Any]:
     """A stored definition, created the way the dashboard form will.
 
-    The endpoint is an IP literal for the reason the remote cases use one: a
-    stored address is checked against url_safety when it is written, and a
-    hostname would send that check to a resolver.
+    The endpoint is Lakera's own host, the only one a Lakera definition may name;
+    the module's resolver stub keeps the check it passes off the network.
     """
     payload: dict[str, Any] = {
         "name": "prod-lakera",
         "guardrail_name": "lakera_guard",
-        "create_kwargs": {"api_key": "lakera-key", "endpoint": "https://93.184.216.34/v2"},
+        "create_kwargs": {"api_key": "lakera-key", "endpoint": "https://api.lakera.ai/v2/guard"},
         **overrides,
     }
     response = client.post(
@@ -679,8 +688,38 @@ def test_a_definition_this_worker_does_not_hold_fails_closed(
 
     assert response.status_code == 502
     assert response.json()["error"]["message"] == "guardrail profile 'prompt-injection' could not be evaluated"
+    assert response.json()["code"] == "guardrail_unavailable"
+    assert response.headers["Otari-Error-Code"] == "guardrail_unavailable"
     assert guardrails.calls == []
     assert definition["id"] not in response.text
+
+
+def test_a_mandate_with_no_service_refuses_without_blaming_the_request(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otari#2937: the caller named nothing, so the refusal does not send them to their request."""
+    monkeypatch.delenv("OTARI_GUARDRAILS_URL", raising=False)
+    _mandate(
+        client,
+        master_key_header,
+        profile="prompt-injection",
+        mode="block",
+        on_unavailable="block",
+        applies_to_all_workspaces=True,
+    )
+    guardrails = _Guardrails(valid=True)
+
+    response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
+
+    assert response.status_code == 424
+    assert response.json()["code"] == "guardrail_not_configured"
+    message = response.json()["error"]["message"]
+    assert "'prompt-injection' is required for this request" in message
+    assert "`url`" not in message
+    assert guardrails.calls == []
 
 
 def test_a_definition_this_worker_does_not_hold_honors_a_fail_open_entry(

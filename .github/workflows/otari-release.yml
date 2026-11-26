@@ -14,7 +14,7 @@ name: Otari Release (open PR)
 # RELEASE_APP_PRIVATE_KEY), so the PR is authored by otari-bot[bot] rather than
 # by whichever maintainer owned a personal access token. The default
 # GITHUB_TOKEN cannot be used instead: a PR it opens starts no workflows at
-# all, so the PR title and template checks would not run on the release PR, and
+# all, so the PR title check would not run on the release PR, and
 # step 2 would publish a Release that never triggers the Docker build. An App
 # installation token is a distinct identity and does start them. See RELEASE.md.
 #
@@ -154,21 +154,6 @@ jobs:
             echo "### Release notes preview"
             echo
             cat /tmp/notes.md
-            echo
-            echo "## PR Type"
-            echo
-            echo "- [x] Infrastructure / CI"
-            echo
-            echo "## Relevant issues"
-            echo
-            echo "## Checklist"
-            echo
-            echo "- [x] I understand the code I am submitting."
-            echo "- [x] Documentation was updated where necessary."
-            echo
-            echo "## AI Usage"
-            echo
-            echo "- [x] No AI was used."
           } > /tmp/pr-body.md
 
       - name: Generate App token

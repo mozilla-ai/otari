@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useAuth } from "@/features/auth/AuthContext"
 import { OAuthCallbackPage } from "@/features/auth/OAuthCallbackPage"
 import { API_ROOT } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
@@ -18,7 +19,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 })
 
 const STATE_KEY = "otari.oauth.state"
-const RETURN_KEY = "otari.oauth.return-hash"
+const RETURN_KEY = "otari.oauth.return-route"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -39,20 +40,20 @@ function jsonResponse(body: unknown, status = 200): Response {
  * `App` tree in `src/app/App.test.tsx` ("sends a completed OAuth sign-in on to
  * the dashboard"), which is the only place the true ordering exists.
  */
-function Harness({ hash }: { hash: string }) {
+function Harness({ route }: { route: string }) {
   const { isAuthenticated } = useAuth()
   return isAuthenticated ? (
     <div>SIGNED IN</div>
   ) : (
-    <OAuthCallbackPage provider="google" hash={hash} />
+    <OAuthCallbackPage provider="google" route={route} />
   )
 }
 
-function renderCallback(hash: string) {
+function renderCallback(route: string) {
   return render(
     <AppProviders>
       <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
-        <Harness hash={hash} />
+        <Harness route={route} />
       </DeploymentProvider>
     </AppProviders>,
   )
@@ -74,9 +75,9 @@ afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
   window.localStorage.clear()
-  // The success path changes the hash, so a test that signs in would otherwise
+  // The success path changes the route, so a test that signs in would otherwise
   // leave it set for the next one.
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 describe("OAuthCallbackPage", () => {
@@ -86,7 +87,7 @@ describe("OAuthCallbackPage", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     const [url, init] = fetchMock.mock.calls[0] ?? []
@@ -113,7 +114,7 @@ describe("OAuthCallbackPage", () => {
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: true }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
     expect(recordEvent.mock.calls).toEqual([
@@ -128,7 +129,7 @@ describe("OAuthCallbackPage", () => {
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z", new_account: false }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
     expect(recordEvent.mock.calls).toEqual([
@@ -142,7 +143,7 @@ describe("OAuthCallbackPage", () => {
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
     expect(window.sessionStorage.getItem(STATE_KEY)).toBeNull()
@@ -153,22 +154,22 @@ describe("OAuthCallbackPage", () => {
     // the sign-in screen stood in for that page, and the provider's round trip
     // must not lose it.
     window.sessionStorage.setItem(STATE_KEY, "the-state")
-    window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+    window.sessionStorage.setItem(RETURN_KEY, "/organization/billing")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
-    expect(window.location.hash).toBe("#/organization/billing")
+    expect(currentRoute()).toBe("/organization/billing")
     expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
   })
 
   it.each([
     ["nothing was remembered", undefined],
-    ["the page renders ahead of the router", "#/verify-email?token=t"],
-    ["the value is not a hash path", "https://evil.example/#/keys"],
+    ["the page renders ahead of the router", "/verify-email?token=t"],
+    ["the value is not a route path", "https://evil.example/#/keys"],
   ])("goes home when %s", async (_, remembered) => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     if (remembered !== undefined) {
@@ -178,22 +179,22 @@ describe("OAuthCallbackPage", () => {
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
-    expect(window.location.hash).toBe("#/")
+    expect(currentRoute()).toBe("/")
     expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
   })
 
   it.each([
     [
       "the provider declined",
-      "#/auth/google/callback?error=access_denied&state=the-state",
+      "/sign-in/google/callback?error=access_denied&state=the-state",
       () => {},
     ],
     [
       "the gateway refused the code",
-      "#/auth/google/callback?code=the-code&state=the-state",
+      "/sign-in/google/callback?code=the-code&state=the-state",
       () =>
         vi
           .spyOn(globalThis, "fetch")
@@ -201,12 +202,12 @@ describe("OAuthCallbackPage", () => {
             jsonResponse({ detail: "Not registered here." }, 401),
           ),
     ],
-  ])("keeps the page for a retry when %s", async (_, hash, stubFetch) => {
+  ])("keeps the page for a retry when %s", async (_, route, stubFetch) => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
-    window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+    window.sessionStorage.setItem(RETURN_KEY, "/organization/billing")
     stubFetch()
 
-    renderCallback(hash)
+    renderCallback(route)
 
     await screen.findByRole("heading", {
       name: "That sign-in did not complete",
@@ -215,20 +216,22 @@ describe("OAuthCallbackPage", () => {
     // remembers it afresh; storage keeps nothing for a later sign-in.
     expect(
       screen.getByRole("link", { name: "Back to sign in" }),
-    ).toHaveAttribute("href", "#/organization/billing")
+    ).toHaveAttribute("href", "/organization/billing")
     expect(window.sessionStorage.getItem(RETURN_KEY)).toBeNull()
-    expect(window.location.hash).toBe("")
+    expect(currentRoute()).toBe("/")
   })
 
   it("sends a failed sign-in back home when the page is not one to return to", async () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
-    window.sessionStorage.setItem(RETURN_KEY, "#/reset-password?token=t")
+    window.sessionStorage.setItem(RETURN_KEY, "/reset-password?token=t")
 
-    renderCallback("#/auth/google/callback?error=access_denied&state=the-state")
+    renderCallback(
+      "/sign-in/google/callback?error=access_denied&state=the-state",
+    )
 
     expect(
       await screen.findByRole("link", { name: "Back to sign in" }),
-    ).toHaveAttribute("href", "#/")
+    ).toHaveAttribute("href", "/")
   })
 
   it("refuses a state that does not match, without spending the code", async () => {
@@ -237,7 +240,9 @@ describe("OAuthCallbackPage", () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/google/callback?code=the-code&state=somebody-elses")
+    renderCallback(
+      "/sign-in/google/callback?code=the-code&state=somebody-elses",
+    )
 
     expect(
       await screen.findByRole("heading", {
@@ -256,7 +261,7 @@ describe("OAuthCallbackPage", () => {
   it("refuses a callback with no state at all", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/google/callback?code=the-code")
+    renderCallback("/sign-in/google/callback?code=the-code")
 
     await screen.findByRole("heading", {
       name: "That sign-in did not complete",
@@ -269,7 +274,7 @@ describe("OAuthCallbackPage", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
     renderCallback(
-      "#/auth/google/callback?error=access_denied&error_description=nope&state=the-state",
+      "/sign-in/google/callback?error=access_denied&error_description=nope&state=the-state",
     )
 
     expect(
@@ -291,7 +296,7 @@ describe("OAuthCallbackPage", () => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
-    renderCallback("#/auth/google/callback?state=the-state")
+    renderCallback("/sign-in/google/callback?state=the-state")
 
     expect(
       await screen.findByText(
@@ -313,7 +318,7 @@ describe("OAuthCallbackPage", () => {
       ),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     expect(
       await screen.findByText(/not registered on this gateway/),
@@ -325,7 +330,7 @@ describe("OAuthCallbackPage", () => {
     const TERMS_KEY = "otari.oauth.terms-accepted"
     const realLocation = window.location
 
-    function renderWithTerms(hash: string) {
+    function renderWithTerms(route: string) {
       return render(
         <AppProviders>
           <DeploymentProvider
@@ -334,7 +339,7 @@ describe("OAuthCallbackPage", () => {
               terms_url: "https://otari.example.com/terms",
             })}
           >
-            <Harness hash={hash} />
+            <Harness route={route} />
           </DeploymentProvider>
         </AppProviders>,
       )
@@ -363,7 +368,7 @@ describe("OAuthCallbackPage", () => {
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
 
-      renderWithTerms("#/auth/google/callback?code=the-code&state=the-state")
+      renderWithTerms("/sign-in/google/callback?code=the-code&state=the-state")
 
       expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
       const [, init] = fetchMock.mock.calls[0] ?? []
@@ -375,7 +380,7 @@ describe("OAuthCallbackPage", () => {
 
     it("asks for the terms a new account needs instead of ending at a refusal", async () => {
       window.sessionStorage.setItem(STATE_KEY, "the-state")
-      window.sessionStorage.setItem(RETURN_KEY, "#/organization/billing")
+      window.sessionStorage.setItem(RETURN_KEY, "/organization/billing")
       const assign = vi.fn()
       Object.defineProperty(window, "location", {
         configurable: true,
@@ -392,7 +397,7 @@ describe("OAuthCallbackPage", () => {
         )
       const user = userEvent.setup()
 
-      renderWithTerms("#/auth/google/callback?code=the-code&state=the-state")
+      renderWithTerms("/sign-in/google/callback?code=the-code&state=the-state")
 
       expect(
         await screen.findByRole("heading", {
@@ -405,7 +410,7 @@ describe("OAuthCallbackPage", () => {
       // Either way on keeps the page the refused sign-in started from.
       expect(
         screen.getByRole("link", { name: "Back to sign in" }),
-      ).toHaveAttribute("href", "#/organization/billing")
+      ).toHaveAttribute("href", "/organization/billing")
       const again = screen.getByRole("button", { name: "Sign in with Google" })
       expect(again).toBeDisabled()
 
@@ -426,7 +431,7 @@ describe("OAuthCallbackPage", () => {
       expect(window.sessionStorage.getItem(STATE_KEY)).toBe("the-next-state")
       expect(window.sessionStorage.getItem(TERMS_KEY)).toBe("true")
       expect(window.sessionStorage.getItem(RETURN_KEY)).toBe(
-        "#/organization/billing",
+        "/organization/billing",
       )
     })
 
@@ -434,7 +439,7 @@ describe("OAuthCallbackPage", () => {
       window.sessionStorage.setItem(STATE_KEY, "the-state")
       vi.spyOn(globalThis, "fetch").mockResolvedValue(termsRefusal())
 
-      renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+      renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
       expect(
         await screen.findByText("Accept the terms of service to continue"),
@@ -466,7 +471,7 @@ describe("OAuthCallbackPage", () => {
           <DeploymentProvider
             value={bootstrap({ oauth_providers: ["google"] })}
           >
-            <Harness hash="#/auth/google/callback?code=the-code&state=the-state" />
+            <Harness route="/sign-in/google/callback?code=the-code&state=the-state" />
           </DeploymentProvider>
         </AppProviders>
       </StrictMode>,
@@ -491,7 +496,7 @@ describe("OAuthCallbackPage", () => {
     // Rendered without the harness's gate, the way `DeploymentRoot` mounts it:
     // the page keeps rendering after `login()`, which is what lets it say this.
     window.sessionStorage.setItem(STATE_KEY, "the-state")
-    window.location.hash = "#/auth/google/callback"
+    window.history.replaceState(null, "", "/sign-in/google/callback")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
         expires_at: "2026-09-01T00:00:00Z",
@@ -504,7 +509,7 @@ describe("OAuthCallbackPage", () => {
         <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
           <OAuthCallbackPage
             provider="google"
-            hash="#/auth/google/callback?code=the-code&state=the-state"
+            route="/sign-in/google/callback?code=the-code&state=the-state"
           />
         </DeploymentProvider>
       </AppProviders>,
@@ -520,26 +525,26 @@ describe("OAuthCallbackPage", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "Set a new password" }),
-    ).toHaveAttribute("href", "#/account")
+    ).toHaveAttribute("href", "/account")
     expect(screen.getByRole("link", { name: "Continue" })).toHaveAttribute(
       "href",
-      "#/",
+      "/",
     )
     // The notice waits for the person instead of moving them on, even though
     // this tab now holds a session.
-    expect(window.location.hash).toBe("#/auth/google/callback")
+    expect(currentRoute()).toBe("/sign-in/google/callback")
   })
 
   it.each([
     [
       "the page the sign-in started from",
-      "#/organization/billing",
-      "#/organization/billing",
+      "/organization/billing",
+      "/organization/billing",
     ],
     [
       "home when that page is not one to return to",
-      "#/reset-password?token=t",
-      "#/",
+      "/reset-password?token=t",
+      "/",
     ],
   ])("continues from that notice to %s", async (_, remembered, continueTo) => {
     window.sessionStorage.setItem(STATE_KEY, "the-state")
@@ -556,7 +561,7 @@ describe("OAuthCallbackPage", () => {
         <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
           <OAuthCallbackPage
             provider="google"
-            hash="#/auth/google/callback?code=the-code&state=the-state"
+            route="/sign-in/google/callback?code=the-code&state=the-state"
           />
         </DeploymentProvider>
       </AppProviders>,
@@ -568,24 +573,31 @@ describe("OAuthCallbackPage", () => {
   })
 
   it("replaces its own history entry on success, so Back skips it", async () => {
-    window.location.hash =
-      "#/auth/google/callback?code=the-code&state=the-state"
+    window.history.replaceState(
+      null,
+      "",
+      "/sign-in/google/callback?code=the-code&state=the-state",
+    )
     const entries = window.history.length
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
     )
 
-    renderCallback("#/auth/google/callback?code=the-code&state=the-state")
+    renderCallback("/sign-in/google/callback?code=the-code&state=the-state")
 
     await screen.findByText("SIGNED IN")
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(window.history.length).toBe(entries)
   })
 
   it("sends a tab that is already signed in to the dashboard rather than refusing a spent state", async () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1")
-    window.location.hash = "#/auth/google/callback?code=the-code&state=spent"
+    window.history.replaceState(
+      null,
+      "",
+      "/sign-in/google/callback?code=the-code&state=spent",
+    )
     const fetchMock = vi.spyOn(globalThis, "fetch")
 
     // Mounted bare: the harness would hide the page behind the signed-in marker.
@@ -594,13 +606,13 @@ describe("OAuthCallbackPage", () => {
         <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
           <OAuthCallbackPage
             provider="google"
-            hash="#/auth/google/callback?code=the-code&state=spent"
+            route="/sign-in/google/callback?code=the-code&state=spent"
           />
         </DeploymentProvider>
       </AppProviders>,
     )
 
-    await waitFor(() => expect(window.location.hash).toBe("#/"))
+    await waitFor(() => expect(currentRoute()).toBe("/"))
     expect(
       screen.queryByRole("heading", { name: "That sign-in did not complete" }),
     ).toBeNull()

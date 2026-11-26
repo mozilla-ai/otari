@@ -225,7 +225,6 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "model_discovery_timeout_seconds",
         "models_dev_metadata",
         "models_dev_cache_ttl_seconds",
-        "file_understanding_enabled",
         "vision_strategy",
         "vision_describe_model",
         "vision_describe_max_tokens",
@@ -235,7 +234,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
 
     # The outbound network-safety gates stay read-only on purpose.
     for name in (
-        "mcp_allow_private_hosts",
+        "mcp_private_hosts",
         "web_search_allow_private_hosts",
         "web_retrieval_trust_env_proxy",
         "provider_allow_private_hosts",
@@ -557,3 +556,24 @@ def test_patch_rejects_negative_cache_ttl(tmp_path: Path) -> None:
             json={"model_cache_ttl_seconds": -1},
         )
     assert response.status_code == 422
+
+
+def test_the_mcp_private_hosts_list_cannot_be_written_through_the_settings_api(tmp_path: Path) -> None:
+    """An operator lists hosts in the environment or the config file; no route a session reaches widens it."""
+    from gateway.services.runtime_settings_service import SETTABLE_KEYS
+    from gateway.services.tool_settings_service import TOOL_SETTABLE_KEYS
+
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'settings-private-hosts.db'}",
+        master_key="sk-test-master",
+        mcp_private_hosts="mcp.internal:8000",
+    )
+    with TestClient(create_app(config)) as client:
+        patched = client.patch(f"{API_ROOT}/settings", headers=AUTH, json={"mcp_private_hosts": "localhost"})
+        tools = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"mcp_private_hosts": "localhost"})
+
+    assert patched.status_code == 200
+    assert tools.status_code in {200, 422}
+    assert config.mcp_private_hosts == "mcp.internal:8000"
+    assert "mcp_private_hosts" not in SETTABLE_KEYS
+    assert "mcp_private_hosts" not in TOOL_SETTABLE_KEYS

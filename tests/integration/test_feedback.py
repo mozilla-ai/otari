@@ -1,26 +1,25 @@
 """Feedback authentication, explicit payloads, the delivery port, and disabled deployments."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlmodel import col
 
 from gateway import container as container_module
 from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.feedback_exceptions import ANOTHER_ACCOUNT, UNSHAREABLE_EMAIL, FeedbackDeliveryError
-from gateway.models.tenancy import DashboardSession, User
+from gateway.models.tenancy import User
 from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
-from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
 from .conftest import build_test_client, declared_test_providers, shared_test_config
+
+MEMBER = "member@example.com"
 
 
 @pytest.fixture(scope="module")
@@ -84,24 +83,12 @@ def test_operator_submission_is_explicit(
 
 
 def test_ordinary_member_can_submit(
-    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+    client: TestClient,
+    db_session: Session,
+    deliveries: list[httpx.Request],
+    signed_in_member: Callable[..., User],
 ) -> None:
-    added = client.post(
-        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
-    )
-    assert added.status_code == 201, added.text
-    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
-    token = "feedback-member-session"
-    db_session.add(
-        DashboardSession(
-            token_hash=hash_session_token(token),
-            user_id=user.id,
-            created_at=datetime.now(UTC),
-            expires_at=datetime.now(UTC) + timedelta(hours=1),
-        )
-    )
-    db_session.commit()
-    client.cookies.set(SESSION_COOKIE_NAME, token)
+    signed_in_member(email=MEMBER)
     assert client.post(f"{API_ROOT}/feedback", json={"message": "A member's idea"}).status_code == 204
     assert json.loads(deliveries[0].content) == {"message": "A member's idea"}
     assert (
@@ -113,30 +100,13 @@ def test_ordinary_member_can_submit(
     assert len(deliveries) == 1
 
 
-def _sign_in_member(client: TestClient, db_session: Session, master_key_header: dict[str, str]) -> User:
-    added = client.post(
-        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
-    )
-    assert added.status_code == 201, added.text
-    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
-    token = "feedback-member"
-    db_session.add(
-        DashboardSession(
-            token_hash=hash_session_token(token),
-            user_id=user.id,
-            created_at=datetime.now(UTC),
-            expires_at=datetime.now(UTC) + timedelta(hours=1),
-        )
-    )
-    db_session.commit()
-    client.cookies.set(SESSION_COOKIE_NAME, token)
-    return user
-
-
 def test_a_member_who_shares_their_email_sends_the_session_address(
-    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+    client: TestClient,
+    db_session: Session,
+    deliveries: list[httpx.Request],
+    signed_in_member: Callable[..., User],
 ) -> None:
-    user = _sign_in_member(client, db_session, master_key_header)
+    user = signed_in_member(email=MEMBER)
     # Adding a member lower-cases the address; an identity from another sign-in
     # path keeps its own, and a local part can be case-sensitive.
     user.email = "Member@Example.com"
@@ -155,11 +125,14 @@ def test_a_member_who_shares_their_email_sends_the_session_address(
 
 
 def test_an_address_the_page_showed_for_another_account_is_refused(
-    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+    client: TestClient,
+    db_session: Session,
+    deliveries: list[httpx.Request],
+    signed_in_member: Callable[..., User],
 ) -> None:
     # The page was loaded as one account, and another tab has since signed in as
     # this one: what the person agreed to share is not the session's address.
-    user = _sign_in_member(client, db_session, master_key_header)
+    user = signed_in_member(email=MEMBER)
     assert user.email is not None
     stale = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": "earlier@example.com"})
     assert stale.status_code == 422
@@ -184,9 +157,12 @@ def test_sharing_an_email_the_caller_does_not_have_is_refused(
 
 
 def test_an_email_the_receiver_would_refuse_is_never_sent(
-    client: TestClient, db_session: Session, deliveries: list[httpx.Request], master_key_header: dict[str, str]
+    client: TestClient,
+    db_session: Session,
+    deliveries: list[httpx.Request],
+    signed_in_member: Callable[..., User],
 ) -> None:
-    user = _sign_in_member(client, db_session, master_key_header)
+    user = signed_in_member(email=MEMBER)
     # Within this gateway's 255, one past the receiver's 254.
     user.email = "a" * 243 + "@example.com"
     db_session.commit()
@@ -197,7 +173,10 @@ def test_an_email_the_receiver_would_refuse_is_never_sent(
 
 
 def test_a_receiver_that_refuses_the_address_is_explained(
-    client: TestClient, db_session: Session, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    db_session: Session,
+    signed_in_member: Callable[..., User],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A receiver from before `reply_to`, which refuses any field it does not know.
     def receive(request: httpx.Request) -> httpx.Response:
@@ -208,7 +187,7 @@ def test_a_receiver_that_refuses_the_address_is_explained(
         "ReceiverFeedbackDeliveryAdapter",
         partial(ReceiverFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
     )
-    user = _sign_in_member(client, db_session, master_key_header)
+    user = signed_in_member(email=MEMBER)
     ticked = client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email})
     assert ticked.status_code == 422
     assert ticked.json()["detail"] == UNSHAREABLE_EMAIL
@@ -252,6 +231,7 @@ def test_each_caller_is_limited_to_five_sends_per_window(
     client: TestClient,
     db_session: Session,
     master_key_header: dict[str, str],
+    signed_in_member: Callable[..., User],
     deliveries: list[httpx.Request],
 ) -> None:
     for _ in range(5):
@@ -265,22 +245,7 @@ def test_each_caller_is_limited_to_five_sends_per_window(
     # A body that never leaves the gateway spends nothing, and the limit is the
     # caller's own: a member signed in on the same gateway still gets through.
     assert client.post(f"{API_ROOT}/feedback", json={"message": " "}, headers=master_key_header).status_code == 422
-    added = client.post(
-        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
-    )
-    assert added.status_code == 201, added.text
-    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
-    token = "feedback-limit-member"
-    db_session.add(
-        DashboardSession(
-            token_hash=hash_session_token(token),
-            user_id=user.id,
-            created_at=datetime.now(UTC),
-            expires_at=datetime.now(UTC) + timedelta(hours=1),
-        )
-    )
-    db_session.commit()
-    client.cookies.set(SESSION_COOKIE_NAME, token)
+    signed_in_member(email=MEMBER)
     assert client.post(f"{API_ROOT}/feedback", json={"message": "Mine"}).status_code == 204
     assert len(deliveries) == 6
 
@@ -314,11 +279,15 @@ class RecordingDelivery:
 
 
 def test_a_bound_delivery_receives_the_verified_sender(
-    client: TestClient, db_session: Session, master_key_header: dict[str, str], deliveries: list[httpx.Request]
+    client: TestClient,
+    db_session: Session,
+    signed_in_member: Callable[..., User],
+    master_key_header: dict[str, str],
+    deliveries: list[httpx.Request],
 ) -> None:
     recording = RecordingDelivery()
     client.app.state.container.bind(FeedbackDeliveryPort, lambda session: recording)  # type: ignore[attr-defined]
-    user = _sign_in_member(client, db_session, master_key_header)
+    user = signed_in_member(email=MEMBER)
     assert client.post(f"{API_ROOT}/feedback", json={"message": "Idea", "share_email": user.email}).status_code == 204
     assert client.post(f"{API_ROOT}/feedback", json={"message": "Quiet"}).status_code == 204
     client.cookies.clear()

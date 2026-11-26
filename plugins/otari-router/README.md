@@ -26,7 +26,7 @@ The install asks for two values, and both are required:
 | Option | What it is |
 | --- | --- |
 | `otari_url` | Base URL of the gateway, such as `https://otari.example.com`. Plain `http` only for a gateway on this machine, since the key travels in a header. |
-| `otari_api_key` | The key each recommendation is billed to. Stored in secure storage, never in a settings file. |
+| `otari_api_key` | The key each recommendation is billed to. It needs the `agents` [scope](../../docs/api-keys.md#scopes), which the **Coding agent** choice under **Access** in the key form includes. Stored in secure storage, never in a settings file. |
 
 Change them later with `/plugin configure otari-router`. The plugin is active
 in the session that installed it and in every session after.
@@ -45,7 +45,14 @@ One hooks module with two hooks:
    subagent starts on the model it would have had anyway, and a line in the
    transcript says so.
 2. **`turn.complete`**: when a subagent finishes, logs the model it ran on and
-   its token counts, so the pick can be checked against what it cost.
+   its token counts, so the pick can be checked against what it cost. For a
+   subagent the gateway picked the model of, it also sends those counts to
+   `PUT /api/v1/routing/decisions/{decision_id}/outcome`: the model ids and
+   the token counts, never the task or the answer. Each report carries the
+   subagent's running totals so far: the engine's own when it has them, the
+   plugin's own sum of the turns it has seen otherwise. The gateway uses them
+   to work out what the recommendation saved. A report that fails or takes
+   more than two seconds changes nothing in the session.
 
 Each spawn leaves a dim transcript line such as
 `Explore agent-… starts on claude-haiku-4-5, Otari's choice (haiku with 81%)`.

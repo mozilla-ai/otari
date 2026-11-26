@@ -5,28 +5,19 @@ import { absoluteDashboardLink } from "./dashboardLink"
 describe("absoluteDashboardLink", () => {
   it("leaves a link the server already made absolute alone", () => {
     expect(
-      absoluteDashboardLink("https://otari.example.com/#/accept?token=a", {
-        origin: "http://localhost:8000",
-        pathname: "/",
-      }),
-    ).toBe("https://otari.example.com/#/accept?token=a")
+      absoluteDashboardLink(
+        "https://otari.example.com/accept-invitation#token=a",
+        "http://localhost:8000",
+      ),
+    ).toBe("https://otari.example.com/accept-invitation#token=a")
   })
 
-  it("resolves a relative link against the page, keeping its path prefix", () => {
+  it("resolves a relative link against this page's origin and base", () => {
     expect(
-      absoluteDashboardLink("/#/accept-invitation?token=abc", {
-        origin: "https://app.example.com",
-        pathname: "/dashboard/",
-      }),
-    ).toBe("https://app.example.com/dashboard/#/accept-invitation?token=abc")
-  })
-
-  it("resolves a link with no hash against the origin", () => {
-    expect(
-      absoluteDashboardLink("/welcome", {
-        origin: "http://localhost:8000",
-        pathname: "/",
-      }),
-    ).toBe("http://localhost:8000/welcome")
+      absoluteDashboardLink(
+        "/accept-invitation#token=abc",
+        "https://app.example.com",
+      ),
+    ).toBe("https://app.example.com/accept-invitation#token=abc")
   })
 })

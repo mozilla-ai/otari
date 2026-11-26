@@ -115,6 +115,58 @@ def test_an_alias_target_a_request_tries_first_is_the_one_described(config: Gate
     assert listed[0].pricing.input_price_per_million == 0.1
 
 
+def _limited(selector: str, input_price: float | None, context: int | None, output: int | None = None) -> ModelObject:
+    return _offering(selector, input_price).model_copy(update={"context_window": context, "max_output_tokens": output})
+
+
+def test_a_limit_the_first_offering_does_not_know_comes_from_the_others(config: GatewayConfig, no_index: None) -> None:
+    """A self-hosted engine reports its context length while a priced offering tried before it knows none."""
+    listed = models_by_identity(
+        config,
+        None,
+        [_limited(_FIREWORKS, 0.7, None), _limited(_NEBIUS, None, 262144), _limited("openai:gpt-4o", 2.5, None)],
+    )
+
+    row = next(row for row in listed if row.id == "z-ai/glm-5.3")
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.7
+    assert row.context_window == 262144
+    assert row.max_output_tokens is None
+    assert next(row for row in listed if row.id == "openai/gpt-4o").context_window is None
+
+
+def test_a_limit_the_first_offering_knows_is_kept(config: GatewayConfig, no_index: None) -> None:
+    listed = models_by_identity(
+        config, None, [_limited(_FIREWORKS, 0.7, 131072, 16384), _limited(_NEBIUS, None, 262144, 32768)]
+    )
+
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (131072, 16384)
+
+
+def test_a_filled_limit_is_the_smallest_the_others_report_and_never_exceeds_the_window(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """Whichever offering a fallback reaches can hold it, and no output limit is larger than the context."""
+    third = "together:zai-org/GLM-5.3"
+    config.providers["together"] = {"api_key": "x"}
+    listed = models_by_identity(
+        config,
+        None,
+        [_limited(_FIREWORKS, 0.7, 65536), _limited(_NEBIUS, None, 262144, 131072), _limited(third, None, 200000)],
+    )
+
+    assert [row.id for row in listed] == ["z-ai/glm-5.3"]
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (65536, 65536)
+
+
+def test_an_output_limit_the_first_offering_knows_is_not_capped_by_a_filled_window(
+    config: GatewayConfig, no_index: None
+) -> None:
+    listed = models_by_identity(config, None, [_limited(_FIREWORKS, 0.7, None, 32768), _limited(_NEBIUS, None, 8192)])
+
+    assert (listed[0].context_window, listed[0].max_output_tokens) == (8192, 32768)
+
+
 def test_a_model_offered_only_by_alias_targets_is_left_to_the_alias(config: GatewayConfig, no_index: None) -> None:
     alias = ModelObject(id="fast", created=0, owned_by=ALIAS_OWNED_BY)
 
@@ -158,6 +210,44 @@ def test_an_organization_key_offering_is_listed_under_the_id_the_index_builds(
     )
 
     assert [row.id for row in listed] == [indexed.id] == ["deepseek/deepseek-v4.1-flash-1017"]
+
+
+def test_an_organization_key_offering_shows_the_metadata_its_slug_hides(config: GatewayConfig, no_index: None) -> None:
+    """The offering is built before the slug map is known, so the folded row reads the model under its provider."""
+    deepseek = ModelsDevModel(
+        id="deepseek-flash", name="DeepSeek V4.1 Flash 1017", context_window=1048576, tool_call=True, reasoning=True
+    )
+    described = ModelsDevModel(
+        id="deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        name="DeepSeek V4.1 Flash 1017",
+        context_window=1000000,
+        max_output_tokens=384000,
+        tool_call=True,
+        reasoning=True,
+    )
+    catalog = ModelsDevCatalog(
+        providers={
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={deepseek.id: deepseek}),
+            "deepinfra": ModelsDevProvider(
+                id="deepinfra", name="DeepInfra", doc=None, models={described.id: described}
+            ),
+        }
+    )
+    # Exactly what the merged catalog builds: each offering's metadata is read
+    # under its own instance name, which for the slug names no models.dev provider.
+    org = _offering("acme-ds:deepseek-flash", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    deployment = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.98)
+    selectors.apply_model_metadata(config, catalog, deployment)
+
+    listed = models_by_identity(config, catalog, [org, deployment], slug_providers={"acme-ds": "deepseek"})
+
+    (row,) = listed
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.3
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.type == "chat"
+    assert row.supported_parameters == ["tools", "tool_choice", "reasoning"]
 
 
 @pytest.mark.parametrize(

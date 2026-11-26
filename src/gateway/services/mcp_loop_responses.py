@@ -22,7 +22,6 @@ execution path and the gateway has nothing to dispatch against.
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import replace
@@ -34,8 +33,11 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
+    RoundGate,
     StreamAction,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -54,6 +56,7 @@ from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
     native_rendering,
@@ -111,8 +114,8 @@ async def _execute_function_calls(
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
-    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
-    is refused as one of those errors.
+    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``,
+    or one whose arguments are not a JSON object, is refused as one of those errors.
 
     When ``native_items`` is given, each call appends the native items announcing it
     right after it ran, so they keep the order the calls ran in and a rendering that
@@ -120,12 +123,17 @@ async def _execute_function_calls(
     """
     out: list[dict[str, Any]] = []
     for item in items:
-        args = _parsed_arguments(item.arguments)
-        call = NativeCall(str(item.name or ""), str(item.call_id or ""), args)
+        args = parse_tool_arguments(str(item.name or ""), item.arguments)
+        call = NativeCall(str(item.name or ""), str(item.call_id or ""), args or {})
+        if args is None:
+            if native_items is not None:
+                native_items.extend(_native_items(call, pool, tools, refused=Refusal.INVALID_INPUT))
+            out.append({"type": "function_call_output", "call_id": item.call_id, "output": INVALID_ARGUMENTS_ERROR})
+            continue
         capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted(item.name):
             if native_items is not None:
-                native_items.extend(_native_items(call, pool, tools, refused=True))
+                native_items.extend(_native_items(call, pool, tools, refused=Refusal.CALL_LIMIT))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         owner = owning_backend(pool, item.name)
@@ -141,7 +149,7 @@ async def _execute_function_calls(
             if capped and budget is not None:
                 budget.record(item.name, text)
         if native_items is not None:
-            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
+            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=None))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -175,7 +183,14 @@ def _coerce_input_to_list(input_data: Any) -> list[Any]:
     return [input_data]
 
 
-_USAGE_COUNTS = ("input_tokens", "cached_tokens", "output_tokens", "reasoning_tokens", "total_tokens")
+_USAGE_COUNTS = (
+    "input_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "total_tokens",
+)
 
 
 def _round_usage(usage: Any) -> dict[str, int]:
@@ -185,6 +200,7 @@ def _round_usage(usage: Any) -> dict[str, int]:
     return {
         "input_tokens": getattr(usage, "input_tokens", 0) or 0,
         "cached_tokens": getattr(input_details, "cached_tokens", 0) or 0,
+        "cache_write_tokens": getattr(input_details, "cache_write_tokens", 0) or 0,
         "output_tokens": getattr(usage, "output_tokens", 0) or 0,
         "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
         "total_tokens": getattr(usage, "total_tokens", 0) or 0,
@@ -199,12 +215,24 @@ def _add_round_usage(acc: dict[str, Any], usage: Any) -> None:
 
 def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
     """A copy of ``usage`` that reports ``counts``, its token details included."""
-    input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0)
+    input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0, cache_write_tokens=0)
+    # A round's retention breakdown no longer adds up once earlier rounds' writes join it.
+    # Read leniently: a provider any-llm bridges to Responses reports openresponses-types
+    # usage, whose input details carry ``cached_tokens`` alone.
+    writes_details = getattr(input_details, "cache_write_tokens_details", None)
+    if counts["cache_write_tokens"] != (getattr(input_details, "cache_write_tokens", 0) or 0):
+        writes_details = None
     output_details = usage.output_tokens_details or OutputTokensDetails(reasoning_tokens=0)
     return usage.model_copy(
         update={
             "input_tokens": counts["input_tokens"],
-            "input_tokens_details": input_details.model_copy(update={"cached_tokens": counts["cached_tokens"]}),
+            "input_tokens_details": input_details.model_copy(
+                update={
+                    "cached_tokens": counts["cached_tokens"],
+                    "cache_write_tokens": counts["cache_write_tokens"],
+                    "cache_write_tokens_details": writes_details,
+                }
+            ),
             "output_tokens": counts["output_tokens"],
             "output_tokens_details": output_details.model_copy(update={"reasoning_tokens": counts["reasoning_tokens"]}),
             "total_tokens": counts["total_tokens"],
@@ -245,19 +273,10 @@ def _reoutput_indexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"output_index": visible_index})
 
 
-def _parsed_arguments(raw: Any) -> dict[str, Any]:
-    """The call's arguments, empty where the model sent something unusable."""
-    try:
-        parsed = json.loads(raw or "{}")
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: bool) -> list[Any]:
+def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: Refusal | None) -> list[Any]:
     """Native items announcing one gateway-run call, if this caller asked to hear about it.
 
-    A refused call is announced through its tool's refusal rendering, which for a
+    A call ``refused`` before it ran is announced through its tool's refusal rendering, which for a
     search is nothing: no search ran. An MCP call has no native equivalent at all and
     stays invisible.
     """
@@ -266,7 +285,7 @@ def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *,
     rendering = native_rendering(call.name, Dialect.RESPONSES)
     if rendering is None:
         return []
-    return rendering.refused(call) if refused else rendering.ran(call, pool)
+    return rendering.ran(call, pool) if refused is None else rendering.refused(call, refused)
 
 
 def _compaction_items(output: list[Any]) -> list[Any]:
@@ -304,11 +323,15 @@ async def _execute_stream_owned(
     """
     results: list[dict[str, Any]] = []
     for spec in state.owned_specs:
-        args = _parsed_arguments(spec.get("arguments"))
-        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args)
+        args = parse_tool_arguments(str(spec["name"]), spec.get("arguments"))
+        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args or {})
+        if args is None:
+            state.native_items.extend(_native_items(call, pool, tools, refused=Refusal.INVALID_INPUT))
+            results.append({"type": "function_call_output", "call_id": call.id, "output": INVALID_ARGUMENTS_ERROR})
+            continue
         capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted(call.name):
-            state.native_items.extend(_native_items(call, pool, tools, refused=True))
+            state.native_items.extend(_native_items(call, pool, tools, refused=Refusal.CALL_LIMIT))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         owner = owning_backend(pool, call.name)
@@ -323,7 +346,7 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(call.name, text)
-        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
+        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=None))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     return results
 
@@ -432,6 +455,9 @@ class _ResponsesToolLoopStrategy:
             "compactions": [],
         }
 
+    def output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
+
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
             _add_round_usage(acc, result.usage)
@@ -496,6 +522,10 @@ class _ResponsesToolLoopStrategy:
                 "Responses-mixed: could not filter output on response; client will see function_call "
                 "items the gateway already executed (no-op on the client side).",
             )
+
+    def end_answer(self, result: Response) -> None:
+        """Mark the answer complete: Gemini reports a round that called a function as incomplete."""
+        result.status = "completed"
 
     async def advance_transcript(
         self,
@@ -694,6 +724,11 @@ class _ResponsesToolLoopStrategy:
             for event in self.synthetic_events(state, acc):
                 yield event
 
+    def end_stream_answer(self, state: _ResponsesStreamState) -> None:
+        # The gateway's function_call items were hidden, and ``terminal_events`` drops
+        # them from the completed response too, so nothing else marks the round.
+        del state
+
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_terminal is None:
             return []
@@ -712,6 +747,9 @@ class _ResponsesToolLoopStrategy:
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
+
+    def stream_output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
 
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: keep the counts of the terminal event the loop drops.
@@ -790,7 +828,7 @@ def _strategy_for(
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed a tool's native items, has anything
+    Only a request with a budget, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
@@ -807,6 +845,7 @@ async def responses_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    round_gate: RoundGate | None = None,
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -835,6 +874,8 @@ async def responses_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -846,6 +887,7 @@ async def responses_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -874,6 +916,8 @@ async def responses_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

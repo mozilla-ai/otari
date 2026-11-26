@@ -39,6 +39,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
+from gateway.api.routes._attempts import LOCKED_IN_DETAIL
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
@@ -57,6 +58,7 @@ from gateway.core.error_codes import (
     ERROR_STATUS_HEADER,
     ERROR_TAG_HEADER,
     PROVIDER_ERROR,
+    UPSTREAM_RATE_LIMITED,
 )
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
@@ -125,7 +127,8 @@ def routing_config(postgres_url: str) -> GatewayConfig:
         require_pricing=False,
         model_discovery=False,
         providers={
-            "openai": {"api_key": "sk-openai"},
+            # The /v1/messages tests here mock amessages, which only the chat-completions path calls.
+            "openai": {"api_key": "sk-openai", "messages_api": "completions"},
             "anthropic": {"api_key": "sk-ant"},
         },
         routing=RoutingConfig.model_validate(
@@ -357,6 +360,9 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     # Both belong to one request, which is what makes the history reconstructable.
     assert served[0]["request_group_id"] == absorbed[0]["request_group_id"]
     assert served[0]["request_group_id"] is not None
+    # Every attempt keeps the name the caller sent, the policy, beside what it ran.
+    assert served[0]["requested_model"] == "fast"
+    assert absorbed[0]["requested_model"] == "fast"
 
 
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
@@ -1027,7 +1033,27 @@ def test_a_dynamic_policy_is_not_a_model_name_outside_the_completion_routes(clie
     )
 
     assert resp.status_code == 400
-    assert "thrifty" in resp.json()["detail"]
+    assert resp.json()["detail"] == (
+        "'thrifty' is a routing policy that chooses its model per request, which only chat completions, "
+        "messages and responses do. Send this endpoint a catalog model id, a 'provider:model' selector, "
+        "or an alias."
+    )
+
+
+def test_a_dynamic_policy_is_refused_as_a_batch_model_with_its_own_reason(client: TestClient) -> None:
+    _create_user(client)
+    resp = client.post(
+        f"{API_ROOT}/batches",
+        json={
+            "model": "thrifty",
+            "user": "test-user",
+            "requests": [{"custom_id": "req-1", "body": {"messages": [{"role": "user", "content": "hi"}]}}],
+        },
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"].startswith("'thrifty' is a routing policy that chooses its model per request")
 
 
 # ---------------------------------------------------------------------------
@@ -1903,6 +1929,74 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
     assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
 
 
+# Each format's reasoning hint, as a request carries it and as the provider call is sent it.
+_REASONING_HINTS: dict[str, tuple[dict[str, Any], str]] = {
+    "chat": ({"reasoning_effort": "low"}, "reasoning_effort"),
+    "responses": ({"reasoning": {"effort": "low"}}, "reasoning"),
+    "messages": ({"thinking": {"type": "enabled", "budget_tokens": 2048}}, "thinking"),
+    "messages-effort": ({"output_config": {"effort": "low"}}, "output_format"),
+}
+
+
+@pytest.mark.parametrize("endpoint", list(_REASONING_HINTS))
+def test_a_fallback_that_does_not_reason_is_sent_no_reasoning_hint(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    """The hint is the caller's for the head, and a fallback with nothing to tune would only fail over it."""
+    from gateway.api.routes import _pipeline
+    from gateway.types.models_dev import parse_catalog
+
+    catalog = parse_catalog(
+        {
+            "openai": {"models": {"gpt-5-mini": {"reasoning": True}}},
+            "anthropic": {"models": {"claude-haiku-4-5": {"reasoning": False}}},
+        }
+    )
+    monkeypatch.setattr(_pipeline, "cached_models_dev_catalog", lambda: catalog)
+    _create_user(client)
+    hint, field = _REASONING_HINTS[endpoint]
+    sent: list[dict[str, Any]] = []
+
+    async def flaky(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        if kwargs["model"] in ("openai:gpt-5-mini", "gpt-5-mini"):
+            raise _http_error(503)
+        if endpoint.startswith("messages"):
+            return _message_response()
+        if endpoint == "responses":
+            from any_llm.types.responses import Response as ProviderResponse
+
+            return ProviderResponse.model_construct(
+                id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
+            )
+        return _completion("claude-haiku-4-5")
+
+    if endpoint.startswith("messages"):
+        body = {
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": "hi"}],
+            "metadata": {"user_id": "test-user"},
+        }
+        with patch("gateway.api.routes.messages.amessages", new=flaky):
+            resp = client.post(f"{API_ROOT}/messages", json={"model": "fast", **body, **hint}, headers=HEADERS)
+    elif endpoint == "responses":
+        with (
+            patch("gateway.api.routes.responses.aresponses", new=flaky),
+            patch("gateway.services.inference._responses_bridge.aresponses_via_chat_completions", new=flaky),
+        ):
+            resp = client.post(
+                f"{API_ROOT}/responses",
+                json={"model": "fast", "input": "hi", "user": "test-user", **hint},
+                headers=HEADERS,
+            )
+    else:
+        with patch("gateway.api.routes.chat.acompletion", new=flaky):
+            resp = _chat(client, "fast", **hint)
+
+    assert resp.status_code == 200, resp.text
+    assert [field in kwargs for kwargs in sent] == [True, False]
+
+
 # ---------------------------------------------------------------------------
 # Provider retries
 # ---------------------------------------------------------------------------
@@ -2164,6 +2258,30 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     assert user["spend"] == pytest.approx(0.01)
 
 
+def test_a_rate_limit_after_lock_in_keeps_its_code_and_says_why_no_backup_was_tried(
+    client: TestClient,
+    serve_search_on_fake: Callable[..., None],
+) -> None:
+    """A 429 on the second round of a tool loop is the caller's 429, explained (#3198)."""
+    _create_user(client)
+    _serve_priced_searches(client, serve_search_on_fake)
+    scripted: list[ChatCompletion | Exception] = [_tool_completion("gpt-5-mini", tool_call=True), _http_error(429)]
+
+    async def scripted_provider(**_kwargs: Any) -> ChatCompletion:
+        nxt = scripted.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    with patch("gateway.services.mcp_loop.acompletion", new=scripted_provider):
+        resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
+
+    assert resp.status_code == 429, resp.text
+    assert not scripted, "the fallback candidate should never have been called"
+    assert resp.json()["code"] == UPSTREAM_RATE_LIMITED
+    assert resp.json()["detail"].endswith(LOCKED_IN_DETAIL)
+
+
 # ---------------------------------------------------------------------------
 # A catalog ID falls back across its offerings
 # ---------------------------------------------------------------------------
@@ -2251,6 +2369,60 @@ def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestCli
     assert resp.status_code == 200, resp.text
     assert _awaited_model(mock) == "anthropic:m1-b"
     assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]
+
+
+def test_a_stored_policy_may_name_a_catalog_id(catalog_client: TestClient) -> None:
+    """A policy accepts the name a request accepts, and dispatches to the offering that name resolves to."""
+    _create_user(catalog_client)
+    created = catalog_client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "by-catalog-id", "spec": _spec(_CATALOG_ID, ["anthropic:claude-haiku-4-5"])},
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["spec"]["select"] == [{"default": _CATALOG_ID}]
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("m1-a"))) as mock:
+        resp = _chat(catalog_client, "by-catalog-id")
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "openai:m1-a"
+
+
+def test_a_one_target_policy_on_a_catalog_id_resolves_on_a_non_completion_endpoint(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    created = catalog_client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "embed", "spec": _spec(_CATALOG_ID)}, headers=HEADERS
+    )
+    assert created.status_code == 200, created.text
+    embedding_response = CreateEmbeddingResponse(
+        data=[Embedding(embedding=[0.1, 0.2], index=0, object="embedding")],
+        model="m1-a",
+        object="list",
+        usage=Usage(prompt_tokens=5, total_tokens=5),
+    )
+
+    with patch(
+        "gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=embedding_response
+    ) as mock:
+        resp = catalog_client.post(
+            f"{API_ROOT}/embeddings", json={"model": "embed", "input": "hello", "user": "test-user"}, headers=HEADERS
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert mock.await_args is not None
+    assert (mock.await_args.kwargs["provider"], mock.await_args.kwargs["model"]) == ("openai", "m1-a")
+    assert resp.json()["model"] == "embed"
+
+
+def test_a_stored_policy_may_not_name_an_id_the_catalog_does_not_know(catalog_client: TestClient) -> None:
+    refused = catalog_client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "by-unknown-id", "spec": _spec("acme/m2")},
+        headers=HEADERS,
+    )
+    assert refused.status_code == 400, refused.text
+    assert "acme" in refused.json()["detail"]
 
 
 _LEGACY_ID = "openai/gpt-x"

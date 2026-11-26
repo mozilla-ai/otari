@@ -6,13 +6,20 @@ Every check reads only active organization and workspace membership.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
-from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy import (
+    UserRepository,
+    WorkspaceIds,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+    ids_in_organization,
+)
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -123,11 +130,65 @@ class WorkspaceAccess:
             self._db, user=user, workspace_id=workspace_id, organizations=self._organizations
         )
 
+    async def readable_workspaces(self, *, user: User, workspace_id: uuid.UUID | None) -> WorkspaceIds:
+        """The workspaces a tenant-scoped read of this caller's active organization may cover.
+
+        ``workspace_id`` narrows the scope and cannot widen it: a workspace the
+        caller may not see raises ``WorkspaceNotFoundError``, whether it is in
+        another organization or in this one. A caller in no workspace gets an
+        empty scope rather than a refusal.
+
+        Resolved per call rather than cached: a membership can be suspended or a
+        role changed between two requests, and a cached scope goes stale in the
+        unsafe direction.
+        """
+        if workspace_id is not None:
+            # The full scope would also build the caller's unpaged workspace-id set,
+            # which this branch discards, on every read the Activity page issues.
+            organization = await self._organizations.get_active_organization_for_user(user)
+            await resolve_workspace_in_organization(
+                self._db,
+                user=user,
+                workspace_id=workspace_id,
+                organization=organization,
+                organizations=self._organizations,
+            )
+            return [workspace_id]
+
+        scope = await resolve_visible_workspace_scope(self._db, user=user, organizations=self._organizations)
+        if scope.sees_every_workspace:
+            return ids_in_organization(scope.organization.id)
+        return scope.workspace_ids or []
+
     async def require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
         """See :func:`require_workspace_management_access`."""
         await require_workspace_management_access(
             self._db, user=user, workspace=workspace, organizations=self._organizations
         )
+
+    async def has_workspace_management_access(self, *, user: User, workspace: Workspace) -> bool:
+        """See :func:`has_workspace_management_access`."""
+        return await has_workspace_management_access(
+            self._db, user=user, workspace=workspace, organizations=self._organizations
+        )
+
+    async def lock_workspace(self, workspace_id: uuid.UUID) -> None:
+        """Take the workspace's row lock, so what is read and written against it runs as if serialized."""
+        await WorkspaceRepository(self._db).lock(workspace_id)
+
+    async def workspace_managers(self, workspace: Workspace) -> list[User]:
+        """The active accounts that may manage a workspace: its own owners and admins, then its organization's."""
+        user_ids = await WorkspaceMemberRepository(self._db).active_user_ids_with_roles(workspace.id, MANAGEMENT_ROLES)
+        user_ids += await self._organizations.members.active_user_ids_with_roles(
+            workspace.organization_id, MANAGEMENT_ROLES
+        )
+        ordered = list(dict.fromkeys(user_ids))
+        accounts = {account.id: account for account in await self.people(ordered)}
+        return [accounts[user_id] for user_id in ordered if user_id in accounts and accounts[user_id].is_active]
+
+    async def people(self, user_ids: Collection[uuid.UUID]) -> list[User]:
+        """The accounts these ids name."""
+        return await UserRepository(self._db).get_by_ids(user_ids)
 
 
 @dataclass(frozen=True)

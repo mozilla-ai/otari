@@ -833,6 +833,90 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     assert usage["effective_price_per_million"] == 1.0
     assert by_selector[_FIREWORKS_GLM]["usage_30d"] is None
 
+    # A key reads its organization's usage only with the scope the usage routes require.
+    for scopes, reads_usage in ((["inference:run"], False), (["inference:run", "usage:read"], True)):
+        created = priced.post(f"{API_ROOT}/keys", json={"key_name": "reader", "scopes": scopes}, headers=master_header)
+        assert created.status_code == status.HTTP_200_OK, created.text
+        key_header = {"Authorization": f"Bearer {created.json()['key']}"}
+        body = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=key_header)
+        by_selector = {offering["selector"]: offering for offering in body["offerings"]}
+        assert (by_selector[_NEBIUS_GLM]["usage_30d"] is not None) is reads_usage
+
+
+def test_a_signed_in_caller_sees_how_fast_each_offering_answered_them(
+    priced: TestClient, master_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    from sqlmodel import select
+
+    from gateway.models.tenancy import Workspace
+    from gateway.models.usage import UsageLog
+
+    assert priced.get(f"{API_ROOT}/organizations/me", headers=master_header).status_code == status.HTTP_200_OK
+    session = db_session_factory()
+
+    def served(provider: str, model: str, step: int, **overrides: Any) -> UsageLog:
+        fields: dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "timestamp": datetime.now(UTC) - timedelta(days=1),
+            "model": model,
+            "provider": provider,
+            "endpoint": f"{API_ROOT}/chat/completions",
+            "status": "success",
+            "prompt_tokens": 1000,
+            "completion_tokens": 200 + 10 * step,
+            "total_tokens": 1200 + 10 * step,
+            "latency_ms": 2000,
+            "ttft_ms": 100 + 10 * step,
+        }
+        fields.update(overrides)
+        return UsageLog(**fields)
+
+    try:
+        workspace_id = session.execute(select(Workspace.id)).scalars().first()
+        assert workspace_id is not None
+        session.add_all(served("nebius", "zai-org/GLM-5.3", step) for step in range(25))
+        # Each of these would drag the percentiles if it counted: too old, a
+        # fallback whose timings include the attempt before it, a request whose
+        # duration includes gateway tools, an import, and a failure.
+        slow = {"ttft_ms": 60_000, "latency_ms": 120_000}
+        session.add_all(
+            [
+                served("nebius", "zai-org/GLM-5.3", 0, timestamp=datetime.now(UTC) - timedelta(days=10), **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, attempt_position=2, attempt_count=2, **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, billing_meters={"tools": {"web_search": {"billed": 1}}}, **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, source="imported", **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, status="error", **slow),
+            ]
+        )
+        # Too few to read a 95th percentile from.
+        session.add_all(served("fireworks", "accounts/fireworks/models/glm-5p3", step) for step in range(5))
+        session.commit()
+    finally:
+        session.close()
+
+    body = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
+    by_selector = {offering["selector"]: offering for offering in body["offerings"]}
+    assert by_selector[_NEBIUS_GLM]["speed_7d"] == {
+        "ttft_samples": 25,
+        "ttft_ms_p50": 220,
+        "ttft_ms_p95": 328,
+        "throughput_samples": 25,
+        # 200 to 440 output tokens over two seconds each, so 100 to 220 tokens per second.
+        "output_tokens_per_second_p50": 160.0,
+        "output_tokens_per_second_p95": 106.0,
+    }
+    assert by_selector[_FIREWORKS_GLM]["speed_7d"] is None
+
+    # The same gate as the usage beside it.
+    created = priced.post(
+        f"{API_ROOT}/keys", json={"key_name": "no-usage", "scopes": ["inference:run"]}, headers=master_header
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+    body = _get(
+        priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers={"Authorization": f"Bearer {created.json()['key']}"}
+    )
+    assert all(offering["speed_7d"] is None for offering in body["offerings"])
+
 
 @pytest.mark.parametrize(
     ("params", "expected"),
@@ -903,3 +987,166 @@ def test_invalid_filter_values_return_validation_errors(
 ) -> None:
     response = priced.get(f"{API_ROOT}/catalog/models", headers=master_header, params=params)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+# ---------------------------------------------------------------------------
+# The providers
+# ---------------------------------------------------------------------------
+
+
+def test_each_provider_is_listed_with_the_models_the_catalog_shows_for_it(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header)
+
+    assert body["providers"] == [
+        {
+            "name": "fireworks",
+            "provider": "fireworks",
+            "display_name": "Fireworks",
+            "model_count": 1,
+            "terms_url": None,
+            "privacy_url": None,
+        },
+        {
+            "name": "nebius",
+            "provider": "nebius",
+            "display_name": "Nebius",
+            "model_count": 2,
+            "terms_url": None,
+            "privacy_url": None,
+        },
+    ]
+    for provider in body["providers"]:
+        listed = _get(
+            priced, f"{API_ROOT}/catalog/models", headers=master_header, params={"provider": provider["name"]}
+        )
+        detail = _get(priced, f"{API_ROOT}/catalog/providers/{provider['name']}", headers=master_header)
+        assert provider["model_count"] == listed["count"]
+        assert {model["id"] for model in detail["models"]} == {model["id"] for model in listed["models"]}
+        assert {key: detail[key] for key in provider} == provider
+
+
+def test_a_providers_models_carry_its_own_price_rather_than_the_cheapest(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    detail = _get(priced, f"{API_ROOT}/catalog/providers/fireworks", headers=master_header)
+
+    assert detail["models"] == [
+        {
+            "id": "z-ai/glm-5.3",
+            "name": "GLM 5.3",
+            "vendor": "Z.ai",
+            "price_unit": "token",
+            "input_price": 0.7,
+            "output_price": 2.5,
+            "context_length": 131072,
+        }
+    ]
+    nebius = _get(priced, f"{API_ROOT}/catalog/providers/nebius", headers=master_header)
+    assert [(model["id"], model["input_price"]) for model in nebius["models"]] == [
+        ("z-ai/glm-5.3", 0.5),
+        ("moonshotai/kimi-k2.6", 0.6),
+    ]
+
+
+def test_the_providers_are_paged_with_the_total_alongside(priced: TestClient, master_header: dict[str, str]) -> None:
+    whole = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header)
+    first = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header, params={"limit": 1})
+    second = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header, params={"skip": 1, "limit": 1})
+
+    assert whole["count"] == first["count"] == second["count"] == len(whole["providers"]) == 2
+    assert first["providers"] + second["providers"] == whole["providers"]
+
+
+def test_a_providers_models_are_paged_with_the_total_alongside(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    path = f"{API_ROOT}/catalog/providers/nebius"
+    whole = _get(priced, path, headers=master_header)
+    pages = [_get(priced, path, headers=master_header, params={"skip": skip, "limit": 1}) for skip in (0, 1, 2)]
+
+    assert whole["model_count"] == len(whole["models"]) == 2
+    assert [page["model_count"] for page in pages] == [2, 2, 2]
+    assert [len(page["models"]) for page in pages] == [1, 1, 0]
+    assert [model for page in pages for model in page["models"]] == whole["models"]
+
+
+@pytest.mark.parametrize("path", ["/catalog/providers", "/catalog/providers/fireworks"])
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 1001}, {"skip": -1}])
+def test_the_providers_window_is_bounded(
+    priced: TestClient, master_header: dict[str, str], path: str, params: dict[str, int]
+) -> None:
+    response = priced.get(f"{API_ROOT}{path}", headers=master_header, params=params)
+    assert response.status_code == 422, response.text
+
+
+def test_an_unknown_provider_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
+        response = priced.get(f"{API_ROOT}/catalog/providers/no-such-provider", headers=master_header)
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_a_configured_provider_offering_nothing_priced_is_not_listed(
+    catalog_client: TestClient, master_header: dict[str, str]
+) -> None:
+    _price(catalog_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+
+    body = _get(catalog_client, f"{API_ROOT}/catalog/providers", headers=master_header)
+    assert [provider["name"] for provider in body["providers"]] == ["nebius"]
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
+        response = catalog_client.get(f"{API_ROOT}/catalog/providers/fireworks", headers=master_header)
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_a_visitor_reads_the_providers_only_while_the_catalog_is_public(
+    catalog_client: TestClient, public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    for path in ("/catalog/providers", "/catalog/providers/nebius"):
+        refused = catalog_client.get(f"{API_ROOT}{path}")
+        assert refused.status_code == status.HTTP_401_UNAUTHORIZED, refused.text
+
+    _price(public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    body = _get(public_client, f"{API_ROOT}/catalog/providers")
+    assert [(provider["name"], provider["model_count"]) for provider in body["providers"]] == [("nebius", 1)]
+    detail = _get(public_client, f"{API_ROOT}/catalog/providers/nebius")
+    assert [model["id"] for model in detail["models"]] == ["z-ai/glm-5.3"]
+
+
+@pytest.fixture
+def linked_hosted_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    hosted = {
+        "groq-eu": {
+            "provider": "groq",
+            "api_key": "sk-fake",
+            "models": ["glm-5.3"],
+            "terms_url": "https://groq.com/terms",
+            "privacy_url": "https://groq.com/privacy",
+        }
+    }
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, hosted_providers=hosted))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_hosted_provider_carries_its_policy_links_to_a_visitor(
+    linked_hosted_client: TestClient, master_header: dict[str, str]
+) -> None:
+    bind_model_provider(linked_hosted_client, HostedModelProvider("groq-eu", models={"groq-eu": ["glm-5.3"]}))
+    _price(linked_hosted_client, master_header, "groq-eu:glm-5.3", 0.4, 1.6)
+    _price(linked_hosted_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+
+    body = _get(linked_hosted_client, f"{API_ROOT}/catalog/providers")
+    by_name = {provider["name"]: provider for provider in body["providers"]}
+    assert by_name["groq-eu"]["provider"] == "groq"
+    assert by_name["groq-eu"]["display_name"] == "Groq (groq-eu)"
+    assert (by_name["groq-eu"]["terms_url"], by_name["groq-eu"]["privacy_url"]) == (
+        "https://groq.com/terms",
+        "https://groq.com/privacy",
+    )
+    assert (by_name["nebius"]["terms_url"], by_name["nebius"]["privacy_url"]) == (None, None)
+    detail = _get(linked_hosted_client, f"{API_ROOT}/catalog/providers/groq-eu")
+    assert detail["terms_url"] == "https://groq.com/terms"
+    assert [(model["id"], model["input_price"]) for model in detail["models"]] == [("z-ai/glm-5.3", 0.4)]

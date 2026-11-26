@@ -12,9 +12,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCall, OtariToolCallError
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.tools._native import Refusal
+from gateway.services.tools._web_tool_failure import (
+    CALL_LIMIT_TAG,
+    INTERNAL_ERROR_TAG,
+    INVALID_INPUT_TAG,
+    WebToolFailure,
+)
 
 if TYPE_CHECKING:
+    from gateway.services._tool_loop import ToolBackend
     from gateway.services.tools._native import NativeCall
 
 OTARI_TOOL_CALLS_FIELD = "otari_tool_calls"
@@ -72,9 +79,23 @@ def mcp_entry(
     )
 
 
-def call_limit_error() -> OtariToolCallError:
-    """The ``error`` of a call refused because the request used up its calls, which reached no provider."""
-    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, CALL_LIMIT_TAG).as_dict())
+def ran_error(call: NativeCall, pool: ToolBackend) -> OtariToolCallError | None:
+    """The ``error`` of a call that ran, clearing what ``pool`` kept.
+
+    That is the failure the pool kept, or ``internal_error`` for a call that raised.
+    ``None`` for a call that did not fail, or failed on a pool that keeps no failures.
+    """
+    take_last_failure = getattr(pool, "take_last_failure", None)
+    failure = take_last_failure() if take_last_failure is not None else None
+    if failure is None and call.raised:
+        failure = WebToolFailure.of(None, None, INTERNAL_ERROR_TAG)
+    return OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
+
+
+def refusal_error(reason: Refusal) -> OtariToolCallError:
+    """The ``error`` of a call refused for ``reason`` before it reached a provider."""
+    tag = CALL_LIMIT_TAG if reason is Refusal.CALL_LIMIT else INVALID_INPUT_TAG
+    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, tag).as_dict())
 
 
 def without_otari_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

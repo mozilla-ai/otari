@@ -15,9 +15,9 @@ signs in, and both routes are throttled per client IP through
 **Where the browser's part begins and ends.** ``/authorize`` mints a CSRF
 ``state`` and hands back the consent-screen URL; the dashboard stores that state
 in ``sessionStorage`` and sends the person to the provider. The provider returns
-them to ``/auth/{provider}/callback``, an ordinary path (a redirect URI may not
-carry a fragment, so it cannot be the hash route directly) which
-``gateway.main`` redirects into the dashboard's own callback page. That page
+them to ``/auth/{provider}/callback``, a path the gateway always answers (the
+dashboard may be served elsewhere), which ``gateway.main`` redirects into the
+dashboard's own callback page. That page
 compares the returned state against the stored one and, only then, posts the
 code and the state here, where the state is checked again against the row
 ``/authorize`` wrote. Two checks that fail in different directions: the

@@ -33,12 +33,13 @@ from openai.types.responses import (
 )
 from openai.types.responses.response import IncompleteDetails
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+from openresponses_types.types import InputTokensDetails as BridgedInputTokensDetails
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
+from gateway.services._tool_loop import FINAL_ROUND_NOTE, INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_loop_responses import (
-    MaxToolIterationsExceeded,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
@@ -145,7 +146,7 @@ def _response(
         tools=[],
         usage=ResponseUsage(
             input_tokens=input_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=cached_tokens),
+            input_tokens_details=InputTokensDetails(cached_tokens=cached_tokens, cache_write_tokens=0),
             output_tokens=output_tokens,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=reasoning_tokens),
             total_tokens=input_tokens + output_tokens,
@@ -277,14 +278,21 @@ class _FakeSearchPool(_FakePool):
 
 
 @pytest.mark.asyncio
-async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_ran(
+async def test_max_uses_refuses_a_search_past_the_cap_and_announces_only_the_one_that_ran(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The refused search is a tool error, and no ``web_search_call`` claims it happened."""
+    """Two searches in one round with one left.
+
+    The refused one is a tool error, and no ``web_search_call`` claims it happened.
+    """
     responses = iter(
         [
-            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
-            _response(output=[_function_call("c2", "web_search", '{"query": "second"}')]),
+            _response(
+                output=[
+                    _function_call("c1", "web_search", '{"query": "first"}'),
+                    _function_call("c2", "web_search", '{"query": "second"}'),
+                ]
+            ),
             _response(output=[], status="completed"),
         ]
     )
@@ -308,7 +316,7 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
     assert pool.calls == [("web_search", {"query": "first"})]
     refused = next(
         item
-        for item in captured_inputs[2]
+        for item in captured_inputs[1]
         if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id") == "c2"
     )
     assert refused["output"] == "[tool error] max_uses_exceeded"
@@ -399,6 +407,17 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
             _response(output=[], input_tokens=12, output_tokens=3, cached_tokens=9, reasoning_tokens=2),
         ]
     )
+    rounds = list(responses)
+    for writes, response in zip((4, 2), rounds, strict=True):
+        assert response.usage is not None
+        response.usage.input_tokens_details = InputTokensDetails.model_validate(
+            {
+                "cached_tokens": response.usage.input_tokens_details.cached_tokens,
+                "cache_write_tokens": writes,
+                "cache_write_tokens_details": {"ttl_12h_tokens": 0, "ttl_30m_tokens": writes},
+            }
+        )
+    responses = iter(rounds)
 
     async def fake_aresponses(**kwargs: Any) -> Response:
         return next(responses)
@@ -413,9 +432,62 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage is not None
     assert out.usage.input_tokens == 22
     assert out.usage.input_tokens_details.cached_tokens == 15
+    assert out.usage.input_tokens_details.cache_write_tokens == 6
+    # The final round's breakdown alone would not add up to the summed writes.
+    assert out.usage.input_tokens_details.cache_write_tokens_details is None
     assert out.usage.output_tokens == 5
     assert out.usage.output_tokens_details.reasoning_tokens == 3
     assert out.usage.total_tokens == 27
+
+
+@pytest.mark.asyncio
+async def test_a_single_round_keeps_its_cache_write_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _response(output=[], input_tokens=12, output_tokens=3)
+    assert response.usage is not None
+    response.usage.input_tokens_details = InputTokensDetails.model_validate(
+        {
+            "cached_tokens": 0,
+            "cache_write_tokens": 5,
+            "cache_write_tokens_details": {"ttl_12h_tokens": 5, "ttl_30m_tokens": 0},
+        }
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return response
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    details = out.usage.input_tokens_details.cache_write_tokens_details
+    assert details is not None
+    assert details.ttl_12h_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_usage_without_cache_write_fields_is_accumulated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """any-llm bridges a provider with no Responses API (DeepSeek) with openresponses-types usage."""
+    response = _response(output=[], input_tokens=12, output_tokens=3)
+    assert response.usage is not None
+    response.usage.input_tokens_details = cast(Any, BridgedInputTokensDetails(cached_tokens=4))
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return response
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert out.usage.input_tokens_details.cached_tokens == 4
+    assert out.usage.input_tokens_details.cache_write_tokens == 0
 
 
 def _provider_search(item_id: str) -> ResponseFunctionWebSearch:
@@ -447,18 +519,26 @@ async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", ["completed", "incomplete"])
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round.
+
+    Gemini reports a round that calls a function as ``incomplete`` with no reason, which the answer must not keep.
+    """
+
     async def fake_aresponses(**kwargs: Any) -> Response:
-        return _response(output=[_function_call("c", "fetch_url", "{}")])
+        return _response(output=[_function_call("c", "fetch_url", "{}")], status=status)
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await responses_tool_loop(
-            completion_kwargs={"model": "fake", "input_data": "go"},
-            pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
-            max_iterations=2,
-        )
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=2,
+    )
+
+    assert not any(getattr(item, "type", None) == "function_call" for item in out.output or [])
+    assert out.status == "completed"
 
 
 @pytest.mark.asyncio
@@ -659,7 +739,7 @@ async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the
         [
             _async_iter(
                 _output_item_added(0, _function_call("c", "fetch_url", "")),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+                _function_call_args_done(0, "fc_item_1", "{}"),
                 _output_item_done(0, _function_call("c", "fetch_url", "{}")),
                 _response_completed(),
             ),
@@ -694,6 +774,74 @@ async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the
     assert output_item["output"] == "[tool error] Gateway tool execution failed"
     assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
     assert "sk-live-secret" not in str(captured_inputs) + str(logged) + str(events)
+
+
+@pytest.mark.asyncio
+async def test_loop_refuses_a_call_whose_arguments_are_not_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _response(output=[_function_call("c", "fetch_url", '{"u": ')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+    captured_inputs: list[Any] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert pool.calls == []
+    assert output_item["output"] == INVALID_ARGUMENTS_ERROR
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
+async def test_stream_refuses_a_call_whose_arguments_are_not_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_inputs: list[Any] = []
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("c", "fetch_url", "")),
+                _function_call_args_done(0, "fc_item_1", '["x"]'),
+                _output_item_done(0, _function_call("c", "fetch_url", '["x"]')),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "recovered"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _ in responses_tool_loop_stream(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    ):
+        pass
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert pool.calls == []
+    assert output_item["output"] == INVALID_ARGUMENTS_ERROR
 
 
 @pytest.mark.asyncio
@@ -856,13 +1004,12 @@ def _function_call_args_delta(
 
 
 def _function_call_args_done(
-    output_index: int, item_id: str, name: str, arguments: str, seq: int = 0
+    output_index: int, item_id: str, arguments: str, seq: int = 0
 ) -> ResponseFunctionCallArgumentsDoneEvent:
     return ResponseFunctionCallArgumentsDoneEvent(
         type="response.function_call_arguments.done",
         item_id=item_id,
         output_index=output_index,
-        name=name,
         arguments=arguments,
         sequence_number=seq,
     )
@@ -941,7 +1088,7 @@ async def test_the_terminal_response_lists_items_where_the_stream_showed_them(
                 _output_item_added(0, before),
                 _output_item_done(0, before),
                 _output_item_added(1, _function_call("call_1", "web_search", "")),
-                _function_call_args_done(1, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _function_call_args_done(1, "fc_item_1", '{"query": "otari gateway"}'),
                 _output_item_done(1, search),
                 _response_completed(output=[before, search]),
             ),
@@ -1003,6 +1150,58 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
     ]
 
 
+def _offers_search(kwargs: dict[str, Any]) -> bool:
+    return any(tool.get("name") == "web_search" for tool in kwargs.get("tools") or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_max_uses_withholds_the_search_once_used_up(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """A model that keeps searching past ``max_uses`` gets one more round, without the search (#3183)."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        arguments = '{"query": "q"}'
+        if stream:
+            return _async_iter(
+                _output_item_added(0, _function_call(call_id, "web_search", "")),
+                _function_call_args_delta(0, f"fc_{len(sent)}", arguments),
+                _function_call_args_done(0, f"fc_{len(sent)}", arguments),
+                _output_item_done(0, _function_call(call_id, "web_search", arguments)),
+                _response_completed(),
+            )
+        return _response(output=[_function_call(call_id, "web_search", arguments)])
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+    completion_kwargs = {"model": "fake", "input_data": [{"role": "user", "content": "hi"}]}
+
+    if stream:
+        async for _ in responses_tool_loop_stream(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            use_budget=_use_budget(1),
+            native_tools=_SEARCH,
+        ):
+            pass
+    else:
+        out = await responses_tool_loop(
+            completion_kwargs=completion_kwargs,
+            pool=cast(Any, pool),
+            max_iterations=10,
+            use_budget=_use_budget(1),
+            native_tools=_SEARCH,
+        )
+        assert not [item for item in out.output or [] if getattr(item, "type", None) == "function_call"]
+
+    assert [_offers_search(kwargs) for kwargs in sent] == [True, False]
+    assert sent[1]["input_data"][-1] == {"role": "user", "content": FINAL_ROUND_NOTE}
+    assert pool.calls == [("web_search", {"query": "q"})]
+
+
 @pytest.mark.asyncio
 async def test_stream_max_uses_announces_only_the_search_that_ran(
     monkeypatch: pytest.MonkeyPatch,
@@ -1014,20 +1213,18 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
     Without that, the stream would announce a search the cap stopped.
     """
 
-    def _search_round(call_id: str, item_id: str, query: str) -> AsyncIterator[ResponseStreamEvent]:
+    def _search(index: int, call_id: str, item_id: str, query: str) -> list[ResponseStreamEvent]:
         arguments = json.dumps({"query": query})
-        return _async_iter(
-            _output_item_added(0, _function_call(call_id, "web_search", "")),
-            _function_call_args_delta(0, item_id, arguments),
-            _function_call_args_done(0, item_id, "web_search", arguments),
-            _output_item_done(0, _function_call(call_id, "web_search", arguments)),
-            _response_completed(),
-        )
+        return [
+            _output_item_added(index, _function_call(call_id, "web_search", "")),
+            _function_call_args_delta(index, item_id, arguments),
+            _function_call_args_done(index, item_id, arguments),
+            _output_item_done(index, _function_call(call_id, "web_search", arguments)),
+        ]
 
     iter_streams = iter(
         [
-            _search_round("c1", "fc_1", "first"),
-            _search_round("c2", "fc_2", "second"),
+            _async_iter(*_search(0, "c1", "fc_1", "first"), *_search(1, "c2", "fc_2", "second"), _response_completed()),
             _async_iter(_text_delta("msg_1", 0, "done"), _response_completed()),
         ]
     )
@@ -1074,7 +1271,7 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
                 _output_item_added(0, fc),
                 _function_call_args_delta(0, "fc_item_1", '{"u":'),
                 _function_call_args_delta(0, "fc_item_1", ' "x"}'),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _output_item_done(0, _function_call("call_1", "fetch_url", '{"u": "x"}')),
                 _response_completed(),
             ),
@@ -1117,6 +1314,34 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        call = _function_call("call_1", "fetch_url", "{}")
+        return _async_iter(
+            _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+            _function_call_args_done(0, "fc_item_1", "{}"),
+            _output_item_done(0, call),
+            _response_completed(output=[call]),
+        )
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    [completed] = [e for e in events if e.type == "response.completed"]
+    assert not any(getattr(item, "type", None) == "function_call" for item in completed.response.output)
+
+
+@pytest.mark.asyncio
 async def test_stream_fires_on_first_response_before_running_the_first_rounds_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1125,7 +1350,7 @@ async def test_stream_fires_on_first_response_before_running_the_first_rounds_to
         [
             _async_iter(
                 _output_item_added(0, _function_call("call_1", "fetch_url", "")),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _output_item_done(0, _function_call("call_1", "fetch_url", '{"u": "x"}')),
                 _response_completed(),
             ),
@@ -1237,7 +1462,7 @@ async def test_stream_counts_earlier_rounds_output_on_a_final_round_that_ended_u
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _response_terminal("completed", output_tokens=5),
             ),
             _async_iter(_text_delta("msg_1", 0, "cut"), _response_terminal(status, output_tokens=3)),
@@ -1270,7 +1495,7 @@ async def test_stream_counts_every_rounds_input(monkeypatch: pytest.MonkeyPatch)
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _response_terminal("completed", input_tokens=2000, cached_tokens=1800, output_tokens=5),
             ),
             _async_iter(
@@ -1315,7 +1540,7 @@ async def test_stream_adds_the_provider_searches_of_hidden_rounds(monkeypatch: p
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _searched_terminal(2),
             ),
             _async_iter(_text_delta("msg_1", 0, "done"), _searched_terminal(1)),
@@ -1392,7 +1617,7 @@ async def test_stream_replays_and_returns_compaction_from_hidden_iteration(
                 _output_item_added(0, compaction),
                 _output_item_done(0, compaction),
                 _output_item_added(1, function_call),
-                _function_call_args_done(1, "fc_item_1", "fetch_url", "{}"),
+                _function_call_args_done(1, "fc_item_1", "{}"),
                 _output_item_done(1, function_call),
                 _response_completed(output=[compaction, function_call]),
             ),
@@ -1448,7 +1673,7 @@ async def test_stream_foreign_function_call_forwards_terminal_and_exits(
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "user_tool", "{}"),
+                _function_call_args_done(0, "fc_item_1", "{}"),
                 _response_completed(),
             ),
         ]
@@ -1579,7 +1804,7 @@ async def test_stream_announces_a_failed_search_as_failed(monkeypatch: pytest.Mo
         [
             _async_iter(
                 _output_item_added(0, _function_call("call_1", "web_search", "")),
-                _function_call_args_done(0, "fc_item_1", "web_search", args),
+                _function_call_args_done(0, "fc_item_1", args),
                 _output_item_done(0, _function_call("call_1", "web_search", args)),
                 _response_completed(),
             ),
@@ -1627,7 +1852,7 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _function_call_args_done(0, "fc_item_1", '{"query": "otari gateway"}'),
                 _output_item_done(0, _function_call("call_1", "web_search", '{"query": "otari gateway"}')),
                 _response_completed(),
             ),
@@ -1687,9 +1912,9 @@ async def test_stream_mixed_batch_hides_runs_and_strips_the_gateway_call(
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_owned", '{"u": "x"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -1734,9 +1959,9 @@ async def test_stream_mixed_capped_search_hides_refusal_and_returns_foreign_call
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "web_search", '{"query": "x"}'),
+                _function_call_args_done(0, "fc_owned", '{"query": "x"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -1869,9 +2094,9 @@ async def test_a_streamed_mixed_batch_announces_the_execution_and_the_terminal_l
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "code_execution", '{"code": "print(1)"}'),
+                _function_call_args_done(0, "fc_owned", '{"code": "print(1)"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -1964,7 +2189,7 @@ async def test_stream_announces_the_execution_as_a_code_interpreter_call(monkeyp
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "code_execution", '{"code": "print(1)"}'),
+                _function_call_args_done(0, "fc_item_1", '{"code": "print(1)"}'),
                 _output_item_done(0, _function_call("call_1", "code_execution", '{"code": "print(1)"}')),
                 _response_completed(),
             ),
@@ -2068,7 +2293,7 @@ async def test_stream_native_items_keep_the_order_their_calls_ran_in(monkeypatch
     for index, (call_id, name, args) in enumerate(_MIXED_BATCH):
         events_in += [
             _output_item_added(index, _function_call(call_id, name, "")),
-            _function_call_args_done(index, f"fc_item_{index}", name, args),
+            _function_call_args_done(index, f"fc_item_{index}", args),
             _output_item_done(index, _function_call(call_id, name, args)),
         ]
     iter_streams = iter(

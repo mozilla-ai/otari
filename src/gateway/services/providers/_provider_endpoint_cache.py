@@ -20,7 +20,12 @@ from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.providers import ProviderEndpoint
 from gateway.repositories.providers import ProviderEndpointRepository
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    SecretDecryptionError,
+    decrypt_mapping,
+    decrypt_secret,
+)
 
 PROVIDER_ENDPOINT_CACHE_TTL_SECONDS = 30.0
 
@@ -52,21 +57,21 @@ def cached_owned_endpoint(name: str, *, workspace_id: uuid.UUID, user_id: str | 
 
 
 def _to_entry(row: ProviderEndpoint) -> OwnedEndpoint:
-    """Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the key will not decrypt."""
+    """Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when a stored secret will not decrypt."""
     return OwnedEndpoint(
         id=row.id,
         provider=row.provider,
         api_base=row.api_base,
         api_key=decrypt_secret(row.encrypted_api_key) if row.encrypted_api_key else None,
-        default_params=dict(row.default_params or {}),
+        default_params=decrypt_mapping(row.encrypted_default_params) or {},
     )
 
 
 async def refresh_provider_endpoint_cache(uow: UnitOfWork) -> None:
     """Reload every endpoint in one query and swap the cache in one step.
 
-    A row whose key will not decrypt is skipped, so its name stops resolving
-    rather than dispatching without the key.
+    A row whose stored secrets will not decrypt is skipped, so its name stops
+    resolving rather than dispatching without them.
     """
     global _shared, _per_user  # noqa: PLW0603
 
@@ -80,7 +85,7 @@ async def refresh_provider_endpoint_cache(uow: UnitOfWork) -> None:
             entry = _to_entry(row)
         except (SecretBoxUnavailableError, SecretDecryptionError):
             logger.warning(
-                "Skipping provider endpoint %s: its API key could not be decrypted (check OTARI_SECRET_KEY).",
+                "Skipping provider endpoint %s: its stored secrets could not be decrypted (check OTARI_SECRET_KEY).",
                 row.id,
             )
             continue

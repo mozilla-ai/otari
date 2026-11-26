@@ -14,7 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.routes._pipeline import PROVIDER_ERROR_DETAIL, log_usage
+from gateway.api.routes._pipeline import log_usage
+from gateway.core.error_details import ProviderDetail
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS
 
 from .test_log_usage_commit_scope import StubLogWriter
@@ -67,7 +68,7 @@ def test_stored_error_drops_an_echoed_request_payload(
 
     rows = _error_rows(client, master_key_header)
     assert len(rows) == 1
-    assert rows[0]["error_message"] == PROVIDER_ERROR_DETAIL
+    assert rows[0]["error_message"] == ProviderDetail.ERROR
     assert prompt not in rows[0]["error_message"]
 
 

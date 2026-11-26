@@ -81,8 +81,54 @@ export const MEMBERSHIP_ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   label: membershipLabel(role),
 }))
 
+/** What each role may do, as a role picker says it under the role. */
+export const MEMBERSHIP_ROLE_DESCRIPTIONS: Readonly<
+  Record<MembershipRole, string>
+> = {
+  member:
+    "Creates their own API keys. Sees their workspace’s sessions and spend.",
+  viewer: "Sees their workspace’s sessions and spend. Cannot create API keys.",
+  admin:
+    "Sees every workspace and manages people, limits, providers and billing.",
+  owner: "Everything an admin can do, and can make other people owners.",
+}
+
+/** The order a picker of roles to give lists them in: the default first. */
+const GRANT_ORDER: readonly MembershipRole[] = [
+  "member",
+  "viewer",
+  "admin",
+  "owner",
+]
+
+/**
+ * The roles a caller holding `callerRole` may give someone, as picker options.
+ * The server lets only an owner grant the owner role (an admin is refused
+ * "Only organization owners can grant the owner role"), and anyone who does
+ * not manage the organization may give none.
+ */
+export function grantableRoleOptions(callerRole: string | undefined): readonly {
+  value: MembershipRole
+  label: string
+  description: string
+}[] {
+  if (callerRole !== "owner" && callerRole !== "admin") return []
+  return GRANT_ORDER.filter(
+    (role) => callerRole === "owner" || role !== "owner",
+  ).map((role) => ({
+    value: role,
+    label: membershipLabel(role),
+    description: MEMBERSHIP_ROLE_DESCRIPTIONS[role],
+  }))
+}
+
 /** The roles that may manage an organization or a workspace. */
 const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
+
+/** Whether `role`, in an organization or a workspace, manages it. */
+export function isManagementRole(role: string | undefined): boolean {
+  return role !== undefined && MANAGEMENT_ROLES.includes(role)
+}
 
 /** Whether the caller's standing in their organization lets them manage it. */
 export function canManage(context: OrganizationContext | undefined): boolean {
@@ -188,6 +234,11 @@ export function memberLabel(member: OrganizationMember): string {
 
 /** The roles that may change a workspace's resources; everything but viewer. */
 const CONTRIBUTOR_ROLES: readonly string[] = ["owner", "admin", "member"]
+
+/** Whether `role`, in an organization or a workspace, may change its own resources there. */
+export function isContributorRole(role: string | undefined): boolean {
+  return role !== undefined && CONTRIBUTOR_ROLES.includes(role)
+}
 
 /**
  * Whether the caller may change their own resources in a workspace, such as

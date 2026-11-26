@@ -31,7 +31,7 @@ To run it for Google::
     # 2. Call GET /api/v1/auth/oauth/google/authorize with curl -c so the flow
     #    cookie (otari_oauth_flow_<digest>) it sets is kept, open the URL it
     #    returns and complete the consent screen. The browser lands on
-    #    /#/auth/google/callback?code=...&state=...; copy both out of the
+    #    /sign-in/google/callback?code=...&state=...; copy both out of the
     #    address bar, and the cookie's value out of the jar. The state finds
     #    the verifier, and the cookie's value is that sign-in's browser token.
     # 3. Run immediately, since the code expires in minutes and is single-use,

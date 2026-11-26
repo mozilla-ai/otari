@@ -1,11 +1,11 @@
 import { Modal } from "@heroui/react"
-import { type ReactNode, useEffect, useId, useState } from "react"
+import { type ReactNode, type Ref, useEffect, useId, useState } from "react"
 import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 
-/** `sm` 440px, `md` 520px (the default), `lg` 640px, `xl` 928px. */
-export type DialogSize = "sm" | "md" | "lg" | "xl"
+/** `sm` 440px, `md` 520px (the default), `lg` 640px. */
+export type DialogSize = "sm" | "md" | "lg"
 
 /** Which ink the scanning arc is drawn in. */
 export type ScanTone = "accent" | "danger"
@@ -97,6 +97,8 @@ export interface DialogProps {
    * widths and the control nearest the thumb is the last one written.
    */
   actions?: ReactNode
+  /** The one element holding header to footer, for a caller's own transition. */
+  faceRef?: Ref<HTMLDivElement>
   /** `DialogSection`s. Each draws the rule above itself. */
   children: ReactNode
 }
@@ -136,6 +138,7 @@ export function Dialog({
   status,
   footerStart,
   actions,
+  faceRef,
   children,
 }: DialogProps) {
   const descriptionId = useId()
@@ -174,69 +177,71 @@ export function Dialog({
               isScanning ? `otari-scan-border ${SCAN_INK[scanTone]}` : ""
             }`}
           >
-            <header
-              className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-4 ${
-                isScrolled ? "border-border border-b" : ""
-              }`}
-            >
-              <div className="flex min-w-0 items-start gap-3">
-                {mark}
-                <div className="flex min-w-0 flex-col gap-1">
-                  <Modal.Heading
-                    className={
-                      isAnnouncement ? "text-display-sub" : "text-heading"
-                    }
-                  >
-                    {title}
-                  </Modal.Heading>
-                  {description ? (
-                    <p id={descriptionId} className="text-body text-muted">
-                      {description}
-                    </p>
-                  ) : null}
+            <div ref={faceRef} className="flex min-h-0 flex-1 flex-col">
+              <header
+                className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-4 ${
+                  isScrolled ? "border-border border-b" : ""
+                }`}
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  {mark}
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <Modal.Heading
+                      className={
+                        isAnnouncement ? "text-display-sub" : "text-heading"
+                      }
+                    >
+                      {title}
+                    </Modal.Heading>
+                    {description ? (
+                      <p id={descriptionId} className="text-body text-muted">
+                        {description}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              {/* Absent rather than dead when the frame cannot be dismissed: the
+                {/* Absent rather than dead when the frame cannot be dismissed: the
                   footer's action is the way out in that case. */}
-              {isDismissable ? (
-                <Button
-                  aria-label="Close"
-                  isIconOnly
-                  size="sm"
-                  className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
-                  onPress={() => onOpenChange(false)}
-                >
-                  <FiX aria-hidden className="text-muted size-4" />
-                </Button>
-              ) : null}
-            </header>
-            {/* `min-h-0` is what lets this scroll rather than push the footer
+                {isDismissable ? (
+                  <Button
+                    aria-label="Close"
+                    isIconOnly
+                    size="sm"
+                    className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
+                    onPress={() => onOpenChange(false)}
+                  >
+                    <FiX aria-hidden className="text-muted size-4" />
+                  </Button>
+                ) : null}
+              </header>
+              {/* `min-h-0` is what lets this scroll rather than push the footer
                 off the viewport: a flex child's default `min-height: auto`
                 refuses to shrink below its content. No padding: the sections
                 own it, so their rules reach both edges. */}
-            <div
-              onScroll={(event) =>
-                setIsScrolled(event.currentTarget.scrollTop > 0)
-              }
-              className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-            >
-              {children}
-            </div>
-            {status !== undefined ? (
-              // Outside the scrolling body and above the footer, so it holds
-              // its place while the body moves under it.
-              <div className="border-border bg-surface-alt flex min-h-18 shrink-0 items-center border-t px-6 py-3.5">
-                {status}
+              <div
+                onScroll={(event) =>
+                  setIsScrolled(event.currentTarget.scrollTop > 0)
+                }
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+              >
+                {children}
               </div>
-            ) : null}
-            {hasFooter ? (
-              <footer className="otari-dialog__footer border-border flex shrink-0 items-center justify-between gap-4 border-t px-6 py-3">
-                <div className="min-w-0">{footerStart}</div>
-                <div className="otari-dialog__actions flex shrink-0 items-center gap-2">
-                  {actions}
+              {status !== undefined ? (
+                // Outside the scrolling body and above the footer, so it holds
+                // its place while the body moves under it.
+                <div className="border-border bg-surface-alt flex min-h-18 shrink-0 items-center border-t px-6 py-3.5">
+                  {status}
                 </div>
-              </footer>
-            ) : null}
+              ) : null}
+              {hasFooter ? (
+                <footer className="otari-dialog__footer border-border flex shrink-0 items-center justify-between gap-4 border-t px-6 py-3">
+                  <div className="min-w-0">{footerStart}</div>
+                  <div className="otari-dialog__actions flex shrink-0 items-center gap-2">
+                    {actions}
+                  </div>
+                </footer>
+              ) : null}
+            </div>
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

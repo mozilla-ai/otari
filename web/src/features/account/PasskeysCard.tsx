@@ -86,13 +86,14 @@ function PasskeyRow({
       <RowActionRow>
         <RowAction
           icon={FiEdit2}
-          label="Rename"
+          label="Rename…"
           isDisabled={isBusy}
           onPress={onRename}
         />
         <RowAction
           icon={FiTrash2}
-          label="Delete"
+          label="Delete…"
+          isDestructive
           isDisabled={isBusy}
           onPress={onDelete}
         />

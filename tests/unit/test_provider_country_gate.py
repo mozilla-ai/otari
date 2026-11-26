@@ -3,15 +3,23 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig, load_config
 from gateway.models.routing import PolicySpec
+from gateway.ports.model_provider_port import HostedCredential
 from gateway.services.providers import CountryGate
-from gateway.services.providers._country_gate import provider_vendor
+from gateway.services.providers._country_gate import (
+    CountryNotServedError,
+    closed_provider,
+    ensure_hosted_country,
+    provider_vendor,
+)
 from gateway.services.routing import NoEligibleCandidatesError, compile_catalog_plan, compile_policy
+from gateway.services.vision import describe_image
 
 _HEADER = "CF-IPCountry"
 
@@ -104,7 +112,73 @@ def test_the_vendor_is_who_serves_the_instance(instance: str, vendor: str | None
 def test_the_gate_refuses_a_listed_vendor_outside_its_countries(
     instance: str, country: str | None, refused: bool
 ) -> None:
-    assert CountryGate(country).refuses(_config(), instance) is refused
+    assert (closed_provider(_config(), CountryGate(country), instance) is not None) is refused
+
+
+@pytest.mark.parametrize(
+    ("country", "account_country", "refused"),
+    [
+        ("US", "DE", False),
+        ("US", "FR", True),
+        ("FR", "US", True),
+        ("US", None, False),
+        (None, "US", True),
+    ],
+    ids=["both listed", "account unlisted", "request unlisted", "account unknown", "request unknown"],
+)
+def test_the_gate_refuses_when_either_known_country_is_off_the_list(
+    country: str | None, account_country: str | None, refused: bool
+) -> None:
+    gate = CountryGate(country, account_country=account_country)
+
+    assert (closed_provider(_config(), gate, "openai") is not None) is refused
+
+
+def test_an_account_the_port_could_not_resolve_is_refused_by_a_list_only() -> None:
+    gate = CountryGate("US", account_unresolved=True)
+
+    assert closed_provider(_config(), gate, "openai") == "an account country that could not be read"
+    assert closed_provider(_config(), gate, "anthropic") is None
+    assert gate.closed_to(("US",)) is not None and gate.closed_to(None) is None
+
+
+@pytest.mark.parametrize(
+    ("gate", "closed"),
+    [
+        (CountryGate("FR", account_country="FR"), "country 'FR'"),
+        (CountryGate(None, account_country="US"), "an unknown country"),
+        (CountryGate("US", account_country="FR"), "account country 'FR'"),
+    ],
+    ids=["request", "unknown request", "account"],
+)
+def test_the_operator_detail_names_the_half_that_decided(gate: CountryGate, closed: str) -> None:
+    assert closed_provider(_config(), gate, "openai") == closed
+
+
+@pytest.mark.parametrize(
+    "gate", [CountryGate("US", account_country="FR"), CountryGate("US", account_unresolved=True), CountryGate("US")]
+)
+def test_the_refusal_reads_the_same_whichever_country_decided(gate: CountryGate) -> None:
+    # The caller's own country is named; neither the account's nor which half refused is.
+    assert gate.refusal_detail("openai:gpt-5-mini") == (
+        "Model 'openai:gpt-5-mini' is not available to requests from country 'US'."
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_image_describe_side_call_is_skipped_for_the_accounts_country(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = AsyncMock()
+    monkeypatch.setattr("gateway.services.vision.acompletion", called)
+    config = _config(vision_describe_model="openai:gpt-5-mini")
+
+    described = await describe_image(
+        config, "data:image/png;base64,AA==", upstream_user=None, country_gate=CountryGate("US", account_country="FR")
+    )
+
+    assert described == (None, None)
+    called.assert_not_awaited()
 
 
 def _spec(default: str, *on_failure: str) -> PolicySpec:
@@ -172,4 +246,58 @@ def test_the_lists_are_settable_as_json_in_the_environment(tmp_path: Path, monke
 def test_a_hosted_providers_own_list_excludes_the_countries_it_leaves_out(
     country: str | None, countries: tuple[str, ...] | None, excluded: bool
 ) -> None:
-    assert CountryGate(country).excludes(countries) is excluded
+    assert (CountryGate(country).closed_to(countries) is not None) is excluded
+
+
+@pytest.mark.parametrize(
+    ("account_country", "countries", "excluded"),
+    [("DE", ("US", "DE"), False), ("FR", ("US", "DE"), True), (None, ("US", "DE"), False), ("FR", None, False)],
+    ids=["listed", "unlisted", "unknown", "every country"],
+)
+def test_a_hosted_providers_own_list_also_excludes_the_accounts_country(
+    account_country: str | None, countries: tuple[str, ...] | None, excluded: bool
+) -> None:
+    assert (CountryGate("US", account_country=account_country).closed_to(countries) is not None) is excluded
+
+
+def _put_off(account_country: str | None) -> tuple[CountryGate, AsyncMock]:
+    """A gate from ``US`` whose account's country is read only when a list asks for it."""
+    lookup = AsyncMock(return_value=CountryGate("US", account_country=account_country))
+    return CountryGate("US", account_lookup=lookup), lookup
+
+
+def _credential(countries: tuple[str, ...] | None, *alternates: HostedCredential) -> HostedCredential:
+    return HostedCredential(
+        api_key="k", api_base=None, response_provider="openai", supported_countries=countries, alternates=alternates
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_put_off_account_is_read_for_a_hosted_list_and_refused_off_it() -> None:
+    gate, lookup = _put_off("FR")
+
+    with pytest.raises(CountryNotServedError) as caught:
+        await ensure_hosted_country(gate, _credential(("US",)))
+
+    assert caught.value.closed == "account country 'FR'"
+    lookup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_put_off_account_is_not_read_for_a_provider_with_no_list() -> None:
+    gate, lookup = _put_off("FR")
+    credential = _credential(None)
+
+    assert await ensure_hosted_country(gate, credential) is credential
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_put_off_account_is_read_once_across_the_regions() -> None:
+    gate, lookup = _put_off("FR")
+    open_region = _credential(None)
+
+    assert await ensure_hosted_country(gate, _credential(("US",), _credential(("US", "DE")), open_region)) is (
+        open_region
+    )
+    lookup.assert_awaited_once()

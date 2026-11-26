@@ -38,14 +38,17 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
+    OrganizationServiceDep,
     OrgProviderKeyServiceDep,
     RequestSessionModelProviderPortDep,
+    UsageServiceDep,
     get_config,
     get_db,
     get_session_identity,
     require_deployment_operator,
     verify_catalog_reader_or_public,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
 from gateway.core.metered_pricing import effective_rates
 from gateway.models.api_keys import APIKey
@@ -58,6 +61,10 @@ from gateway.schemas.catalog import (
     CatalogCapabilities,
     CatalogFacets,
     CatalogModelSummary,
+    CatalogProviderDetail,
+    CatalogProviderModel,
+    CatalogProvidersResponse,
+    CatalogProviderSummary,
     CatalogQuery,
     ModelMetadataOverrideRequest,
 )
@@ -78,6 +85,7 @@ from gateway.services.merged_catalog_service import (
     served_on_deployment_key,
     viewer_organization,
     viewer_price,
+    viewer_reads_usage,
     viewer_zero_data_retention,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
@@ -101,7 +109,8 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
-from gateway.services.tenancy import OrgProviderKeyService
+from gateway.services.tenancy import OrganizationService, OrgProviderKeyService
+from gateway.services.usage_and_telemetry import OfferingSpeed, UsageService
 from gateway.types.model_endpoint import ModelEndpoint
 from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
@@ -157,6 +166,47 @@ class OfferingUsage(BaseModel):
     effective_price_per_million: float | None = Field(
         description="Spend over every token served, per million. Null when no tokens were served."
     )
+
+
+class OfferingSpeedInfo(BaseModel):
+    """How fast one offering answered the viewer's organization over the last 7 days.
+
+    Read from the organization's own requests, so it describes that traffic rather
+    than the provider in general: an offering that served the long prompts looks
+    slower. Only a request a routing plan's first candidate served counts, and
+    only one that ran no gateway tool.
+    """
+
+    ttft_samples: int = Field(description="Streamed requests the time to first token is read from.")
+    ttft_ms_p50: int | None = Field(
+        description="Median milliseconds to the first token. Null on fewer than 20 streamed requests."
+    )
+    ttft_ms_p95: int | None = Field(
+        description="The 95th percentile of milliseconds to the first token, rounded: the slow tail."
+    )
+    throughput_samples: int = Field(
+        description="Requests the throughput is read from: those with 20 or more output tokens."
+    )
+    output_tokens_per_second_p50: float | None = Field(
+        description=(
+            "Median output tokens per second over the whole request, time to first token included, as "
+            "OpenRouter measures it. Null on fewer than 20 measured requests."
+        )
+    )
+    output_tokens_per_second_p95: float | None = Field(
+        description="The 5th percentile of output tokens per second: the slow tail."
+    )
+
+    @classmethod
+    def of(cls, speed: OfferingSpeed) -> "OfferingSpeedInfo":
+        return cls(
+            ttft_samples=speed.ttft_samples,
+            ttft_ms_p50=speed.ttft_ms_p50,
+            ttft_ms_p95=speed.ttft_ms_p95,
+            throughput_samples=speed.throughput_samples,
+            output_tokens_per_second_p50=speed.output_tokens_per_second_p50,
+            output_tokens_per_second_p95=speed.output_tokens_per_second_p95,
+        )
 
 
 def _metadata_override(
@@ -239,6 +289,7 @@ class CatalogOffering(BaseModel):
         ),
     )
     usage_30d: OfferingUsage | None = None
+    speed_7d: OfferingSpeedInfo | None = None
 
 
 class CatalogElsewhere(BaseModel):
@@ -467,21 +518,39 @@ async def _group(
     )
 
 
-async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offering]) -> list[CatalogOffering]:
-    """One model's offerings with the viewer's 30-day usage of each.
+async def _with_usage(
+    db: AsyncSession,
+    grouped: _Grouped,
+    members: list[_Offering],
+    caller: CatalogCaller,
+    *,
+    usage_service: UsageService,
+    organizations: OrganizationService,
+) -> list[CatalogOffering]:
+    """One model's offerings with the viewer's 30-day usage of each, and how fast each answered it lately.
 
     Queried for these selectors alone rather than the whole catalog's: a usage
     row is matched on two unindexed columns, and a detail read asks about one
-    model. A visitor has no organization and gets the offerings as they are.
+    model. A visitor has no organization, and a viewer that does not read usage
+    may not read this one's, so both get the offerings as they are.
     """
-    if grouped.organization_id is None:
+    if grouped.organization_id is None or not viewer_reads_usage(caller):
         return [member.wire for member in members]
-    usage = await _usage_by_selector(
-        db,
-        grouped.organization_id,
-        ((member.wire.selector, member.wire.provider, member.model_id) for member in members),
+    offerings = [(member.wire.selector, member.wire.provider, member.model_id) for member in members]
+    usage = await _usage_by_selector(db, grouped.organization_id, offerings)
+    speed = await usage_service.offering_speed(
+        workspace_ids=await organizations.get_workspace_ids_in_organization(grouped.organization_id),
+        offerings=offerings,
     )
-    return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
+    return [
+        member.wire.model_copy(
+            update={
+                "usage_30d": usage.get(member.wire.selector),
+                "speed_7d": OfferingSpeedInfo.of(found) if (found := speed.get(member.wire.selector)) else None,
+            }
+        )
+        for member in members
+    ]
 
 
 def _get_credential(config: GatewayConfig, instance: str, *, hosted: bool) -> CatalogCredential:
@@ -627,7 +696,7 @@ async def _merged_for(
     )
 
 
-@router.get("/models")
+@router.get("/models", openapi_extra=key_scope(None))
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -677,7 +746,7 @@ async def list_catalog(
     )
 
 
-@router.get("/models/{model_id:path}")
+@router.get("/models/{model_id:path}", openapi_extra=key_scope(None))
 async def get_catalog_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -687,6 +756,8 @@ async def get_catalog_model(
     model_provider: RequestSessionModelProviderPortDep,
     hosted_providers: HostedProviderServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
+    usage_service: UsageServiceDep,
+    organizations: OrganizationServiceDep,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(description="For a signed-in caller, only the offerings a request billed to this workspace may call."),
@@ -703,7 +774,8 @@ async def get_catalog_model(
     A model the caller may not see answers 404, the same as one that does not
     exist, so the route cannot be used to probe the catalog behind an allow-list.
     A signed-in caller's offerings also carry their organization's own usage of
-    each over the last 30 days.
+    each over the last 30 days, and how fast each answered it over the last 7, and
+    so do an API key's when it holds ``usage:read``.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
@@ -724,7 +796,7 @@ async def get_catalog_model(
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(
-        await _with_usage(db, grouped, members),
+        await _with_usage(db, grouped, members, caller, usage_service=usage_service, organizations=organizations),
         key=lambda o: (o.pricing is None, o.pricing.input_price_per_million if o.pricing else 0.0, o.selector),
     )
     return CatalogModelDetail(
@@ -735,3 +807,147 @@ async def get_catalog_model(
             grouped, identity.key, {models_dev_provider_id(o.provider_type) for o in offerings}
         ),
     )
+
+
+@dataclass
+class _Instance:
+    """One provider instance's share of the grouped catalog."""
+
+    provider_type: str
+    models: dict[str, tuple[ModelIdentity, list[_Offering]]]
+    """The instance's offerings, with the model they are offerings of, by that model's identity key."""
+
+
+def _instances(grouped: _Grouped) -> dict[str, _Instance]:
+    """The grouped catalog split by provider instance, so a provider is listed only where a model is."""
+    instances: dict[str, _Instance] = {}
+    for identity in grouped.identities.values():
+        for selector in identity.selectors:
+            offering = grouped.offerings[selector]
+            instance = instances.setdefault(offering.wire.provider, _Instance(offering.wire.provider_type, {}))
+            instance.models.setdefault(identity.key, (identity, []))[1].append(offering)
+    return instances
+
+
+def _provider_display_name(grouped: _Grouped, name: str, provider_type: str) -> str:
+    known = grouped.catalog.providers.get(models_dev_provider_id(provider_type)) if grouped.catalog else None
+    if known is None or not known.name:
+        return name
+    return known.name if name == provider_type else f"{known.name} ({name})"
+
+
+async def _provider_summaries(
+    grouped: _Grouped, hosted_providers: HostedProviderService
+) -> dict[str, tuple[CatalogProviderSummary, _Instance]]:
+    profiles = await hosted_providers.profiles()
+    summaries: dict[str, tuple[CatalogProviderSummary, _Instance]] = {}
+    for name, instance in _instances(grouped).items():
+        profile = profiles.get(name)
+        # An offering names its instance's implementation only where the
+        # selector index knows it; a hosted provider's own record always does.
+        provider_type = profile.implementation if profile else instance.provider_type
+        summaries[name] = (
+            CatalogProviderSummary(
+                name=name,
+                provider=provider_type,
+                display_name=_provider_display_name(grouped, name, provider_type),
+                model_count=len(instance.models),
+                terms_url=profile.terms_url if profile else None,
+                privacy_url=profile.privacy_url if profile else None,
+            ),
+            instance,
+        )
+    return summaries
+
+
+@router.get("/providers", openapi_extra=key_scope(None))
+async def list_catalog_providers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the providers a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of providers to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of providers to return.")] = 100,
+) -> CatalogProvidersResponse:
+    """The provider instances offering a model this caller may use, with each one's policy links.
+
+    Read from the same grouped catalog as ``GET /catalog/models``, so a provider
+    is listed exactly when that listing shows one of its models.
+    """
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
+    summaries = sorted(
+        (summary for summary, _ in (await _provider_summaries(grouped, hosted_providers)).values()),
+        key=lambda summary: (summary.display_name.casefold(), summary.name),
+    )
+    return CatalogProvidersResponse(count=len(summaries), providers=summaries[skip : skip + limit])
+
+
+@router.get("/providers/{name}", openapi_extra=key_scope(None))
+async def get_catalog_provider(
+    name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the models a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of the provider's models to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of the provider's models to return.")] = 100,
+) -> CatalogProviderDetail:
+    """One provider instance and a page of the models it offers this caller, at the caller's rates.
+
+    An instance offering the caller nothing answers 404, the same as one that
+    does not exist, so the route cannot be used to probe for a restricted provider.
+    """
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
+    found = (await _provider_summaries(grouped, hosted_providers)).get(name)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Provider '{name}' not found")
+    summary, instance = found
+    models: list[CatalogProviderModel] = []
+    for identity, members in instance.models.values():
+        # The model as this instance alone offers it, folded the way the list folds every offering.
+        folded = _summary(identity, members, organization_id=grouped.organization_id)
+        models.append(
+            CatalogProviderModel(
+                id=folded.id,
+                name=folded.name,
+                vendor=folded.vendor,
+                price_unit=folded.price_unit,
+                input_price=folded.min_input_price_per_million,
+                output_price=folded.min_output_price_per_million,
+                context_length=folded.context_window,
+            )
+        )
+    models.sort(key=lambda model: (model.name.casefold(), model.id))
+    return CatalogProviderDetail(**summary.model_dump(), models=models[skip : skip + limit])

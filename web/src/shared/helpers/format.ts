@@ -52,6 +52,12 @@ export function formatUnitRate(value: number): string {
     : usdPerRequest.format(value)
 }
 
+// Output tokens per second, whole: "142 tok/s". A tenth of a token a second is
+// noise in a rate that moves with every request.
+export function formatThroughput(tokensPerSecond: number): string {
+  return `${Math.round(tokensPerSecond).toLocaleString("en-US")} tok/s`
+}
+
 // A millisecond duration an operator reads at a glance: "820 ms", "1.50 s".
 // `undefined` rather than a placeholder when the row recorded none, so a table
 // cell can render the em dash that keeps it aligned and a stat card can drop
@@ -161,6 +167,29 @@ export function formatDateTimeMinutes(iso: string | null | undefined): string {
   })
 }
 
+// A time of day on a 24-hour clock, "14:02:31", or "14:02" without seconds.
+// For a status line about the last few minutes, where the date is today's and
+// a fixed width keeps the line from shifting as the clock moves. Pinned like
+// the number formatters (see `formatters are locale-pinned` in the tests).
+const clockSeconds = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+})
+const clockMinutes = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+
+export function formatClockTime(
+  at: Date | number,
+  { seconds = true }: { seconds?: boolean } = {},
+): string {
+  return (seconds ? clockSeconds : clockMinutes).format(at)
+}
+
 // The heading a dated row sits under in a history list: "Today", "Yesterday",
 // or the date, with the year only when it is not the current one.
 //
@@ -200,6 +229,24 @@ const usdCompact = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 })
 
+const bucketDay = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+})
+const bucketHour = new Intl.DateTimeFormat("en-US", { hour: "numeric" })
+
+// A chart tick for one bucket of a series: "Nov 11" for a day, "2 PM" for an
+// hour. A day bucket starts at UTC midnight, so it is read in UTC: read in a
+// zone west of it, the tick would name the day before.
+export function formatBucketTick(iso: string, bucket: "hour" | "day"): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return (bucket === "hour" ? bucketHour : bucketDay).format(date)
+}
+
 export function formatUsd(value: number): string {
   return usdCompact.format(value)
 }
@@ -219,13 +266,19 @@ const usdWhole = new Intl.NumberFormat("en-US", {
 
 // Dollars set as a headline rather than read off a table. From $100 up the cents
 // are receipt detail: they add two of the widest glyphs on the line to carry a
-// precision nobody checks at a glance, and on the share card that width comes
-// straight out of the type size. Below $100 they still say something, since the
+// precision nobody checks at a glance. Below $100 they still say something, since the
 // difference between $4.10 and $4.99 is a quarter of the number.
 export function formatUsdHeadline(value: number): string {
   return Math.abs(value) >= 100
     ? usdWhole.format(value)
     : usdCompact.format(value)
+}
+
+const wholeCount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+
+/** A count in full, grouped: 24,108. */
+export function formatCount(value: number): string {
+  return wholeCount.format(value)
 }
 
 // Compact token counts for aggregate tiles: 12.4M / 84.2k / 512.

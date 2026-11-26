@@ -40,6 +40,7 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_memory_recall_stage_seconds", "histogram", ("stage",)),
     ("gateway_memory_rerank_skipped", "counter", ()),
     ("gateway_memory_rows_unopened", "counter", ("table",)),
+    ("gateway_output_tokens_per_second", "histogram", ("provider", "model")),
     ("gateway_rate_limit_hits", "counter", ()),
     ("gateway_rate_limit_model_full", "counter", ("rule", "model")),
     ("gateway_rate_limit_reported", "counter", ("rule",)),

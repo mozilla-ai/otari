@@ -28,6 +28,7 @@ from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
+from gateway.core.tokens import generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import OrganizationScopeNotFoundError
 from gateway.exceptions.identity_exceptions import (
@@ -52,7 +53,7 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -84,6 +85,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyCreate,
 )
 from gateway.services.budgets import BudgetService
+from gateway.services.organizations import MembershipListener
 from gateway.services.password_service import (
     hash_password_async,
     verify_absent_password_async,
@@ -91,13 +93,11 @@ from gateway.services.password_service import (
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import SignupRegistration
 from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
-from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.user_service import set_password
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
@@ -289,6 +289,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
             identity,
             new_password="a-real-password",
             sso_enforcement=NO_SSO_ENFORCEMENT,
+            authority=AddressAuthority.OPERATOR,
             email="contested@example.com",
         )
         # `set_password` returns None, so the racer that got through reports a

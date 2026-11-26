@@ -7,10 +7,13 @@ configuration and which values can be changed without a restart.
 
 ## Config file
 
-Pass a file explicitly:
+Pass a file explicitly, or name it in `OTARI_CONFIG_PATH`, which a container or
+service manager can set without changing the command. `--config` wins when both
+are given.
 
 ```bash
 otari serve --config config.yml
+OTARI_CONFIG_PATH=config.yml otari serve
 ```
 
 A small configuration looks like this:
@@ -87,6 +90,10 @@ the corresponding startup value after the database is available.
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard, except that `DO_NOT_TRACK` (`1`, `true` or `yes`) or a non-empty `CI` then answers `false` and nothing is asked; `true` or `false` answers for them and wins over both. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
+| `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
+| `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
+| `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
+| `organization_oidc_enabled` | Offer organizations their own OIDC sign-in connection: the **Single sign-on** page and its routes. Defaults to `true`; startup setting. `false` removes both, so no organization can configure a connection or sign in through one. Stored connections are kept. See [Single sign-on](sso.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -118,7 +125,7 @@ the corresponding startup value after the database is available.
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `cors_allow_origins` | Origins whose pages may call any route, with credentials, so a dashboard served from another host keeps its session. `*` opens every route to any origin without credentials, so a dashboard session needs its origin named. Empty, the default, sends no CORS headers. Startup setting. |
-| `cors_inference_origins` | Origins whose pages may call the model endpoints from a browser with an API key, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
+| `cors_inference_origins` | Origins whose pages may call the model and web tool endpoints from a browser with an API key, and exchange an OAuth app code for one, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -298,8 +305,8 @@ runs before route auth, so any caller can choose the trace ID and sampling flag
 your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
 warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
-the edge. Browsers cannot send them cross-origin: they are not in the CORS
-allow-list.
+the edge. A browser page sends them cross-origin only to the endpoints
+`cors_inference_origins` opens (below), and never with credentials.
 
 ### Calling models from a browser
 
@@ -312,9 +319,14 @@ cors_inference_origins: ["*"]
 
 It opens these endpoints, and no others: chat completions, responses,
 messages and message token counts, embeddings, rerank, moderations, the audio
-and image endpoints, and the model list (`GET /api/v1/models`), which a page
-reads to offer its models. The rest of the API, the dashboard's included,
-answers a page on another origin as it did before.
+and image endpoints, direct web search and fetch (`/api/v1/search`,
+`/api/v1/fetch`), the model list (`GET /api/v1/models`) and the tool list
+(`GET /api/v1/tools`), which a page reads to offer its models and tools, and
+the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
+the API, the dashboard's included and the app consent screen with it, answers a
+page on another origin as it did before. On these endpoints a page may send any
+request header, so a header its client library adds, such as an app version,
+does not fail the browser's preflight.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.
@@ -327,7 +339,9 @@ Name origins instead of `*` to open the endpoints to those pages alone. Each
 entry is an origin as a browser sends it: a scheme and a host in lowercase, with
 a port only when it is not the scheme's default, and nothing after it, such as
 `https://app.example.com` or `http://localhost:5173`. An entry that is not one,
-`https://app.example.com:443` for instance, is refused at startup.
+`https://app.example.com:443` for instance, is refused at startup. So is a
+wildcard inside an origin, such as `https://*.example.com`: an origin is matched
+whole, so list each subdomain, or use `*` alone.
 
 An origin listed in `cors_allow_origins` keeps that list's policy on every
 path, the model endpoints included. With `*` there, every origin does, and
@@ -377,6 +391,7 @@ the next start. It takes:
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
+| `scopes` | The endpoint groups the key may reach; see [Scopes](api-keys.md#scopes). Unset gives every scope that existed when scopes were introduced (the end-user scopes only to a service key) and never one added since. |
 
 Unknown fields are refused, so a misspelled limit stops the start rather than
 leaving a budget uncapped. A key may name a budget declared here or one that
@@ -508,7 +523,7 @@ providers:
 | `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
 | `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
 | `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |
-| `messages_api` | `completions` (default) or `responses`. See [Messages through the Responses API](#messages-through-the-responses-api). |
+| `messages_api` | `completions` or `responses`; unset, `responses` for OpenAI's own API and `completions` otherwise. See [Messages through the Responses API](#messages-through-the-responses-api). |
 | `credentials`, `project`, `location` | Vertex AI only: configure its client. |
 | Any other key | Passed to the provider's any-llm call as it is. |
 
@@ -628,19 +643,27 @@ gateway's own values through it. Chat completions only.
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its
-own is served as a chat completion by default. An OpenAI instance (or any
-instance whose provider has a Responses API, such as Azure OpenAI) can serve it
-through the Responses API instead:
+own is served as a chat completion, except on OpenAI's own API, which serves it
+through the Responses API. That holds for a configured instance, a hosted
+provider and an organization's own key alike; an OpenAI instance with another
+`api_base` (an OpenAI-compatible server) stays on chat completions, and so does
+a request that sends `stop_sequences`, which the Responses API cannot carry.
+
+An instance whose provider has a Responses API (such as Azure OpenAI) can opt in
+with `messages_api: responses`, and an OpenAI instance can opt out with
+`messages_api: completions`:
 
 ```yaml
 providers:
   openai:
     api_key: ${OPENAI_API_KEY}
-    messages_api: responses   # default: completions
+    messages_api: completions   # unset: responses for OpenAI's own API
 ```
 
-This reaches models OpenAI serves only on the Responses API (the codex and pro
-variants), and keeps a reasoning model's reasoning across turns:
+The Responses path reaches models OpenAI serves only on the Responses API (the codex and pro
+variants), lets a reasoning model call function tools with its reasoning on,
+which chat completions refuses for the newer ones, and keeps a reasoning model's
+reasoning across turns:
 
 - Each reasoning item comes back as a `thinking` block whose signature carries
   its encrypted content. When a client such as Claude Code sends the block back,
@@ -655,8 +678,8 @@ variants), and keeps a reasoning model's reasoning across turns:
   answers that turn without extended thinking.
 
 Reasoning fields are sent only to a model whose name looks like a reasoning
-model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
-`-chat` variants, and anything with `codex` in it), whether or not the client
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5` and later
+except their `-chat` variants, and anything with `codex` in it), whether or not the client
 asked for thinking, because any other model fails the call over them. An Azure
 OpenAI deployment is called by its deployment name, so name a reasoning
 deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
@@ -672,8 +695,10 @@ How the request is translated:
 - `stop_sequences` is refused with a 400 (no Responses equivalent); `top_k`,
   `cache_control` and `metadata` are dropped.
 - With no `prompt_cache_key`, the request's session (`Otari-Conversation-Id`,
-  or the session id Claude Code sends) keys the provider's prompt cache, scoped
-  to the caller, so the session id itself never reaches the provider.
+  or the session id a recognized harness sends, as
+  [What makes a session](sessions-reference.md#what-makes-a-session) lists) keys
+  the provider's prompt cache, scoped to the caller, so the session id itself
+  never reaches the provider.
 - Anthropic's server tools are not forwarded: Otari's own web search, web fetch
   and code execution serve them where configured (see [Built-in tools](tools.md)),
   and one Otari does not serve is dropped.
@@ -724,13 +749,9 @@ with the database. If the database holds encrypted credentials and neither
 `OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
 than generate a key that could not decrypt them.
 
-To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
-run the hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
-router's key has no re-encryption endpoint yet: re-enter it on the Subagent
-router page after the rotation. Losing every configured encryption key makes
-stored credentials unrecoverable.
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key, then run every re-encryption endpoint: `POST /api/v1/hosted-providers/reencrypt`, `POST /api/v1/search-tools/reencrypt` and `POST /api/v1/organization-provider-keys/reencrypt`.
+
+**Keep the old key configured after that.** Only the three stores above have a re-encryption endpoint, and everything else still opens with the key it was written under. A subagent router's key is re-entered on the Subagent router page. Stored trace content is sealed under `OTARI_SECRET_KEY` too, and [Keeping trace content](trace-storage.md#keeping-trace-content) says to keep a rotated-out key for as long as you keep traces. Removing the old key while any of that remains makes it unrecoverable, as losing every configured key does.
 
 ### Hosted providers in config.yml
 
@@ -948,9 +969,22 @@ that list or for the supported countries of an enabled hosted provider. A
 private address, or one the file does not hold, has no country, and
 a listed provider refuses it.
 
-A VPN changes the country a request appears to come from, so this check does
-not replace the account and billing checks a provider may also ask for, which
-need billing data a self-hosted Otari does not hold.
+A VPN changes the country a request appears to come from, so the gate also
+reads where the account lives, when the deployment knows. That country comes
+from the build, not from a setting: a self-hosted Otari holds no billing data
+and knows no account's country, and a build that bills its customers, such as
+otari.ai, answers it from the billing address of the organization the API key
+belongs to. A list refuses a request when either country is off it. An unknown
+account country is no opinion, so a deployment that knows none is gated on
+the request's country alone, while an unknown request country still refuses.
+The account is looked up only where a list could refuse it: a provider type
+lists countries, or the hosted credential a request is served on has a list.
+A build that holds the country but cannot read it at the moment refuses on
+every listed provider rather than going by the request's country alone. A
+master key is the operator, not an account, so its requests are gated on the
+request's country alone. A refusal names the request's country and never the
+account's, nor which of the two the list left out; the usage row's detail, a
+dropped candidate's operator detail and the log say which.
 
 ## Pricing
 
@@ -1019,7 +1053,7 @@ priced (see [Who is shown which models](models.md#who-is-shown-which-models)).
 The gateway logs a warning per unpriced model at most once an hour per
 process. Operators see a dashboard banner naming the models that served
 unpriced traffic in the selected workspace in the last 24 hours, linked to
-those requests on the Overview, where each can be priced.
+those requests in the Requests view of Sessions, where each can be priced.
 
 ### Keeping the defaults current
 
@@ -1125,6 +1159,15 @@ organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default and can be
 changed at runtime.
+
+The same setting publishes the Providers pages: `GET /api/v1/catalog/providers`
+lists every provider instance offering a model the caller may see, with how many,
+and `GET /api/v1/catalog/providers/{name}` lists that instance's models at its own
+rates for the caller. Both are read from the Models catalog, so a provider is
+listed exactly when one of its models is, and an instance the caller may not see
+answers 404. A hosted provider links its own terms of service and privacy policy
+there through its `terms_url` and `privacy_url`, each an absolute `http` or `https`
+address with no username or password; a `providers:` instance has neither.
 
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
@@ -1333,10 +1376,12 @@ request's price.
 A transcription model that reports tokens and no length, such as
 `gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
 length Otari reads from the uploaded file. Otari reads the length of a WAV,
-MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
-not its name. A file it cannot read, such as a WebM upload, gives no length,
-so that request keeps no cost at a `minute` or `second` rate. A length the
-provider reports always wins over the length read from the file.
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF, WMA or WebM file by its
+content, not its name. A WebM file from a browser recorder states no length,
+so Otari counts it from the timestamps of the audio blocks in the file. A file
+it cannot read gives no length, so that request keeps no cost at a `minute` or
+`second` rate. A length the provider reports always wins over the length read
+from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1527,12 +1572,14 @@ file or environment, then to the built-in default.
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search
   with its provider. Several search instances with neither log a warning at
-  startup.
+  startup. A deployment with no search instance also serves the legacy backend
+  to [direct search](tools.md#direct-search), under its provider's name.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10. A call past it gets a tool error the model can recover
-  from.
+  together. Default 10. Once it is reached, later rounds no longer offer either
+  tool, and a call past it within one round gets a tool error the model can
+  recover from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
@@ -1607,20 +1654,22 @@ OTARI_WEB_SEARCH_URL=
 A variable exported in the shell that runs Docker Compose wins over `.env`, so
 unset an exported `OTARI_WEB_SEARCH_URL` there too.
 
-### The older in-loop backend
+### The legacy provider settings
 
-The older in-loop backend still serves some requests until it is removed: a
-search on `web_search_provider`, or on a Tavily or Brave organization key, and a
-request that declares only the fetch tool. `web_fetch_default_tool` governs every
-fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
-search instance serves the request: the older backend keeps its fixed limit of 10
-calls, its 422 past it, and its own enrichment through the built-in fetcher.
+`web_search_provider` and `web_search_provider_api_key` are deprecated, and a
+coming breaking release refuses to start while they are set. They name the
+Tavily or Brave account the in-loop tool searches with when no search instance
+is its default. Replace them with a search instance named after the provider,
+with the key and a price, and name it in `web_search_default_tool`; for Tavily,
+add `include_raw_content: true` to its options to keep each page's full text.
+The startup log says the same while they are set.
 
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
 key is the prefix callers write in `model`, so the entry below serves
-`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13`, `gemini:gemini-decision-1`
+and `local:openjev`:
 
 ```yaml
 decision_providers:
@@ -1628,16 +1677,29 @@ decision_providers:
     api_key: ${TYPESAFE_API_KEY}
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
+  gemini:
+    api_key: ${GEMINI_API_KEY}
   local:
     provider: llamacpp
     api_base: "http://127.0.0.1:8080"
 ```
 
-`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
-key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
-replaced with another https root. A `llamacpp` entry points at a `llama-server`
+`provider` is one of `typesafe`, `openrouter`, `gemini` or `llamacpp`, and defaults
+to the key. TypeSafe, OpenRouter and Gemini need an `api_key`, and their default
+`api_base` can be replaced with another https root. A `llamacpp` entry points at a `llama-server`
 running a decision model and needs an `api_base`; it may use plain http only when
 it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+A `gemini` entry calls Google's
+[Decisions API](https://aistudio.google.com/docs/decisions-api) with a Gemini API
+key. Callers keep sending the same request body: the gateway translates it to
+Gemini's shape (`state` becomes `input`, a `noul` question's `true` and `false`
+criteria become `true_description` and `false_description`, structured JSON is
+serialized to text, and each data URL in `images` becomes an inline image block)
+and returns Gemini's answer with its token counts as `usage.input_tokens` and
+`usage.output_tokens`. Question fields Gemini has no counterpart for are not sent.
+Gemini reports no cost, so price its model in `pricing` (as
+`gemini:gemini-decision-1`) to have its requests charged against budgets.
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
@@ -1691,10 +1753,25 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
+`mail_from_email` is the address alone, with no display name, comment or quoted text.
+`mail_from_name` sets the name shown beside it.
+With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
 `POST /api/v1/settings/mail/test`.
+
+Nothing reaches a recipient on that transport, so anything whose outcome depends
+on somebody receiving the message behaves as it does with no mail at all. An
+invitation hands its accept link back, a password link is shown instead of
+emailed, and health check alerts tell nobody. Signing up without an invitation,
+a verification resend and a password reset need `public_base_url` as well, and
+are refused without it. With it set they are accepted, because their message is
+written to the log for an operator to pass on, and the page that follows says to
+ask for the link rather than to watch an inbox. Signing up from an invitation is
+accepted either way, because the invitation names the address and the account
+needs no verification link.
 
 ### Invitations
 
@@ -1742,12 +1819,12 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
-- `web_search_provider` and `web_search_provider_api_key`
+- `web_search_provider` and `web_search_provider_api_key` (deprecated, see [The legacy provider settings](#the-legacy-provider-settings))
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
 - `guardrails_url`
 - `guardrail_thread_pool_size`
-- `mcp_allow_loopback` and `mcp_allow_private_hosts`
+- `mcp_private_hosts` (see [Connect an MCP server on a private network](connect-a-private-mcp-server.md#route-2-list-the-host-on-your-own-gateway))
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
 - `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
@@ -1849,9 +1926,9 @@ Unset, `public_base_url` is used.
 - Supply an absolute http(s) URL with no trailing slash.
 - Credentials and fragments are refused, since the value goes into redirects
   and mail.
-- A query string is kept and placed ahead of the hash route in every link
-  (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`), for an
-  edge that serves one interface for several deployments.
+- A query string is kept and joined to every link's own query, ahead of its
+  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
+  for an edge that serves one interface for several deployments.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is

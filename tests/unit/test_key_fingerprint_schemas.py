@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from gateway.api.routes.keys import CreateKeyResponse, KeyInfo
 from gateway.models.api_keys import APIKey
 from gateway.services.tenancy.workspace_activation_service import ActivationApiKeyPublic
+from gateway.types.key_scope import KeyScopeSet
 
 
 def _key(**overrides: object) -> APIKey:
@@ -22,6 +23,7 @@ def _key(**overrides: object) -> APIKey:
         "key_hash": "hash-1",
         "key_prefix": "gw-abcdefg",
         "key_suffix": "wxyz",
+        "scopes": KeyScopeSet.read(["inference:run", "files:read"]),
         # Applied at flush in real use; these rows are never flushed.
         "created_at": datetime(2026, 9, 14, tzinfo=UTC),
     }
@@ -36,6 +38,7 @@ def test_the_create_response_keeps_both_fingerprint_halves() -> None:
 
     assert response.key_prefix == "gw-abcdefg"
     assert response.key_suffix == "wxyz"
+    assert response.scopes == ["inference:run", "files:read"]
 
 
 def test_a_key_minted_before_either_half_existed_reads_back_as_null() -> None:

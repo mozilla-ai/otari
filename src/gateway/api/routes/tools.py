@@ -27,12 +27,15 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
+    CodeExecutionPortDep,
+    DirectToolAvailabilityDep,
     WorkspaceCodeExecutionPoliciesDep,
     WorkspaceFundingDep,
     WorkspaceWebSearchPoliciesDep,
     get_config,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -96,6 +99,18 @@ class ManagedTool(BaseModel):
             "the provider-named keywords unless the deployment's executor is `provider`."
         )
     )
+    direct_available: bool | None = Field(
+        default=None,
+        description=(
+            "For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` "
+            "naming no tool would be admitted for this caller: something is set up to run it, the "
+            "workspace allows web access, the organization can pay for a call on the deployment's "
+            "account, and for an API key, the key holds the `web:search` or `web:fetch` scope and "
+            "its tool list allows the instance the call would run on. Pricing and budgets still "
+            "apply to the call itself. It can differ from `available`, which is about declaring "
+            "the tool in a model request. `null` for the other tools, which have no direct endpoint here."
+        ),
+    )
     input_schema: dict[str, Any] = Field(
         description="JSON Schema for the arguments the model supplies, as the model sees it."
     )
@@ -152,10 +167,33 @@ def _reason(configured: bool, workspace_allows: bool, *, funded: bool = True) ->
     return None if funded else "insufficient_funds"
 
 
-def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[ManagedTool]:
+@dataclass(frozen=True)
+class _DirectAvailability:
+    """Whether the direct search and fetch endpoints would run a call naming no tool."""
+
+    search: bool = False
+    fetch: bool = False
+
+
+async def _direct_availability(
+    api_key: APIKey | None, switches: _WorkspaceSwitches, availability: DirectToolAvailabilityDep
+) -> _DirectAvailability:
+    """The direct endpoints' answer: the workspace's web switch, then the service's own checks."""
+    if not switches.web:
+        return _DirectAvailability()
+    unfunded = switches.unfunded
+    return _DirectAvailability(
+        search=await availability.search(api_key, switches.search_policy, funded=Tool.WEB_SEARCH not in unfunded),
+        fetch=await availability.fetch(api_key, funded=Tool.WEB_FETCH not in unfunded),
+    )
+
+
+def _managed_tools(
+    config: GatewayConfig, switches: _WorkspaceSwitches, direct: _DirectAvailability, languages: tuple[str, ...]
+) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
-    code_execution = code_execution_tool_definition()["function"]
+    code_execution = code_execution_tool_definition(languages)["function"]
     # The same question the request path asks, asked the same way: a hosted
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
@@ -174,6 +212,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             description=web_fetch["description"],
             available=fetch_reason is None,
             reason=fetch_reason,
+            direct_available=direct.fetch,
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
             example={"type": Tool.WEB_FETCH},
@@ -183,6 +222,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
             description=web_search["description"],
             available=search_reason is None,
             reason=search_reason,
+            direct_available=direct.search,
             # Admission claims a provider's own search keywords only for a deployment that searches itself.
             accepted_types=web_search_declaration_forms(config) if deployment_searches else [str(Tool.WEB_SEARCH)],
             input_schema=web_search["parameters"],
@@ -202,13 +242,15 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     ]
 
 
-@router.get("/tools")
+@router.get("/tools", openapi_extra=key_scope(None))
 async def list_tools(
     config: Annotated[GatewayConfig, Depends(get_config)],
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     web_policies: WorkspaceWebSearchPoliciesDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     funding: WorkspaceFundingDep,
+    availability: DirectToolAvailabilityDep,
+    port: CodeExecutionPortDep,
 ) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
@@ -216,8 +258,12 @@ async def list_tools(
     unavailable, and so is a tool that runs on the deployment's account while
     the key's organization has no funds. Every other `tools[]` entry, including
     provider-native keywords not listed here, is forwarded to the upstream
-    provider untouched.
+    provider untouched. Web search and web fetch also say whether their direct
+    endpoints would run a call from this caller.
     """
     api_key, _ = auth
     switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, funding)
-    return ToolsResponse(data=_managed_tools(config, switches))
+    direct = await _direct_availability(api_key, switches, availability)
+    # A deployment with no sandbox runs no language.
+    languages = port.languages if port is not None else ()
+    return ToolsResponse(data=_managed_tools(config, switches, direct, languages))

@@ -29,10 +29,13 @@ from gateway.api.deps import (
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_invitation_cleanup,
+    build_invitation_delivery,
     build_scheduled_catalog_update,
     build_search_tool_refresh,
     build_search_tool_service,
     build_trace_service,
+    build_unavailable_model_reporter,
     get_api_key_service,
     get_membership_listener,
     set_config,
@@ -48,6 +51,7 @@ from gateway.core.config import (
     API_ROOT,
     CONVERSATION_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     PRICING_SOURCE_HEADER,
     TAGS_HEADER,
     USAGE_UNIT_HEADER,
@@ -65,14 +69,27 @@ from gateway.core.database import (
     release_session,
     sqlite_database_file,
 )
-from gateway.core.error_codes import ERROR_CODE_HEADER, INVALID_REQUEST, body_fields_of, error_code_of, error_headers
+from gateway.core.error_codes import (
+    BILLING_URL_HEADER,
+    ERROR_CODE_HEADER,
+    INVALID_REQUEST,
+    body_fields_of,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
-from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
+from gateway.dashboard import (
+    DASHBOARD_PACKAGE_PATH,
+    dashboard_fallback,
+    get_dashboard_build_id,
+    get_dashboard_dir,
+)
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import log_plain, logger
+from gateway.models.usage import configure_usage_data_location
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -111,12 +128,13 @@ from gateway.services.log_writer import (
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key, load_master_key_hash, startup_notice
-from gateway.services.model_catalog_service import configure_models_dev_base_url
+from gateway.services.model_catalog_service import configure_models_dev_base_url, load_bundled_fallback
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
 )
 from gateway.services.oauth_service import callback_landing_target
+from gateway.services.organizations import ExpiredInvitationCleanup, InvitationDelivery
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -138,13 +156,21 @@ from gateway.services.pricing_refresh_service import (
     run_catalog_refresher,
     run_price_snapshot_refresher,
 )
-from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.pricing_service import (
+    configure_default_pricing,
+    configure_provider_types,
+    configure_region_parents,
+)
 from gateway.services.provider_kwargs import (
     configure_hosted_names,
     settle_configured_providers,
     warn_about_ignored_provider_variables,
 )
+from gateway.services.provider_kwargs import (
+    configure_region_parents as configure_kwargs_region_parents,
+)
 from gateway.services.providers import (
+    HostedRegionIndex,
     hosted_implementation,
     load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
@@ -188,6 +214,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.services.tools import (
     SANDBOX_KEY_ENV,
+    AttachedMcpServerIndex,
     LegacySearchValues,
     build_web_provider_client,
     load_sandbox_credentials_at_startup,
@@ -590,6 +617,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         lambda _config, _container: run_sandbox_credential_refresher(),
         reset_sandbox_credential_cache,
     ),
+    _LifespanWorker(
+        "attached MCP server",
+        lambda _config, _container: AttachedMcpServerIndex.run_refresher(),
+        AttachedMcpServerIndex.reset,
+    ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
     # Not run where client_country_database is set: that file wins, and the stored one is not read.
@@ -639,7 +671,14 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
-    # A trace is kept for its retention and no longer.
+    _LifespanWorker(
+        "invitation email",
+        lambda config, _container: InvitationDelivery.poll(lambda uow: build_invitation_delivery(uow, config)),
+    ),
+    _LifespanWorker(
+        "invitation cleanup",
+        lambda _config, _container: ExpiredInvitationCleanup.poll(build_invitation_cleanup),
+    ),
 )
 
 
@@ -711,18 +750,23 @@ _CORS_ALLOW_HEADERS = (
     "Otari-Region",
     *_SDK_CORS_HEADERS,
 )
-# A speech response carries its cost on headers, which a browser on
-# another origin reads only when they are exposed.
+# A speech response carries its cost on headers, and a completion says who paid
+# for it, which a browser on another origin reads only when they are exposed.
 _CORS_EXPOSE_HEADERS = (
+    BILLING_URL_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     ERROR_CODE_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
     USAGE_UNITS_HEADER,
+    # The scope a refused key lacks, which a browser client cannot read unexposed.
+    "WWW-Authenticate",
 )
-# The model endpoints ``cors_inference_origins`` opens to a browser: each one
-# takes an API key and calls a model, except the model list a page reads to
-# offer its models, and none changes the deployment.
+# The endpoints ``cors_inference_origins`` opens to a browser: each one takes
+# an API key, or (the OAuth app token exchange) a code and its verifier, and
+# none takes a session or changes the deployment. The model list and the tool
+# list are what a page reads to offer models and web tools.
 _INFERENCE_CORS_PATHS = frozenset(
     {
         f"{API_ROOT}/chat/completions",
@@ -733,9 +777,20 @@ _INFERENCE_CORS_PATHS = frozenset(
         f"{API_ROOT}/rerank",
         f"{API_ROOT}/moderations",
         f"{API_ROOT}/models",
+        f"{API_ROOT}/search",
+        f"{API_ROOT}/fetch",
+        f"{API_ROOT}/tools",
+        f"{API_ROOT}/oauth/apps/token",
+        f"{API_ROOT}/oauth/apps/revoke",
     }
 )
-_INFERENCE_CORS_PREFIXES = (f"{API_ROOT}/audio/", f"{API_ROOT}/images/", f"{API_ROOT}/models/")
+_INFERENCE_CORS_PREFIXES = (
+    f"{API_ROOT}/audio/",
+    f"{API_ROOT}/images/",
+    f"{API_ROOT}/models/",
+    f"{API_ROOT}/search/",
+    f"{API_ROOT}/fetch/",
+)
 # Under the model list's prefix but for the operator alone, so a page never needs them.
 _INFERENCE_CORS_OPERATOR_PATHS = frozenset({f"{API_ROOT}/models/discoverable", f"{API_ROOT}/models/metadata"})
 
@@ -777,7 +832,10 @@ class ScopedCORSMiddleware:
                 allow_origins=inference_origins,
                 allow_credentials=False,
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=_CORS_ALLOW_HEADERS,
+                # Any header: with no credentials a header grants a page nothing it
+                # could not send from curl, while one a client adds that is missing
+                # here fails its preflight and so the whole request.
+                allow_headers=["*"],
                 expose_headers=_CORS_EXPOSE_HEADERS,
             )
             if inference_origins
@@ -852,7 +910,10 @@ def _add_security_headers(headers: MutableHeaders, path: str, status_code: int) 
     elif serves_content and (path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES)):
         headers.setdefault("Cache-Control", "public, max-age=86400")
     else:
-        headers["Cache-Control"] = "private, no-store, no-cache"
+        # A route may let the signed-in browser alone keep what it served (an MCP server's logo), never a shared cache.
+        own = headers.get("Cache-Control", "")
+        if not (serves_content and own.startswith("private, max-age=")):
+            headers["Cache-Control"] = "private, no-store, no-cache"
         vary_values = {part.strip() for part in headers.get("Vary", "").split(",") if part.strip()}
         vary_values.add("Authorization")
         headers["Vary"] = ", ".join(sorted(vary_values))
@@ -1040,6 +1101,20 @@ def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
         logger.warning("%s stopped with an unexpected error", name, exc_info=error)
 
 
+def _reset_worker_cache(worker: _LifespanWorker) -> None:
+    """Clear ``worker``'s cache, logging a failure so it cannot stop the rest of shutdown.
+
+    Each reset is another module's code with no shared error type, and the log
+    writer, the pooled clients and the engine still need closing after it.
+    """
+    if worker.reset is None:
+        return
+    try:
+        worker.reset()
+    except Exception:
+        logger.warning("%s cache reset failed at shutdown", worker.name, exc_info=True)
+
+
 async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
     """Cancel all refreshers, then give the group one shared shutdown bound.
 
@@ -1133,6 +1208,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
         )
         configure_hosted_names(hosted_implementation)
+        # A region of a hosted provider (``tokenhub@sg``) is priced and served as one of its provider's.
+        configure_region_parents(HostedRegionIndex.parent_of)
+        configure_kwargs_region_parents(HostedRegionIndex.parent_of)
+        configure_usage_data_location(HostedRegionIndex.data_location_of)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
@@ -1158,14 +1237,16 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
-            # The bundled catalog is several MB of JSON: read it here, off the
-            # event loop, so no request waits on it.
+            # The bundled catalog is several MB of JSON: build its prices here,
+            # off the event loop, so no request waits on them.
             await asyncio.to_thread(load_bundled_index)
             # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config, advisory_level)
             await load_persisted_price_snapshot(session)
             # So the first request after a restart lists the stored model facts.
             await load_stored_models_dev_catalog(session)
+            # Its model facts too, off the loop, unless a stored catalog serves them.
+            await asyncio.to_thread(load_bundled_fallback)
             # Persisted tool overrides win over config/env too, so the worker
             # reflects a prior run's dashboard change. The legacy search values
             # are read first, to tell a file value from a stored one.
@@ -1178,9 +1259,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # holds one pooled connection at a time.
             await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
-                stored_tools_loaded = await build_search_tool_service(
-                    uow, search_tool_session, config=config
-                ).load_at_startup()
+                search_tools = build_search_tool_service(uow, search_tool_session, config=config)
+                # A failed start, as a misconfigured entry fails the config load: on a blank
+                # key, a tool whose key is optional searches with no key at all.
+                search_tools.refuse_blank_api_keys()
+                stored_tools_loaded = await search_tools.load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a
@@ -1248,6 +1331,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         await load_provider_endpoints_at_startup()
         await load_served_models_at_startup()
         await load_workspace_hosted_access_at_startup()
+        await AttachedMcpServerIndex.load_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())
@@ -1316,8 +1400,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         finally:
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
-                if worker.reset is not None:
-                    worker.reset()
+                _reset_worker_cache(worker)
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
@@ -1359,13 +1442,13 @@ async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     A body field survives where a header does not (a proxy that drops it, an SDK
     that surfaces only the body), so a client can map the refusal from either.
     A ``BodyHTTPException`` is answered with its own body rather than under ``detail``.
-    A ``RefusalException`` adds its fields beside ``code``.
+    A ``RefusalException`` adds its fields beside ``code``, as ``Otari-Billing-Url`` adds ``billing_url``.
     """
     if not isinstance(exc, StarletteHTTPException):
         raise exc
     code = error_code_of(exc.headers)
     if isinstance(exc, BodyHTTPException):
-        body = exc.body if code is None else {**exc.body, "code": code}
+        body = exc.body if code is None else {**exc.body, "code": code, **body_fields_of(exc)}
         return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if code is None:
         return with_request_id(request, await http_exception_handler(request, exc))
@@ -1401,7 +1484,7 @@ async def _tenancy_error_handler(request: Request, exc: Exception) -> Response:
         # The direct tool service wrote this answer for the caller, 5xx included, and its
         # headers carry the refusal's code or a provider failure's safe fields.
         code = error_code_of(exc.headers)
-        body = {"detail": exc.message} if code is None else {"detail": exc.message, "code": code}
+        body = {"detail": exc.message} if code is None else {"detail": exc.message, "code": code, **body_fields_of(exc)}
         return with_request_id(request, JSONResponse(body, status_code=exc.status_code, headers=exc.headers))
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         logger.error("Tenancy request failed: %s", exc.message)
@@ -1545,12 +1628,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
     async def oauth_callback_landing(provider: str, request: Request) -> RedirectResponse:
         """Bounce a provider's redirect into the dashboard page that finishes it.
 
-        This path exists because a redirect URI may not carry a fragment
-        (RFC 6749; Google rejects one outright) and every dashboard page in
-        front of a session is a hash route. So the provider is given an
-        ordinary path, and this turns it into the hash route
-        ``DeploymentRoot`` renders ahead of the auth gate, carrying the
-        query the provider appended.
+        The provider is given a path this process always answers, because the
+        dashboard may be served from another origin or path prefix than the
+        gateway. This sends the browser to the page ``DeploymentRoot`` renders
+        ahead of the auth gate, carrying the query the provider appended.
 
         It holds no credential and decides nothing: the code in that query
         is spent by ``POST /api/v1/auth/oauth/{provider}/callback``, which the
@@ -1586,8 +1667,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
         )
 
     # The page reads /api/v1/bootstrap to learn which surfaces exist here. The dashboard is a
-    # single-page app, so a static mount for /assets plus an index.html at / is
-    # all it needs (navigation is client-side).
+    # single-page app, so a static mount for /assets plus its index.html at / and
+    # at each of its own paths is all it needs (navigation is client-side).
     dashboard_dir = get_dashboard_dir()
     if dashboard_dir is not None:
         index_file = dashboard_dir / "index.html"
@@ -1624,6 +1705,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         @app.get("/dashboard-build.json", include_in_schema=False)
         async def dashboard_build() -> dict[str, str]:
             return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
+
+        # Every other page of the dashboard is the same index.html, answered only
+        # once no route or mount has taken the path.
+        app.router.default = dashboard_fallback(index_file, app.router.not_found)
     else:
         # A missing bundle means nobody built it, which is the ordinary state of a
         # source checkout now that the bundle is gitignored rather than committed.
@@ -1695,6 +1780,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         app.state.public_catalog_rate_limiter = None
 
     app.state.config = config
+    app.state.unavailable_model_reporter = build_unavailable_model_reporter(config)
 
     # The composition root, built before the routers because a bootstrap may
     # contribute some of them. Per app rather than module-global, for the same

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.types.completion import CreateEmbeddingResponse, Embedding, Usage
@@ -15,9 +15,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.api.routes._pipeline import PROVIDER_TIMEOUT_DETAIL
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.core.error_codes import ERROR_CODE_HEADER, UPSTREAM_RATE_LIMITED
+from gateway.core.error_details import ProviderDetail
 from gateway.exceptions import TenancyValidationError
 from gateway.metrics import REGISTRY
 from gateway.models.usage import UsageLog
@@ -575,10 +575,10 @@ def test_embeddings_response_carries_no_inline_cost_when_unpriced(
 
 def _openai_bad_request(message: str) -> Exception:
     """An OpenAI 400 as any-llm hands it back."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/embeddings")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/embeddings")
     upstream = openai.BadRequestError(
         f"Error code: 400 - {{'error': {{'message': '{message}'}}}}",
-        response=httpx.Response(400, request=request),
+        response=httpx2.Response(400, request=request),
         body={"message": message, "type": "invalid_request_error", "param": None, "code": None},
     )
     return convert_exception(upstream, "openai")
@@ -666,10 +666,10 @@ def test_embeddings_upstream_rate_limit_is_a_429_with_its_retry_after(
     api_key_obj: dict[str, Any],
 ) -> None:
     """The provider's rate limit keeps its status and wait, and names itself as the provider's."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/embeddings")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/embeddings")
     upstream = openai.RateLimitError(
         "Error code: 429 - Rate limit reached for requests",
-        response=httpx.Response(429, request=request, headers={"Retry-After": "7"}),
+        response=httpx2.Response(429, request=request, headers={"Retry-After": "7"}),
         body={"message": "Rate limit reached for requests"},
     )
     with patch(
@@ -694,7 +694,7 @@ def test_embeddings_provider_timeout_is_a_504(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    timeout = openai.APITimeoutError(request=httpx.Request("POST", "https://api.openai.com/v1/embeddings"))
+    timeout = openai.APITimeoutError(request=httpx2.Request("POST", "https://api.openai.com/v1/embeddings"))
     with patch(
         "gateway.api.routes.embeddings.aembedding",
         new_callable=AsyncMock,
@@ -706,7 +706,7 @@ def test_embeddings_provider_timeout_is_a_504(
             headers=api_key_header,
         )
     assert resp.status_code == 504
-    assert resp.json()["detail"] == PROVIDER_TIMEOUT_DETAIL
+    assert resp.json()["detail"] == ProviderDetail.TIMEOUT
 
 
 def _settlement(client: TestClient, request_id: str, headers: dict[str, str], *, timeout: float = 3.0) -> Any:

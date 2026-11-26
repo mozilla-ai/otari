@@ -520,3 +520,27 @@ async def test_history_longer_than_the_resident_window_fails_closed_before_it(
     assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
     latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
     assert latest is not None and latest.input == Decimal(3)
+
+
+def test_stored_generations_share_the_entries_that_did_not_change() -> None:
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    later = earlier + timedelta(days=1)
+
+    built = refresh._build_generations([(later, _raw(extra=True)), (earlier, _raw(5, extra=True))], None)
+
+    newest, older = built[0].index, built[1].index
+    assert older.get("test", "other") is newest.get("test", "other")
+    assert older.get("test", "model") is not newest.get("test", "model")
+    assert [entry.input for entry in (newest.get("test", "model"), older.get("test", "model")) if entry] == [
+        Decimal("1"),
+        Decimal("5"),
+    ]
+
+
+def test_a_snapshot_that_no_longer_parses_does_not_stop_the_sharing() -> None:
+    day = datetime(2026, 1, 1, tzinfo=UTC)
+
+    built = refresh._build_generations([(day, _raw()), (day + timedelta(days=1), "{"), (day, _raw())], None)
+
+    assert len(built) == 2
+    assert built[0].index.get("test", "model") is built[1].index.get("test", "model")

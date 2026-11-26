@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gateway.core.oauth_apps import parse_oauth_redirect
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 
 class OAuthAppConfig(BaseModel):
@@ -14,6 +15,11 @@ class OAuthAppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=100)
     redirect_uris: list[str] = Field(min_length=1, max_length=20)
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: list(DEFAULT_KEY_SCOPES),
+        min_length=1,
+        description="The scopes of each key the app is issued. An app key is never a service key.",
+    )
 
     @field_validator("redirect_uris")
     @classmethod
@@ -26,11 +32,25 @@ class OAuthAppConfig(BaseModel):
                 )
         return values
 
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, values: list[KeyScope]) -> list[KeyScope]:
+        return list(KeyScopeSet.checked(values, is_service_key=False))
+
 
 class IdentitySettings(BaseModel):
     oauth_apps: Annotated[dict[Annotated[str, Field(min_length=1, max_length=128)], OAuthAppConfig], OMITTED] = Field(
         default_factory=dict,
         description="Registered OAuth apps, keyed by public client ID. Empty disables app authorization.",
+    )
+
+    oauth_open_apps: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Let an app connect with OAuth without being registered in oauth_apps. Its client ID is "
+            "the origin of its HTTPS (or loopback HTTP) callback, the consent screen names that site "
+            "as unverified, and its keys hold the default scopes."
+        ),
     )
 
     oidc_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -39,5 +59,16 @@ class IdentitySettings(BaseModel):
             "Let an organization's own OIDC issuer be discovered at a private, loopback or link-local "
             "address, for an identity provider on the deployment's own network. Off by default, because "
             "an organization administrator types the issuer in rather than the operator choosing it."
+        ),
+    )
+
+    organization_oidc_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Offer organizations their own OIDC sign-in connection: the Single sign-on page, and sign-in "
+            "through a connection an organization saved. Off removes the page and those routes, so no "
+            "organization can configure a connection or sign in through one. A member whose only credential "
+            "is such a connection then cannot sign in at all. Stored connections are kept and work again "
+            "when it is back on. Requires restart. Also settable via OTARI_ORGANIZATION_OIDC_ENABLED."
         ),
     )

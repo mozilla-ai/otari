@@ -17,6 +17,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -190,7 +191,7 @@ def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
     )
 
 
-@catalog_router.get("/models", response_model_exclude_none=True)
+@catalog_router.get("/models", response_model_exclude_none=True, openapi_extra=key_scope(None))
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -212,7 +213,10 @@ async def list_models(
     request sends as `model` to let the gateway choose the provider: it tries the
     model's offerings best first and falls back down the list. An entry's price,
     token limits and capabilities are those of the offering tried first, at the
-    caller's own rate. A value nobody knows is omitted rather than sent as null.
+    caller's own rate; a token limit that offering does not know is the smallest
+    the model's other offerings report, and an output limit filled that way is
+    capped at the entry's context window. A value nobody knows is omitted rather
+    than sent as null.
 
     Aliases and routing policies are listed beside the models. An
     `instance:model` selector still pins a request to one provider, and
@@ -348,7 +352,7 @@ async def list_model_metadata(
     )
 
 
-@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True)
+@catalog_router.get("/models/{model_id:path}", response_model_exclude_none=True, openapi_extra=key_scope(None))
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

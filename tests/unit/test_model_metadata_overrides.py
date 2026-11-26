@@ -1,6 +1,7 @@
 """Unit tests for how a model metadata override sits over what its server and models.dev say."""
 
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -90,6 +91,54 @@ def test_an_override_beats_the_server_and_models_dev_field_by_field() -> None:
     assert model_limits(_config(), MODELS_DEV, "cairn:cairn-qwen") == ModelLimits(131072, 131072)
     assert capabilities is not None
     assert capabilities.supported_parameters == ["response_format", "reasoning"]
+
+
+def test_an_override_turns_off_what_the_server_s_parsers_report() -> None:
+    _serve(
+        "cairn",
+        "glm",
+        ServedFacts(
+            engine="vllm",
+            settings_reported=True,
+            tool_call_parser="hermes",
+            reasoning_parser="qwen3",
+            input_modalities=("text", "image"),
+        ),
+    )
+    _override("cairn", "glm", MetadataOverride(tool_call=False, reasoning=False, input_modalities=("text",)))
+
+    capabilities = model_capabilities(_config(), MODELS_DEV, "cairn:glm")
+
+    assert capabilities is not None
+    assert capabilities.supported_parameters == []
+    assert capabilities.input_modalities == ["text"]
+
+
+def test_an_override_s_output_limit_replaces_models_dev_s() -> None:
+    _serve("cairn", "cairn-qwen", ServedFacts(engine="vllm", context_window=262144, root="Qwen/Qwen3-32B"))
+    _override("cairn", "cairn-qwen", MetadataOverride(max_output_tokens=4096))
+
+    assert model_limits(_config(), MODELS_DEV, "cairn:cairn-qwen") == ModelLimits(262144, 4096)
+
+
+def test_an_organization_without_its_own_override_reads_the_deployment_s() -> None:
+    _override("byo", "glm", MetadataOverride(context_window=8192))
+
+    assert model_limits(_config(), MODELS_DEV, "byo:glm", ACME).context_window == 8192
+    assert served_context_window("byo", "glm", ACME) == 8192
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector", ["glm", "cairn:", ":glm"])
+async def test_a_selector_missing_a_provider_or_a_model_is_refused_before_any_write(selector: str) -> None:
+    repository = MagicMock()
+    service = _overrides.ModelMetadataOverrideService(MagicMock(), overrides=repository)
+
+    with pytest.raises(ValueError, match="is not a provider:model selector"):
+        await service.set(selector, MetadataOverride(context_window=8192))
+    with pytest.raises(ValueError, match="is not a provider:model selector"):
+        await service.clear(selector)
+    assert repository.method_calls == []
 
 
 def test_an_override_cannot_offer_what_any_llm_will_not_send() -> None:

@@ -21,7 +21,18 @@ foundations, components with their states, and the page archetypes as artboards.
 ## Runtime contract
 
 `src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
-React. Do not guess a deployment when that request fails.
+React. Do not guess a deployment when that request fails: `app/boot.ts` keeps
+retrying it with backoff, and `app/DeploymentGate.tsx` shows the failure in the
+sign-in shell's frame and mounts `App` once an attempt answers. A redirect is
+followed once, deliberately: one that lands on the bootstrap (a canonical host,
+HTTPS) opens the dashboard, and one that lands on a page that is not JSON is
+something in front of the gateway asking this browser to sign in, which the
+screen says, with a Reload. A followed redirect whose fetch fails is a sign-in
+only if its destination answers a `no-cors` read (it is up and refused to
+share, as a cross-origin sign-in page does); if nothing answers, the gateway is
+unreachable. Either way the loader keeps asking in the background, quietly on
+the sign-in screen, because a host that answered without CORS reads the same
+as a sign-in page from here and only it recovers on its own.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through
@@ -80,8 +91,11 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
+- `requires`, an organization owner or admin (`manager`) or someone who may
+  run things in the selected workspace (`contributor`); a row on the
+  organization rail is a manager's without saying so
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
-  caller with no organization can use (Overview today); every other row,
+  caller with no organization can use (Home today); every other row,
   overlay rows included, is hidden from that caller, and from every caller
   until `GET /v1/organizations/me` has answered
 
@@ -89,9 +103,24 @@ These gates combine with AND, and the top bar and the account menu gate their
 Playground link through the same predicate. Organization and workspace
 authorization still comes from server responses.
 
+The same declarations decide whether a page opens, with two outcomes. A page
+the caller may not use goes Home (`useRouteAccess` in
+`app/nav/useNavVisibility.ts`), once their role is known; a failed read opens
+it. A page this deployment does not serve shows the shell's "not available
+here" panel instead. One route asks less than its row: a workspace's own page
+under Workspaces also opens to that workspace's owner or admin. A route the
+registry does not govern, such as a build's own redirect under a gated path,
+declares who may open it in `staticData.access`. A link to a
+page the caller may not open is not drawn; a feature asks
+`useIsOrganizationManager` for the manager's pages, since it cannot import the
+shell.
+
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/playground`, `/account`, and `/invitations` are
-chrome destinations and do not belong in a rail.
+points to a real page, never a redirect. A few destinations have no row of
+their own (`OFF_RAIL_ITEMS`) and select the row that stands for them: Routing
+and the workspace's guardrails select Rules, and the workspace roster People.
+`/playground`, `/account`, and `/invitations` are chrome destinations and do
+not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
@@ -106,7 +135,15 @@ pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
 header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
 line under the password field after a refused sign-in), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
-the account control, the person's avatar here). Each ships inert; `src/overlaySeams.test.ts`
+the account control, the person's avatar here). Three more carry account state
+into the chrome: `app/overlayShellBanner.tsx` (a band above the header on every
+signed-in page), `app/nav/overlayMobileWalletSlot.tsx` (a balance in the mobile
+header, where the top bar's wallet slot is hidden), and
+`features/playground/overlayErrorAction.tsx` (an action under a failed
+Playground turn, given the refusal's status and error code). One more adds to
+an owner's Home: `features/home/overlayHomeAccount.tsx` (a figure in place of
+Failures, a row under Needs attention and a clause in the all-clear line, for
+an edition that holds the organization's money). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
 
 One seam is a CSS custom property rather than a module: `--shell-corner-clearance`
@@ -189,7 +226,8 @@ The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
 prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved
 `base` and rewrites the `index.html` link (#857). Do not add a static manifest
 to `public/pwa/`; only the icons live there. The plugin is a standalone module
-so the otari-ai superset build imports it rather than copying it.
+so the otari-ai superset build imports it rather than copying it, and passes
+its own `description` as an option.
 
 Regenerate the icons with `pnpm --dir web run icons:generate`
 (`web/scripts/generate-pwa-icons.mjs`). It rasterizes the mark through
@@ -336,9 +374,8 @@ flex row.
 
 **Read the table's own block in `globals.css` before measuring anything.** Ten of
 the sixteen per-table classes declare widths on some of their columns, keyed on
-`data-key`, and `.otari-keys-table` is `table-layout: fixed` outright
-(`globals.css:2731`, "Key lanes stay fixed while the name absorbs the available
-width"). So a width is often written down rather than solved, and measuring the
+`data-key`, and `.otari-activity-table` and `.otari-rules-table` are
+`table-layout: fixed` outright. So a width is often written down rather than solved, and measuring the
 live table to rediscover it is the slower route to a worse answer. Read both
 blocks before changing one: `.otari-breakdown`'s columns are specified in two
 places, as `min-width` at `globals.css:2279` and as `width` at `globals.css:2827`,
@@ -353,7 +390,7 @@ them by injecting the new cell into the live table and reading the result back.
 - Give every part of an injected cell `flex: 0 0 auto`. Without it the parts
   shrink to fit and overflow their own element with no error, leaving column
   widths that look plausible and are not.
-- Overwrite `last_used` with a real timestamp first. Every row in the seed says
+- Overwrite `last_used_at` with a real timestamp first. Every row in the seed says
   "never", and that one substitution moves a measured overflow from 0 to 23px.
 
 **A dialog's bounding box is a few percent large while it opens.** The overlay

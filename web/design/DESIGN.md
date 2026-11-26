@@ -81,7 +81,8 @@ for a component, not for those.
 | `actions/IconButton` | `IconButton` |
 | `actions/ConfirmButton` · `/RefreshButton` · `/CopyButton` | one each |
 | `actions/CopyField` | `CopyField`, `CopyableValue` |
-| `actions/RowAction` | `RowAction`, `RowActionRow` |
+| `actions/RowAction` | `RowAction`, `RowActionRow`, and `RowMenuContext`, which `ConfirmRowAction` asks through |
+| `actions/RowMenu` | `RowMenu`, and the `RowMenuAction` type |
 | `actions/ConfirmRowAction` | `ConfirmRowAction` |
 | `data/DataTable` | `DataTable`, and the `DataTableColumn` type |
 | `data/TablePagination` | `TablePagination`, `PAGE_SIZE_OPTIONS` |

@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Never
 
 from sqlalchemy import Update, case, select, update
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.repositories.base_repository import BaseRepository
+from gateway.types.key_scope import KeyScopeSet
 
 _NAMES_BATCH = 10_000
 
@@ -33,6 +35,8 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         user_id: str,
         workspace_id: uuid.UUID,
         client_id: str,
+        scopes: KeyScopeSet,
+        expires_at: datetime | None = None,
     ) -> None:
         """Stage a budget-enforced, self-service key with inherited access restrictions."""
         self.db.add(
@@ -46,6 +50,8 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
                 workspace_id=workspace_id,
                 self_service=True,
                 exclude_from_budget=False,
+                scopes=scopes,
+                expires_at=expires_at,
                 metadata_={"oauth_client_id": client_id},
             )
         )
@@ -68,6 +74,17 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
+
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage revoking every key in these workspaces, whoever it is billed to."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.workspace_id.in_(list(workspace_ids)))
+            .values(is_active=False, disabled_reason=DisabledReason.REVOKED)
+            .execution_options(synchronize_session=False)
+        )
 
     async def reload_locked(self, key: APIKey) -> None:
         """Re-read ``key`` from the database and lock its row until the commit."""
@@ -215,6 +232,10 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the key whose secret hashes to ``key_hash``, or None."""
         result = await self.db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
         return result.scalar_one_or_none()
+
+    async def touch_last_used(self, key_id: str, when: datetime) -> None:
+        """Record that the key ``key_id`` was used at ``when``."""
+        await self.db.execute(update(APIKey).where(APIKey.id == key_id).values(last_used_at=when))
 
     async def add_declared_if_absent(
         self,

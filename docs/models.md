@@ -7,18 +7,31 @@ reliable than a copied provider table.
 
 ## Model format
 
-Use `provider:model`:
+A request names its model in one of two forms:
 
 ```text
-openai:gpt-5
+openai/gpt-oss-120b          # catalog id, vendor/model: Otari picks the provider
+openai:gpt-5                 # provider:model: pinned to that provider
 anthropic:claude-sonnet-4-6
 ollama:llama3
 ```
 
-The prefix selects a provider or named provider instance. Everything after the
-first colon is sent as the provider's model ID.
+`vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, the `id` that [`GET /api/v1/models`](#listing-available-models) lists, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
 
-A request may also name the model the way the catalog does. `vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
+In `provider:model`, the prefix selects a provider or named provider instance,
+and everything after the first colon is sent as the provider's model ID, colons
+included (`bedrock:anthropic.claude-sonnet-4-20250514-v1:0`). The two separators
+are not interchangeable: `openai/gpt-oss-120b` is a catalog id, while
+`openai:gpt-oss-120b` asks the `openai` provider itself for that model.
+
+A model neither the catalog nor models.dev knows, such as a misspelled catalog
+id, is refused with `404` (`model_not_found`), naming up to two of the nearest
+catalog ids. A bare name that is no catalog id and none of the caller's aliases
+or routing policies, such as a policy saved in another workspace, is refused
+with `400` (`invalid_model`); its message points to
+[`GET /api/v1/models`](#listing-available-models), which lists the caller's
+aliases and routing policies. A model that exists but whose provider has no
+credential is refused with `424` (`provider_not_configured`).
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
@@ -196,9 +209,12 @@ uses:
 
 - `name`: models.dev's display name.
 - `supported_parameters`: `tools` and `tool_choice` for a model that calls
-  tools, `response_format` for one with structured output, and `reasoning` for
-  a reasoning model. It names only the parameters models.dev records a flag
-  for, not every parameter the model takes. `response_format` is left out where
+  tools, `response_format` for one with structured output, `reasoning` for
+  a reasoning model, and `temperature` for one that takes a sampling
+  temperature. It names only the parameters models.dev records a flag
+  for, not every parameter the model takes. A model models.dev records no
+  `temperature` flag for does not list `temperature`, whether or not it takes
+  one. `response_format` is left out where
   Otari cannot send it to the provider, as on Bedrock for every model but
   Anthropic's, or on MiniMax, Z.ai, Inception, SageMaker and llamafile for any
   model.
@@ -220,7 +236,7 @@ no `name`.
 
 Where a provider's server and models.dev say nothing about a model, or say it
 wrong, whoever holds the key that serves it can set its details on the model's
-page in the dashboard: **Edit details** on its row of offerings. The deployment
+page in the dashboard: choose **Edit details…** from its row's menu. The deployment
 operator sets them for the deployment's own providers, and an organization's
 owners and admins for the models its own provider keys serve, which only that
 organization's callers see.
@@ -396,7 +412,9 @@ aliases:
 Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target, which the gateway
 names in the `Otari-Provider` and `Otari-Model` response headers. Configure the
-target's price, not a price under the alias.
+target's price, not a price under the alias. Each usage row keeps the alias as
+its `requested_model` beside the target in `model`, so a request sent under the
+alias can be told from one sent to the target.
 
 An alias also withholds its target offering from `GET /api/v1/models` in that
 workspace, where the alias is listed in its place; the model stays listed while
@@ -482,6 +500,22 @@ caller, the organization's last thirty days on that offering: requests, cache
 hit rate, and the effective price per million tokens after cache reads and
 tiers.
 
+For the same caller, each offering carries how fast it answered the
+organization over the last seven days, in `speed_7d`: the time to first token
+and the output tokens per second, each at the median (p50) and at p95, and how
+many requests each was read from. p95 is the slow tail of each: the 95th
+percentile of the time to first token, and the 5th percentile of the rate, the
+speed 95% of requests reached. Throughput counts the
+whole request, time to first token included, as OpenRouter measures it, so the
+two compare. Only a request a routing policy's first candidate served counts,
+because a fallback's timings include the attempts before it, and so does only a
+request that ran no gateway tool. A value is null on fewer than 20 measured
+requests: the time to first token needs streamed requests, and throughput needs
+responses of 20 output tokens or more. These are the organization's own
+requests, so an offering that served the longer prompts reads slower. The
+model's page shows them as the Latency and Throughput columns, with a switch
+between the two percentiles.
+
 Each offering also lists the Otari routes its models.dev protocols map to, in
 `endpoints`. A route is a path below the API base, so `/embeddings` is called at
 `/api/v1/embeddings`. The list comes from the protocols in models.dev's v2
@@ -542,7 +576,7 @@ your organization pays.
   offering is served on.
 
 The page is read-only. An organization sets its own rate on **Providers >
-Inference**, which an offering on one of its keys links to.
+Inference**, which **Set your rate…** in an offering's row menu opens.
 
 The Models page requests one page at a time from `GET /api/v1/catalog/models`.
 Filters and sorting apply to the caller's full authorized catalog before `skip`
@@ -597,14 +631,20 @@ what was sent, and pricing, budgets and usage key on the offering reached.
   4. The other offerings, cheapest first at the caller's rates, ties in A-Z order.
 
   To make an unpriced offering lead (an organization's own key or a local model, say), give it a price, even 0.
+- A model's bare name (`claude-opus-5-5`), where exactly one catalog id ends in it (`anthropic/claude-opus-5-5`), resolves as that catalog id, so a client that sends a provider's own id with no prefix, as Claude Code does, needs no alias. Where no catalog id ends in the name as written, a dash may stand for a dot in it, so `claude-opus-5-5` also reaches `anthropic/claude-opus-5.5`. A name two catalog ids end in resolves to neither, and an alias of the same name wins.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 - On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.
 
-The index behind this is rebuilt every minute and on
-`POST /api/v1/catalog/selectors/refresh`, an operator call. It holds the
+The index behind this is rebuilt every minute, on
+`POST /api/v1/catalog/selectors/refresh`, an operator call, and after each
+change made through `/api/v1/hosted-providers`, so a hosted model a refresh,
+a switch or an edit serves is reachable by its catalog id at once on the
+instance that took the change. That rebuild is best effort and local to the
+process: another replica or worker picks the change up on its own next
+rebuild, within a minute. It holds the
 deployment's catalog view, priced from the deployment's list and the defaults,
 and one view per organization for the models it offers on its own provider
 keys, priced at that organization's rates. An organization's view answers only
@@ -659,8 +699,12 @@ ranked independently. Region remains a preference, so fallback can cross regions
 Selection uses these signals:
 
 - **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
-  put an offering behind healthy alternatives for 15 seconds. It stays available
-  as a last resort. Client cancellation and gateway refusals do not count as outages.
+  put an offering behind healthy alternatives for 15 seconds, doubling with each
+  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  credential cools every model served on that credential the same way, for the
+  workspace that saw it. An offering the deployment refuses to serve a caller on its
+  credential ranks last for that caller for 5 minutes. Each stays available as a last
+  resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
   pricing where requested. It uses the caller's organization prices, then the
@@ -754,7 +798,14 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor.
+of the offering tried first, and `owned_by` is the model's vendor. A limit the
+offering tried first does not know, such as the context length of a model a vLLM
+server also serves, is the smallest one the model's other offerings report. An
+output limit filled that way is capped at the entry's context window.
+
+The caller's aliases and routing policies are listed beside the models, under
+their own names: the configured ones, and the stored ones of the key's
+workspace.
 
 To pin a request to one provider, send its `provider:model` selector, which
 still works everywhere it did. `?provider=<instance>` lists only the models that

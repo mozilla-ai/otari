@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceDetail, TraceSortKey, TraceSummary } from "@/client"
+import type { TraceDetail, TraceSortKey } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
-import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { DataTable } from "@/design-system/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
@@ -13,11 +13,11 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
-import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import { useObserveScope } from "@/features/observe/useObserveScope"
+import { useViewWorkspace } from "@/features/observe/viewWorkspace"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   DEFAULT_TRACE_SORT,
@@ -29,7 +29,7 @@ import {
   useTraces,
 } from "@/shared/api/traces"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { anyHarnessMark } from "@/shared/components/marks/BrandMark"
 import {
   ACTIVITY_DEFAULT_KEY,
   bucketDurationMs,
@@ -38,22 +38,15 @@ import {
   SESSION_PRESETS,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
-import { formatDuration, formatTraceTimestamp, plural } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent, ShareSessionAction } from "./SessionContent"
+import { columns } from "./sessionColumns"
 import { TracePeek } from "./TracePeek"
-import {
-  sessionDurationMs,
-  sessionName,
-  shortId,
-  traceKind,
-} from "./traceModel"
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -108,112 +101,25 @@ const HAS_ERROR: Record<string, "true" | "false"> = {
   success: "false",
 }
 
-const EMPTY = <span className="text-subtle">—</span>
-
-function columns(peekId: string): DataTableColumn<TraceSummary>[] {
-  return [
-    {
-      id: "last_activity",
-      allowsSorting: true,
-      header: "Last activity",
-      cell: (session) => (
-        <span className="text-mono-caption whitespace-nowrap text-muted">
-          {formatTraceTimestamp(session.last_activity_at)}
-        </span>
-      ),
-    },
-    {
-      id: "name",
-      header: "Name",
-      isRowHeader: true,
-      cell: (session) => (
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-body">{sessionName(session)}</span>
-          <span className="shrink-0 text-mono-caption whitespace-nowrap text-subtle">
-            {shortId(session.trace_id)}
-          </span>
-          {session.trace_id === peekId ? (
-            <span className="sr-only">, open</span>
-          ) : null}
-        </span>
-      ),
-    },
-    {
-      id: "user",
-      header: "User",
-      cell: (session) =>
-        session.user_id ? (
-          <span className="block max-w-48 truncate text-mono-caption text-muted">
-            {session.user_id}
-          </span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "levels",
-      allowsSorting: true,
-      header: "Levels",
-      cell: (session) =>
-        session.error_count ? (
-          <Chip tone="danger">{plural(session.error_count, "error")}</Chip>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "latency",
-      allowsSorting: true,
-      header: "Latency",
-      align: "end",
-      cell: (session) => (
-        <span className="text-mono-caption">
-          {formatDuration(sessionDurationMs(session))}
-        </span>
-      ),
-    },
-    {
-      id: "tokens",
-      allowsSorting: true,
-      header: "Tokens",
-      align: "end",
-      cell: (session) =>
-        session.input_tokens || session.output_tokens ? (
-          <span className="text-mono-caption whitespace-nowrap">
-            {formatNumber(session.input_tokens)} →{" "}
-            {formatNumber(session.output_tokens)} (Σ{" "}
-            {formatNumber(session.input_tokens + session.output_tokens)})
-          </span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "cost",
-      allowsSorting: true,
-      header: "Total cost",
-      align: "end",
-      cell: (session) =>
-        session.cost ? (
-          <span className="text-mono-caption">{formatCost(session.cost)}</span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "tags",
-      header: "Tags",
-      cell: (session) => <Chip>{traceKind(session)}</Chip>,
-    },
-  ]
-}
-
 interface TimeWindow {
   start: number
   end: number
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
+
+/**
+ * The count the chart's header reads out: the server's count of the window.
+ * One that could not be read leaves the header to the bars, rather than to
+ * skeletons that never resolve.
+ */
+export function windowTotals(count: {
+  data?: { count: number }
+  isError: boolean
+}): { count: number; failed: null } | null | undefined {
+  if (count.data) return { count: count.data.count, failed: null }
+  return count.isError ? undefined : null
+}
 
 /** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
 export function SessionsPage({ embedded = false }: { embedded?: boolean }) {
@@ -227,7 +133,7 @@ export function SessionsPage({ embedded = false }: { embedded?: boolean }) {
 
 function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const url = useUrlState(URL_DEFAULTS, { untracked: UNTRACKED })
-  const { selected: workspace } = useSelectedWorkspace()
+  const workspaceId = useViewWorkspace() ?? ""
   // Said on the page as well as in the workspace's settings, because a manager
   // turns it on and a member may never have opted in themselves.
   const workspaces = useWorkspaces()
@@ -237,7 +143,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     ? (workspaces.data ?? []).filter(
         (candidate) =>
           candidate.trace_content_enabled &&
-          (workspace ? candidate.id === workspace.workspace_id : true),
+          (workspaceId ? candidate.id === workspaceId : true),
       )
     : []
   const keepsContent = keeping.length > 0
@@ -310,7 +216,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
 
   const search = useDebounced(query.trim().slice(0, SEARCH_MAX_LENGTH))
   const base: Omit<TraceFilters, "start"> = {
-    workspaceId: workspace?.workspace_id ?? "",
+    workspaceId,
     q: search,
     userIds: userFilters,
     apiKeyIds: apiKeyFilters,
@@ -413,9 +319,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     return out
   }, [points, chartStart, bucket, now])
   const win = custom ?? { start: chartStart, end: now }
-  const tableColumns = useMemo(() => columns(peekId), [peekId])
 
   const rows = traces.data?.items ?? []
+  const withMarks = anyHarnessMark(rows)
+  const tableColumns = useMemo(
+    () => columns(peekId, withMarks),
+    [peekId, withMarks],
+  )
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
   // The read's own summary once it lands: the list is a snapshot, and a
   // session still running has moved on since. Until then, the row on screen.
@@ -495,15 +405,10 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
       {/* Below md the panel covers the page, which then takes no focus or
           presses until it closes. */}
       <div className="flex flex-col" inert={open !== null && isMobile}>
-        {embedded ? null : (
-          <PageIntro title="Sessions">
-            Every agent session the gateway recorded: the turns, model requests
-            and tools behind each one. No model response is stored.
-          </PageIntro>
-        )}
+        {embedded ? null : <PageIntro title="Sessions" />}
         {keepsContent ? (
           <InfoBanner>
-            {workspace ? "This workspace keeps" : "Your workspaces keep"} what
+            {workspaceId ? "This workspace keeps" : "Your workspaces keep"} what
             your sessions were about: the prompts and tool calls your agents
             send{keepsToolOutput ? ", and what each tool returned" : ""}. Otari
             shows yours only to you, unless you share a session.{" "}
@@ -549,6 +454,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
             loading={seriesQuery.isPending}
             ariaLabel="Sessions active over the selected window"
             unitLabel="Active sessions"
+            // A session spans buckets, so the bars are never summed; the
+            // window's count is the one that sizes the list. No failed figure:
+            // the series counts sessions with a failing error, and the
+            // `has_error` filter counts any error, so a count with it would not
+            // match the failed marks.
+            additive={false}
+            totals={windowTotals(count)}
           />
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <SearchField

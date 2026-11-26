@@ -1,3 +1,4 @@
+import { mailCanSend } from "@/shared/helpers/bootstrap"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { CheckEmailPage } from "./CheckEmailPage"
@@ -20,9 +21,9 @@ import { SsoCallbackPage } from "./SsoCallbackPage"
 import { VerifyEmailPage } from "./VerifyEmailPage"
 
 /**
- * One of the pages in front of a session, chosen by hash path.
+ * One of the pages in front of a session, chosen by route path.
  *
- * `App.tsx` mounts this ahead of its auth gate and keys it on the whole hash,
+ * `App.tsx` mounts this ahead of its auth gate and keys it on the whole route,
  * so following a second emailed link in an open tab remounts rather than
  * re-rendering: the token-reading pages take their token once, at mount, the
  * same hazard `AcceptInvitationPage`'s own key exists for.
@@ -37,16 +38,16 @@ import { VerifyEmailPage } from "./VerifyEmailPage"
  */
 export function PublicAuthPage({
   path,
-  hash,
+  route,
 }: {
   /** Null for a direct link naming an organization's slug rather than one of the fixed pages. */
   path: PublicAuthPath | null
-  hash: string
+  route: string
 }) {
-  const { mail_ready, oauth_providers } = useDeployment()
+  const { mail, oauth_providers } = useDeployment()
 
   if (path === null) {
-    const slug = ssoAuthorizeSlug(hash)
+    const slug = ssoAuthorizeSlug(route)
     return slug === null ? null : <SsoAuthorizePage slug={slug} />
   }
 
@@ -54,7 +55,7 @@ export function PublicAuthPage({
 
   if (
     !isPublicAuthPageAvailable(path, {
-      mailReady: mail_ready,
+      mailCanSend: mailCanSend(mail),
       oauthProviders: oauth_providers,
     })
   ) {
@@ -67,28 +68,28 @@ export function PublicAuthPage({
 
   switch (path) {
     case "/signup":
-      return <SignupPage hash={hash} />
+      return <SignupPage route={route} />
     case "/check-email":
-      return <CheckEmailPage hash={hash} />
+      return <CheckEmailPage route={route} />
     case "/resend-verification":
       return <ResendVerificationPage />
     case "/recover-password":
       return <RecoverPasswordPage />
     case "/verify-email":
-      return <VerifyEmailPage hash={hash} />
+      return <VerifyEmailPage route={route} />
     case "/reset-password":
-      return <ResetPasswordPage hash={hash} />
+      return <ResetPasswordPage route={route} />
     case "/setup":
-      return <SetupPage hash={hash} />
-    case "/auth/google/callback":
-    case "/auth/github/callback":
+      return <SetupPage route={route} />
+    case "/sign-in/google/callback":
+    case "/sign-in/github/callback":
       // `provider` is non-null on these two arms by construction: it is parsed
       // from the same path this switch matched. Narrowed with a fallback rather
       // than an assertion, because a `!` here would be a claim the type system
       // cannot check and the fallback renders the same panel either way.
-      return <OAuthCallbackPage provider={provider ?? ""} hash={hash} />
-    case "/auth/sso/callback":
-      return <SsoCallbackPage hash={hash} />
+      return <OAuthCallbackPage provider={provider ?? ""} route={route} />
+    case "/sign-in/sso/callback":
+      return <SsoCallbackPage route={route} />
   }
 }
 
@@ -98,7 +99,7 @@ function ProviderUnavailable({ provider }: { provider: string }) {
     <PublicAuthLayout
       title="Not available on this gateway"
       description={`This deployment is not configured to sign anyone in with ${label}.`}
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <p className="text-sm text-muted">
         An operator can turn it on by registering an OAuth client with {label}{" "}
@@ -130,7 +131,7 @@ function MailUnavailable({
     <PublicAuthLayout
       title="Not available on this gateway"
       description="This flow works by emailing you a link, and this deployment is not configured to send mail."
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <p className="text-sm text-muted">
         {offersProviderSignIn

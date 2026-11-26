@@ -171,13 +171,14 @@ export function OrganizationGuardrailsPage() {
             />
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit ${row.name}`}
               onPress={() => openDialog("definition", row.id)}
             />
             <RowAction
               icon={FiTrash2}
-              label="Remove"
+              label="Remove…"
+              isDestructive
               ariaLabel={`Remove ${row.name}`}
               onPress={() => setPendingDefinitionDelete(row)}
             />
@@ -275,13 +276,14 @@ export function OrganizationGuardrailsPage() {
           )}
           <RowAction
             icon={FiEdit2}
-            label="Edit"
+            label="Edit…"
             ariaLabel={`Edit ${row.profile}`}
             onPress={() => openDialog("mandate", row.id)}
           />
           <RowAction
             icon={FiTrash2}
-            label="Remove"
+            label="Remove…"
+            isDestructive
             ariaLabel={`Remove ${row.profile}`}
             onPress={() => setPendingMandateDelete(row)}
           />
@@ -308,12 +310,7 @@ export function OrganizationGuardrailsPage() {
             </div>
           ) : null
         }
-      >
-        The organization&rsquo;s own checks on what models read and answer, such
-        as prompt injection or personal data. Each one runs in the workspaces
-        you choose, and can block what it flags or only record it. Vendor keys
-        are encrypted at rest and never shown again.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={

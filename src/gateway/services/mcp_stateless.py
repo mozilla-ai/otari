@@ -24,7 +24,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from time import monotonic
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 import httpx2
 from mcp import ClientSession
@@ -32,10 +32,14 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
 from mcp.types import PaginatedRequestParams
 
+from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
+from gateway.exceptions.tools_exceptions import McpConnectionUnavailableError, McpSignInRequiredError
 from gateway.log_config import logger
+from gateway.services.url_safety import mcp_private_hosts
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, MutableMapping
+    import uuid
+    from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator, MutableMapping
 
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
@@ -128,6 +132,8 @@ CODE_SERVER_CHANGED = "mcp_server_changed"
 CODE_TOOL_NOT_ALLOWED = "mcp_tool_not_allowed"
 CODE_UNSAFE_URL = "unsafe_mcp_url"
 CODE_CREDENTIALS_UNAVAILABLE = "mcp_credentials_unavailable"
+# The server sends each user's own credential and the key's user has not signed in to it.
+CODE_SIGN_IN_REQUIRED = MCP_SIGN_IN_REQUIRED
 CODE_AUTHENTICATION_FAILED = "authentication_failed"
 CODE_MISDIRECTED_REQUEST = "misdirected_request"
 CODE_PAYMENT_REQUIRED = "payment_required"
@@ -186,11 +192,15 @@ class McpExecutionError(Exception):
     what must not travel.
     """
 
-    def __init__(self, code: str, execution_state: ExecutionState, status_code: int) -> None:
+    def __init__(
+        self, code: str, execution_state: ExecutionState, status_code: int, *, sign_in_url: str | None = None
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.execution_state = execution_state
         self.status_code = status_code
+        # With ``mcp_sign_in_required``: the link that starts the caller's own sign-in, when one could be made.
+        self.sign_in_url = sign_in_url
 
 
 # --------------------------------------------------------------------------- #
@@ -395,7 +405,11 @@ class _BoundedResponseStream(httpx2.AsyncByteStream):
 
 
 def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., httpx2.AsyncClient]:
-    """An MCP HTTP client factory with redirects disabled and a size pre-check.
+    """An MCP HTTP client factory with a pinned public-only transport, redirects disabled and a size pre-check.
+
+    The server's URL is a tenant's, so every request is dialed through
+    :class:`OwnedEndpointHttpx2Transport`: its host is resolved again, refused
+    unless every address is public, and connected at the address that was checked.
 
     The SDK follows a redirect that stays on the endpoint's origin, up to the
     client's ``max_redirects``, whatever its ``follow_redirects`` says. Redirects
@@ -405,9 +419,11 @@ def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., 
     ``screen_answers`` adds :func:`refuse_unusable_answer` ahead of the size
     check, for a connection check that has to name why a server failed.
     """
+    # At call time: the providers package reaches this module through model access.
+    from gateway.services.providers import OwnedEndpointHttpx2Transport
+
     response_hooks: list[Callable[[httpx2.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
-    if screen_answers:
-        response_hooks.insert(0, refuse_unusable_answer)
+    response_hooks.insert(0, refuse_unusable_answer if screen_answers else refuse_rejected_token)
 
     def factory(
         headers: dict[str, str] | None = None,
@@ -417,6 +433,7 @@ def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., 
         client_headers = dict(headers or {})
         client_headers["Accept-Encoding"] = "identity"
         kwargs: dict[str, Any] = {
+            "transport": OwnedEndpointHttpx2Transport(private_hosts=mcp_private_hosts()),
             "follow_redirects": False,
             "max_redirects": 0,
             "timeout": timeout if timeout is not None else httpx2.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
@@ -502,15 +519,78 @@ async def open_session(server: ResolvedMcpServer, *, screen_answers: bool = Fals
     Connection and initialization share one deadline, so a server
     that accepts a socket and then never answers ``initialize`` cannot hold a
     slot for the length of the call deadline instead.
+
+    A per-user server that refuses its token with a 401 gets one more try with a renewed one,
+    from ``server.renew_token``; a user whose sign-in ended is answered ``mcp_sign_in_required``.
     """
+    retried = False
+    while True:
+        stack = AsyncExitStack()
+        try:
+            session = await _enter_session(stack, server, screen_answers=screen_answers)
+        except BaseException as exc:
+            failure = await closed_with(stack, exc)
+            if retried or server.renew_token is None or not refused_token(failure):
+                raise failure from None
+            server = server.model_copy(update={"authorization_token": await _renewed(server)})
+            retried = True
+            continue
+        async with stack:
+            yield session
+        return
+
+
+async def _enter_session(stack: AsyncExitStack, server: ResolvedMcpServer, *, screen_answers: bool) -> ClientSession:
+    """Connect and initialize one session into ``stack``; a test stands in for the network here."""
     headers = {"Authorization": f"Bearer {server.authorization_token}"} if server.authorization_token else None
-    async with AsyncExitStack() as stack:
-        async with asyncio.timeout(CONNECT_TIMEOUT_S):
-            client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
-            read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-        yield session
+    async with asyncio.timeout(CONNECT_TIMEOUT_S):
+        client = await stack.enter_async_context(build_http_client_factory(screen_answers=screen_answers)(headers))
+        read, write = await stack.enter_async_context(streamable_http_client(server.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+    return session
+
+
+async def closed_with(stack: AsyncExitStack, failure: BaseException) -> BaseException:
+    """Close a half-opened session's stack, and return what failed: the group closing raises carries the cause.
+
+    Bounded by ``CLEANUP_TIMEOUT_S`` as a session that opened is, and a close that runs past it leaves
+    ``failure`` as the answer.
+    """
+    bound = asyncio.timeout(CLEANUP_TIMEOUT_S)
+    try:
+        async with bound:
+            await stack.aclose()
+    except BaseException as closed:
+        if bound.expired():
+            logger.warning("Stateless MCP cleanup timed out after a failed open error_class=%s", failure_class(failure))
+            return failure
+        return closed
+    return failure
+
+
+def refused_token(failure: BaseException) -> bool:
+    """Whether a failed session was the server answering 401, the one failure a new token can mend.
+
+    The SDK reports a 401 as a protocol error with no status, so the response hooks name it first
+    (:func:`refuse_rejected_token`, or :func:`refuse_unusable_answer` when a check screens answers).
+    """
+    return any(
+        (isinstance(leaf, httpx2.HTTPStatusError) and leaf.response.status_code == 401)
+        or (isinstance(leaf, _UnusableAnswer) and leaf.http_status == 401)
+        for leaf in _leaves(failure)
+    )
+
+
+async def _renewed(server: ResolvedMcpServer) -> str:
+    """A new token for the one ``server`` was refused with, as an execution error the routes already answer."""
+    assert server.renew_token is not None
+    try:
+        return await server.renew_token(server.authorization_token or "")
+    except McpSignInRequiredError:
+        raise McpExecutionError(CODE_SIGN_IN_REQUIRED, ExecutionState.NOT_STARTED, 403) from None
+    except McpConnectionUnavailableError:
+        raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
 
 
 # --------------------------------------------------------------------------- #
@@ -531,8 +611,21 @@ class DiscoveredCatalog:
     warnings: list[tuple[str, str]]
 
 
+class ContactObserver(Protocol):
+    """Hears what a real request found when it talked to a stored server, without waiting or raising."""
+
+    def reached(self, server_id: uuid.UUID | str | None, url: str, listing: ServerCheck | None = None) -> None:
+        """The server answered; ``listing`` is its whole tool catalog, when the request read one."""
+
+    def failed(self, server_id: uuid.UUID | str | None, url: str, failure: BaseException) -> None:
+        """No session could be opened on the server."""
+
+
 async def discover_stored_tools(
-    server: ResolvedMcpServer, admits: Callable[[str], bool] | None = None
+    server: ResolvedMcpServer,
+    admits: Callable[[str], bool] | None = None,
+    *,
+    contacts: ContactObserver | None = None,
 ) -> DiscoveredCatalog:
     """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
@@ -542,14 +635,15 @@ async def discover_stored_tools(
     more tools than a response may carry still answers a caller allowed a few
     of them; the limits on pages, bytes read and descriptors examined still
     bound the listing itself. Every failure is ``not_started``: discovery runs
-    no tool.
+    no tool. ``contacts`` hears whether the server answered, and its catalog where the
+    listing read all of it.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
     try:
         async with DISCOVERY_GATE.slot():
-            return await _run_in_owner_task(_discover_once(server, admits))
+            return await _run_in_owner_task(_discover_once(server, admits, contacts))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except McpExecutionError:
@@ -564,10 +658,14 @@ async def discover_stored_tools(
         # ``Exception``, so a narrower arm here would let the most ordinary
         # failure of all escape the error contract and answer nothing.
         logger.warning("Stateless MCP discovery failed error_class=%s", failure_class(exc))
+        if contacts is not None:
+            contacts.failed(server.id, server.url, exc)
         raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
-async def _discover_once(server: ResolvedMcpServer, admits: Callable[[str], bool] | None) -> DiscoveredCatalog:
+async def _discover_once(
+    server: ResolvedMcpServer, admits: Callable[[str], bool] | None, contacts: ContactObserver | None = None
+) -> DiscoveredCatalog:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server))
@@ -575,6 +673,9 @@ async def _discover_once(server: ResolvedMcpServer, admits: Callable[[str], bool
             listed = await collect_tools(session, allowed_tools=server.allowed_tools)
         except McpDiscoveryRefused:
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
+        if contacts is not None:
+            # An allow-list stops the listing early, so only a server without one was read in full.
+            contacts.reached(server.id, server.url, catalog_of(listed) if server.allowed_tools is None else None)
         if admits is not None:
             listed = [tool for tool in listed if admits(tool.name)]
 
@@ -687,6 +788,9 @@ class CheckFailure(StrEnum):
     NOT_MCP = "not_mcp"
     LIMITS_EXCEEDED = "limits_exceeded"
     CONNECTION_FAILED = "connection_failed"
+    # A per-user server's sign-in setup, found before anyone signs in (``sign_in_problem``).
+    SIGN_IN_UNSUPPORTED = "sign_in_unsupported"
+    SIGN_IN_UNAVAILABLE = "sign_in_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -696,13 +800,16 @@ class ServerCheck:
     ``tool_names`` lists the server's whole live catalog, whatever the stored
     allowlist admits, and is empty on a failure. ``http_status`` is set when
     the server refused with one. ``read_only_hinted`` are the tools the server
-    annotates ``readOnlyHint``, a suggestion for a manager and never a label.
+    annotates ``readOnlyHint``, which its read labels follow until a manager edits them.
+    ``descriptions`` holds the first line of each tool's own description, where
+    it has one: untrusted text, for a person to read and never to act on.
     """
 
     tool_names: list[str]
     failure: CheckFailure | None = None
     http_status: int | None = None
     read_only_hinted: list[str] = field(default_factory=list)
+    descriptions: dict[str, str] = field(default_factory=dict)
 
 
 class _UnusableAnswer(Exception):
@@ -759,6 +866,27 @@ async def refuse_unusable_answer(response: httpx2.Response) -> None:
     content_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
     if content_type not in _MCP_CONTENT_TYPES and _answers_a_request(response.request):
         raise _UnusableAnswer(CheckFailure.NOT_MCP, None)
+
+
+def _opens_a_session(request: httpx2.Request) -> bool:
+    try:
+        body = json.loads(request.content)
+    except (ValueError, TypeError, httpx2.RequestNotRead):
+        return False
+    return isinstance(body, dict) and body.get("method") == "initialize"
+
+
+async def refuse_rejected_token(response: httpx2.Response) -> None:
+    """Name a 401 to the opening handshake, which the SDK would otherwise turn into a status-less protocol error.
+
+    A response hook on every MCP client, so a refused token reaches :func:`refused_token` and is renewed.
+    The handshake only: a session that opened was given a token the server accepted.
+
+    Raises:
+        _UnusableAnswer: the server answered ``initialize`` with 401.
+    """
+    if response.status_code == 401 and response.request.method == "POST" and _opens_a_session(response.request):
+        raise _UnusableAnswer(CheckFailure.UNAUTHORIZED, 401)
 
 
 def _leaves(exc: BaseException, _depth: int = 0) -> Iterator[BaseException]:
@@ -838,15 +966,35 @@ async def _check_once(server: ResolvedMcpServer) -> ServerCheck:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server, screen_answers=True))
-        listed = [tool for tool in await collect_tools(session, allowed_tools=None) if not reads_as_pattern(tool.name)]
-        return ServerCheck(
-            tool_names=[tool.name for tool in listed],
-            read_only_hinted=[
-                tool.name for tool in listed if tool.annotations is not None and tool.annotations.read_only_hint is True
-            ],
-        )
+        return catalog_of(await collect_tools(session, allowed_tools=None))
     finally:
         await _close_bounded(stack)
+
+
+def catalog_of(tools: Iterable[MCPTool]) -> ServerCheck:
+    """A server's whole tool listing as a check records it: literal names, read-only hints, one-line descriptions."""
+    listed = [tool for tool in tools if not reads_as_pattern(tool.name)]
+    return ServerCheck(
+        tool_names=[tool.name for tool in listed],
+        read_only_hinted=[
+            tool.name for tool in listed if tool.annotations is not None and tool.annotations.read_only_hint is True
+        ],
+        descriptions={tool.name: summary for tool in listed if (summary := tool_summary(tool.description)) is not None},
+    )
+
+
+TOOL_SUMMARY_MAX_LENGTH = 200
+"""Longest one-line summary of a tool's description that a check keeps."""
+
+
+def tool_summary(description: str | None) -> str | None:
+    """The first non-empty line of a tool's description, cut to ``TOOL_SUMMARY_MAX_LENGTH``; ``None`` when blank."""
+    if not description:
+        return None
+    line = next((line.strip() for line in description.splitlines() if line.strip()), "")
+    if not line:
+        return None
+    return line if len(line) <= TOOL_SUMMARY_MAX_LENGTH else line[: TOOL_SUMMARY_MAX_LENGTH - 1].rstrip() + "…"
 
 
 # --------------------------------------------------------------------------- #
@@ -861,6 +1009,7 @@ async def execute_stored_tool(
     *,
     on_dispatch: Callable[[], None] | None = None,
     timings: MutableMapping[str, float] | None = None,
+    contacts: ContactObserver | None = None,
 ) -> CallToolResult:
     """Execute exactly one caller-authorized tool call and return its result.
 
@@ -875,7 +1024,7 @@ async def execute_stored_tool(
     ``timings``, when given, collects the phase durations and the result size for
     the caller to log. It carries no tool name, argument, or result content,
     and it is filled in as each phase ends, so a failure part way through still
-    leaves the phases that did run.
+    leaves the phases that did run. ``contacts`` hears whether a session opened on the server.
 
     Raises:
         McpExecutionError: with the code, state and status the route returns.
@@ -885,7 +1034,7 @@ async def execute_stored_tool(
     try:
         async with EXECUTION_GATE.slot():
             record["admission_ms"] = (monotonic() - admission_started) * 1000
-            return await _run_in_owner_task(_execute_once(server, tool_name, arguments, on_dispatch, record))
+            return await _run_in_owner_task(_execute_once(server, tool_name, arguments, on_dispatch, record, contacts))
     except McpCapacityUnavailable:
         record["admission_ms"] = (monotonic() - admission_started) * 1000
         raise McpExecutionError(CODE_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
@@ -897,12 +1046,16 @@ async def _execute_once(
     arguments: dict[str, Any],
     on_dispatch: Callable[[], None] | None,
     timings: MutableMapping[str, float],
+    contacts: ContactObserver | None = None,
 ) -> CallToolResult:
     stack = AsyncExitStack()
     phase_started = monotonic()
     try:
         try:
             session = await stack.enter_async_context(open_session(server))
+        except McpExecutionError:
+            # A sign-in that ended while renewing a refused token: already the answer to give.
+            raise
         except BaseException as exc:
             # ``BaseException``, not ``Exception``, because that is what a dead
             # server actually raises: the SDK yields inside an anyio task group,
@@ -916,9 +1069,16 @@ async def _execute_once(
             # enclosing total deadline reaches here as a cancellation too, and
             # is reported the same way, which is the same status and state.
             logger.warning("Stateless MCP connection failed error_class=%s", failure_class(exc))
+            task = asyncio.current_task()
+            cancelled = isinstance(exc, asyncio.CancelledError) and task is not None and task.cancelling()
+            if contacts is not None and not cancelled:
+                contacts.failed(server.id, server.url, exc)
             raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
         timings["connect_ms"] = (monotonic() - phase_started) * 1000
+        if contacts is not None:
+            # The session initialized, which is the server answering, whatever the call then does.
+            contacts.reached(server.id, server.url)
         if on_dispatch is not None:
             on_dispatch()
         phase_started = monotonic()

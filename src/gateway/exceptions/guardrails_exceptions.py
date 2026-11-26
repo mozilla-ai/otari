@@ -1,8 +1,14 @@
-"""Errors an organization's guardrail configuration raises, and the HTTP status each carries."""
+"""Errors the guardrails domain raises, and the HTTP status each carries."""
 
-from fastapi import status
+from typing import TYPE_CHECKING, Any
 
+from fastapi import HTTPException, status
+
+from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
 from gateway.exceptions import TenancyConflictError, TenancyError, TenancyNotFoundError, TenancyValidationError
+
+if TYPE_CHECKING:
+    from any_llm.types.completion import CompletionUsage
 
 
 class OrganizationGuardrailNotFoundError(TenancyNotFoundError):
@@ -66,6 +72,21 @@ class OrganizationGuardrailUnsafeUrlError(TenancyValidationError):
 
     def __init__(self, reason: str):
         super().__init__(reason)
+
+
+class OrganizationGuardrailKwargsUnreadableError(TenancyValidationError):
+    """A masked per-check argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    guardrail. Refused so the admin enters the arguments in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked guardrail argument keeps the stored value, and there is none that can be read back. "
+            "Enter the arguments in full."
+        )
 
 
 class OrganizationGuardrailLimitReachedError(TenancyValidationError):
@@ -276,7 +297,21 @@ class OrganizationGuardrailDefinitionInUseError(TenancyConflictError):
         )
 
 
+class AnswerRefused(HTTPException):
+    """A guardrail refused the model's answer, after the model ran.
+
+    ``usage`` is what the provider reported for the answer, which a streamed
+    request bills on its error path; a request that is not streamed is billed
+    before this is raised.
+    """
+
+    def __init__(self, detail: dict[str, Any]) -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, detail=detail, headers=error_headers(GUARDRAIL_VIOLATION))
+        self.usage: CompletionUsage | None = None
+
+
 __all__ = [
+    "AnswerRefused",
     "OrganizationGuardrailAlreadyExistsError",
     "OrganizationGuardrailCheckFailedError",
     "OrganizationGuardrailCredentialNeedsUrlError",
@@ -288,6 +323,7 @@ __all__ = [
     "OrganizationGuardrailDefinitionNotFoundError",
     "OrganizationGuardrailDefinitionNotRunningError",
     "OrganizationGuardrailDefinitionUnsafeUrlError",
+    "OrganizationGuardrailKwargsUnreadableError",
     "OrganizationGuardrailLimitReachedError",
     "OrganizationGuardrailNoEndpointError",
     "OrganizationGuardrailNotBuildableError",

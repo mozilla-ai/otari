@@ -55,6 +55,11 @@ def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Respons
 
 # A provider that signals no error inside a successful response leaves "in_body_error" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "brave": {
+        "normal": Scenario(handler=_replay("brave", "normal")),
+        "empty": Scenario(handler=_replay("brave", "empty")),
+        "error": Scenario(handler=_replay("brave", "error")),
+    },
     "deepseek": {
         "normal": Scenario(handler=_replay("deepseek", "normal")),
         "empty": Scenario(handler=_replay("deepseek", "empty")),
@@ -70,6 +75,13 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario({"hits": []}),
         "error": Scenario({"error": "rate_limit", "error_status": 429}),
         "in_body_error": Scenario({"in_body_error": "engine_unavailable"}),
+    },
+    # Recorded without a key. The fixture sets KEENABLE_API_KEY, so these replay on the keyed endpoint,
+    # whose answer has the same shape plus a usage object the adapter does not read.
+    "keenable": {
+        "normal": Scenario(handler=_replay("keenable", "normal")),
+        "empty": Scenario(handler=_replay("keenable", "empty")),
+        "error": Scenario(handler=_replay("keenable", "error")),
     },
     "mojeek": {
         "normal": Scenario(handler=_replay("mojeek", "normal")),
@@ -93,6 +105,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("serply", "empty")),
         "error": Scenario(handler=_replay("serply", "error")),
     },
+    "tavily": {
+        "normal": Scenario(handler=_replay("tavily", "normal")),
+        "empty": Scenario(handler=_replay("tavily", "empty")),
+        "error": Scenario(handler=_replay("tavily", "error")),
+    },
     # Synthetic's "normal" is the example its documentation gives, and "empty" that shape with no
     # results; neither is a recording, since a search needs a subscription. Record both once one is
     # available.
@@ -100,6 +117,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "normal": Scenario(handler=_replay("synthetic", "normal")),
         "empty": Scenario(handler=_replay("synthetic", "empty")),
         "error": Scenario(handler=_replay("synthetic", "error")),
+    },
+    "youdotcom": {
+        "normal": Scenario(handler=_replay("youdotcom", "normal")),
+        "empty": Scenario(handler=_replay("youdotcom", "empty")),
+        "error": Scenario(handler=_replay("youdotcom", "error")),
     },
 }
 
@@ -282,3 +304,22 @@ async def test_a_given_client_is_used_with_the_timeout_and_left_open(provider: s
         expected = {"connect": TIMEOUT, "read": TIMEOUT, "write": TIMEOUT, "pool": TIMEOUT}
         assert all(request.extensions["timeout"] == expected for request in sent)
         assert not client.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
+async def test_a_redirect_is_not_followed_and_raises_a_provider_error(provider: str) -> None:
+    scenario = _scenario(provider, "normal")
+    sent: list[httpx.Request] = []
+
+    def redirect(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        # A JSON object, which an adapter with an optional result list could read as an empty answer.
+        return httpx.Response(302, headers={"Location": "https://elsewhere.example/"}, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(redirect), follow_redirects=True) as client:
+        async with _provider(provider, scenario, client=client) as engine:
+            with pytest.raises(ProviderError) as raised:
+                await engine.search("conformance", **scenario.options)
+    assert sent and all(request.url.host != "elsewhere.example" for request in sent)
+    assert (raised.value.provider, raised.value.status, raised.value.tag) == (provider, 302, "http_error")

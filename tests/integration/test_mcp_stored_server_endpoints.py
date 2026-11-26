@@ -36,7 +36,7 @@ from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 # The same public host over cleartext, for the credential rule rather than the
@@ -290,7 +290,9 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
     config = test_config.model_copy(update={"rate_limit_rpm": 1})
     for rate_limited_client in build_test_client(config):
         master = {"Otari-Key": f"Bearer {config.master_key}"}
-        key = rate_limited_client.post(f"{API_ROOT}/keys", json={"key_name": "rl"}, headers=master).json()
+        key = rate_limited_client.post(
+            f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "rl"}, headers=master
+        ).json()
         header = {"Otari-Key": f"Bearer {key['key']}"}
         with Session(create_engine(postgres_url)) as db:
             row = _store_server(db, _workspace_id(db, key["id"]))
@@ -355,6 +357,42 @@ def test_an_unblocked_user_is_unaffected(
     response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/mcp",
+        "http://127.1:8000/mcp",
+        "http://0177.0.0.1:8000/mcp",
+        "http://[::1]:8000/mcp",
+        "https://10.0.0.5/mcp",
+    ],
+)
+def test_a_stored_server_on_an_internal_address_is_not_called(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    """A row written before loopback was refused still reaches nothing: execution re-checks the URL."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=url, token=None)
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert response.json()["execution_state"] == "not_started"
+    assert session.calls == []
 
 
 def test_a_stored_token_is_never_sent_over_cleartext_http(

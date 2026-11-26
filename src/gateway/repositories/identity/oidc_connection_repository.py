@@ -1,10 +1,11 @@
 """Data access for an organization's OIDC connection."""
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Never
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
 
@@ -94,6 +95,18 @@ class OIDCConnectionRepository(BaseRepository[OIDCConnection, Never, Never]):
     def stage(self, connection: OIDCConnection) -> None:
         """Stage the connection's changes for the caller's transaction to write."""
         self.db.add(connection)
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage deleting these organizations' sign-in connections, whose client secret cannot be cleared alone."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            delete(OIDCConnection)
+            .where(col(OIDCConnection.organization_id).in_(list(organization_ids)))
+            .execution_options(synchronize_session=False)
+        )
 
 
 __all__ = ["OIDCConnectionRepository"]

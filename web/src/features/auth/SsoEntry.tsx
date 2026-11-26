@@ -3,6 +3,7 @@ import { useState } from "react"
 import { FiBriefcase } from "react-icons/fi"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { ApiError, lookupSso } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { useBackForwardCacheRestore } from "@/shared/hooks/useBackForwardCacheRestore"
 import {
   analyticsErrorCode,
@@ -10,7 +11,6 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
 import { AuthMethodRow } from "./AuthProviderButtons"
 import {
   forgetRememberedCompany,
@@ -26,11 +26,12 @@ const AUTHENTICATION_METHOD = "sso"
  * The row that signs in through an organization's own connection, closed by
  * default like the credential row above it.
  *
- * Offered on every deployment, because no deployment-wide setting could gate
- * it: whether an address's organization has a connection is answered per
- * address rather than published in the bootstrap. A browser that already signed in this way once skips straight to
- * continuing with that organization; any other browser is asked for an
- * address to resolve one from.
+ * Rendered only where the deployment offers organization SSO, which the
+ * bootstrap's `organization_oidc_enabled` answers. Whether a given address resolves to a
+ * connection is answered per address instead, so this row is offered on every
+ * deployment that serves the feature at all. A browser that already signed in
+ * this way once skips straight to continuing with that organization. Any other
+ * browser is asked for an address to resolve one from.
  */
 export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
   const { recordEvent } = useTelemetry()
@@ -57,7 +58,7 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
     try {
       const started = await leaveForSsoConnection(slug, {
         organizationName,
-        returnHash: window.location.hash,
+        returnRoute: currentRoute(),
       })
       if (!started.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {

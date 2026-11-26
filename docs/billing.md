@@ -20,8 +20,13 @@ balance minus what running requests hold.
 When nothing is available, new requests paid from the balance are refused until funds arrive. Requests on your own provider keys are not affected.
 Requests already running finish, so the balance can end slightly below zero.
 
-A new organization gets $2 once its creator answers every question in the
-welcome questionnaire.
+A refused request answers `402` with the code `insufficient_funds` and a link to
+the Billing page, in the message, in a `billing_url` field and in the
+`Otari-Billing-Url` header. Owners and admins also see a banner across the
+dashboard, and a refused Playground message offers **Add funds** in place.
+
+The organization created for you at signup starts with a one-time $2 credit,
+so its first request can run before you add funds.
 
 ## Three ways to add funds
 
@@ -32,7 +37,8 @@ welcome questionnaire.
 | **Recurring top-up** | Every day, every week, or on a day of the month | The cardholder |
 
 Payment happens on Stripe. Each charge adds a 4.5% service fee and VAT based on
-the billing address; only the amount itself goes to the balance. The person who
+the billing address; only the amount itself goes to the balance. **Add funds**
+shows the amount, the fee and the total before you continue to Stripe. The person who
 paid gets the receipt by email, and each deposit is listed under
 **Transactions**.
 
@@ -94,6 +100,7 @@ on-call inbox or shared alias, invite it to the organization as an admin.
 | --- | --- |
 | **Requests are being refused** | The balance is used up. At most once an hour. All-clear: **Requests are being served again**. |
 | **Monthly limit reached** | An auto top-up would pass the monthly limit. |
+| **Auto top-up declined** | The first decline in a row. Sent to the cardholder only, with the reason when the bank gives one; the Billing page shows the failed attempt until a charge goes through. |
 | **Auto top-up paused** | One of the pause reasons above. |
 | **Waiting on the bank** | The cardholder's bank asked for confirmation. The cardholder gets a separate email with the link. |
 | **Last auto top-up this month**, **One auto top-up left**, **On pace to reach the limit** | The monthly limit is getting close. At most once a month each. |
@@ -106,15 +113,15 @@ the cardholder's emails offer changes to the auto top-up; everyone else's offer
 
 ## Subscription plans
 
-Otari Go ($10 a month) and Otari Pro ($40 a month) are early-access plans. A plan includes a monthly usage allowance for the open-weight models otari.ai serves ($30 on Go, $120 on Pro), plus monthly allowances of web searches, web fetches and code runs. Every model counts as open-weight except the closed ones: Claude, GPT and o-series (but not gpt-oss), Gemini (but not Gemma) and Grok, whichever provider serves them, and any model served by Anthropic, OpenAI, Gemini, Vertex AI or xAI directly. The deployment's `closed_model_*` settings ([Configuration](configuration.md)) set these lists, which decide coverage on their own: a model's `open_weights` capability in the catalog does not. Plans are by invitation: an owner or admin redeems the invitation code on the **Billing** page and pays on Stripe.
+Otari Go ($10 a month) and Otari Pro ($40 a month) are early-access plans. A plan includes a monthly usage allowance for the open-weight models otari.ai serves ($30 on Go, $120 on Pro), plus monthly allowances of web searches, web fetches and code runs. Every model counts as open-weight except the closed ones: Claude, GPT and o-series (but not gpt-oss), Gemini (but not Gemma) and Grok, whichever provider serves them, and any model served by Anthropic, OpenAI, Gemini, Vertex AI or xAI directly. The deployment's `closed_model_*` settings ([Configuration](configuration.md)) set these lists, which decide coverage on their own: a model's `open_weights` capability in the catalog does not. Plans are by invitation. On the **Billing** page an owner or admin sees both plans and can press **Request access**; invites go out in the order requests arrive, and pay as you go keeps working meanwhile. Once an invite is sent to your verified address, that plan shows **Subscribe** and needs no code; an invitation code can also be entered under **Have an invite code?**. Payment happens on Stripe.
 
 A plan is personal. It covers only requests made with the subscriber's own API keys. Requests from other members, and requests to closed models such as Claude, GPT and Gemini, are paid from the balance as usual.
 
 **Usage.** The Billing page shows what is left of this month's allowance. The subscriber is emailed at 80% and again when it is used up. Usage resets on the date the plan renews each month, and unused usage does not carry over. Up to 3 requests (Go) or 10 (Pro) that the plan covers can run at once; a request over that waits briefly, then gets a 429.
 
-**When the allowance runs out.** Requests the plan covered stop until it renews, and the error says why. To keep going, turn on **Pay as you go** on the Billing page, and further requests are paid from the balance at standard prices, or upgrade. Only the subscriber or the organization's owner can turn it on.
+**When the allowance runs out.** Requests the plan covered stop until it renews, and the error says why. To keep going, turn on **Pay as you go** on the Billing page, and further requests are paid from the balance at standard prices plus the top-up fee, or upgrade. [Budgets](budgets.md) count every request at list price, including usage the plan covers. Only the subscriber or the organization's owner can turn it on.
 
-**Changing or cancelling.** An upgrade to Otari Pro starts a new month at once with Pro's full allowance, charged at Pro's price minus a credit for the unused days of Go. A downgrade takes effect at the next renewal. A cancelled plan stays active until the end of the paid month and is not refunded. Only the subscriber or the owner can change or cancel the plan.
+**Changing or cancelling.** An upgrade to Otari Pro starts a new month at once with Pro's full allowance, charged at Pro's price minus a credit for the unused days of Go. The upgrade dialog shows the amount charged today before you confirm. A downgrade takes effect at the next renewal. A cancelled plan stays active until the end of the paid month and is not refunded. Only the subscriber or the owner can change or cancel the plan.
 
 **Payments and leaving.** If a renewal payment fails, the plan covers nothing until Stripe collects it; pay as you go keeps requests going meanwhile. If the subscriber leaves the organization, the plan ends with its paid month and they are emailed.
 

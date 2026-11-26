@@ -1,9 +1,8 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { WorkspaceActivation } from "@/client"
+import type { ActivationIssuedKey, WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
-import { SetupSuccess } from "@/features/onboarding/SetupSuccess"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
@@ -81,6 +80,10 @@ export function SetupGuide({
   )
 }
 
+function keyFingerprint({ key_prefix, key_suffix }: ActivationIssuedKey) {
+  return `${key_prefix ?? ""}••${key_suffix ?? ""}`
+}
+
 function SetupFlow({
   workspaceId,
   workspaceName,
@@ -110,6 +113,12 @@ function SetupFlow({
   // Only a press somebody made, never the background poll: `isFetching` would
   // put the control in its pending state every few seconds on its own.
   const [isChecking, setIsChecking] = useState(false)
+  // Someone who left after taking a key and came back keeps it unless they ask
+  // for a new one: minting rotates it, and the old one may already be pasted
+  // somewhere.
+  // Held as the fingerprint chosen, because a rotation elsewhere keeps the row
+  // and changes the key: the choice no longer stands once it stops matching.
+  const [keptKey, setKeptKey] = useState<string | null>(null)
   // The flow only celebrates a first request it was present for. Without this
   // latch, somebody who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
@@ -153,23 +162,10 @@ function SetupFlow({
 
   if (isFinished) return null
 
-  if (isActivated) {
-    return wasOffered.current ? (
-      <SetupSuccess
-        attempt={data.activation_attempt ?? undefined}
-        onDismiss={() => setIsFinished(true)}
-        onOpenActivity={() => {
-          setIsFinished(true)
-          void navigate({
-            to: "/requests",
-            search: { source: "gateway" },
-          })
-        }}
-      />
-    ) : null
-  }
-
-  if (!isOffered) return null
+  // The payoff is the sheet's second face, so a request that lands while the
+  // sheet is up keeps it mounted rather than swapping in another dialog.
+  const hasLanded = isActivated && wasOffered.current
+  if (!isOffered && !hasLanded) return null
 
   // Recorded once the server has retired the guide, so a Skip that fails and
   // is pressed again is one dismissal rather than two.
@@ -204,6 +200,15 @@ function SetupFlow({
       apiKey={createKey.data?.key}
       keyPrefix={createKey.data?.key_prefix ?? undefined}
       keySuffix={createKey.data?.key_suffix ?? undefined}
+      // The mint refreshes this state, so a key minted here is described by
+      // both; the plaintext in hand is the one to show.
+      issuedKey={createKey.data ? undefined : (data.issued_key ?? undefined)}
+      isUsingIssuedKey={
+        data.issued_key != null && keptKey === keyFingerprint(data.issued_key)
+      }
+      onUseIssuedKey={() =>
+        setKeptKey(data.issued_key ? keyFingerprint(data.issued_key) : null)
+      }
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.
@@ -226,6 +231,21 @@ function SetupFlow({
       onCheckNow={() => void checkNow()}
       onSkip={skip}
       onLeave={leave}
+      landed={
+        hasLanded
+          ? {
+              attempt: data.activation_attempt ?? undefined,
+              onDismiss: () => setIsFinished(true),
+              onOpenActivity: () => {
+                setIsFinished(true)
+                void navigate({
+                  to: "/requests",
+                  search: { source: "gateway" },
+                })
+              },
+            }
+          : undefined
+      }
     />
   )
 }

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-
 import { USAGE_PRESETS } from "@/shared/helpers/timeRange"
+import { renderWithRouter } from "@/tests/router"
 import { ActivityTimeline, type TimelinePoint } from "./ActivityTimeline"
 
 const SERIES: TimelinePoint[] = [
@@ -95,7 +95,7 @@ describe("ActivityTimeline", () => {
     ).toBeInTheDocument()
   })
 
-  it("legends the error split when the window has failures", () => {
+  it("reads the window's failures out in the header when it has any", () => {
     renderTimeline({
       series: [
         { bucketStart: "2026-07-10T00:00:00Z", requests: 12, errors: 3 },
@@ -103,13 +103,7 @@ describe("ActivityTimeline", () => {
         { bucketStart: "2026-07-12T00:00:00Z", requests: 8 },
       ],
     })
-    expect(screen.getByText("Succeeded")).toBeInTheDocument()
-    expect(screen.getByText("Failed")).toBeInTheDocument()
-  })
-
-  it("keeps a single calm series when nothing failed", () => {
-    renderTimeline()
-    expect(screen.queryByText("Failed")).not.toBeInTheDocument()
+    expect(screen.getByText("failed")).toBeInTheDocument()
   })
 
   it("promotes to the next larger preset when zooming out at the full extent", async () => {
@@ -284,5 +278,69 @@ describe("ActivityTimeline", () => {
     expect(
       screen.queryByRole("slider", { name: "Pan the selected window" }),
     ).not.toBeInTheDocument()
+  })
+})
+
+const TOTALS_SERIES = [
+  { bucketStart: "2026-07-10T00:00:00Z", requests: 12, errors: 2 },
+  { bucketStart: "2026-07-11T00:00:00Z", requests: 40, errors: 0 },
+  { bucketStart: "2026-07-12T00:00:00Z", requests: 8, errors: 1 },
+]
+
+const totalsProps = {
+  presets: USAGE_PRESETS,
+  extentKey: "30d",
+  onPreset: vi.fn(),
+  onSelectRange: vi.fn(),
+  onSelectFull: vi.fn(),
+  series: TOTALS_SERIES,
+  bucket: "day" as const,
+  windowStart: "2026-07-10T00:00:00.000Z",
+  windowEnd: "2026-07-13T00:00:00.000Z",
+}
+
+describe("ActivityTimeline totals", () => {
+  it("sums the window for a caller that passes no totals (Requests)", async () => {
+    await renderWithRouter(
+      <ActivityTimeline {...totalsProps} unitLabel="Requests" />,
+    )
+    expect(screen.getByText("60")).toBeInTheDocument()
+    expect(screen.getByText("requests")).toBeInTheDocument()
+    expect(screen.getByText("3")).toBeInTheDocument()
+    expect(screen.getByText("failed")).toBeInTheDocument()
+  })
+
+  it("uses the caller's count and shows no failed figure when there is none (Sessions)", async () => {
+    await renderWithRouter(
+      <ActivityTimeline
+        {...totalsProps}
+        unitLabel="Active sessions"
+        additive={false}
+        totals={{ count: 51, failed: null }}
+      />,
+    )
+    expect(screen.getByText("51")).toBeInTheDocument()
+    expect(screen.queryByText("60")).toBeNull()
+    expect(screen.queryByText("failed")).toBeNull()
+  })
+
+  it("reads one request in the singular", async () => {
+    await renderWithRouter(
+      <ActivityTimeline
+        {...totalsProps}
+        series={[{ bucketStart: "2026-07-10T00:00:00Z", requests: 1 }]}
+        windowEnd="2026-07-11T00:00:00.000Z"
+      />,
+    )
+    expect(screen.getByText("request")).toBeInTheDocument()
+    expect(screen.queryByText("requests")).toBeNull()
+  })
+
+  it("holds skeletons, not a number, while the caller's count loads", async () => {
+    await renderWithRouter(
+      <ActivityTimeline {...totalsProps} additive={false} totals={null} />,
+    )
+    expect(screen.queryByText("requests")).toBeNull()
+    expect(screen.queryByText("failed")).toBeNull()
   })
 })

@@ -13,6 +13,7 @@ from gateway.services.tools import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
     Dialect,
     NativeCall,
+    Refusal,
     WebToolFailure,
     native_rendering,
 )
@@ -48,8 +49,10 @@ def _rendering() -> Any:
     return rendering
 
 
-def _call(*, failed: bool = False) -> NativeCall:
-    return NativeCall(WEB_FETCH_TOOL_NAME, "toolu_1", {"url": "https://example.com/a?token=secret"}, failed=failed)
+def _call(*, failed: bool = False, raised: bool = False) -> NativeCall:
+    return NativeCall(
+        WEB_FETCH_TOOL_NAME, "toolu_1", {"url": "https://example.com/a?token=secret"}, failed=failed, raised=raised
+    )
 
 
 @pytest.mark.parametrize(
@@ -103,11 +106,15 @@ def test_an_mcp_tool_named_web_fetch_is_not_announced() -> None:
     assert _rendering().ran(_call(), _McpPoolLike()) == []
 
 
-def test_a_refused_fetch_reports_max_uses_exceeded() -> None:
-    use, result = _rendering().refused(_call())
+@pytest.mark.parametrize(
+    ("reason", "error_code"),
+    [(Refusal.CALL_LIMIT, "max_uses_exceeded"), (Refusal.INVALID_INPUT, "invalid_tool_input")],
+)
+def test_a_refused_fetch_reports_why_it_was_refused(reason: Refusal, error_code: str) -> None:
+    use, result = _rendering().refused(_call(), reason)
 
     assert result.tool_use_id == use.id
-    assert result.content.error_code == "max_uses_exceeded"
+    assert result.content.error_code == error_code
 
 
 def _chat_rendering() -> Any:
@@ -161,8 +168,38 @@ def test_a_failed_chat_fetch_on_a_pool_that_keeps_no_failure_has_no_error() -> N
     assert "error" not in ended
 
 
-def test_a_refused_chat_fetch_fails_with_the_call_limit_tag() -> None:
-    [ended] = _chat_rendering().refused(_call())
+def test_a_chat_fetch_that_raised_on_a_pool_that_keeps_no_failure_is_an_internal_error() -> None:
+    [ended] = _chat_rendering().ran(_call(failed=True, raised=True), _McpPoolLike())
 
     assert ended["status"] == "failed"
-    assert ended["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}
+    assert ended["error"] == {"provider": None, "status": None, "tag": "internal_error", "retryable": False}
+
+
+def test_a_chat_fetch_that_raised_carries_the_failure_the_backend_kept_over_internal_error() -> None:
+    backend = _FetchBackendLike(failure=WebToolFailure.of("builtin", 404, "http_status"))
+
+    [ended] = _chat_rendering().ran(_call(failed=True, raised=True), backend)
+
+    assert ended["error"] == {"provider": "builtin", "status": 404, "tag": "http_status", "retryable": False}
+    assert backend.take_last_failure() is None
+
+
+def test_a_completed_chat_fetch_takes_the_failure_the_backend_kept() -> None:
+    """Otherwise a later failed fetch on a pool keeping nothing new would show this call's failure."""
+    backend = _FetchBackendLike(_page(), failure=WebToolFailure.of("builtin", 503, "http_status"))
+
+    [ended] = _chat_rendering().ran(_call(), backend)
+
+    assert ended["status"] == "completed"
+    assert "error" not in ended
+    assert backend.take_last_failure() is None
+
+
+@pytest.mark.parametrize(
+    ("reason", "tag"), [(Refusal.CALL_LIMIT, "call_limit"), (Refusal.INVALID_INPUT, "invalid_input")]
+)
+def test_a_refused_chat_fetch_fails_with_the_refusal_tag(reason: Refusal, tag: str) -> None:
+    [ended] = _chat_rendering().refused(_call(), reason)
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": None, "status": None, "tag": tag, "retryable": False}
