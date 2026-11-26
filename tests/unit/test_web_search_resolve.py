@@ -95,7 +95,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "exa",
-            "runner": "library",
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
@@ -126,7 +125,6 @@ _SEARCH_CASES = [
         {
             "name": "tavily",
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-deploy",
             "api_base": "",
             "label": "otari:web_search",
@@ -141,7 +139,6 @@ _SEARCH_CASES = [
         {
             "name": "searxng",
             "provider": "searxng",
-            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "otari:web_search",
             "rate_keys": ("otari:web_search",),
@@ -154,10 +151,8 @@ _SEARCH_CASES = [
         {"provider": "searxng"},
         options={"engines": "brave,wikipedia"},
     ),
-    _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
-    _SearchCase(
-        "the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local", "runner": "library"}
-    ),
+    _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test"}),
+    _SearchCase("the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local"}),
     _SearchCase("several instances and no default", {"search_tools": {"exa": _EXA, "test": _FAKE}}, None),
     _SearchCase("nothing configured", {}, None),
     # The policy's credential wins over the in-loop default.
@@ -167,7 +162,6 @@ _SEARCH_CASES = [
         {
             "name": None,
             "provider": "exa",
-            "runner": "library",
             "api_key": "exa-org-key",
             "api_base": "https://api.exa.ai",
             "label": "org:exa",
@@ -197,7 +191,6 @@ _SEARCH_CASES = [
         {"search_tools": {"test": _FAKE}},
         {
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-org",
             "api_base": "https://api.tavily.com",
             "label": "org:tavily",
@@ -209,7 +202,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
         {"web_search_url": "http://deployment-searxng:8080", "web_search_engines": "brave"},
-        {"provider": "searxng", "runner": "library", "api_key": "", "api_base": "https://org-searxng.example"},
+        {"provider": "searxng", "api_key": "", "api_base": "https://org-searxng.example"},
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
@@ -242,7 +235,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "fake",
-            "runner": "library",
             "api_key": "",
             "api_base": "",
             "label": "org:fake",
@@ -259,7 +251,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-org",
             "timeout": 30.0,
             "label": "org:tavily",
@@ -278,7 +269,6 @@ _SEARCH_CASES = [
         {
             "name": "local",
             "provider": "searxng",
-            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "searxng:local",
         },
@@ -295,7 +285,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG instance that sends its searches by POST",
         {"search_tools": {"local": {**_SEARXNG, "options": {"method": "post"}}}},
-        {"runner": "library"},
+        {"name": "local", "provider": "searxng"},
         requested="local",
         options={"method": "post"},
     ),
@@ -385,7 +375,7 @@ def _named(config: GatewayConfig, name: str) -> ResolvedSearch:
 
 def test_a_library_instance_takes_its_providers_endpoint_and_its_name_as_its_provider() -> None:
     resolved = _named(GatewayConfig(search_tools={"exa": {"api_key": "k"}}), "exa")
-    assert (resolved.provider, resolved.api_base, resolved.runner) == ("exa", "https://api.exa.ai", "library")
+    assert (resolved.provider, resolved.api_base) == ("exa", "https://api.exa.ai")
 
 
 @pytest.mark.parametrize(
@@ -404,7 +394,7 @@ def test_a_searxng_instance_needs_no_key() -> None:
     resolved = _named(
         GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
     )
-    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("library", "", "http://searxng:8080")
+    assert (resolved.api_key, resolved.api_base) == ("", "http://searxng:8080")
 
 
 @pytest.mark.parametrize(
@@ -816,7 +806,6 @@ _FETCH_CASES = [
         {
             "name": "builtin_fetch",
             "provider": "builtin",
-            "runner": "library",
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",

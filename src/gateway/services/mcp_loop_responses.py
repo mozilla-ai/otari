@@ -139,8 +139,6 @@ async def _execute_function_calls(
         owner = owning_backend(pool, item.name)
         try:
             text = await owner.call_tool(item.name, args)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, item.name)
             log_tool_failure(item.name, detail, exc)
@@ -337,8 +335,6 @@ async def _execute_stream_owned(
         owner = owning_backend(pool, call.name)
         try:
             text = await owner.call_tool(call.name, args)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
             detail = tool_failure_detail(owner, call.name)
             log_tool_failure(call.name, detail, exc)

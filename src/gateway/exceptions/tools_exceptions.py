@@ -423,9 +423,8 @@ class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
     The two lists are intersected rather than overridden, so this is the empty
     intersection: every domain the request asked for is one the workspace does
     not permit. Refused rather than run, because an empty effective allow-list
-    is read by ``_build_web_retrieval_backend`` as *no* allow-list (an empty list
-    is falsy), which would turn the narrowest possible policy into no policy at
-    all.
+    is read as *no* allow-list (an empty list is falsy), which would turn the
+    narrowest possible policy into no policy at all.
     """
 
     def __init__(self) -> None:
@@ -645,19 +644,6 @@ class SearchToolSelectionError(TenancyValidationError):
     """
 
 
-class DirectSearchFieldRefusedError(TenancyValidationError):
-    """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
-
-    Such a call runs on the old search client: a key on a provider any-search
-    does not serve, an organization's or the legacy settings'.
-    """
-
-    def __init__(self, provider: str) -> None:
-        super().__init__(
-            f"include_raw and provider_options are not available yet for a {provider} search: leave them unset."
-        )
-
-
 class DirectToolFailedError(TenancyError):
     """The provider failed a direct tool call, or could not be reached.
 
@@ -788,7 +774,6 @@ __all__ = [
     "DirectFetchNotEnabledError",
     "DirectFetchUrlRefusedError",
     "DirectSearchFailedError",
-    "DirectSearchFieldRefusedError",
     "DirectToolCallError",
     "DirectToolFailedError",
     "FundsCheckFailedError",

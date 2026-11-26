@@ -248,8 +248,8 @@ def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
     """The domains both sides permit, in the request's order.
 
     Not a set intersection, because an entry in either list is a *suffix* and not
-    a host: ``WebRetrievalBackend._apply_domain_filters`` keeps a result when its hostname
-    equals an entry or ends in ``"." + entry``. So ``example.com`` on the
+    a host: a domain rule keeps a result when its hostname equals an entry or ends in
+    ``"." + entry``. So ``example.com`` on the
     workspace's list already covers ``docs.example.com``, and a request naming
     the subdomain is asking for strictly less than the workspace permits rather
     than for something outside it. Whichever side is the narrower of an

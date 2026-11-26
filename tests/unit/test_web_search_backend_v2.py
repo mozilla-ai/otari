@@ -786,11 +786,7 @@ def test_the_legacy_provider_pair_resolves_to_in_loop_search_on_tavilys_adapter(
     in_loop = resolve_in_loop_search(legacy_pair, None)
 
     assert in_loop is not None
-    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
-        "tavily",
-        "library",
-        "otari:web_search",
-    )
+    assert (in_loop.search.provider, in_loop.search.label) == ("tavily", "otari:web_search")
     assert resolve_in_loop_search(GatewayConfig(), None) is None
 
 
@@ -798,11 +794,7 @@ def test_the_legacy_url_resolves_to_in_loop_search_on_searxngs_adapter() -> None
     in_loop = resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None)
 
     assert in_loop is not None
-    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
-        "searxng",
-        "library",
-        "otari:web_search",
-    )
+    assert (in_loop.search.provider, in_loop.search.label) == ("searxng", "otari:web_search")
     assert in_loop.enrichment.name == "builtin_fetch"
 
 

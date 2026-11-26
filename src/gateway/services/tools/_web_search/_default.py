@@ -24,8 +24,9 @@ from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 
 
 def direct_search_fallback(settings: ToolSettings) -> SynthesizedSearchInstance | None:
-    """The legacy backend the direct endpoint serves, or ``None``: only a deployment with no search instance has one.
+    """The search the legacy settings describe, which the direct endpoint serves, or ``None``.
 
+    Only a deployment with no search instance has one.
     None either where a fetch instance has its name, which an ``allowed_tools`` entry would then grant both.
     """
     if effective_search_instances(settings):
