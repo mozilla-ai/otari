@@ -118,12 +118,20 @@ function WelcomeFrame({
     void navigate({ to: "/" })
   })
   const isPending = flow.state === "pending"
+  // Answering ends a code still waiting, or the providers page would offer it
+  // again straight after. Not on the approval, which closes through `close`.
+  const endWaiting = () => {
+    if (isPending) flow.cancel()
+  }
 
   return (
     <Dialog
       isOpen
       onOpenChange={(open) => {
-        if (!open) close()
+        if (!open) {
+          endWaiting()
+          close()
+        }
       }}
       title="Welcome to Otari"
       description="Your gateway is running. Point any app at it and Otari routes, meters and guards every request. Bring your own provider keys, or use ours."
@@ -161,7 +169,10 @@ function WelcomeFrame({
         <button
           type="button"
           className="min-h-11 text-sm text-muted hover:text-foreground md:min-h-9"
-          onClick={onSkip}
+          onClick={() => {
+            endWaiting()
+            onSkip()
+          }}
         >
           Skip, I&rsquo;ll use my own keys
         </button>
