@@ -626,6 +626,7 @@ async def discover_stored_tools(
     admits: Callable[[str], bool] | None = None,
     *,
     contacts: ContactObserver | None = None,
+    timings: MutableMapping[str, float] | None = None,
 ) -> DiscoveredCatalog:
     """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
@@ -636,13 +637,18 @@ async def discover_stored_tools(
     of them; the limits on pages, bytes read and descriptors examined still
     bound the listing itself. Every failure is ``not_started``: discovery runs
     no tool. ``contacts`` hears whether the server answered, and its catalog where the
-    listing read all of it.
+    listing read all of it. ``timings``, when given, gets ``admission_ms`` once a slot is held,
+    which is how a caller whose deadline ends the listing tells the server's silence from a wait
+    for capacity.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
+    admission_started = monotonic()
     try:
         async with DISCOVERY_GATE.slot():
+            if timings is not None:
+                timings["admission_ms"] = (monotonic() - admission_started) * 1000
             return await _run_in_owner_task(_discover_once(server, admits, contacts))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None

@@ -691,6 +691,8 @@ async def list_mcp_tools(
     run's snapshot; execution then returns the remote server's own typed error.
     """
     started = time.monotonic()
+    dialed: ResolvedMcpServer | None = None
+    timings: dict[str, float] = {}
     try:
         async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
@@ -713,9 +715,13 @@ async def list_mcp_tools(
             await _require_safe_url(server)
             track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
             patterns = _caller_patterns(principal, server)
+            dialed = server
             try:
                 catalog = await discover_stored_tools(
-                    server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
+                    server,
+                    lambda name: is_mcp_tool_allowed(patterns, name),
+                    contacts=mcp_server_contacts,
+                    timings=timings,
                 )
             except McpExecutionError as failed:
                 raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
@@ -739,7 +745,11 @@ async def list_mcp_tools(
             )
             if discovery_response_exceeds_bound(response):
                 raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
-    except TimeoutError:
+    except TimeoutError as timed_out:
+        if dialed is not None and "admission_ms" in timings:
+            # The deadline cancels discovery before it can report the server that never answered. A
+            # deadline spent waiting for a slot is ours, not the server's, and is left out.
+            mcp_server_contacts.failed(dialed.id, dialed.url, timed_out)
         exc = McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
         logger.info(
             "Stateless MCP discovery request_id=%s server_id=%s outcome=%s duration_ms=%.2f",
@@ -813,6 +823,7 @@ async def execute_mcp_tool(
     """
     started = time.monotonic()
     dispatched = False
+    dialed: ResolvedMcpServer | None = None
     timings: dict[str, float] = {}
 
     def mark_dispatched() -> None:
@@ -846,6 +857,7 @@ async def execute_mcp_tool(
 
             tool_started = datetime.now(UTC)
             finished: CallToolResult | None = None
+            dialed = server
             try:
                 result = finished = await execute_stored_tool(
                     server,
@@ -870,10 +882,13 @@ async def execute_mcp_tool(
                         mcp_server_id=str(server.id),
                         decided_by=decided_by,
                     )
-    except TimeoutError:
+    except TimeoutError as timed_out:
         # The total deadline can only be reached before dispatch here: past it,
         # the call's own deadline is the shorter of the two and classifies the
         # failure itself.
+        if dialed is not None and "admission_ms" in timings and "connect_ms" not in timings:
+            # Cancelled while opening the session, so the connection never reported the server.
+            mcp_server_contacts.failed(dialed.id, dialed.url, timed_out)
         exc = McpExecutionError(
             CODE_OUTCOME_UNKNOWN if dispatched else CODE_CONNECTION_FAILED,
             ExecutionState.OUTCOME_UNKNOWN if dispatched else ExecutionState.NOT_STARTED,

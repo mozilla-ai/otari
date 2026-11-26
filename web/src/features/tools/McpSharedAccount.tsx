@@ -37,7 +37,9 @@ export function sharedAccountState(
   if (server.shared_account) return "signed_in"
   if (server.has_token) return "token"
   if (server.needs_setup) return "not_set_up"
-  return server.health?.status === "healthy" ? "open" : "unchecked"
+  return server.health && server.health.status !== "failing"
+    ? "open"
+    : "unchecked"
 }
 
 const MEANING =

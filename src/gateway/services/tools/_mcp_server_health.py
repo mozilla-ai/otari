@@ -42,6 +42,9 @@ CONTACT_WRITE_INTERVAL_S = 15 * 60
 # worker, before one request tries it again. A failure is written again at most this often, so a server that
 # keeps failing keeps being left out, and the first answer it gives brings it back.
 ATTACHED_COOLDOWN_S = 60.0
+# How long a server that answers again is called degraded after its last failure, so one that fails
+# every other request is never shown as healthy by whichever contact happened to come last.
+DEGRADED_WINDOW_S = 60 * 60
 # The failures that cost a request time: the ones an attached server is left out for.
 _SLOW_FAILURES = frozenset(
     {CheckFailure.TIMEOUT, CheckFailure.UNREACHABLE, CheckFailure.CONNECTION_FAILED, CheckFailure.TLS_FAILED}
@@ -52,6 +55,14 @@ _SLOW_FAILURES = frozenset(
 _MAX_REMEMBERED_SERVERS = 10_000
 # Writes in flight at once. A contact past this bound is not recorded; a later contact is.
 _MAX_PENDING_WRITES = 64
+
+
+class WorkspaceMcpServerLastFailure(BaseModel):
+    """The most recent time the gateway could not get an answer from the server, and why."""
+
+    failed_at: str
+    error: CheckFailure
+    http_status: int | None = Field(default=None, description="The HTTP status the server refused with, if any")
 
 
 class WorkspaceMcpServerHealth(BaseModel):
@@ -65,7 +76,10 @@ class WorkspaceMcpServerHealth(BaseModel):
     MAX_ALLOWED_TOOLS: ClassVar[int] = MAX_ALLOWED_TOOLS
     MAX_TOOL_NAME_LENGTH: ClassVar[int] = MAX_TOOL_NAME_LENGTH
 
-    status: Literal["healthy", "failing"]
+    status: Literal["healthy", "degraded", "failing"] = Field(
+        description="failing: the last contact got no answer. degraded: the last contact got one, but "
+        f"another failed within the last {DEGRADED_WINDOW_S // 60} minutes. healthy: neither"
+    )
     checked_at: str
     error: CheckFailure | None = Field(default=None, description="Why the check failed; null when healthy")
     http_status: int | None = Field(default=None, description="The HTTP status the server refused with, if any")
@@ -91,6 +105,34 @@ class WorkspaceMcpServerHealth(BaseModel):
         description="The first line of each offered tool's own description, where it has one: untrusted text "
         "the server wrote, for a person to read",
     )
+    last_failure: WorkspaceMcpServerLastFailure | None = Field(
+        default=None, description="The most recent contact that got no answer, however long ago; null if none is known"
+    )
+
+    @property
+    def answered(self) -> bool:
+        """Whether the last contact got an answer, degraded or not."""
+        return self.status != "failing"
+
+    def following(self, previous: WorkspaceMcpServerHealth | None) -> WorkspaceMcpServerHealth:
+        """This health as the next one on record after ``previous``: it remembers the last failure.
+
+        A failure is its own last failure. An answer keeps the one on record, and is ``degraded``
+        while that failure is within ``DEGRADED_WINDOW_S``.
+        """
+        if self.status == "failing" and self.error is not None:
+            own = WorkspaceMcpServerLastFailure(
+                failed_at=self.checked_at, error=self.error, http_status=self.http_status
+            )
+            return self.model_copy(update={"last_failure": own})
+        last = previous.last_failure if previous is not None else None
+        if last is None and previous is not None and previous.status == "failing" and previous.error is not None:
+            # Stored before failures were remembered: the failing health is the last failure.
+            last = WorkspaceMcpServerLastFailure(
+                failed_at=previous.checked_at, error=previous.error, http_status=previous.http_status
+            )
+        degraded = last is not None and _is_recent(last.failed_at, DEGRADED_WINDOW_S)
+        return self.model_copy(update={"status": "degraded" if degraded else "healthy", "last_failure": last})
 
     @field_validator("tool_descriptions")
     @classmethod
@@ -129,7 +171,7 @@ class WorkspaceMcpServerHealth(BaseModel):
         if server.read_tools_hinted is not None or server.health is None:
             return
         health = WorkspaceMcpServerHealth.model_validate(server.health)
-        if health.status == "healthy" and health.tool_count is not None:
+        if health.answered and health.tool_count is not None:
             server.read_tools_hinted = list(health.read_only_hinted_tools)
 
     @staticmethod
@@ -214,7 +256,8 @@ def health_after_contact(
     """The health to store after a request's contact with a server, or ``None`` to leave it as it is.
 
     A contact that says what the stored health already says, within ``interval_s`` of it, is not
-    written again. A successful one that listed no tools keeps the tools on record.
+    written again. A successful one that listed no tools keeps the tools on record. Every write
+    remembers the last failure, so a server that answers between failures reads ``degraded``.
     """
     previous = WorkspaceMcpServerHealth.model_validate(stored) if stored is not None else None
     recent = previous is not None and _is_recent(previous.checked_at, interval_s)
@@ -226,32 +269,38 @@ def health_after_contact(
         if failed_recently and previous is not None and previous.error == contact.failure:
             return None
         failed = ServerCheck(tool_names=[], failure=contact.failure, http_status=contact.http_status)
-        health = server_health(allowed_tools, failed)
+        health = server_health(allowed_tools, failed).following(previous)
         if previous is not None:
             # What '@read' stands for until a manager labels tools: one failed contact must not empty it.
             health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
         return health.model_dump(mode="json")
-    was_healthy = previous is not None and previous.status == "healthy"
+    answered_before = previous is not None and previous.answered
     if contact.listing is not None:
-        listed = server_health(allowed_tools, contact.listing)
+        listed = server_health(allowed_tools, contact.listing).following(previous)
         if (
             recent
             and previous is not None
-            and was_healthy
+            and answered_before
+            and previous.status == listed.status
             and previous.tools == listed.tools
             and previous.read_only_hinted_tools == listed.read_only_hinted_tools
         ):
             return None
         return listed.model_dump(mode="json")
-    if previous is not None and was_healthy:
-        if recent:
+    if previous is not None and answered_before:
+        refreshed = previous.model_copy(update={"checked_at": datetime.now(UTC).isoformat()}).following(previous)
+        if recent and refreshed.status == previous.status:
             return None
-        return previous.model_copy(update={"checked_at": datetime.now(UTC).isoformat()}).model_dump(mode="json")
-    return WorkspaceMcpServerHealth(
-        status="healthy",
-        checked_at=datetime.now(UTC).isoformat(),
-        read_only_hinted_tools=previous.read_only_hinted_tools if previous is not None else [],
-    ).model_dump(mode="json")
+        return refreshed.model_dump(mode="json")
+    return (
+        WorkspaceMcpServerHealth(
+            status="healthy",
+            checked_at=datetime.now(UTC).isoformat(),
+            read_only_hinted_tools=previous.read_only_hinted_tools if previous is not None else [],
+        )
+        .following(previous)
+        .model_dump(mode="json")
+    )
 
 
 def _is_recent(checked_at: str, interval_s: float) -> bool:
