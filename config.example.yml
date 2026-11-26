@@ -114,7 +114,7 @@ providers:
 # smtp_host: "mailpit"
 # smtp_port: 1025
 # smtp_tls: false
-# mail_from_email: "otari@localhost"
+# mail_from_email: "otari@example.com"
 
 # Passkeys are on by default; set passkeys_enabled: false (OTARI_PASSKEYS_ENABLED)
 # to switch them off. They default to the host of public_base_url. Set these only for a parent

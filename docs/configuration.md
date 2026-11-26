@@ -1771,13 +1771,14 @@ mail_transport: smtp
 smtp_host: "mailpit"
 smtp_port: 1025
 smtp_tls: false
-mail_from_email: "otari@localhost"
+mail_from_email: "otari@example.com"
 ```
 
 The host is `mailpit` for a gateway in the same Compose network, and `localhost` on the mapped port
-for one running beside it, which is what `.env.example` carries as `OTARI_` variables. The sink
-keeps every message in memory and accepts any credential, so it belongs in development and never in
-a deployment that serves anybody.
+for one running beside it, which is what `.env.example` carries as `OTARI_` variables. The sink holds
+every message in a temporary database inside its container, which goes when the container does, and
+it accepts any credential. So it belongs in development and never in a deployment that serves
+anybody.
 
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it

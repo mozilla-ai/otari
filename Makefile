@@ -26,11 +26,16 @@ help:
 # cannot prove a mailbox, and signup, verification, a password reset and an
 # invitation all need one. Not fatal when Docker is absent: the rest of Otari
 # runs without mail, so this says what is unavailable and carries on.
+#
+# Compose resolves its own settings and reports the address it published, so
+# this target neither loads them for it nor derives that address a second time.
 dev:
 	@if docker info >/dev/null 2>&1; then \
-		docker compose --profile mail up -d mailpit >/dev/null 2>&1 \
-			&& printf "mail sink on http://localhost:%s\n" "$${OTARI_MAILPIT_WEB_PORT:-8025}" \
-			|| printf "mail sink did not start: link-bearing flows are unavailable\n"; \
+		if started=$$(docker compose --profile mail up -d mailpit 2>&1); then \
+			printf "mail sink on http://%s\n" "$$(docker compose --profile mail port mailpit 8025)"; \
+		else \
+			printf "mail sink did not start: link-bearing flows are unavailable\n%s\n" "$$started"; \
+		fi; \
 	else \
 		printf "Docker is not running, so there is no mail sink: link-bearing flows are unavailable\n"; \
 	fi

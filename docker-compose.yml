@@ -103,10 +103,15 @@ services:
       # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
       - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
       # Key that names the provider account a copy of an attached file is in.
-      # Required while provider copies are on, which they are by default, and
-      # it must differ from OTARI_SECRET_KEY. Generate one with
+      # It must differ from OTARI_SECRET_KEY. Generate one with
       # `openssl rand -base64 32`.
-      - OTARI_PROVIDER_ACCOUNT_PEPPER=${OTARI_PROVIDER_ACCOUNT_PEPPER:?set OTARI_PROVIDER_ACCOUNT_PEPPER, for example to the output of openssl rand -base64 32}
+      #
+      # Passed through only where it is set, rather than defaulted or required
+      # here, because the gateway owns what a missing one means: it warns and
+      # turns provider copies off. An empty value fails its length check at
+      # startup, and a required one stops every other service in this file
+      # from starting without it.
+      - OTARI_PROVIDER_ACCOUNT_PEPPER
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.
@@ -134,7 +139,8 @@ services:
   # with no TLS and no credentials; from a gateway running on the host it is
   # localhost on the mapped port. config.example.yml carries both.
   #
-  # NOTE: It stores every message in memory and keeps no credentials, so it is for
+  # NOTE: It holds every message in a temporary database inside the container, which
+  # goes when the container does, and it accepts any credential. So it is for
   # development and never for a deployment that serves anybody.
   mailpit:
     profiles: ["mail"]
