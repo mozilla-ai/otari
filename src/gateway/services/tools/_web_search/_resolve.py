@@ -333,6 +333,9 @@ def _search_on_instance(
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
     """A search on ``instance``: its layered options and the rate keys it is billed under."""
+    if not instance.library_backed:
+        # Before the provider's metadata is looked up, which a provider any-search does not serve has none of.
+        raise SearchToolMisconfiguredError(instance.name)
     if refused_cost_tier(instance) is not None:
         # Before the options are layered, which would drop the tier with a warning for a call that does not run.
         raise SearchToolMisconfiguredError(instance.name)
