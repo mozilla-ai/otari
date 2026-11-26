@@ -2853,7 +2853,8 @@ export interface paths {
          *
          *     Requires master key authentication. A new ``expires_at`` is capped by the deployment's
          *     ``max_api_key_lifetime_days``, measured from the key's creation, and a capped change
-         *     answers with ``Otari-Key-Lifetime-Capped``.
+         *     answers with ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap
+         *     is refused with 409 rather than stored as an expiry already past.
          */
         patch: operations["keys-update_key"];
         trace?: never;
@@ -4207,7 +4208,8 @@ export interface paths {
          *
          *     A new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,
          *     measured from the key's creation, and a capped change answers with
-         *     ``Otari-Key-Lifetime-Capped``.
+         *     ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap is refused
+         *     with 409 rather than stored as an expiry already past.
          */
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
@@ -23670,7 +23672,7 @@ export interface components {
             exclude_from_budget?: boolean | null;
             /**
              * Expires At
-             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.
+             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that would clamp is refused with 409 rather than stored as an expiry already past.
              */
             expires_at?: string | null;
             /** Is Active */
@@ -23728,7 +23730,7 @@ export interface components {
             end_user_budget_ids?: string[] | null;
             /**
              * Expires At
-             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.
+             * @description New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that would clamp is refused with 409 rather than stored as an expiry already past.
              */
             expires_at?: string | null;
             /** Is Active */
@@ -30253,6 +30255,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened */
+                    "Otari-Key-Lifetime-Capped"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -30348,6 +30352,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened */
+                    "Otari-Key-Lifetime-Capped"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -32863,6 +32869,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened */
+                    "Otari-Key-Lifetime-Capped"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -32927,6 +32935,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened */
+                    "Otari-Key-Lifetime-Capped"?: string;
                     [name: string]: unknown;
                 };
                 content: {

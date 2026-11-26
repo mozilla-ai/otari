@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -18,6 +17,7 @@ from gateway.core.config import (
     CONVERSATION_HEADER,
     COST_USD_HEADER,
     END_USER_BUDGET_HEADER,
+    KEY_LIFETIME_CAPPED_HEADER,
     PRICING_SOURCE_HEADER,
     ROUTER_HEADER,
 )
@@ -52,42 +52,18 @@ USER_MISMATCH_END_USER_DETAIL = f"{USER_MISMATCH_DETAIL} To bill each end user s
 USER_MISMATCH_METADATA_DETAIL = (
     f"{USER_MISMATCH_END_USER_DETAIL} To tag a request with a free-form ID, put it in metadata instead."
 )
-KEY_LIFETIME_CAPPED_HEADER = "Otari-Key-Lifetime-Capped"
-"""Response header carrying the expiry, in UTC ISO-8601, that a create or update was
-clamped to by ``max_api_key_lifetime_days``; absent when no clamping happened."""
 
 
-def cap_key_expiry(
-    config: GatewayConfig,
-    requested: datetime | None,
-    *,
-    created_at: datetime,
-) -> tuple[datetime | None, datetime | None]:
-    """The ``expires_at`` to store on a key created at ``created_at``, and the cap that changed the ask.
-
-    ``max_api_key_lifetime_days`` bounds a minted API key's lifetime: the ceiling is
-    ``created_at`` plus that many days. An ask past the ceiling is clamped to it, an
-    ask naming no expiry gets the ceiling (an unbounded key would outlive every cap),
-    and an ask within it is stored as it arrived, with no ceiling reported back.
-    Unset, the default, nothing moves. The cap governs writes: lowering it leaves
-    already-issued keys on the expiry they were given.
-
-    The second element is the ceiling that was applied, or None: routes echo it in the
-    ``Otari-Key-Lifetime-Capped`` header.
-    """
-    days = config.max_api_key_lifetime_days
-    if days is None:
-        return requested, None
-    # An offset-less timestamp is read as UTC, as the admission check reads one, so the
-    # comparison is against an instant rather than a ``TypeError``.
-    start = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
-    ceiling = start + timedelta(days=days)
-    if requested is None:
-        return ceiling, ceiling
-    requested_utc = requested if requested.tzinfo else requested.replace(tzinfo=UTC)
-    if requested_utc > ceiling:
-        return ceiling, ceiling
-    return requested, None
+# How the OpenAPI spec describes the expiry a clamped key write answers with.
+KEY_LIFETIME_CAPPED_HEADERS: dict[str, Any] = {
+    KEY_LIFETIME_CAPPED_HEADER: {
+        "description": (
+            "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; "
+            "absent when no clamping happened"
+        ),
+        "schema": {"type": "string"},
+    },
+}
 
 
 # How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.

@@ -665,6 +665,31 @@ async def test_replacing_an_expired_setup_key_issues_one_that_authenticates(asyn
     assert key_refusal(record, datetime.now(UTC)) is None
 
 
+async def test_a_capped_deployment_mints_a_setup_key_that_expires_at_the_cap(async_db: AsyncSession) -> None:
+    """The guide must not hand a manager a key the deployment's lifetime cap forbids."""
+    owner, workspace = await _setup(async_db, slug="acme-capped-setup")
+    config = _config().model_copy(update={"max_api_key_lifetime_days": 90})
+    service = WorkspaceActivationService(async_db, config, KEY_FORMAT)
+
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    record = await async_db.get(APIKey, issued.key_id)
+    assert record is not None
+    assert record.expires_at is not None
+    assert record.expires_at > datetime.now(UTC)
+    assert record.expires_at <= datetime.now(UTC) + timedelta(days=90)
+
+    # Replacing the key restarts the lifetime rather than restoring an unexpiring one.
+    record.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    reissued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    assert reissued.key_id == issued.key_id
+    await async_db.refresh(record)
+    assert record.expires_at is not None
+    assert record.expires_at > datetime.now(UTC)
+    assert key_refusal(record, datetime.now(UTC)) is None
+
+
 # ----------------------------------------------------------------------
 # Dismissal
 # ----------------------------------------------------------------------

@@ -29494,7 +29494,7 @@
                 "type": "null"
               }
             ],
-            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.",
+            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that would clamp is refused with 409 rather than stored as an expiry already past.",
             "title": "Expires At"
           },
           "is_active": {
@@ -29679,7 +29679,7 @@
                 "type": "null"
               }
             ],
-            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header.",
+            "description": "New expiration timestamp, or null to clear it. Where the deployment sets max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, and a clear becomes an expiry at the cap; a clamped change answers with the Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that would clamp is refused with 409 rather than stored as an expiry already past.",
             "title": "Expires At"
           },
           "is_active": {
@@ -44101,7 +44101,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Otari-Key-Lifetime-Capped": {
+                "description": "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -44221,7 +44229,7 @@
         ]
       },
       "patch": {
-        "description": "Update an API key in the caller's organization.\n\nRequires master key authentication. A new ``expires_at`` is capped by the deployment's\n``max_api_key_lifetime_days``, measured from the key's creation, and a capped change\nanswers with ``Otari-Key-Lifetime-Capped``.",
+        "description": "Update an API key in the caller's organization.\n\nRequires master key authentication. A new ``expires_at`` is capped by the deployment's\n``max_api_key_lifetime_days``, measured from the key's creation, and a capped change\nanswers with ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap\nis refused with 409 rather than stored as an expiry already past.",
         "operationId": "keys-update_key",
         "parameters": [
           {
@@ -44253,7 +44261,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Otari-Key-Lifetime-Capped": {
+                "description": "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -48575,7 +48591,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Otari-Key-Lifetime-Capped": {
+                "description": "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -48646,7 +48670,7 @@
         ]
       },
       "patch": {
-        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.\n\nA new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,\nmeasured from the key's creation, and a capped change answers with\n``Otari-Key-Lifetime-Capped``.",
+        "description": "Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.\n\nA new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,\nmeasured from the key's creation, and a capped change answers with\n``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap is refused\nwith 409 rather than stored as an expiry already past.",
         "operationId": "organization-keys-update_own_key",
         "parameters": [
           {
@@ -48678,7 +48702,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Otari-Key-Lifetime-Capped": {
+                "description": "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; absent when no clamping happened",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {

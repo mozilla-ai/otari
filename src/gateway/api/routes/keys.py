@@ -18,10 +18,10 @@ from gateway.api.deps import (
     get_db,
     require_deployment_operator,
 )
-from gateway.api.routes._helpers import KEY_LIFETIME_CAPPED_HEADER, cap_key_expiry, database_error
+from gateway.api.routes._helpers import KEY_LIFETIME_CAPPED_HEADERS, database_error
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
-from gateway.core.config import GatewayConfig
+from gateway.core.config import KEY_LIFETIME_CAPPED_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.sql import utc_iso
 from gateway.core.surface import Surface
@@ -32,6 +32,7 @@ from gateway.repositories.users_repository import get_or_create_default_user, ow
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate, KeyEndUsersPublic
 from gateway.services.api_keys import (
+    ApiKeyService,
     operator_enable_refusal,
     operator_max_end_users,
     operator_set_active,
@@ -318,7 +319,8 @@ class UpdateKeyRequest(BaseModel):
             "New expiration timestamp, or null to clear it. Where the deployment sets "
             "max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, "
             "and a clear becomes an expiry at the cap; a clamped change answers with the "
-            "Otari-Key-Lifetime-Capped header."
+            "Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that "
+            "would clamp is refused with 409 rather than stored as an expiry already past."
         ),
     )
     exclude_from_budget: bool | None = None
@@ -349,7 +351,7 @@ class UpdateKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-@router.post("")
+@router.post("", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def create_key(
     request: CreateKeyRequest,
     response: Response,
@@ -479,7 +481,10 @@ async def create_key(
 
     # The deployment's lifetime cap, if set, binds what is stored: the mint is clamped
     # before insert and the answer says so in ``Otari-Key-Lifetime-Capped``.
-    expires_at, capped_to = cap_key_expiry(config, request.expires_at, created_at=datetime.now(UTC))
+    created_at = datetime.now(UTC)
+    expires_at, capped_to = ApiKeyService.cap_key_expiry(
+        config, request.expires_at, created_at=created_at, now=created_at
+    )
     if capped_to is not None:
         response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
 
@@ -563,7 +568,7 @@ async def get_key(
     return KeyInfo.from_model(key)
 
 
-@router.patch("/{key_id}")
+@router.patch("/{key_id}", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def update_key(
     key_id: str,
     request: UpdateKeyRequest,
@@ -579,7 +584,8 @@ async def update_key(
 
     Requires master key authentication. A new ``expires_at`` is capped by the deployment's
     ``max_api_key_lifetime_days``, measured from the key's creation, and a capped change
-    answers with ``Otari-Key-Lifetime-Capped``.
+    answers with ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap
+    is refused with 409 rather than stored as an expiry already past.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     refuse_service_key_flag_change(key, request.is_service_key)
@@ -633,7 +639,9 @@ async def update_key(
     if request.is_active is not None:
         operator_set_active(key, request.is_active)
     if "expires_at" in request.model_fields_set:
-        key.expires_at, capped_to = cap_key_expiry(config, request.expires_at, created_at=key.created_at)
+        key.expires_at, capped_to = ApiKeyService.cap_key_expiry(
+            config, request.expires_at, created_at=key.created_at, now=datetime.now(UTC)
+        )
         if capped_to is not None:
             response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
     if request.exclude_from_budget is not None:

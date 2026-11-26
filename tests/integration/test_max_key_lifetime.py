@@ -3,7 +3,9 @@
 The cap binds on both key surfaces, create and update: an ask past the cap is clamped
 to the key's creation plus the cap, a mint naming no expiry gets one at the cap, and a
 clamped write answers with ``Otari-Key-Lifetime-Capped`` so the caller learns its ask
-moved. Unset, the default, nothing moves, which the last tests hold.
+moved. A write that would clamp on a key the cap has already outlived is refused with
+409 rather than storing an expiry that ends the key. Unset, the default, nothing moves,
+which the last tests hold.
 
 The pure arithmetic has its own unit tests (``tests/unit/test_key_lifetime_cap.py``);
 these exercise the routes, the header, and the member surface's ``changes`` path.
@@ -17,8 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.api.routes._helpers import KEY_LIFETIME_CAPPED_HEADER
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, KEY_LIFETIME_CAPPED_HEADER, GatewayConfig
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
@@ -44,6 +46,18 @@ def _parse(value: str | None) -> datetime | None:
 
 def _near(value: datetime | None, expected: datetime) -> bool:
     return value is not None and abs(value - expected) <= _TOLERANCE
+
+
+def _backdate(db_session_factory: Callable[[], Session], key_id: str, days: int) -> None:
+    """Move a key's creation back in time, as a cap lowered after its mint would leave it."""
+    session = db_session_factory()
+    try:
+        row = session.get(APIKey, key_id)
+        assert row is not None
+        row.created_at = datetime.now(UTC) - timedelta(days=days)
+        session.commit()
+    finally:
+        session.close()
 
 
 # =============================================================================
@@ -136,6 +150,38 @@ def test_update_without_an_expiry_change_leaves_the_expiry_alone(
     assert response.headers.get(KEY_LIFETIME_CAPPED_HEADER) is None
 
 
+def test_update_past_an_outlived_cap_is_refused(
+    capped_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A renewal on a key older than the cap is refused rather than stored as an expiry already past."""
+    created = capped_client.post(f"{API_ROOT}/keys", json={"key_name": "outlived"}, headers=master_key_header).json()
+    minted_expiry = _parse(created["expires_at"])
+    assert minted_expiry is not None
+    _backdate(db_session_factory, created["id"], days=100)
+
+    renewed = capped_client.patch(
+        f"{API_ROOT}/keys/{created['id']}",
+        json={"expires_at": (datetime.now(UTC) + timedelta(days=1)).isoformat()},
+        headers=master_key_header,
+    )
+    assert renewed.status_code == 409, renewed.text
+    assert "max_api_key_lifetime_days" in renewed.json()["detail"]
+    assert KEY_LIFETIME_CAPPED_HEADER not in renewed.headers
+
+    # Clearing the expiry is also a write of the ceiling, so it is refused the same way.
+    cleared = capped_client.patch(
+        f"{API_ROOT}/keys/{created['id']}",
+        json={"expires_at": None},
+        headers=master_key_header,
+    )
+    assert cleared.status_code == 409, cleared.text
+
+    stored = capped_client.get(f"{API_ROOT}/keys/{created['id']}", headers=master_key_header).json()
+    assert _parse(stored["expires_at"]) == minted_expiry
+
+
 # =============================================================================
 # Member surface: POST and PATCH /organizations/me/keys
 # =============================================================================
@@ -216,6 +262,31 @@ def test_a_member_update_is_clamped_and_told(capped_client: TestClient, member_s
 
         assert _near(_parse(body["expires_at"]), created_at + timedelta(days=_CAP_DAYS))
         assert response.headers.get(KEY_LIFETIME_CAPPED_HEADER) is not None
+    finally:
+        capped_client.cookies.clear()
+
+
+def test_a_member_update_past_an_outlived_cap_is_refused(
+    capped_client: TestClient,
+    member_session: tuple[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The member surface's ``changes`` path refuses the same write the operator surface does."""
+    token, _ = member_session
+    _as_member(capped_client, token)
+    try:
+        created = capped_client.post(
+            f"{API_ROOT}/organizations/me/keys",
+            json={"key_name": "member-outlived"},
+        ).json()
+        _backdate(db_session_factory, created["id"], days=100)
+
+        response = capped_client.patch(
+            f"{API_ROOT}/organizations/me/keys/{created['id']}",
+            json={"expires_at": (datetime.now(UTC) + timedelta(days=1)).isoformat()},
+        )
+        assert response.status_code == 409, response.text
+        assert KEY_LIFETIME_CAPPED_HEADER not in response.headers
     finally:
         capped_client.cookies.clear()
 

@@ -29,6 +29,9 @@ operator sets `max_api_key_lifetime_days` (see [Configuration](configuration.md)
 an expiry past it is clamped to the key's creation plus that many days, and a
 key minted without an expiry gets one at the cap. The API answers a clamped
 write with the `Otari-Key-Lifetime-Capped` header carrying the expiry applied.
+A key older than the cap cannot be given a new expiry: the write would clamp to
+a moment already past, so it is refused with 409 and the key keeps the expiry it
+has. Renew such a key by minting a new one.
 
 **Access**, under **More options**, sets what the key may call: one checkbox
 per scope, grouped by area. Models, Tools and MCP are shown; Files, Batches,
