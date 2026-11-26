@@ -123,7 +123,7 @@ providers:
 # files_max_bytes: 536870912
 # Most bytes and uploads one workspace may hold at once (null: no limit):
 # files_workspace_max_bytes: 1073741824
-# files_workspace_max_files: 1000
+# files_workspace_max_files: 500
 # files_gemini_inline_max_bytes: 16777216
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864

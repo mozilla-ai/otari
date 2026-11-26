@@ -271,11 +271,11 @@ async def test_an_upload_within_the_workspace_allowance_is_stored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_default_allowance_is_one_gigabyte_and_a_thousand_files() -> None:
+async def test_the_default_allowance_is_one_gigabyte_and_five_hundred_files() -> None:
     config = GatewayConfig()
 
     assert config.files_workspace_max_bytes == 1024**3
-    assert config.files_workspace_max_files == 1000
+    assert config.files_workspace_max_files == 500
 
 
 @pytest.mark.asyncio

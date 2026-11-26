@@ -1275,10 +1275,10 @@ class GatewayConfig(
         ),
     )
     files_workspace_max_files: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
-        default=1000,
+        default=500,
         ge=1,
         description=(
-            "Most uploads one workspace may hold at once (1000 by default), counting files not yet deleted or "
+            "Most uploads one workspace may hold at once (500 by default), counting files not yet deleted or "
             "expired. An upload past it is refused with 413, and nothing stored is deleted. "
             "Null in the config file sets no limit."
         ),
