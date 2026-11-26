@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import {
   deltaFraction,
   formatBucketTick,
+  formatClockTime,
   formatCost,
   formatCount,
   formatFileSize,
@@ -240,6 +241,28 @@ describe("formatReleaseDate", () => {
     expect(formatReleaseDate(undefined)).toBe("—")
     expect(formatReleaseDate("someday")).toBe("someday")
     expect(formatReleaseDate("2024-13")).toBe("2024")
+  })
+})
+
+describe("formatClockTime", () => {
+  // Built from local fields, since the clock reads the viewer's time zone.
+  const at = (hour: number, minute: number, second: number) =>
+    new Date(2026, 0, 1, hour, minute, second)
+
+  it("reads a 24-hour clock with zero-padded fields", () => {
+    expect(formatClockTime(at(14, 2, 31))).toBe("14:02:31")
+    expect(formatClockTime(at(9, 5, 7))).toBe("09:05:07")
+    expect(formatClockTime(at(9, 5, 7).getTime())).toBe("09:05:07")
+  })
+
+  it("drops the seconds when asked", () => {
+    expect(formatClockTime(at(14, 2, 31), { seconds: false })).toBe("14:02")
+  })
+
+  it("starts the day at 00, not 24", () => {
+    // `hour12: false` reads midnight as "24:00" in some engines; h23 does not.
+    expect(formatClockTime(at(0, 0, 0))).toBe("00:00:00")
+    expect(formatClockTime(at(0, 4, 0), { seconds: false })).toBe("00:04")
   })
 })
 

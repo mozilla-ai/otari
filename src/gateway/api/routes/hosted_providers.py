@@ -31,6 +31,7 @@ from gateway.api.deps import (
     HostedCatalogUpdateDep,
     HostedProviderServiceDep,
     SelectorReindexDep,
+    refuse_access_tokens,
     require_deployment_operator_or_absent,
     verify_master_key,
 )
@@ -379,7 +380,7 @@ async def refresh_hosted_models(
     return refreshed
 
 
-@router.get("/{provider}/available-models")
+@router.get("/{provider}/available-models", dependencies=[Depends(refuse_access_tokens)])
 async def list_available_models(service: HostedProviderServiceDep, provider: str) -> HostedAvailableModelsPublic:
     """Ask the provider what it serves on its credential.
 

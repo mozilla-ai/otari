@@ -2574,8 +2574,16 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.OAuthDynamicClient": {
+        "repository": "gateway/repositories/identity/oauth_dynamic_client_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.identity.PersonalAccessToken": {
+        "repository": "gateway/repositories/identity/personal_access_token_repository.py",
         "baseline": (),
     },
     "gateway.models.identity.OIDCConnection": {

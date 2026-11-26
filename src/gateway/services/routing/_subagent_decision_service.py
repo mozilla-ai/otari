@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.metered_pricing import RATE_FIELDS, calculate_token_cost, priced_per_request, quantize_cost
+from gateway.core.sql import WorkspaceIds
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.routing_exceptions import RecommenderNotConfiguredError, SubagentDecisionNotFoundError
 from gateway.log_config import logger
@@ -32,7 +33,7 @@ from gateway.models.routing import (
 )
 from gateway.models.usage import DECISIONS_ENDPOINT
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, SubagentSpawn
-from gateway.repositories.routing import DecisionSums, DecisionWindow, SubagentDecisionRepository, Workspaces
+from gateway.repositories.routing import DecisionSums, DecisionWindow, SubagentDecisionRepository
 from gateway.schemas.routing import (
     SavingsAmounts,
     SavingsByAgentType,
@@ -263,7 +264,7 @@ class SubagentDecisionService:
     async def savings(
         self,
         *,
-        workspaces: Workspaces,
+        workspaces: WorkspaceIds,
         start_date: datetime | None,
         end_date: datetime | None,
         user_ids: list[str] | None,

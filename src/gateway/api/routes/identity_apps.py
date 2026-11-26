@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Res
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from starlette.datastructures import MutableHeaders
 
 from gateway.api.deps import CurrentIdentity, OAuthAppServiceDep, OrganizationServiceDep, get_config, verify_master_key
@@ -26,6 +27,8 @@ from gateway.schemas.identity.oauth_apps import (
     AppRevocationRequest,
     AppTokenRequest,
     AppTokenResponse,
+    ClientRegistrationRequest,
+    ClientRegistrationResponse,
 )
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
@@ -77,6 +80,8 @@ router = APIRouter(
     prefix="/oauth/apps", tags=["oauth-apps"], dependencies=[Depends(verify_master_key), Depends(throttle_public_auth)]
 )
 public_router = APIRouter(prefix="/oauth/apps", tags=["oauth-apps"], route_class=OAuthAppRoute)
+# Registration takes JSON (RFC 7591), unlike the form-encoded endpoints above.
+registration_router = APIRouter(prefix="/oauth/apps", tags=["oauth-apps"], dependencies=[Depends(throttle_public_auth)])
 
 
 @public_router.get(
@@ -95,7 +100,9 @@ async def authorization_redirect(
     params: Annotated[AppAuthorizationParameters, Query()], service: OAuthAppServiceDep
 ) -> RedirectResponse:
     """Start authorization with standard OAuth query parameters, preserving them through dashboard sign-in."""
-    return RedirectResponse(service.authorization_url(params), status_code=status.HTTP_302_FOUND, headers=_NO_STORE)
+    return RedirectResponse(
+        await service.authorization_url(params), status_code=status.HTTP_302_FOUND, headers=_NO_STORE
+    )
 
 
 @public_router.get("/clients")
@@ -105,7 +112,7 @@ async def app_details(
     service: OAuthAppServiceDep,
 ) -> AppDetails:
     """Validate the app and redirect before the dashboard offers consent."""
-    return service.details(client_id, redirect_uri)
+    return await service.details(client_id, redirect_uri)
 
 
 def require_dashboard_consent_origin(request: Request, config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
@@ -150,12 +157,56 @@ async def app_workspaces(
 
 @public_router.post("/token", response_model=AppTokenResponse, responses={400: {"model": OAuthErrorResponse}})
 async def exchange(body: Annotated[AppTokenRequest, Form()], service: OAuthAppServiceDep) -> JSONResponse:
-    """Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key."""
-    key, scopes = await service.exchange(body)
+    """Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.
+
+    A registered or open app is given an API key. A client that registered itself is given a
+    read-only access token good for an hour through the MCP server, and a refresh token that
+    renews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.
+    """
+    issued = await service.exchange(body)
     token = AppTokenResponse(
-        access_token=key, scope=" ".join(scope.value for scope in scopes), manage_url=service.manage_url()
+        access_token=issued.token,
+        scope=" ".join(scope.value for scope in issued.scopes) or None,
+        expires_in=issued.expires_in,
+        refresh_token=issued.refresh_token,
+        manage_url=service.manage_url(issued.manage_path),
     )
-    return JSONResponse(token.model_dump(), headers=_NO_STORE)
+    return JSONResponse(token.model_dump(exclude_none=True), headers=_NO_STORE)
+
+
+@registration_router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ClientRegistrationResponse,
+    responses={status.HTTP_400_BAD_REQUEST: {"model": OAuthErrorResponse}},
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": ClientRegistrationRequest.model_json_schema()}},
+        }
+    },
+)
+async def register_client(request: Request, service: OAuthAppServiceDep) -> JSONResponse:
+    """Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.
+
+    What it is approved for redeems only to the approving person's read-only access token, and
+    the consent screen names it as unverified. Served where the MCP server is on.
+    """
+    try:
+        body = ClientRegistrationRequest.model_validate_json(
+            await bounded_body(request, _TOKEN_BODY_LIMIT, "Client registration is too large").body()
+        )
+    except ValidationError:
+        error = OAuthErrorResponse(
+            error="invalid_redirect_uri", error_description="Invalid client metadata or redirect URIs"
+        )
+        return JSONResponse(error.model_dump(), status_code=status.HTTP_400_BAD_REQUEST, headers=_NO_STORE)
+    try:
+        registered = await service.register_client(body)
+    except OAuthAppGrantError as exc:
+        error = OAuthErrorResponse(error="invalid_client_metadata", error_description=exc.description)
+        return JSONResponse(error.model_dump(), status_code=status.HTTP_400_BAD_REQUEST, headers=_NO_STORE)
+    return JSONResponse(registered.model_dump(), status_code=status.HTTP_201_CREATED, headers=_NO_STORE)
 
 
 @public_router.post("/revoke", responses={400: {"model": OAuthErrorResponse}})
@@ -168,6 +219,6 @@ async def revoke(body: Annotated[AppRevocationRequest, Form()], service: OAuthAp
 FEATURE = CoreFeature(
     name="oauth_apps",
     surface=None,
-    enabled=lambda config: bool(config.oauth_apps) or config.oauth_open_apps,
-    routers=lambda config: (router, public_router),
+    enabled=lambda config: bool(config.oauth_apps) or config.oauth_open_apps or config.mcp_server_enabled,
+    routers=lambda config: (router, public_router, registration_router),
 )
