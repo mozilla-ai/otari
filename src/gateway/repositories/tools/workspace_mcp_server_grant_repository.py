@@ -24,12 +24,18 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         super().__init__(db, WorkspaceMcpServerGrant)
 
     async def for_caller(
-        self, api_key_id: str | None, user_id: str | None, server_ids: Collection[uuid.UUID] | None
+        self,
+        api_key_id: str | None,
+        user_id: str | None,
+        server_ids: Collection[uuid.UUID] | None,
+        *,
+        workspace_id: uuid.UUID | None = None,
     ) -> list[WorkspaceMcpServerGrant]:
-        """Every grant naming this key or this user, on these servers; a session passes no key.
+        """Every grant naming this key or user, on these servers, applying in ``workspace_id``; a session passes no key.
 
         A request passes its workspace's servers, so a user every keyless key shares (``default``) holding grants in
-        many workspaces costs a request in one of them only that one's grants. ``None`` reads every server.
+        many workspaces costs a request in one of them only that one's grants. ``None`` reads every server. An
+        organization's server holds a grant per workspace, so one read for a workspace passes it.
         """
         subjects = []
         if api_key_id is not None:
@@ -41,6 +47,8 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         query = select(WorkspaceMcpServerGrant).where(or_(*subjects))
         if server_ids is not None:
             query = query.where(WorkspaceMcpServerGrant.server_id.in_(list(server_ids)))
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
         return list((await self.db.execute(query)).scalars().all())
 
     async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerGrant]:
@@ -159,12 +167,13 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         """
         await self.db.execute(delete(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.user_id == user_id))
 
-    async def remove_for_user_on_servers(self, user_id: str, server_ids: Collection[uuid.UUID]) -> None:
-        """Stage the removal of a user's grants on these servers."""
-        if not server_ids:
+    async def remove_for_user_in_workspaces(self, user_id: str, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of a user's grants that apply in these workspaces, on any server."""
+        if not workspace_ids:
             return
         await self.db.execute(
             delete(WorkspaceMcpServerGrant).where(
-                WorkspaceMcpServerGrant.user_id == user_id, WorkspaceMcpServerGrant.server_id.in_(list(server_ids))
+                WorkspaceMcpServerGrant.user_id == user_id,
+                WorkspaceMcpServerGrant.workspace_id.in_(list(workspace_ids)),
             )
         )

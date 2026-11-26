@@ -28,6 +28,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import OrganizationMember, WorkspaceMember
 from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpSharedConnection, McpUserConnection
+from gateway.repositories.tools import McpUserConnectionRepository, WorkspaceMcpServerRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
 from gateway.services.model_access import McpAccess
@@ -38,12 +39,12 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
 )
-from gateway.services.tools import McpGrantMembershipListener, McpUserTokens
-from gateway.services.tools._mcp_connections import McpServerRef
+from gateway.services.tools import McpGrantMembershipListener, McpUserTokens, _mcp_connections
+from gateway.services.tools._mcp_connections import McpServerRef, collect_revocations
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
 from . import test_mcp_user_connections as base
-from .test_mcp_user_connections import _row, _service, _sign_in, _state, _Wire, _World, _world
+from .test_mcp_user_connections import _reach, _row, _service, _sign_in, _state, _Wire, _World, _world
 
 # The scaffolding's fixtures, taken by assignment: pytest finds a fixture by its name in this module.
 wire = base.wire
@@ -468,13 +469,13 @@ async def test_deleting_the_workspace_revokes_its_shared_account_and_a_member_le
 
     async with uow:
         # The manager who signed the account in, leaving: everyone else still uses it.
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.owner.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.owner.id, [world.workspace.id])
     await base._drain_revocations()
     assert wire.revoked == []
     assert await _account(async_db, world) is not None
 
     async with uow:
-        await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
+        await McpGrantMembershipListener(uow, _reach(uow)).workspace_deleted(world.workspace.id, [])
     await base._drain_revocations()
     assert wire.revoked == ["refresh-1"]
 
@@ -554,3 +555,23 @@ async def test_a_check_of_an_account_replaced_while_it_ran_is_dropped(
 
     assert replaced
     assert checked.health is not None and checked.health.status == "healthy", "account B's health is kept"
+
+
+async def test_a_shared_account_counts_against_a_removal_s_revocation_limit(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    decrypted: list[str] = []
+
+    def counting(value: str) -> str:
+        decrypted.append(value)
+        return decrypt_secret(value)
+
+    monkeypatch.setattr(_mcp_connections, "decrypt_secret", counting)
+    repositories = (McpUserConnectionRepository(async_db), WorkspaceMcpServerRepository(async_db))
+
+    found, unread, read = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=0)
+    assert (found, unread, read, decrypted) == ([], 1, 0, []), "a zero limit counts the account and reads nothing"
+    found, unread, read = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=1)
+    assert (len(found), unread, read) == (1, 0, 1)

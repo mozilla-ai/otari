@@ -3389,8 +3389,11 @@ class ToolContext:
         shared: SharedToolUse | None = None,
         web_provider_client: httpx.AsyncClient | None = None,
         guardrails: RequestGuardrails | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> None:
         self.config = config
+        # The request's workspace, which a sign-in link names so the sign-in starts from it.
+        self.workspace_id = workspace_id
         # The request's guardrails, which the gateway's tools and the answer pass
         # through; None where the request runs none.
         self.guardrails = guardrails
@@ -4006,6 +4009,7 @@ async def prepare_gateway_tools(
         code, web, web_access = answer.code, answer.web, answer.web_access
         return ToolContext(
             config=ctx.config,
+            workspace_id=ctx.workspace_id,
             mcp_server_configs=mcp.servers,
             mcp_sign_in=mcp.sign_in,
             use_sandbox=code.use_sandbox,
@@ -4467,7 +4471,7 @@ async def _admit_mcp_servers(
             ctx.api_key is not None
             and not ctx.session
             and KeyScope.MCP_EXECUTE in ctx.api_key.scopes
-            and await servers.any_attached(ctx.workspace_id)
+            and await servers.any_attached(ctx.workspace_id, ctx.organization_id)
         )
         access = (
             await resolve_request_mcp_access(
@@ -5734,7 +5738,7 @@ async def _open_tool_backends(
             McpSignInBackend(
                 [*tool_ctx.mcp_sign_in, *signed_out],
                 mint=lambda server_id, user_id: McpConnectionService.sign_in_link(
-                    tool_ctx.config, server_id=server_id, user_id=user_id
+                    tool_ctx.config, server_id=server_id, user_id=user_id, workspace_id=tool_ctx.workspace_id
                 ),
                 link_prefix=McpConnectionService.sign_in_link_prefix(tool_ctx.config),
                 taken=taken | tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),

@@ -69,6 +69,17 @@ class WorkspaceMcpServerAlreadyExistsError(TenancyConflictError):
         super().__init__(f"Workspace {workspace_id} already has an MCP server named '{name}'")
 
 
+class McpServerNameTakenError(TenancyConflictError):
+    """Another server a workspace of the organization reaches already has this name.
+
+    A workspace reaches its own servers and its organization's under one set of names, since the tool
+    loop labels a server's tools by name.
+    """
+
+    def __init__(self, name: object):
+        super().__init__(f"An MCP server named '{name}' is already available to this organization's workspaces")
+
+
 class WorkspaceMcpServerUnsafeUrlError(TenancyValidationError):
     """The URL failed the same SSRF and TLS checks a request-body MCP server faces.
 
@@ -755,6 +766,7 @@ __all__ = [
     "McpConnectionUnavailableError",
     "McpConnectionUpstreamError",
     "McpSignInRequiredError",
+    "McpServerNameTakenError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",
