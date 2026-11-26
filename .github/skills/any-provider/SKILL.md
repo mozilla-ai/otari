@@ -552,8 +552,7 @@ The first provider whose key is optional: with one it calls `/v1/search`, withou
 
 ### 2026-11-25, Firecrawl (both libraries)
 
-The first fetch provider that reports where it found the page, and the first to mark options
-operator only for what they cost.
+The first fetch provider that reports where it found the page.
 
 - A fetch provider can say where a redirect led: Firecrawl's `metadata.url` is the page's URL after
   redirects (`http://python.org/downloads` came back as `https://www.python.org/downloads/`), so
@@ -563,20 +562,21 @@ operator only for what they cost.
   above `basic`; its billing page, read 2026-11-25, bills both alike, and its documentation marks
   `proxy` deprecated, so the option is left out. Firecrawl has no string option whose values carry
   their own price, so neither adapter has a cost tier.
-- A charge per page can hang on an option no `enum` describes. Firecrawl parses a PDF at 1 credit
-  per page by default, and `parsers`, an array, is how to cap it (`[{"type": "pdf", "maxPages":
-  20}]`). It is `operator_only`, so a request cannot lift an operator's cap. Its default stays the
-  SDK's, since the cheaper `parsers: []` returns a PDF as base64 with no text.
+- A charge per page can hang on an option no `enum` describes. Firecrawl parses every page of a
+  PDF at 1 credit each by default, and `parsers`, an array, is how to cap it. The adapter sends
+  `[{"type": "pdf", "maxPages": 100}, "image"]` unless passed: Firecrawl's own default with a
+  ceiling, since `parsers: []`, the cheapest, returns a PDF as base64 with no text. 100 is the page
+  limit Otari's own fetch applies to a PDF. Keep `"image"` in the list: a list turns off the
+  parsers it leaves out.
 - An SDK can tag every call with its own name: firecrawl-py sends `origin: python-sdk@<version>`.
-  The adapter sends the library's name (`any-search`, `any-fetch`), as Keenable's header does.
-  Firecrawl's `integration` field, which the SDK sends only when passed, takes a fixed list of
-  names, so it is not sent.
+  The adapters send neither `origin` nor Firecrawl's `integration` field, so the request body holds
+  only what the search or the scrape needs.
 - Capture what an SDK puts on the wire, not what its request model declares. firecrawl-py 4.57.0's
   models carry `limit: 5` and `timeout: 300000`, but `search("q")` sends only the query and
   `origin`, so Firecrawl applies its own defaults (10 results, 60 seconds). The adapter sends
   `limit` only for `max_results` and cuts the hits to 10 otherwise.
 - An option that holds other options can carry a charge per page: `scrapeOptions` scrapes every
-  result at 1 credit each, plus whatever its own options cost, so it is `operator_only` too. Its
+  result at 1 credit each, plus whatever its own options cost. Its
   `formats` always include `markdown`, and missing or empty `formats` become `["markdown"]`, since
   Firecrawl scrapes nothing without one.
 - A flag the envelope trusts is required: an answer without `success` raises

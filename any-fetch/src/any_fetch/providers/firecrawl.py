@@ -1,10 +1,12 @@
 """Firecrawl scrape: ``POST /v2/scrape``, with the key as a Bearer token.
 
-One page per call, as Markdown. Sends what Firecrawl's SDK (``firecrawl-py``
-4.57.0) sends: the URL, ``origin``, here the library's name, as the SDK sends its
-own, and the native options passed, with ``formats`` always ``["markdown"]``,
-since the Markdown is the text. ``None`` counts as not passed. Firecrawl has no
-length cap, so ``max_chars`` cuts the text. Firecrawl renders a page's scripts
+One page per call, as Markdown. Sends the URL and the native options passed,
+with ``formats`` always ``["markdown"]``, since the Markdown is the text. ``None``
+counts as not passed. ``parsers`` is ``[{"type": "pdf", "maxPages": 100}, "image"]``
+unless passed: Firecrawl's own default, ``["pdf", "image"]``, parses every page of
+a PDF at 1 Firecrawl credit each with no ceiling, while the cap still returns
+the text of the first 100 pages. Firecrawl has no length cap, so ``max_chars``
+cuts the text. Firecrawl renders a page's scripts
 in a browser when the page needs them
 (https://docs.firecrawl.dev/features/scrape: "js-rendered sites").
 
@@ -49,8 +51,8 @@ from any_fetch._api import AnyFetch
 from any_fetch._errors import ProviderError, safe_tag
 from any_fetch._types import FetchedPage, FetchError, OptionSpec, ProviderMetadata
 
-ORIGIN = "any-fetch"
-"""The ``origin`` sent with every fetch, as Firecrawl's SDK sends its own."""
+DEFAULT_PARSERS: list[Any] = [{"type": "pdf", "maxPages": 100}, "image"]
+"""The ``parsers`` sent when none is passed: Firecrawl's own, with a ceiling on the PDF pages parsed and billed."""
 
 # Native options copied into the request as they are.
 _PASSED_THROUGH = (
@@ -65,7 +67,6 @@ _PASSED_THROUGH = (
     "removeBase64Images",
     "blockAds",
     "storeInCache",
-    "parsers",
 )
 
 # The statuses whose body is a sentence, not a code.
@@ -163,19 +164,20 @@ class FirecrawlProvider(AnyFetch):
             OptionSpec(
                 name="parsers",
                 type="array",
-                operator_only=True,
+                default=DEFAULT_PARSERS,
                 description=(
-                    'How files are read, ["pdf", "image"] unless passed. A PDF adds 1 Firecrawl credit per page '
-                    'parsed; [{"type": "pdf", "maxPages": 20}] caps that. Only the operator sets it, since it sets '
-                    "the cost of a PDF."
+                    "How PDFs and images are read. A PDF adds 1 Firecrawl credit per page parsed, so the default "
+                    "parses the first 100 pages; a higher maxPages, or a pdf parser without one, reads and bills "
+                    "more. A list turns off the parsers it leaves out."
                 ),
             ),
         ],
     )
 
     async def _fetch(self, url: str, *, max_chars: int | None, options: dict[str, Any]) -> FetchedPage:
-        payload: dict[str, Any] = {"url": url, "formats": ["markdown"], "origin": ORIGIN}
+        payload: dict[str, Any] = {"url": url, "formats": ["markdown"]}
         payload.update({name: options[name] for name in _PASSED_THROUGH if options.get(name) is not None})
+        payload["parsers"] = DEFAULT_PARSERS if options.get("parsers") is None else options["parsers"]
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/v2/scrape"
         headers = {"Authorization": f"Bearer {self._api_key or ''}"}

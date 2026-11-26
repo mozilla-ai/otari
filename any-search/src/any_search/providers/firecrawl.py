@@ -1,9 +1,9 @@
 """Firecrawl: ``POST /v2/search``, with the key as a Bearer token.
 
-Sends what Firecrawl's SDK (``firecrawl-py`` 4.57.0) sends: the query and
-``origin``, here the library's name, as the SDK sends its own, plus the native
-options passed. ``None`` is not sent. ``max_results`` becomes ``limit``, at most
-100, sent only when passed, as the SDK does; Firecrawl's own default is 10.
+Sends the query and the native options passed, as Firecrawl's SDK
+(``firecrawl-py`` 4.57.0) does. ``None`` is not sent. ``max_results`` becomes
+``limit``, at most 100, sent only when passed, as the SDK does; Firecrawl's
+own default is 10.
 ``time_range`` becomes ``tbs`` (``qdr:d``, ``qdr:w``, ``qdr:m``, ``qdr:y``) and
 wins over that option. Firecrawl's ``timeout`` is 60 seconds unless passed.
 
@@ -12,11 +12,11 @@ default, the site's own description under ``highlights=False``. ``markdown``,
 present only when ``scrapeOptions`` scrapes the results, is the text, so
 ``markdown`` is added to ``scrapeOptions.formats`` when they lack it, and they
 are ``["markdown"]`` when missing or empty: Firecrawl scrapes nothing without
-a format. ``scrapeOptions`` is operator only, since what it holds sets the
-cost of each page scraped. Firecrawl
-dates no web result, so ``published`` is ``None``. ``sources`` is not offered:
-the adapter reads web results, while news, images and Firecrawl Alexandria's
-data tools come back in fields of their own.
+a format. ``scrapeOptions`` is not a cost tier, so a request can set it; each
+page it scrapes adds to the cost of the search. Firecrawl dates no web result,
+so ``published`` is ``None``. ``sources`` is not offered: the adapter reads
+web results, while news, images and Firecrawl Alexandria's data tools come back
+in fields of their own.
 
 401, 402 and 429 are tagged by status (``unauthorized``, ``payment_required``,
 ``rate_limited``): their bodies are a sentence. Any other status is tagged with
@@ -24,6 +24,8 @@ the body's ``code`` when it carries one, else ``http_error``; the codes are
 Firecrawl's, seen live, such as ``CATEGORY_REMOVED``. The ``error``
 sentence, which can quote the request, is not read. ``success: false`` inside a
 200 is ``SearchResult.error``, tagged with its ``code``, else ``unsuccessful``.
+That path is unobserved: every failure seen live came with a status of 400 or
+more.
 
 ``success`` must be a boolean, and ``data`` an object. ``data.web``
 must be a list when present; without it there are no hits. Each item read must
@@ -55,9 +57,6 @@ MAX_RESULTS = 100
 
 DEFAULT_LIMIT = 10
 """The ``limit`` Firecrawl applies when none is sent, as the SDK sends none."""
-
-ORIGIN = "any-search"
-"""The ``origin`` sent with every search, as Firecrawl's SDK sends its own."""
 
 # Native options copied into the request as they are; time_range wins over tbs.
 _PASSED_THROUGH = (
@@ -163,11 +162,9 @@ class FirecrawlProvider(AnySearch):
             OptionSpec(
                 name="scrapeOptions",
                 type="object",
-                operator_only=True,
                 description=(
                     'Scrape each result too, as {"formats": ["markdown"]}; its Markdown is the text, and markdown '
-                    "is always among the formats. Each page scraped adds 1 Firecrawl credit, plus the options' own, "
-                    "so only the operator sets it."
+                    "is always among the formats. Each page scraped adds 1 Firecrawl credit, plus the options' own."
                 ),
             ),
         ],
@@ -182,7 +179,7 @@ class FirecrawlProvider(AnySearch):
         options: dict[str, Any],
     ) -> SearchResult:
         limit = min(DEFAULT_LIMIT if max_results is None else max_results, MAX_RESULTS)
-        payload: dict[str, Any] = {"query": query, "origin": ORIGIN}
+        payload: dict[str, Any] = {"query": query}
         if max_results is not None:
             payload["limit"] = limit
         payload.update({name: options[name] for name in _PASSED_THROUGH if options.get(name) is not None})

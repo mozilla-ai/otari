@@ -139,7 +139,7 @@ def test_describe_says_a_provider_renders_javascript_and_reports_the_final_url(
     out = _describe("firecrawl", capsys)
     assert "Renders JavaScript: yes" in out
     assert "Final URL: after redirects" in out
-    assert "  parsers (array, operator only)" in out
+    assert '  parsers (array), default [{"type": "pdf", "maxPages": 100}, "image"]' in out
 
 
 def test_describe_shows_defaults_as_json_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:

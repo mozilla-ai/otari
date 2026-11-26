@@ -181,14 +181,13 @@ Fields the adapter does not read are ignored, so a field Exa adds breaks nothing
 
 ## Firecrawl
 
-`firecrawl` calls Firecrawl's [Scrape API](https://docs.firecrawl.dev/api-reference/endpoint/scrape?utm_source=otari&utm_medium=integration),
+`firecrawl` calls Firecrawl's [Scrape API](https://docs.firecrawl.dev/api-reference/endpoint/scrape),
 `POST /v2/scrape`, with the key as a Bearer token, read from `FIRECRAWL_API_KEY` when not passed.
 Its base URL is `https://api.firecrawl.dev`; `api_base` points it at another Firecrawl
 deployment, such as a self-hosted one.
 
 It fetches one page per call, a web page, a PDF or an image, and returns it as Markdown, rendering
-the page's scripts in a browser when it needs them. It sends what Firecrawl's Python SDK sends, the
-URL and an `origin`, here `any-fetch`, where the SDK sends its own name, and always asks for
+the page's scripts in a browser when it needs them. It sends the URL and always asks for
 `formats` `["markdown"]`, so `formats` is not an option. Firecrawl has no length cap, so
 `max_chars` cuts the text and sets `text_truncated`. The native options are Firecrawl's own:
 `onlyMainContent`, `includeTags`, `excludeTags`, `maxAge`, `waitFor`, `mobile`, `timeout`,
@@ -196,8 +195,10 @@ URL and an `origin`, here `any-fetch`, where the SDK sends its own name, and alw
 firecrawl` lists them, and `None` counts as not passed. `maxAge` lets Firecrawl serve a cached
 copy up to two days old unless passed, so pass `maxAge=0` where the page as it is now matters.
 `timeout` is in milliseconds and goes through `fetch`, since `afetch`'s `timeout` argument is the
-fetcher's own. `parsers` is operator only: a PDF adds 1 Firecrawl credit per page parsed, and
-`[{"type": "pdf", "maxPages": 20}]` caps that.
+fetcher's own. A PDF adds 1 Firecrawl credit per page parsed, so `parsers` is
+`[{"type": "pdf", "maxPages": 100}, "image"]` unless passed: Firecrawl's own default with a ceiling,
+so a fetch of a long PDF returns the text of its first 100 pages. Pass a higher `maxPages`, or
+`"pdf"` without one, to read more; a list turns off the parsers it leaves out.
 
 `final_url` is `metadata.url`, where Firecrawl found the page after redirects, so
 `reports_final_url` is true and a caller can check where a redirect led. `content_type` is

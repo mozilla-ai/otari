@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from any_fetch import AnyFetch, FetchedPage, MissingCredentialError, ProviderError, UnsupportedParameterError
-from any_fetch.providers.firecrawl import ORIGIN
+from any_fetch.providers.firecrawl import DEFAULT_PARSERS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "firecrawl"
 KEY = "test-key"
@@ -66,18 +66,20 @@ def test_metadata() -> None:
     assert (metadata.max_urls_per_call, metadata.renders_javascript, metadata.formats) == (1, True, ["markdown"])
     assert (metadata.reports_final_url, metadata.reports_cost) == (True, False)
     assert not any(option.cost_tier for option in metadata.options)
-    assert [option.name for option in metadata.options if option.operator_only] == ["parsers"]
+    assert not any(option.operator_only for option in metadata.options)
+    assert next(option.default for option in metadata.options if option.name == "parsers") == DEFAULT_PARSERS
     names = {option.name for option in metadata.options}
     # The format is the envelope's, and the deprecated proxy and the options that add a charge per page are left out.
     assert not names & {"url", "formats", "origin", "integration", "proxy", "lockdown", "redactPII"}
 
 
 @pytest.mark.asyncio
-async def test_posts_the_url_markdown_and_the_origin_with_a_bearer_key() -> None:
+async def test_posts_the_url_markdown_and_capped_pdf_parsers_with_a_bearer_key() -> None:
     _, request = await _fetch()
     assert (request.method, str(request.url)) == ("POST", "https://api.firecrawl.dev/v2/scrape")
     assert request.headers["Authorization"] == f"Bearer {KEY}"
-    assert _payload(request) == {"url": URL, "formats": ["markdown"], "origin": ORIGIN}
+    assert _payload(request) == {"url": URL, "formats": ["markdown"], "parsers": DEFAULT_PARSERS}
+    assert DEFAULT_PARSERS == [{"type": "pdf", "maxPages": 100}, "image"]
 
 
 @pytest.mark.asyncio
@@ -97,13 +99,19 @@ async def test_native_options_are_sent_as_they_are_and_max_chars_is_not_sent() -
         "parsers": [{"type": "pdf", "maxPages": 20}],
     }
     _, request = await _fetch(max_chars=600, **options)
-    assert _payload(request) == {"url": URL, "formats": ["markdown"], "origin": ORIGIN, **options}
+    assert _payload(request) == {"url": URL, "formats": ["markdown"], **options}
 
 
 @pytest.mark.asyncio
 async def test_an_option_passed_as_none_counts_as_not_passed() -> None:
     _, request = await _fetch(onlyMainContent=None, maxAge=None, parsers=None)
-    assert _payload(request) == {"url": URL, "formats": ["markdown"], "origin": ORIGIN}
+    assert _payload(request) == {"url": URL, "formats": ["markdown"], "parsers": DEFAULT_PARSERS}
+
+
+@pytest.mark.asyncio
+async def test_parsers_passed_replace_the_default_even_when_empty() -> None:
+    _, request = await _fetch(parsers=[])
+    assert _payload(request)["parsers"] == []
 
 
 @pytest.mark.asyncio

@@ -888,13 +888,16 @@ Each provider's limits are in the
   `fetch_tools`. It reports Firecrawl credits, not dollars, so a fetch is billed at
   the instance's own rate (its `price_per_call`, or a `fetch` price set on the
   dashboard's Web search page or through the API). Firecrawl's
-  [pricing](https://www.firecrawl.dev/pricing?utm_source=otari&utm_medium=integration) and
-  [billing](https://docs.firecrawl.dev/billing?utm_source=otari&utm_medium=integration) pages, read 2026-11-25, put
+  [pricing](https://www.firecrawl.dev/pricing) and
+  [billing](https://docs.firecrawl.dev/billing) pages, read 2026-11-25, put
   a page at 1 Firecrawl credit, and a Firecrawl credit on the published plans costs
   from $0.0006 (Scale, billed yearly) to $0.005 (the Hobby plan's extra credits). A PDF adds 1 Firecrawl credit per page
-  parsed, so a 350-page PDF costs 351; `parsers: [{type: pdf, maxPages: 20}]` in the
-  instance's `options` caps that, and only the instance's configuration sets it,
-  so price an instance that reads PDFs for them. Firecrawl answers with the URL it
+  parsed, so Otari sends `parsers: [{type: pdf, maxPages: 100}, image]` unless the
+  instance's `options` or the request set `parsers`: a fetch then parses at most the
+  first 100 pages of a PDF, the page limit Otari's own fetch applies, and costs at
+  most 101 Firecrawl credits. `parsers` is not a cost tier, so a workspace or a
+  request can set it, a higher `maxPages` included; set the instance's rate with
+  that in mind. Firecrawl answers with the URL it
   found the page at after redirects, so the domain policy holds on the page a
   redirect led to. A page Firecrawl cannot read, such as a zero-byte file or a
   private address, fails the fetch, and a site's error page comes back as its text.
@@ -1263,16 +1266,18 @@ refuse such a value when a tool is saved.
   such as `${FIRECRAWL_API_KEY}`. It reports Firecrawl credits, not dollars, so a
   search is billed at the tool's own rate (its `price_per_call`, or a `search`
   price set on the dashboard's Web search page or through the API). Firecrawl's
-  [pricing](https://www.firecrawl.dev/pricing?utm_source=otari&utm_medium=integration) and
-  [billing](https://docs.firecrawl.dev/billing?utm_source=otari&utm_medium=integration) pages, read 2026-11-25, put
+  [pricing](https://www.firecrawl.dev/pricing) and
+  [billing](https://docs.firecrawl.dev/billing) pages, read 2026-11-25, put
   a search at 2 Firecrawl credits per 10 results, rounded up per 10, and a
   Firecrawl credit on the published plans costs from $0.0006 (Scale, billed
   yearly) to $0.005 (the Hobby plan's extra credits), so a search for 10 results
-  costs $0.0012 to $0.01. `scrapeOptions`, which returns
+  costs $0.0012 to $0.01. Every 10 results past the first 10 add 2 Firecrawl
+  credits, so a workspace's `max_results` ceiling also bounds what one search can
+  cost. `scrapeOptions`, which returns
   each result's page as text, adds 1 Firecrawl credit per page scraped, plus the
   scrape options' own, so a scraped search for 10 results costs 12 Firecrawl
-  credits. `scrapeOptions` is operator only, so only the tool's `options` set it;
-  price a tool that sets it for the pages it scrapes. A search returns 10 results
+  credits. `scrapeOptions` is not a cost tier, so a workspace or a request can set
+  it; set the tool's rate with that in mind. A search returns 10 results
   unless asked for more, and at most 100,
   and its hits carry query-relevant highlights as the snippet, which Otari cuts
   before a model or a direct search sees them; `highlights: false` returns each

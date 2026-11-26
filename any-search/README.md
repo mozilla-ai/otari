@@ -225,13 +225,13 @@ one. Fields the adapter does not read are ignored, so a field Exa adds breaks no
 
 ## Firecrawl
 
-`firecrawl` calls Firecrawl's [Search API](https://docs.firecrawl.dev/api-reference/endpoint/search?utm_source=otari&utm_medium=integration),
+`firecrawl` calls Firecrawl's [Search API](https://docs.firecrawl.dev/api-reference/endpoint/search),
 `POST /v2/search`, with the key as a Bearer token, read from `FIRECRAWL_API_KEY` when not passed.
 The query travels in the JSON body. Its base URL is `https://api.firecrawl.dev`; `api_base` points
 it at another Firecrawl deployment, such as a self-hosted one.
 
-It sends what Firecrawl's Python SDK sends: the query and an `origin`, here `any-search`, where
-the SDK sends its own name. `max_results` becomes `limit`, sent only when passed, as in the SDK;
+It sends the query and the native options passed. `max_results` becomes `limit`, sent only when
+passed, as in Firecrawl's Python SDK;
 Firecrawl's own default is 10 results. Firecrawl spends up to 60 seconds on a search unless the
 `timeout` option says otherwise.
 
@@ -248,10 +248,10 @@ or to 10 when it is unset. `time_range` becomes `tbs` (`qdr:d`, `qdr:w`, `qdr:m`
 over the `tbs` option. The other native options are Firecrawl's own: `categories`,
 `includeDomains`, `excludeDomains`, `location`, `country`, `safe`, `highlights`,
 `ignoreInvalidURLs`, `timeout` (milliseconds) and `scrapeOptions`; `--describe firecrawl` lists
-them. `scrapeOptions` is operator only, since each page it scrapes adds a Firecrawl credit, and its
+them. Each page `scrapeOptions` scrapes adds a Firecrawl credit, and its
 `formats` always include `markdown`: missing or empty `formats` become `["markdown"]`, because
 Firecrawl scrapes nothing without one. An option set to `None` is not sent. `sources` is not offered: the adapter reads web results,
-while news, images and [Firecrawl Alexandria](https://alexandria.firecrawl.dev/?utm_source=otari&utm_medium=integration) data tools
+while news, images and [Firecrawl Alexandria](https://alexandria.firecrawl.dev/) data tools
 come back in fields of their own.
 
 Highlights can run to a few thousand characters a result, so pass `highlights=False` for the

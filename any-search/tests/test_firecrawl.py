@@ -9,7 +9,7 @@ import pytest
 
 from any_search import AnySearch, MissingCredentialError, ProviderError, SearchResult, UnsupportedParameterError
 from any_search._http import USER_AGENT
-from any_search.providers.firecrawl import DEFAULT_LIMIT, MAX_RESULTS, ORIGIN
+from any_search.providers.firecrawl import DEFAULT_LIMIT, MAX_RESULTS
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "firecrawl"
 KEY = "test-key"
@@ -66,17 +66,17 @@ def test_metadata() -> None:
     assert (metadata.query_in_url, metadata.key_in_url, metadata.reports_cost) == (False, False, False)
     assert metadata.max_results == MAX_RESULTS == 100
     assert not any(option.cost_tier for option in metadata.options)
-    assert [option.name for option in metadata.options if option.operator_only] == ["scrapeOptions"]
+    assert not any(option.operator_only for option in metadata.options)
     names = {option.name for option in metadata.options}
     # The query, the count, the origin and the sources the envelope cannot read are not options.
     assert not names & {"query", "limit", "origin", "integration", "sources"}
 
 
 @pytest.mark.asyncio
-async def test_posts_the_query_and_the_origin_with_a_bearer_key_and_no_limit_unless_asked() -> None:
+async def test_posts_the_query_with_a_bearer_key_and_no_limit_unless_asked() -> None:
     _, request = await _search()
     assert (request.method, str(request.url)) == ("POST", "https://api.firecrawl.dev/v2/search")
-    assert _payload(request) == {"query": QUERY, "origin": ORIGIN}
+    assert _payload(request) == {"query": QUERY}
     assert (request.headers["Authorization"], request.headers["User-Agent"]) == (f"Bearer {KEY}", USER_AGENT)
 
 
@@ -100,7 +100,7 @@ async def test_native_options_are_sent_as_given_and_none_is_not_sent() -> None:
         "timeout": 30000,
     }
     _, request = await _search(**options, excludeDomains=None)
-    assert _payload(request) == {"query": QUERY, "origin": ORIGIN, **options}
+    assert _payload(request) == {"query": QUERY, **options}
 
 
 @pytest.mark.asyncio
