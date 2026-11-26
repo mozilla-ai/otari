@@ -1,9 +1,9 @@
 import uuid
 from collections.abc import Collection
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Never
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -43,3 +43,23 @@ class DashboardSessionRepository(BaseRepository[DashboardSession, Never, Never])
         self.db.add(
             DashboardSession(token_hash=token_hash, user_id=user_id, created_at=created_at, expires_at=expires_at)
         )
+
+    async def is_live(self, token_hash: str, user_id: uuid.UUID, now: datetime) -> bool:
+        """Whether the account still holds this session and it has not expired.
+
+        Asked inside a transaction that is about to act on a session's authority, so that a
+        cleanup which ends an account's sessions (a block, a proof, deactivation) cannot commit
+        between the request that authenticated and the write that request makes.
+        """
+        expires_at = (
+            await self.db.execute(
+                select(DashboardSession.expires_at).where(
+                    col(DashboardSession.token_hash) == token_hash,
+                    col(DashboardSession.user_id) == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if expires_at is None:
+            return False
+        # SQLite hands a stored timestamp back naive, and it was written as UTC.
+        return (expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=UTC)) > now

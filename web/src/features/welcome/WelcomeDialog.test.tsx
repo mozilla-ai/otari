@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Outlet } from "@tanstack/react-router"
-import { act, screen, waitFor } from "@testing-library/react"
+import { act, renderHook, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -16,7 +16,10 @@ import {
   WELCOME_ANSWERED_KEY,
 } from "@/features/welcome/welcomeAnswer"
 import * as apiClient from "@/shared/api/client"
-import { useHostedProviders } from "@/shared/api/hostedProviders"
+import {
+  useHostedProviders,
+  usePlatformConnectStatus,
+} from "@/shared/api/hostedProviders"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -84,6 +87,7 @@ async function renderDialog(platformConnect = true) {
     </QueryClientProvider>,
     { routes: [{ path: "/", element: <p>OVERVIEW</p> }], url: "/providers" },
   )
+  return queryClient
 }
 
 const TITLE = "Welcome to Otari"
@@ -226,9 +230,41 @@ describe("WelcomeDialog", () => {
     await waitFor(() => expect(requests).toContain("DELETE /platform/connect"))
   })
 
+  it.each(["Skip, I’ll use my own keys", "Close"])(
+    "ends a code still waiting for approval on %s",
+    async (label) => {
+      const requests = mockApi({
+        statuses: [{ status: "idle" }, { status: "pending", ...STARTED }],
+      })
+      vi.spyOn(window, "open").mockReturnValue(null)
+      const user = userEvent.setup()
+      const queryClient = await renderDialog()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Connect otari.ai" }),
+      )
+      expect(await screen.findByText("WXYZ-1234")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: label }))
+
+      await waitFor(() =>
+        expect(requests).toContain("DELETE /platform/connect"),
+      )
+      // The status the providers page reads to decide whether to show the
+      // code, taken from the cache without another read.
+      const { result } = renderHook(() => usePlatformConnectStatus(false), {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={queryClient}>
+            {children}
+          </QueryClientProvider>
+        ),
+      })
+      await waitFor(() => expect(result.current.data?.status).toBe("idle"))
+    },
+  )
+
   it("closes and opens the Overview once the connection is approved", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    mockApi({
+    const requests = mockApi({
       statuses: [
         { status: "idle" },
         { status: "pending", ...STARTED },
@@ -257,6 +293,7 @@ describe("WelcomeDialog", () => {
     )
     expect(localStorage.getItem(WELCOME_ANSWERED_KEY)).not.toBe(OWN_KEYS)
     expect(localStorage.getItem(WELCOME_ANSWERED_KEY)).not.toBeNull()
+    expect(requests).not.toContain("DELETE /platform/connect")
   })
 
   it("lands on the Overview, where the setup guide opens over the provider it connected", async () => {

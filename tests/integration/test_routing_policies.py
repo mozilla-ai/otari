@@ -44,6 +44,7 @@ from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
     ATTEMPT_COUNT_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     FALLBACK_HEADER,
     MODEL_HEADER,
     PROVIDER_HEADER,
@@ -191,14 +192,15 @@ def _awaited_model(mock: AsyncMock) -> str:
     return model
 
 
-def _served_by(resp: Any) -> tuple[str | None, str | None, str | None, str | None]:
-    """The serving instance and model, attempt count and fallback flag a response's headers carry."""
+def _served_by(resp: Any) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """The serving instance and model, attempt count, fallback and deployment-paid flags a response's headers carry."""
     headers = resp.headers
     return (
         headers.get(PROVIDER_HEADER),
         headers.get(MODEL_HEADER),
         headers.get(ATTEMPT_COUNT_HEADER),
         headers.get(FALLBACK_HEADER),
+        headers.get(DEPLOYMENT_PAID_HEADER),
     )
 
 
@@ -224,7 +226,7 @@ def test_policy_routes_to_its_default_target(client: TestClient) -> None:
     # The body names the policy, and only the headers name the model behind it.
     assert resp.json()["model"] == "fast"
     assert _awaited_model(mock) == "openai:gpt-5-mini"
-    assert _served_by(resp) == ("openai", "gpt-5-mini", "1", "false")
+    assert _served_by(resp) == ("openai", "gpt-5-mini", "1", "false", "false")
     # Billing keys on the resolved target.
     rows = _usage_rows(client)
     assert len(rows) == 1
@@ -278,7 +280,7 @@ def test_a_plain_model_names_the_instance_and_model_that_served_it(
 
     assert resp.status_code == 200, resp.text
     # A name a header cannot carry is left out rather than failing a response the provider gave.
-    assert _served_by(resp) == ("openai", header, "1", "false")
+    assert _served_by(resp) == ("openai", header, "1", "false", "false")
     assert int(resp.headers[RESPONSE_DURATION_HEADER]) >= 0
     timing = _server_timing(resp)
     assert list(timing) == ["otari", "upstream", "total"]
@@ -303,7 +305,7 @@ def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
         resp = _chat(client, "fast")
 
     assert resp.status_code == 502
-    assert _served_by(resp) == (None, None, None, None)
+    assert _served_by(resp) == (None, None, None, None, None)
     assert RESPONSE_DURATION_HEADER not in resp.headers
     assert SERVER_TIMING_HEADER not in resp.headers
 
@@ -334,7 +336,7 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     # Relabeled to the policy, so a fallover is invisible to the caller's code.
     assert resp.json()["model"] == "fast"
     # ...but not to a caller reading the headers, which name what served it.
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
 
     # Two rows: the attempt that served, plus the failure the policy absorbed.
     rows = _usage_rows(client)
@@ -428,7 +430,7 @@ def test_an_empty_completion_fails_over_to_the_next_candidate(client: TestClient
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
     assert resp.json()["choices"][0]["message"]["content"] == "hello"
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
     rows = _usage_rows(client)
     absorbed = [r for r in rows if r["status"] == "absorbed"]
     assert [r["model"] for r in absorbed] == ["gpt-5-mini"]
@@ -536,7 +538,7 @@ def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -
     assert resp.status_code == 200
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
     # The walk runs before the stream opens, so the headers already know who serves it.
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
     # Chunks are relabeled to the policy name too.
     assert '"model":"fast"' in body.replace(" ", "")
 
@@ -572,7 +574,7 @@ def test_streaming_fails_over_when_the_stream_fails_on_its_first_read(client: Te
 
     assert resp.status_code == 200
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
     assert '"error"' not in body
 
 
@@ -1896,7 +1898,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
 
 
 def test_responses_endpoint_fails_over(client: TestClient) -> None:
@@ -1926,7 +1928,7 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
-    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true")
+    assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "2", "true", "false")
 
 
 # Each format's reasoning hint, as a request carries it and as the provider call is sent it.

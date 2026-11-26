@@ -59,7 +59,18 @@ from gateway.models.usage import DECISIONS_ENDPOINT, PLAYGROUND_USAGE_ENDPOINT
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
-FROZEN_ROOT_PATHS = frozenset({"/auth/{provider}/callback", "/metrics"})
+# ``/mcp`` is the URL a person pastes into an MCP client, so it stays short and unversioned: the
+# protocol carries its own version. Where its clients discover sign-in, RFC 8615 fixes at the root.
+FROZEN_ROOT_PATHS = frozenset(
+    {
+        "/auth/{provider}/callback",
+        "/metrics",
+        "/mcp",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+    }
+)
 # The SPA shell and its assets. Not API, never versioned.
 SHELL_PATHS = frozenset({"/", "/welcome", "/favicon.svg", "/dashboard-build.json"})
 SHELL_MOUNTS = ("/assets", "/pwa", "/fonts")

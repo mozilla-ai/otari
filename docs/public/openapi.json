@@ -133,6 +133,205 @@
         "title": "AcceptedSnapshotResponse",
         "type": "object"
       },
+      "AccessTokenCreate": {
+        "properties": {
+          "expiration": {
+            "default": "90-days",
+            "description": "How long the token lives from now, at most a year.",
+            "enum": [
+              "1-hour",
+              "1-day",
+              "7-days",
+              "30-days",
+              "90-days",
+              "180-days",
+              "1-year"
+            ],
+            "title": "Expiration",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the token is for.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccessTokenCreate",
+        "type": "object"
+      },
+      "AccessTokenCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accurate to about a minute. Null until first used.",
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
+          "token": {
+            "description": "The token itself. Shown once: only its hash is stored.",
+            "title": "Token",
+            "type": "string"
+          },
+          "token_suffix": {
+            "description": "The token's last characters, to tell it apart from the account's others.",
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "organization_id",
+          "token"
+        ],
+        "title": "AccessTokenCreated",
+        "type": "object"
+      },
+      "AccessTokenPublic": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accurate to about a minute. Null until first used.",
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
+          "token_suffix": {
+            "description": "The token's last characters, to tell it apart from the account's others.",
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "organization_id"
+        ],
+        "title": "AccessTokenPublic",
+        "type": "object"
+      },
+      "AccessTokensPublic": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AccessTokenPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AccessTokensPublic",
+        "type": "object"
+      },
       "ActivationApiKeyPublic": {
         "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, on the press that asked for it, and never stored in\nplaintext, like every other key this gateway mints.",
         "properties": {
@@ -2157,6 +2356,19 @@
             "description": "The key's spending limit in USD over its whole life. Null sets none.",
             "title": "Limit"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization an access token reads: the one the consent screen showed. Required when the app is given an access token, and refused unless the person is acting in it.",
+            "title": "Organization Id"
+          },
           "redirect_uri": {
             "maxLength": 2048,
             "title": "Redirect Uri",
@@ -2184,9 +2396,17 @@
             "type": "string"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace the key bills. Required unless the app is given an access token.",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -2195,7 +2415,6 @@
           "state",
           "code_challenge",
           "code_challenge_method",
-          "workspace_id",
           "scopes"
         ],
         "title": "AppAuthorizationRequest",
@@ -2217,6 +2436,16 @@
       "AppDetails": {
         "description": "What the consent screen shows about an app before a person approves it.",
         "properties": {
+          "credential": {
+            "default": "api_key",
+            "description": "What the app is given: an API key billed to a workspace the person picks, or, for a client that registered itself such as an MCP client, the person's own read-only access token.",
+            "enum": [
+              "api_key",
+              "access_token"
+            ],
+            "title": "Credential",
+            "type": "string"
+          },
           "issuer": {
             "title": "Issuer",
             "type": "string"
@@ -2287,7 +2516,7 @@
         "type": "object"
       },
       "AppTokenRequest": {
-        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.\n\nAn authorization code is redeemed with its callback and verifier; a refresh token, which\nonly a client that registered itself holds, on its own.",
         "properties": {
           "client_id": {
             "maxLength": 128,
@@ -2296,53 +2525,118 @@
             "type": "string"
           },
           "code": {
-            "maxLength": 128,
-            "minLength": 43,
-            "title": "Code",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 43,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           },
           "code_verifier": {
-            "pattern": "^[A-Za-z0-9._~-]{43,128}$",
-            "title": "Code Verifier",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Verifier"
           },
           "grant_type": {
-            "const": "authorization_code",
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ],
             "title": "Grant Type",
             "type": "string"
           },
           "redirect_uri": {
-            "maxLength": 2048,
-            "title": "Redirect Uri",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
           }
         },
         "required": [
           "grant_type",
-          "client_id",
-          "redirect_uri",
-          "code",
-          "code_verifier"
+          "client_id"
         ],
         "title": "AppTokenRequest",
         "type": "object"
       },
       "AppTokenResponse": {
-        "description": "A minted app key, as RFC 6749 section 5.1 shapes it.",
+        "description": "A minted app key or access token, as RFC 6749 section 5.1 shapes it.",
         "properties": {
           "access_token": {
             "title": "Access Token",
             "type": "string"
+          },
+          "expires_in": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds until an access token expires, where it does.",
+            "title": "Expires In"
           },
           "manage_url": {
             "description": "The absolute URL of the page where the person sees this key, and revokes it.",
             "title": "Manage Url",
             "type": "string"
           },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Renews an MCP client's access token at this endpoint, and is replaced on each use. Using one a second time ends the sign-in.",
+            "title": "Refresh Token"
+          },
           "scope": {
-            "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.",
-            "title": "Scope",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it. Absent for an access token.",
+            "title": "Scope"
           },
           "token_type": {
             "const": "Bearer",
@@ -2353,7 +2647,6 @@
         },
         "required": [
           "access_token",
-          "scope",
           "manage_url"
         ],
         "title": "AppTokenResponse",
@@ -5657,6 +5950,58 @@
           "criteria"
         ],
         "title": "ChoiceQuestion",
+        "type": "object"
+      },
+      "ClientRegistrationResponse": {
+        "description": "RFC 7591 section 3.2.1: the registration as recorded. Every client registered here is public.",
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "title": "Client Id Issued At",
+            "type": "integer"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "grant_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Grant Types",
+            "type": "array"
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redirect Uris",
+            "type": "array"
+          },
+          "response_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Response Types",
+            "type": "array"
+          },
+          "token_endpoint_auth_method": {
+            "const": "none",
+            "default": "none",
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "client_name",
+          "redirect_uris"
+        ],
+        "title": "ClientRegistrationResponse",
         "type": "object"
       },
       "CodeExecuteRequest": {
@@ -36532,6 +36877,129 @@
         ]
       }
     },
+    "/api/v1/auth/access-tokens": {
+      "get": {
+        "description": "The caller's own access tokens, newest first. Never anybody else's, and never a token itself.",
+        "operationId": "auth-list_access_tokens",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokensPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Access Tokens",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Mint an access token that reads what the caller can see on the dashboard, as them.\n\nIt reads the organization the caller is acting in now, even after the dashboard switches\nto another. It authenticates `GET` requests to the management API and the MCP server at\n`/mcp`, is refused on every write, and lives a year at most. The token is in this response only.",
+        "operationId": "auth-create_access_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Access Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/access-tokens/{token_id}": {
+      "delete": {
+        "description": "Revoke one of the caller's access tokens at once.",
+        "operationId": "auth-delete_access_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Access Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/account": {
       "delete": {
         "description": "Delete the caller's account and sign them out.\n\nErases the account's sign-in identity, sessions, passkeys, Playground\nconversations, agent traces, telemetry, files and keys. Usage rows are\nkept for the deployment's totals under a new id that does not identify\nthe person, and an organization nobody else is active in is renamed, its\nkeys revoked and its stored credentials cleared. Invitations to the\naccount's address are withdrawn everywhere. Refused while the account is the last active owner of\nan organization other people are active in.",
@@ -46126,6 +46594,78 @@
         ]
       }
     },
+    "/api/v1/oauth/apps/register": {
+      "post": {
+        "description": "Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.\n\nWhat it is approved for redeems only to the approving person's read-only access token, and\nthe consent screen names it as unverified. Served where the MCP server is on.",
+        "operationId": "oauth-apps-register_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "RFC 7591 client metadata. Only what Otari uses is read; anything else is ignored.",
+                "properties": {
+                  "client_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name the consent screen shows, marked unverified.",
+                    "title": "Client Name"
+                  },
+                  "redirect_uris": {
+                    "items": {
+                      "maxLength": 2048,
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "title": "Redirect Uris",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "redirect_uris"
+                ],
+                "title": "ClientRegistrationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [],
+        "summary": "Register Client",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
     "/api/v1/oauth/apps/revoke": {
       "post": {
         "description": "Revoke the presented app token. Unknown or previously revoked tokens also succeed (RFC 7009).",
@@ -46179,7 +46719,7 @@
     },
     "/api/v1/oauth/apps/token": {
       "post": {
-        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
+        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.\n\nA registered or open app is given an API key. A client that registered itself is given a\nread-only access token good for an hour through the MCP server, and a refresh token that\nrenews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.",
         "operationId": "oauth-apps-exchange",
         "requestBody": {
           "content": {

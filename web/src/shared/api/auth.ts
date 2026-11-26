@@ -5,7 +5,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  AccessTokensResponse,
   CallerIdentity,
+  CreateAccessTokenRequest,
+  CreatedAccessToken,
   DeleteAccountRequest,
   MailedLinkStatusResponse,
   OrganizationContext,
@@ -31,6 +34,7 @@ import {
   useOrganizationContext,
 } from "@/shared/api/organizations"
 import {
+  ACCESS_TOKENS,
   MAILED_LINK_STATUS,
   NO_RETRY,
   ORGANIZATION_MEMBERS,
@@ -312,6 +316,42 @@ export function useDeletePasskey() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
+    },
+  })
+}
+
+/** The signed-in identity's own access tokens. Never a token itself. */
+export function useAccessTokens() {
+  return useQuery({
+    queryKey: [ACCESS_TOKENS],
+    queryFn: () => apiFetch<AccessTokensResponse>("/auth/access-tokens"),
+    staleTime: 60_000,
+  })
+}
+
+/** Mint an access token. The answer carries the token, which no later read does. */
+export function useCreateAccessToken() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateAccessTokenRequest) =>
+      apiFetch<CreatedAccessToken>("/auth/access-tokens", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACCESS_TOKENS] })
+    },
+  })
+}
+
+/** Revoke one of the caller's access tokens. */
+export function useDeleteAccessToken() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/auth/access-tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACCESS_TOKENS] })
     },
   })
 }
