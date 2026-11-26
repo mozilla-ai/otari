@@ -39,7 +39,14 @@ from gateway.services.merged_catalog_service import (
     build_merged_catalog,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
-from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings, vendor_slug
+from gateway.services.model_identity import (
+    ModelIdentity,
+    OfferingSeed,
+    group_offerings,
+    identity_key,
+    own_providers_for_vendor_slug,
+    vendor_slug,
+)
 from gateway.services.pricing_service import (
     OverridePeriod,
     default_model_pricing,
@@ -172,7 +179,7 @@ def models_by_identity(
         first = _read_under_slug(config, catalog, offerings[ranked[0]], organization_id, slug_providers)
         others = [offerings[selector] for selector in sorted(members - {ranked[0]})]
         reached = [_read_under_slug(config, catalog, obj, organization_id, slug_providers) for obj in others]
-        rows[identity.id] = first.model_copy(
+        row = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
@@ -180,7 +187,72 @@ def models_by_identity(
                 **_facts_from_others(first, reached),
             }
         )
+        if row.name is None:
+            row = _described_as_identity(config, catalog, row, identity, organization_id)
+        rows[identity.id] = row
     return [rows[model_id] for model_id in sorted(rows)]
+
+
+# What a row may still leave unknown once its own offerings are read.
+_DESCRIBED_FIELDS = (
+    "name",
+    "type",
+    "context_window",
+    "max_output_tokens",
+    "supported_parameters",
+    "architecture",
+    "description",
+    "release_date",
+    "knowledge_cutoff",
+)
+
+_entries_cache: tuple[ModelsDevCatalog, dict[str, list[tuple[str, str]]]] | None = None
+
+
+def _entries_by_identity(catalog: ModelsDevCatalog) -> dict[str, list[tuple[str, str]]]:
+    """Every models.dev ``(provider, model id)`` grouped by :func:`identity_key`, built once per catalog snapshot."""
+    global _entries_cache
+    if _entries_cache is not None and _entries_cache[0] is catalog:
+        return _entries_cache[1]
+    entries: dict[str, list[tuple[str, str]]] = {}
+    for provider_type in sorted(catalog.providers):
+        for model_id, model in catalog.providers[provider_type].models.items():
+            entries.setdefault(identity_key(provider_type, model_id, model.name), []).append((provider_type, model_id))
+    _entries_cache = (catalog, entries)
+    return entries
+
+
+def _described_as_identity(
+    config: GatewayConfig,
+    catalog: ModelsDevCatalog | None,
+    row: ModelObject,
+    identity: ModelIdentity,
+    organization_id: uuid.UUID | None,
+) -> ModelObject:
+    """``row`` with what it leaves unknown read from models.dev's entry for the model it was grouped as.
+
+    A key on an OpenAI-compatible endpoint (a proxy, a reseller) is stored under
+    ``openai``, which models.dev lists none of its models under, so no offering
+    read finds the model. The identity still names it, and models.dev lists it
+    under its vendor or its resellers; the vendor's own entry is preferred.
+    """
+    entries = _entries_by_identity(catalog).get(identity.key) if catalog is not None else None
+    if not entries:
+        return row
+    own = own_providers_for_vendor_slug(vendor_slug(identity.vendor)) if identity.vendor else frozenset()
+    provider_type, model_id = next((entry for entry in entries if entry[0] in own), entries[0])
+    read = row.model_copy()
+    apply_model_metadata(
+        config,
+        catalog,
+        read,
+        f"{provider_type}:{model_id}",
+        organization_id=organization_id,
+        provider_type=provider_type,
+    )
+    return row.model_copy(
+        update={field: getattr(read, field) for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
+    )
 
 
 def _read_under_slug(

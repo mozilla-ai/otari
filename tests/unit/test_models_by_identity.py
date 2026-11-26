@@ -303,6 +303,73 @@ def test_an_organization_key_offering_is_read_whichever_ranking_it_gets(config: 
     assert org.release_date is None
 
 
+def _deepseek_catalog() -> ModelsDevCatalog:
+    """DeepSeek's own entry and a reseller's, both named DeepSeek V4.1 Flash 1017; no ``openai`` entry for it."""
+    own = ModelsDevModel(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash 1017",
+        release_date="2026-10-17",
+        context_window=1048576,
+        max_output_tokens=393216,
+        tool_call=True,
+        reasoning=True,
+    )
+    resold = ModelsDevModel(
+        id="deepseek-ai/DeepSeek-V4.1-Flash-1017", name="DeepSeek V4.1 Flash 1017", context_window=1000000
+    )
+    return ModelsDevCatalog(
+        providers={
+            "deepinfra": ModelsDevProvider(id="deepinfra", name="DeepInfra", doc=None, models={resold.id: resold}),
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={own.id: own}),
+        }
+    )
+
+
+def test_an_openai_compatible_key_offering_is_described_as_the_model_it_groups_under(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """A proxy key is stored under ``openai``, which lists no DeepSeek model, so the vendor's own entry describes it."""
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert row.id == "deepseek/deepseek-v4.1-flash-1017"
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.type == "chat"
+    assert row.supported_parameters == ["tools", "tool_choice", "reasoning"]
+    assert (row.context_window, row.max_output_tokens) == (1048576, 393216)
+    assert row.release_date == "2026-10-17"
+    assert org.name is None
+
+
+def test_a_limit_another_offering_reports_wins_over_the_identitys_entry(config: GatewayConfig, no_index: None) -> None:
+    """The fallback only fills what the model's offerings leave unknown."""
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    engine = _offering("vllm:deepseek-v4.1-flash-1017", 0.5)
+    engine.context_window = 262144
+
+    (row,) = models_by_identity(config, catalog, [org, engine], slug_providers={"chat-proxy": "openai"})
+
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.3
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.context_window == 262144
+
+
+def test_a_model_models_dev_does_not_list_stays_undescribed(config: GatewayConfig, no_index: None) -> None:
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:house-model-7b", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert (row.name, row.type, row.context_window) == (None, None, None)
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [("z-ai/glm-5.3", True), ("my-policy", True), ("fast", False), (_NEBIUS, False)],
