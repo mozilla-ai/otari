@@ -364,8 +364,10 @@ quote the request. Any status from 400 raises `ProviderError`, tagged by the sta
 else `http_error`; the sentence never reaches the error. A search that found nothing is a 200 with
 no `organic_results`, with the sentence `Google didn't return any results.` in `error` or, when
 Google answered only other sections such as `top_stories`, with no `error` at all: both are an
-empty result, not an error. A `search_metadata.status` other than `Success`, which no call has
-returned yet, becomes the result's `error`, tagged from the status.
+empty result, not an error. Any other sentence in `error` in a 200 without `organic_results` is
+SearchApi reporting a failure inside a 200, and comes back as the result's `error`, tagged
+`provider_error`. A `search_metadata.status` other than `Success`, which no call has returned yet,
+becomes the result's `error`, tagged from the status.
 
 Every field read from a successful answer is checked: an answer without `search_metadata` or its
 `status`, or with `organic_results` that is not a list, or with an item lacking `link` or `title`,
