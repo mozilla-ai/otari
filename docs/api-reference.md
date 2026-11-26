@@ -69,9 +69,9 @@ with a fixed `forbidden` error that names none):
 - the inference routes (`inference:run`), files, batches, search, fetch, code
   execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
   scope of its own;
-- `GET /api/v1/usage/requests/{request_id}` and
-  [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
-  usage (`usage:read`);
+- `GET /api/v1/usage/requests/{request_id}` for its own requests, and
+  `GET /api/v1/key/budget`, `/key/usage/summary` and `/key/usage/series` for its
+  own [budget and usage](#a-keys-own-budget-and-usage) (`usage:read`);
 - for a [service key](end-users.md), the end-user routes (the `end-users`
   scopes).
 
