@@ -275,6 +275,24 @@ def test_validate_keeps_a_provider_spelling_whose_model_no_entry_can_name_as_bef
         reset_selector_index()
 
 
+@pytest.mark.parametrize("entry", ["acme-openai:gpt-4o", "acme-openai:*", "acme-openai:gpt-4*"])
+def test_an_entry_may_name_an_organization_key_by_its_slug(entry: str) -> None:
+    assert validate_allowed_models(GatewayConfig(), [entry], key_slugs={"acme-openai"}) == [entry]
+    with pytest.raises(ValueError, match="unknown provider or instance 'acme-openai'"):
+        validate_allowed_models(GatewayConfig(), [entry])
+
+
+def test_a_catalog_id_stands_for_an_offering_on_a_slugged_key() -> None:
+    rows = [OfferingRow("acme-openai:gpt-4o", "acme-openai", "openai", 2.0)]
+    set_selector_index(build_selector_index(rows, {"openai/gpt-4o": ("openai/gpt-4o", ("acme-openai:gpt-4o",))}))
+    try:
+        stored = validate_allowed_models(GatewayConfig(), ["openai/gpt-4o"], key_slugs={"acme-openai"})
+    finally:
+        reset_selector_index()
+
+    assert stored == ["acme-openai:gpt-4o"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("author_namespace_catalog")
 @pytest.mark.parametrize(
@@ -294,7 +312,8 @@ async def test_a_changed_key_list_reads_a_catalog_id_from_the_keys_organization(
         AccessLists(["alibaba/qwen3.8-flash"], None),
         stored=AccessLists(None, None),
         owner_id=None,
-        **scope,
+        workspace_id=scope.get("workspace_id"),
+        organization_id=scope.get("organization_id"),
     )
 
     assert access.models == ["deepinfra:alibaba/qwen3.8-flash"]
