@@ -21,6 +21,7 @@ organization's limit in one,
 ``MAX_PENDING_REQUESTS_PER_MEMBER`` and ``MAX_REQUESTS_PER_MEMBER_PER_DAY``,
 ``WorkspaceMcpServerHealth`` is what the gateway last learned by talking to a stored server, ``server_health`` reads
 one from a check, and ``mcp_server_contacts`` (a ``McpServerContacts``) records one from real request traffic,
+``McpToolListings`` keeps each stored server's raw tool listing for a short while so discovery need not reconnect,
 ``McpUserTokens`` reads the token such a user's calls carry, and ``StoredMcpOAuthClient`` is the client they sign in
 through, read off a server with ``stored_oauth_client``; ``require_per_user_support`` refuses the mode on a deployment
 that cannot run it, and ``DASHBOARD_CALLBACK_ROUTE`` is where a dashboard finishes a sign-in;
@@ -160,6 +161,7 @@ from gateway.services.tools._mcp_server_requests import (
 )
 from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
 from gateway.services.tools._mcp_signed_in_servers import McpSignedInServers
+from gateway.services.tools._mcp_tool_listings import McpToolListings
 from gateway.services.tools._mcp_workspace_servers import McpServerInWorkspace, McpWorkspaceServers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
@@ -365,6 +367,7 @@ __all__ = [
     "McpConnectionService",
     "McpServerRequestService",
     "McpSignedInServers",
+    "McpToolListings",
     "McpServerInWorkspace",
     "McpWorkspaceServers",
     "OrganizationMcpServerLimit",

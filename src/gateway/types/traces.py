@@ -151,6 +151,8 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
+    # The provider a gateway-run tool's failed call reached, beside its failure tag in the error class.
+    "otari.tool.provider": str,
     "otari.gate.id": str,
     "otari.gate.type": str,
     "otari.gate.origin": str,

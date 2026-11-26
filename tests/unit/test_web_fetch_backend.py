@@ -264,13 +264,27 @@ async def test_each_failure_of_the_built_in_fetcher_has_its_text_and_tag(
 ) -> None:
     fetcher.side_effect = raised
     tally = ToolUsageTally()
-    backend = WebFetchBackend(builtin_fetch_resolved(), tally=tally)
+    trace = RequestTrace(
+        request_id="req-1",
+        workspace_id=uuid.uuid4(),
+        user_id="alice",
+        api_key_id="key-1",
+        endpoint="/v1/chat/completions",
+        started_at=datetime.now(UTC),
+        max_spans=10,
+    )
+    backend = WebFetchBackend(builtin_fetch_resolved(), tally=tally, trace=trace)
 
     assert await _call(backend) == text
     failure = backend.take_last_failure()
     assert failure is not None
     assert (failure.provider, failure.status, failure.tag) == ("builtin", status, tag)
     assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 0, "errors": 1}}
+    # The span says why, so a failed fetch inside a completion can be told apart from the next.
+    [span] = trace.spans
+    assert (span.outcome, span.error_class) == ("error", tag)
+    assert span.attributes.get("http.response.status_code") == status
+    assert span.attributes.get("otari.tool.provider") == "builtin"
 
 
 @pytest.mark.parametrize("arguments", [{}, {"url": 3}, {"url": _URL, "headers": {"Authorization": "secret"}}])

@@ -261,13 +261,18 @@ class RequestTrace:
         mcp_server_id: str | None = None,
         decided_by: str | None = None,
         refused: bool = False,
+        error_type: str | None = None,
+        error_status: int | None = None,
+        error_provider: str | None = None,
     ) -> None:
         """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
 
         ``arguments`` and ``result`` are kept only where the request keeps content. ``mcp_server`` names the MCP
         server that owns the tool, since a tool's name alone does not, and ``mcp_server_id`` the stored server, for a
         link to it. ``decided_by`` names the rule that allowed the call, or that refused it when ``refused``: a
-        refused tool never ran, so its span is blocked.
+        refused tool never ran, so its span is blocked. A failed call's ``error_type`` (a failure tag or an exception
+        class, never a message) becomes its error class, with the upstream ``error_status`` and the
+        ``error_provider`` that failed where known.
         """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
@@ -279,6 +284,11 @@ class RequestTrace:
         if decided_by is not None:
             attributes["otari.tool.decision"] = "reject" if refused else "accept"
             attributes["otari.tool.decision_source"] = decided_by
+        failed = not ok and not refused
+        if failed and error_status is not None:
+            attributes["http.response.status_code"] = error_status
+        if failed and (provider := identifier_or_none(error_provider)) is not None:
+            attributes["otari.tool.provider"] = provider
         self._add(
             SpanRecord(
                 span_id=_span_id(),
@@ -288,7 +298,7 @@ class RequestTrace:
                 name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
                 operation="execute_tool",
                 outcome="blocked" if refused else "ok" if ok else "error",
-                error_class=None if ok or refused else "tool_error",
+                error_class=(identifier_or_none(error_type) or "tool_error") if failed else None,
                 start_time=started,
                 end_time=ended,
                 duration_ms=_elapsed_ms(started, ended),
@@ -502,8 +512,15 @@ class ToolSpans:
         tool_name: str | None = None,
         mcp_server: str | None = None,
         mcp_server_id: str | None = None,
+        error_type: str | None = None,
+        error_status: int | None = None,
+        error_provider: str | None = None,
     ) -> None:
-        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
+        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed.
+
+        A failed call names why with ``error_type``, ``error_status`` and ``error_provider``, as
+        :meth:`RequestTrace.record_tool_call` takes them.
+        """
         name = tool_name or self.tool_name
         if self.trace is not None and name is not None:
             self.trace.record_tool_call(
@@ -515,4 +532,7 @@ class ToolSpans:
                 result=result,
                 mcp_server=mcp_server,
                 mcp_server_id=mcp_server_id,
+                error_type=error_type,
+                error_status=error_status,
+                error_provider=error_provider,
             )

@@ -16,6 +16,7 @@ the running dashboard too, not only present in the source tree.
 | --- | --- | --- | --- |
 | Mozilla Text | `MozillaText-Variable.woff2`, `MozillaTextItalic-Variable.woff2` | [OFL 1.1](MozillaText-OFL.txt) | Copyright 2024, The Mozilla Foundation |
 | Mozilla Headline | `MozillaHeadline-Variable.woff2` | [OFL 1.1](MozillaHeadline-OFL.txt) | Copyright 2025 The Mozilla Headline Project Authors |
+| Inter | `InterVariable.woff2`, `InterVariable-Italic.woff2` | [OFL 1.1](InterVariable-OFL.txt) | Copyright (c) 2016-2018 The Inter Project Authors |
 | Fira Code | `FiraCode-VariableFont_wght.woff2` | [OFL 1.1](FiraCode-OFL.txt) | Copyright (c) 2014, The Fira Code Project Authors |
 
 The license and copyright of each row are the font binary's own: the `name`
