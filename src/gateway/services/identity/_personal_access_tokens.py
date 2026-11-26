@@ -15,13 +15,17 @@ from gateway.auth.models import (
 )
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    PersonalAccessTokenBlockedError,
     PersonalAccessTokenLimitReachedError,
+    PersonalAccessTokenNoOrganizationError,
     PersonalAccessTokenNotFoundError,
+    PersonalAccessTokenSessionEndedError,
 )
 from gateway.models.identity import MAX_ACCESS_TOKEN_NAME_LENGTH, PersonalAccessToken
 from gateway.models.tenancy import User
-from gateway.repositories.identity import PersonalAccessTokenRepository
-from gateway.repositories.tenancy import UserRepository
+from gateway.repositories.identity import DashboardSessionRepository, PersonalAccessTokenRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
+from gateway.services.identity._blocklist import EmailBlocklist
 
 # A ceiling on a table a signed-in caller writes in a loop they control. Ended tokens do not count.
 MAX_PERSONAL_ACCESS_TOKENS = 50
@@ -51,29 +55,53 @@ class PersonalAccessTokenService:
         uow: UnitOfWork,
         tokens: PersonalAccessTokenRepository,
         users: UserRepository,
+        sessions: DashboardSessionRepository,
+        members: OrganizationMemberRepository,
+        blocklist: EmailBlocklist,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        self.uow, self.tokens, self.users, self.clock = uow, tokens, users, clock
+        self.uow, self.tokens, self.users = uow, tokens, users
+        self.sessions, self.members, self.blocklist = sessions, members, blocklist
+        self.clock = clock
 
-    async def create(self, user: User, *, name: str, lifetime: timedelta) -> tuple[PersonalAccessToken, str]:
+    async def create(
+        self, user: User, *, name: str, lifetime: timedelta, session_token: str | None = None
+    ) -> tuple[PersonalAccessToken, str]:
         """Mint a token that reads the organization the person is acting in now. Returned once, never stored.
 
+        ``session_token`` is the dashboard session the request authenticated with, re-read here
+        because every event that ends an account's tokens also ends its sessions: a session that is
+        gone by the time this commits means the token is one the cleanup meant to prevent.
+
         Raises:
+            PersonalAccessTokenBlockedError: the account's address is blocked.
             PersonalAccessTokenLimitReachedError: the account already holds the most it may.
+            PersonalAccessTokenNoOrganizationError: the account is acting in no organization.
+            PersonalAccessTokenSessionEndedError: the account or the session asking ended meanwhile.
         """
         token = PERSONAL_ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
         now = self.clock()
         async with self.uow:
-            await self._make_room(user.id, now)
+            # The blocklist's lock before any row lock, as a sign-in takes it: a block commits either
+            # before this (and is read here) or after it (and deletes the token this makes).
+            if user.email and await self.blocklist.blocked_among({user.email}):
+                raise PersonalAccessTokenBlockedError()
+            owner = await self._make_room(user.id, now)
+            if owner is None or not owner.is_active:
+                raise PersonalAccessTokenSessionEndedError()
+            if session_token is not None and not await self.sessions.is_live(_hash(session_token), owner.id, now):
+                raise PersonalAccessTokenSessionEndedError()
+            if owner.active_organization_id is None:
+                raise PersonalAccessTokenNoOrganizationError()
             row = await self.tokens.add(
-                user_id=user.id,
+                user_id=owner.id,
                 name=name,
                 token_hash=_hash(token),
                 token_suffix=key_suffix(token),
                 created_at=now,
                 expires_at=now + lifetime,
-                organization_id=user.active_organization_id,
+                organization_id=owner.active_organization_id,
             )
         return row, token
 
@@ -131,7 +159,7 @@ class PersonalAccessTokenService:
             if row.client_id != client_id or row.expires_at is None or row.expires_at <= now:
                 return None
             owner = await self.users.get(row.user_id)
-            if owner is None or not owner.is_active:
+            if owner is None or not owner.is_active or not await self._membership_is_live(row):
                 return None
             access_expires_at = min(now + MCP_ACCESS_TOKEN_LIFETIME, row.expires_at)
             await self.tokens.rotate(
@@ -144,12 +172,30 @@ class PersonalAccessTokenService:
             )
         return McpSignIn(access, refresh, int((access_expires_at - now).total_seconds()))
 
-    async def _make_room(self, user_id: uuid.UUID, now: datetime) -> None:
-        # Locked so two concurrent creates cannot both count one below the limit.
-        await self.users.get_locked(user_id)
+    async def _make_room(self, user_id: uuid.UUID, now: datetime) -> User | None:
+        """Lock the account, clear its ended tokens, and refuse where it holds the most it may.
+
+        The lock is what makes the count mean anything: it is held until the block commits, so a
+        second create counts what the first one inserted.
+        """
+        owner = await self.users.get_locked(user_id)
         await self.tokens.delete_expired_for_user(user_id, now)
         if len(await self.tokens.list_for_user(user_id)) >= MAX_PERSONAL_ACCESS_TOKENS:
             raise PersonalAccessTokenLimitReachedError(MAX_PERSONAL_ACCESS_TOKENS)
+        return owner
+
+    async def _membership_is_live(self, token: PersonalAccessToken) -> bool:
+        """Whether the account is still a member of the organization the token reads.
+
+        The binding is the token's organization, put on the account for the request only. Every
+        read resolves its organization from that pointer and falls back to another organization
+        when the membership behind it is gone, so the membership is checked here rather than left
+        to the read: a token reads one organization, and stops when that membership does.
+        """
+        if token.organization_id is None:
+            return False
+        membership = await self.members.get_active_by_organization_and_user(token.organization_id, token.user_id)
+        return membership is not None
 
     async def list(self, user: User) -> Sequence[PersonalAccessToken]:
         """The account's own tokens and MCP sign-ins, newest first."""
@@ -183,7 +229,7 @@ class PersonalAccessTokenService:
             if row is None or _ended(row.expires_at, now) or _ended(row.access_expires_at, now):
                 return None
             owner = await self.users.get(row.user_id)
-            if owner is None or not owner.is_active:
+            if owner is None or not owner.is_active or not await self._membership_is_live(row):
                 return None
             if row.last_used_at is None or now - row.last_used_at >= _TOUCH_INTERVAL:
                 await self.tokens.touch(row.id, now)

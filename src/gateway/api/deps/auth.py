@@ -40,8 +40,12 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.repositories.api_keys import ApiKeyRepository, FederationRuleRepository
-from gateway.repositories.identity import PersonalAccessTokenRepository
-from gateway.repositories.tenancy import UserRepository
+from gateway.repositories.identity import (
+    BlockedEmailRepository,
+    DashboardSessionRepository,
+    PersonalAccessTokenRepository,
+)
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.api_keys import (
     FederatedTokenVerifier,
     FederationRefusedError,
@@ -53,7 +57,7 @@ from gateway.services.api_keys import (
     unverified_issuer,
 )
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
-from gateway.services.identity import PersonalAccessTokenService
+from gateway.services.identity import EmailBlocklist, PersonalAccessTokenService
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.workspace_scope import (
@@ -435,7 +439,14 @@ def _presented_access_token(request: Request) -> str | None:
 
 def build_personal_access_token_service(uow: UnitOfWork) -> PersonalAccessTokenService:
     """Build the personal access token service on a Unit of Work."""
-    return PersonalAccessTokenService(uow, PersonalAccessTokenRepository(uow), UserRepository(uow))
+    return PersonalAccessTokenService(
+        uow,
+        PersonalAccessTokenRepository(uow),
+        UserRepository(uow),
+        DashboardSessionRepository(uow),
+        OrganizationMemberRepository(uow),
+        EmailBlocklist(uow, BlockedEmailRepository(uow)),
+    )
 
 
 def is_personal_access_token_request(request: Request) -> bool:

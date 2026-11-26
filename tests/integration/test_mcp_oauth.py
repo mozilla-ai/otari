@@ -7,9 +7,10 @@ import pytest
 from apron_auth.pkce import generate_code_challenge as pkce_challenge
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
+from .conftest import build_test_client
 from .test_organization_member_keys import _World
 from .test_organization_member_keys import world as world
 
@@ -231,3 +232,15 @@ def test_an_unknown_client_cannot_redeem(client: TestClient) -> None:
     refused = _redeem(client, "mcp-unregistered", "c" * 43)
     assert refused.status_code == 400
     assert refused.json()["error"] == "invalid_client"
+
+
+def test_turning_the_server_off_takes_the_surface_and_its_registration(
+    test_config: GatewayConfig,
+) -> None:
+    """``mcp_server_enabled: false`` is the switch the docs offer, so the surface and sign-in go with it."""
+    for off in build_test_client(test_config.model_copy(update={"mcp_server_enabled": False})):
+        call = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        assert off.post("/mcp", json=call, headers=_MCP_HEADERS).status_code == 404
+        for discovery in ("/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp"):
+            assert off.get(discovery).status_code == 404, discovery
+        assert _register(off).status_code == 404

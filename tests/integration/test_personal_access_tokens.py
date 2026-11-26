@@ -8,13 +8,17 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.api.deps.auth import build_personal_access_token_service
 from gateway.core.config import API_ROOT
-from gateway.models.identity import PersonalAccessToken
-from gateway.models.tenancy import User
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import PersonalAccessTokenSessionEndedError
+from gateway.models.identity import BlockedEmail, PersonalAccessToken
+from gateway.models.tenancy import OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
 from .conftest import MODEL_NAME
@@ -168,6 +172,58 @@ def test_a_token_reads_the_organization_it_was_made_in(
     with db_session_factory() as db:
         active = db.get(User, world.users["alpha_member"])
         assert active is not None and active.active_organization_id == world.beta
+
+
+def test_a_token_stops_with_the_membership_it_was_made_for(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    created = _mint(client, world, "alpha_member")
+    assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(created["token"])).status_code == 200
+    with db_session_factory() as db:
+        db.execute(
+            delete(OrganizationMember).where(
+                col(OrganizationMember.organization_id) == world.alpha,
+                col(OrganizationMember.user_id) == world.users["alpha_member"],
+            )
+        )
+        db.commit()
+    # Every read resolves its organization from the pointer the token sets, and falls back to
+    # another organization when the membership behind it is gone; the token is bound to this one.
+    assert client.get(f"{API_ROOT}/organizations/me", headers=_bearer(created["token"])).status_code == 401
+
+
+def test_a_token_needs_an_organization_to_read(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    with db_session_factory() as db:
+        db.execute(update(User).where(col(User.id) == world.users["alpha_member"]).values(active_organization_id=None))
+        db.commit()
+    refused = client.post(_TOKENS, json={"name": "nowhere"}, headers=_session(world, "alpha_member"))
+    assert refused.status_code == 400, refused.text
+    assert "organization" in refused.json()["detail"]
+
+
+def test_a_blocked_address_is_never_given_a_token(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    # Staged without the session cleanup a block does, which is the state a creation overlapping
+    # a block reaches: the request authenticated before the entry committed.
+    with db_session_factory() as db:
+        db.add(BlockedEmail(pattern="member@alpha.test", reason=None, created_by_user_id=None))
+        db.commit()
+    refused = client.post(_TOKENS, json={"name": "blocked"}, headers=_session(world, "alpha_member"))
+    assert refused.status_code == 403, refused.text
+    assert "blocked" in refused.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_ended_cannot_make_a_token(async_db: AsyncSession, world: _World) -> None:
+    """The creation re-reads the session it authenticated with, so a cleanup cannot be outrun."""
+    owner = await async_db.get(User, world.users["alpha_member"])
+    assert owner is not None
+    service = build_personal_access_token_service(UnitOfWork(async_db))
+    with pytest.raises(PersonalAccessTokenSessionEndedError):
+        await service.create(owner, name="late", lifetime=timedelta(days=1), session_token="not-a-live-session")
 
 
 def test_an_ended_token_makes_room_for_a_new_one(

@@ -86,15 +86,24 @@ def _params(**values: Any) -> dict[str, Any]:
     return {name: value for name, value in values.items() if value is not None}
 
 
-def _render(response: httpx.Response) -> str:
-    text = response.text
+def _truncate(text: str) -> str:
+    if len(text) <= _MAX_RESULT_CHARS:
+        return text
+    return text[:_MAX_RESULT_CHARS] + f"\n[truncated: the answer was {len(text)} characters; page or filter it]"
+
+
+def _document(response: httpx.Response) -> Any:
+    """A response's JSON body, or its text where it answered something else."""
     try:
-        text = json.dumps(response.json(), separators=(",", ":"), ensure_ascii=False)
+        return response.json()
     except ValueError:
-        pass
-    if len(text) > _MAX_RESULT_CHARS:
-        text = text[:_MAX_RESULT_CHARS] + f"\n[truncated: the answer was {len(text)} characters; page or filter it]"
-    return text
+        return response.text
+
+
+def _render(document: Any) -> str:
+    """One answer as the model reads it, truncated whole rather than in pieces."""
+    text = document if isinstance(document, str) else json.dumps(document, separators=(",", ":"), ensure_ascii=False)
+    return _truncate(text)
 
 
 def _refusal(response: httpx.Response) -> str:
@@ -120,7 +129,8 @@ def build_mcp_server(app: ASGIApp) -> MCPServer[Any]:
     root.handlers[:] = handlers
     root.setLevel(level)
 
-    async def get(path: str, params: dict[str, Any] | None = None) -> str:
+    async def fetch(path: str, params: dict[str, Any] | None = None) -> httpx.Response:
+        """One management GET, answered in-process by the app with the token this call came in with."""
         access = get_access_token()
         if access is None:
             raise ToolError("Not authenticated")
@@ -138,7 +148,10 @@ def build_mcp_server(app: ASGIApp) -> MCPServer[Any]:
             raise ToolError(f"Otari did not answer within {_LOOPBACK_TIMEOUT_SECONDS} seconds") from None
         if response.is_error:
             raise ToolError(_refusal(response))
-        return _render(response)
+        return response
+
+    async def get(path: str, params: dict[str, Any] | None = None) -> str:
+        return _render(_document(await fetch(path, params)))
 
     @server.tool(annotations=_READ_ONLY, structured_output=False)
     async def get_context() -> str:
@@ -227,9 +240,12 @@ def build_mcp_server(app: ASGIApp) -> MCPServer[Any]:
     @server.tool(annotations=_READ_ONLY, structured_output=False)
     async def list_budgets(skip: Skip = 0, limit: Limit = 100) -> str:
         """The organization's budgets and spend ceilings, with what each has spent of its limit."""
-        budgets = await get("/organizations/me/budgets", _params(skip=skip, limit=limit))
-        ceilings = await get("/organizations/me/spend-ceilings", _params(skip=skip, limit=limit))
-        return f'{{"budgets":{budgets},"spend_ceilings":{ceilings}}}'
+        params = _params(skip=skip, limit=limit)
+        budgets = await fetch("/organizations/me/budgets", params)
+        ceilings = await fetch("/organizations/me/spend-ceilings", params)
+        # One document, rendered and truncated as one: two rendered answers spliced together would be
+        # cut apart mid-object whenever either of them ran long.
+        return _render({"budgets": _document(budgets), "spend_ceilings": _document(ceilings)})
 
     @server.tool(annotations=_READ_ONLY, structured_output=False)
     async def list_api_keys(workspace_id: WorkspaceId = None, skip: Skip = 0, limit: Limit = 100) -> str:

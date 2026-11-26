@@ -770,8 +770,8 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
     log("Usage for the completion is readable back")
 
 
-def check_mcp_server(base_url: str, admin: dict[str, str]) -> None:
-    """Mint an access token, read the organization's usage through ``/mcp`` with it, and delete it."""
+def check_mcp_server(base_url: str, admin: dict[str, str], names: Names) -> None:
+    """Mint an access token, read this run's usage back through ``/mcp`` with it, and delete it."""
     status, created = _request(
         "POST", f"{base_url}{API_ROOT}/auth/access-tokens", headers=admin, payload={"name": "smoke"}
     )
@@ -781,7 +781,9 @@ def check_mcp_server(base_url: str, admin: dict[str, str]) -> None:
         "Accept": "application/json, text/event-stream",
         "MCP-Protocol-Version": "2025-06-18",
     }
-    call = {"name": "get_usage_summary", "arguments": {"dimensions": ["none"]}}
+    # Narrowed to the identity this run minted, so a summary that reads back is this run's usage
+    # rather than a total that would be non-zero on any deployment that had ever served a request.
+    call = {"name": "get_usage_summary", "arguments": {"user_id": [names.user_id], "dimensions": ["none"]}}
     status, answer = _request(
         "POST",
         f"{base_url}/mcp",
@@ -793,15 +795,15 @@ def check_mcp_server(base_url: str, admin: dict[str, str]) -> None:
         _expect(status, 200, "POST /mcp tools/call", answer)
         try:
             result = answer["result"]
-            totals = json.loads(result["content"][0]["text"])["totals"]
+            tokens = json.loads(result["content"][0]["text"])["totals"]["total_tokens"]
         except (TypeError, LookupError, ValueError):
             raise SmokeFailure(f"The MCP server did not answer get_usage_summary: {answer!r}") from None
-        if result.get("isError") or not totals.get("total_tokens"):
-            raise SmokeFailure(f"get_usage_summary through /mcp shows none of the completion's usage: {answer!r}")
+        if result.get("isError") or not isinstance(tokens, int) or tokens < 1:
+            raise SmokeFailure(f"get_usage_summary through /mcp shows none of {names.user_id}'s usage: {answer!r}")
     finally:
         status, revoked = _request("DELETE", revoke_url, headers=admin)
         _expect(status, 204, f"DELETE {API_ROOT}/auth/access-tokens/{{id}}", revoked)
-    log("An access token reads usage through the MCP server")
+    log("An access token reads this run's usage through the MCP server")
 
 
 def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, names: Names) -> None:
@@ -814,7 +816,7 @@ def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, name
     run_completion(base_url, key, provider, names)
     check_usage_recorded(base_url, admin, names)
     check_mail_is_honestly_unavailable(base_url, admin)
-    check_mcp_server(base_url, admin)
+    check_mcp_server(base_url, admin, names)
 
 
 # --------------------------------------------------------------------------- #

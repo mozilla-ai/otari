@@ -836,6 +836,11 @@ __all__ = [
     "PasswordLinkUnavailableError",
     "PasswordNotSetError",
     "PasswordPolicyError",
+    "PersonalAccessTokenBlockedError",
+    "PersonalAccessTokenLimitReachedError",
+    "PersonalAccessTokenNoOrganizationError",
+    "PersonalAccessTokenNotFoundError",
+    "PersonalAccessTokenSessionEndedError",
     "ResetTokenInvalidError",
     "InvalidBlockedEmailEntryError",
     "SignInAddressRequiredError",
@@ -871,3 +876,29 @@ class PersonalAccessTokenLimitReachedError(TenancyValidationError):
         super().__init__(
             f"You already have {limit} access tokens, which is the most one account may hold. Delete one first."
         )
+
+
+class PersonalAccessTokenNoOrganizationError(TenancyValidationError):
+    """The account is acting in no organization, and a token reads exactly one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "An access token reads one organization, and your account is not acting in one. "
+            "Sign in again to pick one, then create the token."
+        )
+
+
+class PersonalAccessTokenBlockedError(TenancyForbiddenError):
+    """The account's address is on the deployment's blocklist, so no token is made for it."""
+
+    def __init__(self) -> None:
+        super().__init__("Your email address is blocked, so no access token can be made for this account.")
+
+
+class PersonalAccessTokenSessionEndedError(TenancyError):
+    """The dashboard session that asked for the token, or its account, ended while it was being made."""
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self) -> None:
+        super().__init__("Your dashboard session has ended. Sign in again.")

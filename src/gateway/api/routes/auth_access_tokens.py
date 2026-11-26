@@ -17,6 +17,7 @@ from gateway.schemas.identity.access_tokens import (
     AccessTokenPublic,
     AccessTokensPublic,
 )
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
 router = APIRouter(prefix="/auth/access-tokens", tags=["auth"], dependencies=[Depends(verify_master_key)])
 
@@ -43,7 +44,14 @@ async def create_access_token(
     lifetime = APP_KEY_LIFETIMES[body.expiration]
     if lifetime is None:  # pragma: no cover - the schema offers no expiry without an end
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose when the token expires")
-    row, token = await service.create(identity, name=body.name, lifetime=lifetime)
+    row, token = await service.create(
+        identity,
+        name=body.name,
+        lifetime=lifetime,
+        # Re-read under the account lock, so a session that ended while this request ran cannot
+        # outlive the cleanup that ended it by minting a token.
+        session_token=request.cookies.get(SESSION_COOKIE_NAME),
+    )
     return AccessTokenCreated(**AccessTokenPublic.of(row).model_dump(), token=token)
 
 

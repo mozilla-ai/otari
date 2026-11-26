@@ -113,6 +113,7 @@ sign-in you hold also ends whenever Otari ends your dashboard sessions:
 - you prove your email address by signing in with a provider, after a password
   was set on it before the address was proven;
 - an operator deactivates your account, or blocks your email address or domain;
+- you leave, or are removed from, the organization it reads;
 - your organization's single sign-on enforcement starts refusing you;
 - the master key is rotated.
 
