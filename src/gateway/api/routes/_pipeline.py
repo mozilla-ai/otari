@@ -110,7 +110,6 @@ from gateway.api.routes._idempotency import (
     IdempotentReplay,
 )
 from gateway.api.routes._tools import (
-    _build_web_retrieval_backend,
     _resolve_sandbox_purpose_hint,
     _resolve_web_search_purpose_hint,
 )
@@ -128,7 +127,6 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
-from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     BUDGET_EXCEEDED,
     COUNTRY_NOT_SUPPORTED,
@@ -450,11 +448,6 @@ from gateway.services.traces import (
     resolve_session,
 )
 from gateway.services.upstream_redaction import stored_error_message
-from gateway.services.web_retrieval_backend import (
-    WebRetrievalBackend,
-    WebRetrievalCounter,
-    WebSearchNotReachableError,
-)
 from gateway.services.web_retrieval_policy import DomainPolicy
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
@@ -545,10 +538,6 @@ SANDBOX_UNREACHABLE_DETAIL = (
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
 )
 SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
-WEB_SEARCH_UNREACHABLE_DETAIL = (
-    "web_search backend unreachable. Check the deployment's web search settings, and that the search "
-    "provider is reachable."
-)
 
 
 def _model_as_named(provider: Any, model: str, display_model: str | None) -> str:
@@ -3453,9 +3442,7 @@ class ToolContext:
         self.use_budget: ToolUseBudget | None = shared.use_budget
         # Holds each tool-loop round after the first on the request's budgets.
         self.round_gate: ReservationRoundGate | None = shared.round_gate
-        # On the old backend, Search and Fetch share a fixed attempted-call cap across routing attempts.
-        self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
-        # On the libraries, they share the deployment's ``web_search_max_calls`` across routing attempts.
+        # Search and Fetch share the deployment's ``web_search_max_calls`` across routing attempts.
         self.web_call_cap: WebToolCallCap = shared.web_call_cap
         # Each candidate's tools by its provider and model, where the request's candidates are not all dispatched alike.
         self.candidate_variants: dict[tuple[str | None, str | None], CandidateVariant] = {}
@@ -3609,15 +3596,13 @@ class ToolContext:
             or self.use_web_fetch
         )
 
-    def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
-        """Build the request's web tool backends: on the libraries, else the old backend for a search.
+    def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend]:
+        """Build the request's web tool backends.
 
         The search and fetch backends are members of the request's pool, sharing
         its call allowance. A request that declared only the fetch tool gets the
         fetch backend alone, on the instance its admission resolved.
         """
-        if self.web.on_old_backend:
-            return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
             self.config,
@@ -3632,22 +3617,6 @@ class ToolContext:
             trace=self.trace,
         )
 
-    def build_web_retrieval_backend(self) -> WebRetrievalBackend:
-        """Build the request's shared Search and Fetch backend."""
-        return _build_web_retrieval_backend(
-            base_url=self.web.search_url,
-            search_tool_entry=self.web_search_tool_entry,
-            fetch_tool_entry=self.web_fetch_tool_entry,
-            fetch_policy=self.web_fetch_policy,
-            counter=self.web_retrieval_counter,
-            credential=self.web.search_credential,
-            config=self.config,
-            tally=self.tally,
-            trace=self.trace,
-            web_provider_client=self.web_provider_client,
-            fetch=self.web.fetch,
-        )
-
 
 @dataclass
 class SharedToolUse:
@@ -3656,7 +3625,6 @@ class SharedToolUse:
     tally: ToolUsageTally = field(default_factory=ToolUsageTally)
     use_budget: ToolUseBudget | None = None
     round_gate: ReservationRoundGate | None = None
-    web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
     # Sized by the deployment's ``web_search_max_calls`` when the request is admitted.
     web_call_cap: WebToolCallCap = field(kw_only=True)
 
@@ -4574,7 +4542,6 @@ async def _admit_web_access(
 
     ``requested`` is what the policy is read for, where this is the first to read it.
     """
-    search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
     if not web.declared_any:
         return NO_WEB_TOOLS
     try:
@@ -4591,7 +4558,7 @@ async def _admit_web_access(
         WebToolDeclarationError,
     ) as exc:
         raise domain_error(adapter, exc) from exc
-    return replace(admitted, search_url=search_url)
+    return admitted
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:
@@ -5862,7 +5829,7 @@ async def _enter_tool_backends(
 ) -> _OpenedTools:
     """:func:`_open_tool_backends`, closing whatever it entered on ``stack`` when it raises."""
     try:
-        # May raise SandboxNotReachableError, WebSearchNotReachableError or a refusal.
+        # May raise SandboxNotReachableError or a refusal.
         return await _open_tool_backends(adapter, tool_ctx, stack)
     except BaseException as exc:
         await _close_tool_backend(stack.__aexit__(type(exc), exc, exc.__traceback__), _ToolBackendKind.of(tool_ctx))
@@ -6534,7 +6501,6 @@ _GATEWAY_SIDE_FAILURES: tuple[type[BaseException], ...] = (
     asyncio.CancelledError,
     MaxToolIterationsExceeded,
     SandboxNotReachableError,
-    WebSearchNotReachableError,
 )
 
 
@@ -6872,11 +6838,6 @@ async def run_single_attempt_stream(
         if isinstance(exc, SandboxSessionGoneError):
             await served_tools.forget_container()
         raise _sandbox_error(adapter, exc, tool_ctx=served_tools) from exc
-    except WebSearchNotReachableError as exc:
-        # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
-        await release_reservation(ctx)
-        raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
         ctx.unavailable_model_reporter.report(
             exc, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid
@@ -7423,11 +7384,6 @@ async def run_non_stream(
         if isinstance(e, SandboxSessionGoneError):
             await served_tools.forget_container()
         raise _sandbox_error(adapter, e, tool_ctx=served_tools) from e
-    except WebSearchNotReachableError as e:
-        # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
-        await release_reservation(ctx)
-        raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
         ctx.unavailable_model_reporter.report(
             e, instance=provider, model=model, uses_deployment_credential=ctx.deployment_paid

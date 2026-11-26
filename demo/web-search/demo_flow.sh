@@ -344,12 +344,11 @@ show_what_llm_receives() {
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.web_retrieval_backend import WebSearchBackend
+from gateway.services.tools import WEB_SEARCH_PURPOSE_HINT, WEB_SEARCH_TOOL_NAME
 
-backend = WebSearchBackend(base_url='http://searxng:8080')
 print(inject_purpose_hints(
     [{'role': 'user', 'content': sys.argv[1]}],
-    backend.purpose_hints(),
+    [(WEB_SEARCH_TOOL_NAME, WEB_SEARCH_PURPOSE_HINT)],
 )[0]['content'])
 " "$query" 2>&1 | sed "s/^/    ${GRN}/; s/$/${RST}/"
 
@@ -369,15 +368,11 @@ print(inject_purpose_hints(
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.web_retrieval_backend import WebSearchBackend
+from gateway.services.tools import WEB_SEARCH_TOOL_NAME
 
-backend = WebSearchBackend(
-    base_url='http://searxng:8080',
-    purpose_hint='Use web_search only for questions about events after January 2026.',
-)
 print(inject_purpose_hints(
     [{'role': 'user', 'content': sys.argv[1]}],
-    backend.purpose_hints(),
+    [(WEB_SEARCH_TOOL_NAME, 'Use web_search only for questions about events after January 2026.')],
 )[0]['content'])
 " "$query" 2>&1 | sed "s/^/    ${YEL}/; s/$/${RST}/"
 

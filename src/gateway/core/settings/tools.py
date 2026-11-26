@@ -40,11 +40,8 @@ from gateway.core.env import otari_env
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 
-# Licensed search APIs the in-loop ``otari_web_search`` backend can call
-# directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
-# service. Declared here so startup validation rejects an unknown
-# ``web_search_provider`` without the config layer importing
-# `gateway.services.web_search_providers`, which imports this name.
+# Licensed search APIs the deprecated ``web_search_provider`` may name, as an
+# alternative to pointing ``web_search_url`` at a SearXNG-shaped service.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # The providers whose search tools inherit the legacy SearXNG settings (contract
 # C8): ``web_search_url`` with no ``api_base``, ``web_search_engines`` with no

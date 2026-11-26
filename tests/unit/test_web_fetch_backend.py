@@ -1,4 +1,4 @@
-"""The web fetch tool on any-fetch: the fetch backend, otari's ``builtin`` factory, and the old backend's delegation.
+"""The web fetch tool on any-fetch: the fetch backend and otari's ``builtin`` factory.
 
 The built-in fetcher's network is stubbed at ``WebFetchService.fetch`` or given a
 mock transport; a provider instance is any-fetch's ``fake``, or Tabstack on a mock
@@ -27,7 +27,6 @@ import pytest
 import any_fetch
 from any_fetch import AnyFetch, FetchedPage, ProviderError
 from any_fetch.providers import builtin as any_fetch_builtin
-from gateway.api.routes._tools import _build_web_retrieval_backend
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WebSearchCredentialRefusedError
 from gateway.log_config import logger as gateway_logger
@@ -51,6 +50,7 @@ from gateway.services.tools import (
     WebToolFailure,
     admit_web_access,
     apply_web_access_policy,
+    build_web_fetch_backend,
     builtin_fetch_resolved,
     native_rendering,
     resolve_fetch,
@@ -64,12 +64,6 @@ from gateway.services.web_fetch_service import (
     WebFetchHTTPStatusError,
     WebFetchResult,
     WebFetchService,
-)
-from gateway.services.web_retrieval_backend import (
-    MAX_WEB_RETRIEVAL_CALLS,
-    WebRetrievalBackend,
-    WebRetrievalCounter,
-    WebRetrievalLimitExceededError,
 )
 from gateway.services.web_retrieval_network import (
     ContentDecodingError,
@@ -631,9 +625,9 @@ def test_admission_resolves_no_fetch_where_none_was_declared() -> None:
 
 @pytest.mark.asyncio
 async def test_the_builder_puts_the_fetch_tool_on_builtin_fetch_by_default(fetcher: AsyncMock) -> None:
-    backend = _build_web_retrieval_backend(
-        base_url=None, search_tool_entry=None, fetch_tool_entry={"type": "otari_web_fetch"}, config=GatewayConfig()
-    )
+    resolved = _admitted_fetch(GatewayConfig())
+    assert resolved is not None
+    backend = build_web_fetch_backend(resolved, policy=None, trust_env_proxy=False)
     async with backend:
         text = await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
@@ -647,13 +641,9 @@ async def test_the_builder_puts_the_fetch_tool_on_the_instance_admission_resolve
         fetch_tools={_FAKE: {"provider": "fake", "options": {"text": "from the instance"}}},
         web_fetch_default_tool=_FAKE,
     )
-    backend = _build_web_retrieval_backend(
-        base_url=None,
-        search_tool_entry=None,
-        fetch_tool_entry={"type": "otari_web_fetch"},
-        config=config,
-        fetch=_admitted_fetch(config),
-    )
+    resolved = _admitted_fetch(config)
+    assert resolved is not None
+    backend = build_web_fetch_backend(resolved, policy=None, trust_env_proxy=False)
     async with backend:
         text = await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
 
@@ -783,12 +773,12 @@ async def test_a_provider_is_asked_for_the_canonical_url_that_was_checked() -> N
 async def test_a_url_whose_canonical_form_outgrows_the_request_limit_is_still_shown() -> None:
     """Percent-encoding lengthens an accepted URL past the limit it was checked against."""
     url = "https://example.com/" + "é" * 2000
-    old = _old(WebFetchBackend(_fake(text="page")))
-    async with old:
-        text = await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": url})
+    backend = WebFetchBackend(_fake(text="page"))
+    async with backend:
+        text = await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": url})
         rendering = native_rendering(WEB_FETCH_TOOL_NAME, Dialect.MESSAGES)
         assert rendering is not None
-        _, result = rendering.ran(_native_call(failed=False), old)
+        _, result = rendering.ran(_native_call(failed=False), backend)
 
     shown = "https://example.com/" + "%C3%A9" * 2000
     assert text.startswith(f"Source: {shown}\n")
@@ -932,114 +922,7 @@ def test_importing_the_tools_package_registers_nothing() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The old backend's fetch half, delegated
-# ---------------------------------------------------------------------------
-
-
-def _old(fetch_backend: WebFetchBackend | None = None, **kwargs: Any) -> WebRetrievalBackend:
-    return WebRetrievalBackend(enable_search=False, enable_fetch=True, fetch_backend=fetch_backend, **kwargs)
-
-
-@pytest.mark.asyncio
-async def test_the_old_backend_delegates_a_fetch_and_still_claims_its_counter() -> None:
-    tally = ToolUsageTally()
-    counter = WebRetrievalCounter()
-    old = _old(WebFetchBackend(_fake(text="delegated"), tally=tally), counter=counter, tally=tally)
-
-    async with old:
-        text = await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-
-    assert text.endswith("---\ndelegated")
-    assert counter.count == 1
-    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": 1, "errors": 0}}, "recorded once, by the fetch backend"
-
-
-@pytest.mark.asyncio
-async def test_an_old_backend_built_directly_fetches_on_builtin_fetch(fetcher: AsyncMock) -> None:
-    policy = DomainPolicy(allowed=canonicalize_domain_rules(["example.com"]))
-    old = _old(fetch_policy=policy)
-
-    async with old:
-        assert old.owns_tool(WEB_FETCH_TOOL_NAME)
-        assert not old.owns_tool(WEB_SEARCH_TOOL_NAME)
-        assert [tool["function"]["name"] for tool in old.openai_tools] == [WEB_FETCH_TOOL_NAME]
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-
-    assert fetcher.await_args is not None
-    assert fetcher.await_args.kwargs == {"policy": policy, "allow_private": False}
-
-
-@pytest.mark.asyncio
-async def test_the_old_backend_forwards_the_page_and_the_failure() -> None:
-    old = _old(WebFetchBackend(_fake()))
-    async with old:
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-        page = old.take_last_fetch()
-        assert page is not None and page.final_url == _URL
-        assert old.take_last_failure() is None
-
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": "ftp://example.com/"})
-        assert old.take_last_fetch() is None
-        assert old.take_last_failure() == WebToolFailure.of(None, None, "url_invalid")
-
-
-@pytest.mark.asyncio
-async def test_a_fetch_the_old_counter_refuses_shows_no_earlier_outcome() -> None:
-    counter = WebRetrievalCounter()
-    old = _old(WebFetchBackend(_fake(error="timeout")), counter=counter)
-    async with old:
-        for _ in range(MAX_WEB_RETRIEVAL_CALLS):
-            await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-        with pytest.raises(WebRetrievalLimitExceededError, match="10 calls per request"):
-            await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-        assert old.take_last_failure() is None
-
-
-@pytest.mark.asyncio
-async def test_the_old_counter_refuses_the_eleventh_call_before_dispatch() -> None:
-    tally = ToolUsageTally()
-    counter = WebRetrievalCounter()
-    old = _old(WebFetchBackend(_fake(), tally=tally), counter=counter)
-    async with old:
-        for _ in range(MAX_WEB_RETRIEVAL_CALLS):
-            await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-        with pytest.raises(WebRetrievalLimitExceededError, match="10 calls per request"):
-            await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-
-    assert counter.count == MAX_WEB_RETRIEVAL_CALLS
-    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
-
-
-@pytest.mark.asyncio
-async def test_an_invalid_fetch_consumes_the_old_counters_allowance() -> None:
-    counter = WebRetrievalCounter()
-    old = _old(WebFetchBackend(_fake()), counter=counter)
-    async with old:
-        invalid = await old.call_tool(WEB_FETCH_TOOL_NAME, {})
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-
-    assert invalid.startswith("[tool error]")
-    assert counter.count == 2
-
-
-@pytest.mark.asyncio
-async def test_the_old_counter_survives_the_backend_being_rebuilt_between_routing_attempts() -> None:
-    tally = ToolUsageTally()
-    counter = WebRetrievalCounter()
-    async with _old(WebFetchBackend(_fake(), tally=tally), counter=counter) as first:
-        for _ in range(5):
-            await first.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-    async with _old(WebFetchBackend(_fake(), tally=tally), counter=counter) as second:
-        for _ in range(5):
-            await second.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-        with pytest.raises(WebRetrievalLimitExceededError):
-            await second.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
-
-    assert tally.meters() == {WEB_FETCH_TOOL_NAME: {"billed": MAX_WEB_RETRIEVAL_CALLS, "errors": 0}}
-
-
-# ---------------------------------------------------------------------------
-# The renderings, reading a delegated fetch
+# The renderings, reading a fetch
 # ---------------------------------------------------------------------------
 
 
@@ -1048,13 +931,13 @@ def _native_call(*, failed: bool) -> NativeCall:
 
 
 @pytest.mark.asyncio
-async def test_the_messages_rendering_reads_a_delegated_fetchs_page() -> None:
-    old = _old(WebFetchBackend(_fake(text="page text", final_url=f"{_URL}?token=secret#frag")))
-    async with old:
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
+async def test_the_messages_rendering_reads_a_fetchs_page() -> None:
+    backend = WebFetchBackend(_fake(text="page text", final_url=f"{_URL}?token=secret#frag"))
+    async with backend:
+        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
         rendering = native_rendering(WEB_FETCH_TOOL_NAME, Dialect.MESSAGES)
         assert rendering is not None
-        _, result = rendering.ran(_native_call(failed=False), old)
+        _, result = rendering.ran(_native_call(failed=False), backend)
 
     assert result.content.url == _URL
     assert result.content.content.source.data == "page text"
@@ -1074,16 +957,16 @@ async def test_the_messages_rendering_reads_a_delegated_fetchs_page() -> None:
     ],
 )
 @pytest.mark.asyncio
-async def test_the_chat_rendering_reads_a_delegated_fetchs_failure(
+async def test_the_chat_rendering_reads_a_fetchs_failure(
     fetcher: AsyncMock, raised: Exception, error: dict[str, Any]
 ) -> None:
     fetcher.side_effect = raised
-    old = _old()
-    async with old:
-        await old.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
+    backend = WebFetchBackend(builtin_fetch_resolved())
+    async with backend:
+        await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": _URL})
         rendering = native_rendering(WEB_FETCH_TOOL_NAME, Dialect.CHAT)
         assert rendering is not None
-        [ended] = rendering.ran(_native_call(failed=True), old)
+        [ended] = rendering.ran(_native_call(failed=True), backend)
 
     assert ended["status"] == "failed"
     assert ended["error"] == error

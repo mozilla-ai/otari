@@ -28,6 +28,7 @@ from gateway.services.tools import (
     Dialect,
     extract_code_execution_tool,
     read_web_search_max_uses,
+    resolve_in_loop_search,
     retargeted_tool_choice,
     web_search_intercept_enabled,
 )
@@ -345,8 +346,11 @@ def test_strip_gateway_fields_leaves_tool_choice_alone_without_a_declared_name()
 
 def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
     """A web-search tool context carrying ``entry``, with nothing else turned on."""
+    config = GatewayConfig(web_search_url="http://search.invalid")
+    search = resolve_in_loop_search(config, None)
+    assert search is not None
     return ToolContext(
-        config=GatewayConfig(),
+        config=config,
         mcp_server_configs=None,
         use_sandbox=False,
         sandbox_tool_entry=None,
@@ -355,7 +359,7 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
             search_tool_entry=entry,
             fetch_tool_entry=None,
             fetch_policy=DomainPolicy(),
-            search_url="http://search.invalid",
+            in_loop_search=search,
         ),
         remaining_user_tools=None,
         max_tool_iterations=10,

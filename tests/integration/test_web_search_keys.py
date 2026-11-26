@@ -133,7 +133,6 @@ def _searched_with(client: TestClient, headers: dict[str, str]) -> dict[str, Any
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
         patch("gateway.services.tools._web_build.WebSearchBackend", new=fake_search_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json=_REQUEST, headers=headers)

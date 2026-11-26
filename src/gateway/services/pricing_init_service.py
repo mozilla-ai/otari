@@ -120,8 +120,8 @@ async def warn_about_unpriced_web_tools(config: GatewayConfig, db: AsyncSession)
 async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup when a configured gateway-run tool priced under ``otari:<tool>`` has no per-request rate.
 
-    Those are code execution, and web search on the legacy settings or on the
-    old backend; :func:`warn_about_unpriced_web_tools` names the search and
+    Those are code execution, and web search on the legacy settings;
+    :func:`warn_about_unpriced_web_tools` names the search and
     fetch tools priced by their own row. With ``require_pricing`` on, an
     unpriced tool is refused at admission, so this warning is what tells the
     operator *before* the first 402 rather than after. With ``require_pricing``

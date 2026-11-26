@@ -153,7 +153,6 @@ async def test_a_fetch_on_a_tenants_internal_endpoint_is_refused_at_the_call(api
     resolved = ResolvedFetch(
         name=None,
         provider="tabstack",
-        runner="library",
         api_key="org-key",
         api_base=api_base,
         options={},

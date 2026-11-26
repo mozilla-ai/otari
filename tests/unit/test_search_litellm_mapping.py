@@ -1,8 +1,7 @@
 """The direct endpoint's LiteLLM mapping (design J): for Exa, and for a provider without native equivalents.
 
 The request's fields become Exa's native options, and for a provider with none
-of its own (``fake`` here) they are applied to the hits instead. The cases on
-Exa's options moved here from ``test_search_backend.py`` with the mapping.
+of its own (``fake`` here) they are applied to the hits instead.
 """
 
 from datetime import UTC, datetime
@@ -11,7 +10,6 @@ from typing import Any
 import pytest
 
 from any_search import SearchHit
-from gateway.services import search_backend
 from gateway.services.tools import SearchQuery, filter_hits_by_domain
 from gateway.services.tools._web_search._litellm import direct_count, litellm_native_options, litellm_results
 
@@ -191,13 +189,11 @@ def test_exa_filters_its_own_domains() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_domain_filter_takes_any_hit_with_a_url() -> None:
-    """The library's hits and the old clients' alike."""
-    old = [search_backend.SearchHit(url="https://arxiv.org/abs/1"), search_backend.SearchHit(url="https://x.example")]
-    new = [_hit("https://arxiv.org/abs/1"), _hit("https://x.example")]
+def test_the_domain_filter_takes_a_hit_by_its_url() -> None:
+    hits = [_hit("https://arxiv.org/abs/1"), _hit("https://x.example")]
 
-    assert filter_hits_by_domain(old, ("arxiv.org",)) == old[:1]
-    assert filter_hits_by_domain(new, ("-x.example",)) == new[:1]
+    assert filter_hits_by_domain(hits, ("arxiv.org",)) == hits[:1]
+    assert filter_hits_by_domain(hits, ("-x.example",)) == hits[:1]
 
 
 @pytest.mark.parametrize(

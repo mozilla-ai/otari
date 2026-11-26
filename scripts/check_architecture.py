@@ -1116,7 +1116,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/provider_metadata_service.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
-    "gateway/services/search_backend.py",
     "gateway/services/secret_box.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tool_format.py",
@@ -1128,10 +1127,8 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/vision.py",
     "gateway/services/web_extraction.py",
     "gateway/services/web_fetch_service.py",
-    "gateway/services/web_retrieval_backend.py",
     "gateway/services/web_retrieval_network.py",
     "gateway/services/web_retrieval_policy.py",
-    "gateway/services/web_search_providers.py",
     "gateway/services/workspace_scope.py",
 )
 
