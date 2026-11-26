@@ -1266,10 +1266,10 @@ class GatewayConfig(
         description="Maximum size in bytes for a single uploaded file.",
     )
     files_workspace_max_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
-        default=5 * 1024 * 1024 * 1024,
+        default=1024 * 1024 * 1024,
         ge=1,
         description=(
-            "Most bytes of uploads one workspace may hold at once (5 GB by default), counting files not yet "
+            "Most bytes of uploads one workspace may hold at once (1 GB by default), counting files not yet "
             "deleted or expired. An upload that would go past it is refused with 413, and nothing stored is "
             "deleted. Null in the config file sets no limit."
         ),
