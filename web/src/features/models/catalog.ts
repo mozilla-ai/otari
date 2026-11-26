@@ -363,6 +363,7 @@ export function catalogListFromUrl(
       zeroDataRetention: url.get("zdr") === "1",
       dataLocations: url
         .getAll("data_location")
+        .map((value) => value.trim().toUpperCase())
         .filter(known(DATA_LOCATION_OPTIONS.map((option) => option.value))),
       releasedWithinDays: Number(offered(RELEASE_OPTIONS, "released")),
     },

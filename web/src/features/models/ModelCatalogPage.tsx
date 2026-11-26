@@ -7,7 +7,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent, useMemo, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
@@ -24,6 +24,7 @@ import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Segmented } from "@/design-system/navigation/Segmented"
+import { EU, GLOBAL } from "@/features/hostedProviders/dataLocations"
 import {
   activeFilterCount,
   CAPABILITY_FILTERS,
@@ -399,10 +400,21 @@ function FilterRail({
               {option.label}
             </Checkbox>
           ))}
-          <p className="text-caption">
-            European Union includes its member states. Global matches only
-            providers declared global.
-          </p>
+          {locations.some((option) => option.value === EU) ||
+          locations.some((option) => option.value === GLOBAL) ? (
+            <p className="text-caption">
+              {[
+                locations.some((option) => option.value === EU)
+                  ? "European Union includes its member states."
+                  : null,
+                locations.some((option) => option.value === GLOBAL)
+                  ? "Global matches only providers declared global."
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+          ) : null}
         </FilterGroup>
       ) : null}
       <FilterGroup label="Source" count={filters.source !== "all" ? 1 : 0}>
@@ -712,6 +724,14 @@ export function ModelCatalogView({
     },
     workspace.isSettled,
   )
+  // DataTable caches each rendered row on its columns, and a URL re-parse
+  // hands over a new array of the same picks, so the columns are keyed on the
+  // picks' values.
+  const pickedKey = filters.dataLocations.join(",")
+  const columns = useMemo(
+    () => tableColumns(pickedKey === "" ? [] : pickedKey.split(",")),
+    [pickedKey],
+  )
   const pageRows = catalog.data?.models ?? []
   const count = catalog.data?.count ?? 0
   const facets = catalog.data?.facets ?? undefined
@@ -864,7 +884,7 @@ export function ModelCatalogView({
             <TableScrollFrame className="otari-models-table">
               <DataTable
                 ariaLabel="Models"
-                columns={tableColumns(filters.dataLocations)}
+                columns={columns}
                 rows={pageRows}
                 getRowKey={rowKey}
                 sortDescriptor={sortDescriptor}

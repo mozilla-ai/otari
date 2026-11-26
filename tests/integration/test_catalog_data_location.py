@@ -15,7 +15,7 @@ from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -194,3 +194,80 @@ def test_a_provider_restricted_to_one_organization_does_not_lend_its_location_to
 
     assert seen["acme"][0] == ["DE", "US"]
     assert seen["globex"][0] == ["US"]
+
+
+def _workspace_accepting(client: TestClient, locations: list[str]) -> tuple[str, str, dict[str, str]]:
+    """The default workspace, narrowed to ``locations``; its organization's id and an API key in it."""
+    _ok(client.get(f"{API_ROOT}/organizations/me", headers=_MASTER))
+    key = _ok(client.post(f"{API_ROOT}/keys", json={"key_name": "app"}, headers=_MASTER))
+    [workspace] = _ok(client.get(f"{API_ROOT}/workspaces", headers=_MASTER))["data"]
+    _ok(
+        client.put(
+            f"{API_ROOT}/workspaces/{workspace['id']}/provider-policy",
+            json={"require_zero_data_retention": False, "allowed_data_locations": locations},
+            headers=_MASTER,
+        )
+    )
+    return workspace["id"], workspace["organization_id"], {API_KEY_HEADER: f"Bearer {key['key']}"}
+
+
+def test_a_workspace_accepting_some_locations_is_shown_only_those(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    """A model a workspace may only be served from Germany is not listed, or matched, as hosted in the US."""
+    _create(client, "berlin", data_location="DE")
+    _region(client, "berlin", "virginia", data_location="US")
+    _create(client, "oregon", data_location="US")
+    workspace_id, organization_id, key_header = _workspace_accepting(client, ["EU"])
+
+    # Through the workspace's own API key.
+    facet, by_model = _locations(client, headers=key_header)
+    assert facet == ["DE"]
+    assert by_model["z-ai/glm-5.3"] == ["DE"]
+    body = _get(client, _CATALOG, headers=key_header, params={"data_location": ["US"]})
+    assert body["models"] == []
+
+    # And through a signed-in session asking for that workspace.
+    session = db_session_factory()
+    try:
+        user = User(email="admin@default.test", full_name="Admin", active_organization_id=uuid.UUID(organization_id))
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        session.add(
+            OrganizationMember(
+                organization_id=uuid.UUID(organization_id), user_id=user.id, role="admin", status="active"
+            )
+        )
+        session.add(
+            DashboardSession(
+                token_hash=hash_session_token("otari-sess-default"),
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    client.cookies.set(SESSION_COOKIE_NAME, "otari-sess-default")
+    try:
+        narrowed = _get(
+            client, _CATALOG, params={"include_facets": True, "workspace_id": workspace_id, "data_location": ["US"]}
+        )
+        wide = _get(client, _CATALOG, params={"include_facets": True})
+    finally:
+        client.cookies.clear()
+    assert narrowed["models"] == []
+    # Without the workspace the same caller sees every location.
+    assert wide["facets"]["data_locations"] == ["DE", "US"]
+
+
+def test_a_workspace_listing_no_locations_changes_nothing(client: TestClient) -> None:
+    _create(client, "berlin", data_location="DE")
+    _region(client, "berlin", "virginia", data_location="US")
+    key = _ok(client.post(f"{API_ROOT}/keys", json={"key_name": "app"}, headers=_MASTER))
+
+    facet, _ = _locations(client, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
+
+    assert facet == ["DE", "US"]

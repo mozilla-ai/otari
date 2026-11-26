@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -9,7 +10,7 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -27,6 +28,21 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+
+// DataTable caches each rendered row on its `columns`, so what the page hands
+// it must keep its identity while nothing about the columns changes.
+const columnsSeen: unknown[] = []
+vi.mock("@/design-system/data/DataTable", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/design-system/data/DataTable")>()
+  return {
+    ...actual,
+    DataTable: ((props: ComponentProps<typeof actual.DataTable>) => {
+      columnsSeen.push(props.columns)
+      return actual.DataTable(props)
+    }) as typeof actual.DataTable,
+  }
+})
 
 const CAPABILITIES = {
   reasoning: true,
@@ -800,6 +816,58 @@ describe("ModelCatalogPage", () => {
       expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
     )
     expect(asked.at(-1)?.get("zero_data_retention")).toBe("true")
+  })
+
+  it("hands the table the same columns across a change that is not a data location", async () => {
+    localStorage.setItem("otari.dashboard.modelsView", "table")
+    columnsSeen.length = 0
+    mockApi()
+    renderPage(<ModelCatalogPage />, "/models?data_location=DE")
+    const user = userEvent.setup()
+
+    await screen.findByRole("grid", { name: "Models" })
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search models" }),
+      "k",
+    )
+    await waitFor(() => expect(columnsSeen.length).toBeGreaterThan(2))
+
+    expect(new Set(columnsSeen).size).toBe(1)
+  })
+
+  it("explains only the locations it offers", async () => {
+    const facets = (data_locations: string[]) => ({
+      ...CATALOG.facets!,
+      data_locations,
+    })
+    mockApi({ catalog: { ...CATALOG, facets: facets(["US"]) } })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    // Neither the union nor Global is offered, so there is nothing to explain.
+    expect(screen.queryByText(/includes its member states/)).toBeNull()
+    expect(screen.queryByText(/declared global/)).toBeNull()
+    cleanup()
+
+    mockApi({ catalog: { ...CATALOG, facets: facets(["DE"]) } })
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    expect(
+      screen.getByText("European Union includes its member states."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/declared global/)).toBeNull()
+    cleanup()
+
+    mockApi({ catalog: { ...CATALOG, facets: facets(["GLOBAL"]) } })
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    expect(
+      screen.getByText("Global matches only providers declared global."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/member states/)).toBeNull()
   })
 
   it("narrows by data location, offering the union for its member states", async () => {

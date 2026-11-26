@@ -209,6 +209,13 @@ describe("the list's URL", () => {
     expect(list.filters.dataLocations).toEqual(["DE"])
   })
 
+  it("reads a hand-typed data location in any case, trimmed", () => {
+    const list = catalogListFromUrl(
+      readQuery(new URLSearchParams("data_location=de&data_location=%20eu%20")),
+    )
+    expect(list.filters.dataLocations).toEqual(["DE", "EU"])
+  })
+
   it("counts each picked data location as a narrowing choice", () => {
     expect(
       activeFilterCount({ ...EMPTY_FILTERS, dataLocations: ["DE", "US"] }),

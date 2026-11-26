@@ -1232,10 +1232,13 @@ class DataLocations:
 
 
 async def viewer_data_locations(
-    hosted_providers: "HostedProviderService", organization_id: uuid.UUID | None
+    hosted_providers: "HostedProviderService", organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
 ) -> DataLocations:
-    """What the hosted providers serveable to the viewer's organization declare as their data locations."""
-    declared = await hosted_providers.data_locations(organization_id=organization_id)
+    """What the hosted providers serveable to the viewer's organization declare as their data locations.
+
+    ``workspace_id`` is the workspace the catalog is narrowed to, if any: only the locations it accepts are kept.
+    """
+    declared = await hosted_providers.data_locations(organization_id=organization_id, workspace_id=workspace_id)
     return DataLocations(
         hosted={name: tuple(each for each in locations if each is not None) for name, locations in declared.items()}
     )

@@ -13,7 +13,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
-from gateway.core.config import REGION_SEPARATOR, GatewayConfig, region_instance
+from gateway.core.config import REGION_SEPARATOR, GatewayConfig
 from gateway.core.settings.providers import HostedProviderEntry
 from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
@@ -23,6 +23,7 @@ from gateway.services.providers._hosted_credentials import (
     lookup_name,
     region_credential_of,
 )
+from gateway.services.providers._hosted_name_index import serving_data_locations
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
@@ -261,20 +262,14 @@ class HostedSources:
     async def data_locations(self, organization_id: uuid.UUID | None) -> dict[str, tuple[str | None, ...]]:
         """Where each enabled hosted provider ``organization_id`` may use keeps request data, by name.
 
-        One entry per connection a request may be served on, in the order they
-        are tried, as dispatch reads them: a provider with regions gives each
-        enabled region's own declaration, never the provider's, and a region a
-        provider of its whole name shadows is left out. ``None`` stands for a
-        connection that declares nothing.
+        Read from the declarations themselves, as the workspace narrowing
+        reads them (:func:`serving_data_locations`), with no key decrypted.
+        ``None`` stands for a connection that declares nothing.
         """
         everything = await self.all()
         names = {source.name for source in everything}
         return {
-            source.name: tuple(
-                credential.data_location
-                for credential in source.region_credentials(quiet=True)
-                if not (credential.region and region_instance(source.name, credential.region) in names)
-            )
+            source.name: serving_data_locations(source.name, source.data_location, source.regions, names)
             for source in everything
             if source.enabled and not source.withheld_from(organization_id)
         }
