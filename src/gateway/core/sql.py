@@ -6,11 +6,12 @@ agree exactly, because a bulk delete re-derives its target set server-side from 
 filters the operator was shown.
 """
 
-from collections.abc import Sequence
+import uuid
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from sqlalchemy import ColumnElement, func, text
+from sqlalchemy import ColumnElement, Select, false, func, text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -40,6 +41,20 @@ def match_any(column: Any, value: str | list[str]) -> ColumnElement[bool]:
     else:
         condition = column.in_(value)
     return cast("ColumnElement[bool]", condition)
+
+
+WorkspaceIds = Collection[uuid.UUID] | Select[uuid.UUID]
+"""Some workspaces: their ids, or a subquery selecting them."""
+
+
+def in_workspaces(column: Any, workspaces: WorkspaceIds) -> ColumnElement[bool]:
+    """Confine ``column`` to ``workspaces``. An empty set matches nothing rather than emitting ``IN ()``."""
+    if isinstance(workspaces, Select):
+        return cast("ColumnElement[bool]", column.in_(workspaces))
+    ids = sorted(workspaces)
+    if not ids:
+        return false()
+    return cast("ColumnElement[bool]", column == ids[0] if len(ids) == 1 else column.in_(ids))
 
 
 LIKE_ESCAPE = "\\"

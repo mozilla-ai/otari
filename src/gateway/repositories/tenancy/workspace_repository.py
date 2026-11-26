@@ -31,9 +31,6 @@ _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 # from any other foreign key on this table and is not listed here.
 _FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
-WorkspaceIds = Collection[uuid.UUID] | Select[uuid.UUID]
-"""Some workspaces: their ids, or a subquery selecting them."""
-
 
 def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
