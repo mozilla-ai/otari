@@ -338,6 +338,16 @@ def test_a_name_no_search_instance_has_is_not_found() -> None:
         resolve_search(GatewayConfig(search_tools={"exa": _EXA}), None, requested="gone", request_options=None)
 
 
+def test_an_instance_on_a_provider_the_library_does_not_serve_is_misconfigured() -> None:
+    """The provider's metadata has no answer to give, so the refusal comes before it is asked."""
+    config = GatewayConfig(search_tools={"mine": {"provider": "nonesuch"}})
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="mine", request_options=None)
+    assert refused.value.status_code == 400
+    assert refused.value.message == "Search tool 'mine' is not configured correctly."
+
+
 def test_a_searxng_instance_with_no_address_to_search_is_misconfigured() -> None:
     config = GatewayConfig(search_tools={"local": {"provider": "searxng"}})
 
