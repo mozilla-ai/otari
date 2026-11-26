@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -69,9 +69,9 @@ with a fixed `forbidden` error that names none):
 - the inference routes (`inference:run`), files, batches, search, fetch, code
   execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
   scope of its own;
-- `GET /api/v1/usage/requests/{request_id}` and
-  [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
-  usage (`usage:read`);
+- `GET /api/v1/usage/requests/{request_id}` for its own requests, and
+  `GET /api/v1/key/budget`, `/key/usage/summary` and `/key/usage/series` for its
+  own [budget and usage](#a-keys-own-budget-and-usage) (`usage:read`);
 - for a [service key](https://docs.otari.ai/guides/control/end-users), the end-user routes (the `end-users`
   scopes).
 

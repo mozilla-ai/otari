@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -874,7 +874,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1922,12 +1922,21 @@ ui_base_url: "https://app.example.com/dashboard"
 
 Unset, `public_base_url` is used.
 
-- Supply an absolute http(s) URL with no trailing slash.
-- Credentials and fragments are refused, since the value goes into redirects
-  and mail.
-- A query string is kept and joined to every link's own query, ahead of its
-  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
-  for an edge that serves one interface for several deployments.
+Supply an absolute http(s) URL with no trailing slash for either setting. A
+username or password in one is refused, because the value goes into redirects
+and into everybody's inbox. What may follow the host differs, because the two
+are joined to a path in different ways:
+
+- `public_base_url` refuses a query string and a fragment. Every URL naming this
+  deployment is built by appending to it, so either one would land in the middle
+  of the result instead of at its end.
+- `ui_base_url` refuses a fragment and keeps a query string, which is joined to
+  every link's own query ahead of its fragment
+  (`https://app.example.com/dashboard/verify-email?edge=a#token=…`), for an edge
+  that serves one interface for several deployments.
+
+An edge that tags its links therefore sets `ui_base_url` for the query, and
+leaves `public_base_url` as the plain address this process answers on.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is
@@ -1946,7 +1955,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

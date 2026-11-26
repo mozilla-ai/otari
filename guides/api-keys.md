@@ -158,14 +158,17 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/docs/public/openapi.json).
 
 ### Model and search tool access
 
 **Models.** A new key inherits its user's `allowed_models` unless it sets its
 own list. No list allows any model, an empty list allows none, and entries may
 use provider wildcards such as `openai:*`. A key can narrow its user's access,
-never widen it.
+never widen it. An organization's provider key with a custom base URL is named
+by its slug rather than its provider (`openai-proxy:gpt-4o`, `openai-proxy:*`),
+and an entry on a key in that organization names it the same way: `openai:*`
+does not reach it.
 
 An entry may also be a model's catalog id, as `GET /api/v1/models` lists it
 (`mistralai/mistral-small-3`). Otari stores it as the `instance:model` selector
@@ -269,7 +272,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a26d7ea593d7027f95e9bb494b1d847bf6269abd/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page
