@@ -229,6 +229,9 @@ export function MemberHome({
   const isGuideOffered =
     activation.data?.experience_eligible === true &&
     (models.data?.data.length ?? 0) > 0
+  // Until both answer, the band could flash in and out under the guide.
+  const isGuideSettled =
+    !asksGuide || (!activation.isPending && !models.isPending)
   const mySessions = {
     ...sessionsSearchFor(window),
     ...(me ? { user_id: me } : {}),
@@ -467,7 +470,7 @@ export function MemberHome({
       <ErrorBanner error={spend.error} />
       {/* Needs attention (`MemberAttentionBand`) is held back until it reads
           each row's scope right; only the first-run band shows here. */}
-      {isFirstRun && !isGuideOffered ? (
+      {isFirstRun && isGuideSettled && !isGuideOffered ? (
         <MemberFirstRun workspace={workspace} canCreateKey={canCreateKey} />
       ) : null}
       <KpiStrip isEmpty={false} columns={4}>

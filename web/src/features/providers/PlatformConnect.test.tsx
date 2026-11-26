@@ -188,6 +188,29 @@ it("polls while pending and reports the approval once", async () => {
   expect(onConnected).toHaveBeenCalledTimes(1)
 })
 
+it("reports the approval to the page that started the attempt, though it re-rendered without one", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  mockConnect([PENDING, { status: "connected" }])
+  const onConnected = vi.fn()
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const card = (callback?: () => void) => (
+    <QueryClientProvider client={queryClient}>
+      <PlatformConnect onConnected={callback} />
+    </QueryClientProvider>
+  )
+  const { rerender } = render(card(onConnected))
+  expect(await screen.findByText("WXYZ-1234")).toBeInTheDocument()
+
+  // The providers page drops its callback once its list is no longer empty.
+  rerender(card())
+  await vi.advanceTimersByTimeAsync(3_000)
+
+  expect(await screen.findByText(/^Connected\./)).toBeInTheDocument()
+  expect(onConnected).toHaveBeenCalledTimes(1)
+})
+
 it("does not report a connection that was made before the page opened", async () => {
   const requests = mockConnect([{ status: "connected" }])
   const onConnected = renderCard()

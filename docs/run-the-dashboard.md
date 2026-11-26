@@ -229,8 +229,9 @@ no rate, because a request that would run it is refused. See
 ## The setup guide
 
 The guide walks a workspace to its first successful request. Its owners and
-admins share one guide for the workspace: once any request there succeeds, or
-one of them skips it, it is gone for all of them. A member who may run requests
+admins share one guide for the workspace: once a request from code succeeds
+there (a Playground message does not count), or one of them skips it, it is
+gone for all of them. A member who may run requests
 in the workspace without managing it gets a guide of their own: their own API
 key, their own first request and their own **Skip**. Viewers are not offered it.
 

@@ -6,8 +6,9 @@ One row per workspace and person, beside the per-workspace
 exists, so no index is added there.
 
 Both ``workspace_id`` and ``user_id`` cascade, because the row describes one
-person in one workspace and means nothing without either. ``api_key_id`` is
-``SET NULL`` for the reason it is on the workspace's table.
+person in one workspace and means nothing without either. The primary key
+leads with ``workspace_id``, so ``user_id`` gets an index for its cascade.
+``api_key_id`` is ``SET NULL`` for the reason it is on the workspace's table.
 
 Revision ID: 7c4b45a55970
 Revises: a7c9e1b3d5f8
@@ -42,6 +43,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["api_key_id"], ["api_keys.id"], ondelete="SET NULL"),
     )
     op.create_index(
+        op.f("ix_workspace_member_activation_state_user_id"),
+        "workspace_member_activation_state",
+        ["user_id"],
+    )
+    op.create_index(
         op.f("ix_workspace_member_activation_state_api_key_id"),
         "workspace_member_activation_state",
         ["api_key_id"],
@@ -51,6 +57,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index(
         op.f("ix_workspace_member_activation_state_api_key_id"),
+        table_name="workspace_member_activation_state",
+    )
+    op.drop_index(
+        op.f("ix_workspace_member_activation_state_user_id"),
         table_name="workspace_member_activation_state",
     )
     op.drop_table("workspace_member_activation_state")

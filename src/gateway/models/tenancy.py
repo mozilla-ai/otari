@@ -1862,7 +1862,9 @@ class WorkspaceMemberActivationState(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
     first_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     last_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     dismissed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)

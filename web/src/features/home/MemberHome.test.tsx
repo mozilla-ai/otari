@@ -158,9 +158,10 @@ async function renderMemberHome({
   cached?: number
   /**
    * Wei in Platform with no key and no session yet, and what the setup guide's
-   * reads answer: the server's offer and the models Wei may call.
+   * reads answer: the server's offer (`"pending"` never answers) and the
+   * models Wei may call.
    */
-  firstRun?: { activation: WorkspaceActivation; models: string[] }
+  firstRun?: { activation: WorkspaceActivation | "pending"; models: string[] }
 }): Promise<URL[]> {
   const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
@@ -186,7 +187,9 @@ async function renderMemberHome({
             : AS_WEI,
         )
       case `/workspaces/${PLATFORM}/activation`:
-        return Response.json(firstRun?.activation ?? {})
+        return firstRun?.activation === "pending"
+          ? new Promise<Response>(() => {})
+          : Response.json(firstRun?.activation ?? {})
       case "/models":
         return Response.json({
           object: "list",
@@ -309,6 +312,22 @@ describe("MemberHome, on a first run", () => {
         activation: workspaceActivation(),
         models: ["openai:gpt-4o-mini"],
       },
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        asked.some((url) => url.pathname.endsWith(`${PLATFORM}/activation`)),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: FIRST_RUN })).toBeNull()
+  })
+
+  it("holds its first-run band back until the setup guide's offer answers", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      firstRun: { activation: "pending", models: ["openai:gpt-4o-mini"] },
     })
 
     await vi.waitFor(() =>

@@ -45,14 +45,17 @@ export function usePlatformConnectFlow(
   const state = status.data?.status ?? "idle"
 
   // Only an approval this hook waited for: a deployment connected earlier
-  // must not send whoever opens the page somewhere else.
-  const wasPending = useRef(false)
+  // must not send whoever opens the page somewhere else. The callback is the
+  // one in force when the attempt started, so a page that re-renders meanwhile
+  // (its provider list refreshing on the approval) keeps the answer it asked for.
+  const attempt = useRef<{ onConnected?: () => void } | null>(null)
   useEffect(() => {
     if (state === "pending") {
-      wasPending.current = true
-    } else if (state === "connected" && wasPending.current) {
-      wasPending.current = false
-      onConnected?.()
+      attempt.current ??= { onConnected }
+    } else if (state === "connected" && attempt.current) {
+      const { onConnected: approved } = attempt.current
+      attempt.current = null
+      approved?.()
     }
   }, [state, onConnected])
 

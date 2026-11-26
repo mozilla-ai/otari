@@ -64,7 +64,11 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, Us
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.organizations import WorkspaceMemberActivationRepository
-from gateway.repositories.users_repository import get_or_create_attribution_user, is_attribution_user_revoked
+from gateway.repositories.users_repository import (
+    get_or_create_attribution_user,
+    is_attribution_user_revoked,
+    lock_live_users,
+)
 from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -511,6 +515,9 @@ class WorkspaceActivationService:
         self._require_offerable(workspace=workspace, state=state)
         if await self._first_successful_request(workspace.id, user_id=str(user.id)) is not None:
             raise WorkspaceAlreadyActivatedError
+        # Locked as the user's deletion locks it, so a revocation either commits
+        # first and is refused here or waits for this key and then disables it.
+        await lock_live_users(self.db, [str(user.id)])
         if await is_attribution_user_revoked(self.db, str(user.id)):
             raise TenancyConflictError(_SPEND_IDENTITY_REVOKED)
         if state is None:

@@ -12,11 +12,14 @@ export const OWN_KEYS = "own-keys"
 
 const listeners = new Set<() => void>()
 
+/** The answer where storage refused it, so it holds for this tab only. */
+let unsaved: string | null = null
+
 export function readWelcomeAnswer(): string | null {
   try {
-    return localStorage.getItem(WELCOME_ANSWERED_KEY)
+    return localStorage.getItem(WELCOME_ANSWERED_KEY) ?? unsaved
   } catch {
-    return null
+    return unsaved
   }
 }
 
@@ -24,7 +27,7 @@ export function writeWelcomeAnswer(answer: string) {
   try {
     localStorage.setItem(WELCOME_ANSWERED_KEY, answer)
   } catch {
-    // Storage refused: the welcome stays away for this tab only.
+    unsaved = answer
   }
   for (const listener of listeners) listener()
 }
