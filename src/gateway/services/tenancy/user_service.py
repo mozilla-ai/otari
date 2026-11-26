@@ -103,7 +103,6 @@ _EMAIL_UNIQUE_INDEX = "ix_user_email"
 # that has no password of its own to burn the cost against (resend, request a
 # reset): the value is never checked against anything, only its length and the
 # fixed bcrypt cost matter, so a constant is as good as a real one.
-
 _TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
 
 
