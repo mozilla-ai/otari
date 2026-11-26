@@ -77,6 +77,14 @@ from gateway.api.deps.identity import (
     get_oidc_connection_service,
     require_deployment_operator_or_absent,
 )
+from gateway.api.deps.invitations import (
+    InvitationAcceptanceDep,
+    InvitationLinkDep,
+    InvitationsDep,
+    get_invitation_acceptance,
+    get_invitation_link,
+    get_invitations,
+)
 from gateway.api.deps.organizations import (
     InvitationClaimSettingsDep,
     InvitationMailLimitDep,
@@ -99,6 +107,7 @@ from gateway.api.deps.organizations import (
     get_workspace_access,
     get_workspace_activation_service,
     get_workspace_service,
+    invitation_policy_of,
 )
 from gateway.api.deps.ports import (
     AgentModelRecommenderPortDep,
@@ -1204,8 +1213,11 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "InvitationAcceptanceDep",
     "InvitationClaimSettingsDep",
+    "InvitationLinkDep",
     "InvitationMailLimitDep",
+    "InvitationsDep",
     "MaintenanceModeDep",
     "McpCatalogServiceDep",
     "McpServerRequestServiceDep",
@@ -1304,8 +1316,11 @@ __all__ = [
     "get_growth_signal_port",
     "get_identity_provider_port",
     "get_identity_service",
+    "get_invitation_acceptance",
     "get_invitation_claim_settings",
+    "get_invitation_link",
     "get_invitation_mail_limit",
+    "get_invitations",
     "get_log_writer",
     "get_membership_listener",
     "get_membership_organization_service",
@@ -1347,6 +1362,7 @@ __all__ = [
     "get_workspace_mcp_servers",
     "get_workspace_search_keys",
     "get_workspace_service",
+    "invitation_policy_of",
     "get_workspace_web_search_policies",
     "get_workspace_web_search_service",
     "is_valid_master_key",
