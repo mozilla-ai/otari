@@ -116,6 +116,7 @@ def _credentials(tmp_path: Path, *, email: str) -> tuple[str | None, str | None]
 
 def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestClient, **kwargs: object) -> str:
     """Sign up, expecting success, and pull the emailed link's token out of the console log."""
+    caplog.clear()
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
@@ -126,6 +127,22 @@ def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestCl
     match = _TOKEN_IN_LINK.search(caplog.text)
     assert match, caplog.text
     return match.group(1)
+
+
+def test_a_captured_link_is_the_token_of_the_signup_that_was_just_made(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A second capture in one test answers for its own signup, not the first one's.
+
+    ``caplog.text`` accumulates across a test and the search takes the first match, so a
+    capture that does not clear it first answers with a stale token once anything has
+    logged a link.
+    """
+    with _client(tmp_path, open_signup=True) as client:
+        first = _captured_verification_link(caplog, client, email="ada@example.com")
+        second = _captured_verification_link(caplog, client, email="grace@example.com")
+
+        assert second != first
 
 
 def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
