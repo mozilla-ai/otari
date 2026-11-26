@@ -12,7 +12,13 @@ if TYPE_CHECKING:
 MASTER_KEY_USER_REQUIRED_DETAIL = "When using master key, 'user' field is required in request body"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-USER_MISMATCH_DETAIL = "'user' field does not match the authenticated API key's user"
+# A mismatch refusal names the way past it, since the key's setting is not something the caller can read.
+# A route where a service key bills its end users, or that takes ``metadata``, appends that way too.
+USER_MISMATCH_DETAIL = (
+    "'user' field does not match the authenticated API key's user. "
+    "To accept it and bill the key's own user, "
+    "set the key's mismatched user field option to Always accept (reject_user_mismatch: false)."
+)
 
 
 def resolve_user_id(

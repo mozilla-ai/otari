@@ -168,6 +168,7 @@ describe("a page the caller may not open", () => {
     "/settings",
     "/health-checks",
     "/admin/hosted-providers",
+    "/admin/budgets",
   ]) {
     it(`sends an admin who types ${url} Home`, async () => {
       setDesktop()

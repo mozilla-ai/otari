@@ -52,6 +52,30 @@ describe("ActivityPage filter serialization", () => {
     expect(screen.getByText(/Status code/)).toBeVisible()
   })
 
+  it("narrows to what hosted providers served, and marks those rows", async () => {
+    const { calls } = mockApi({ rows: [entry({ deployment_paid: true })] })
+    renderPage(<ActivityPage />, "/activity?paid_by=true&range=24h")
+
+    await screen.findByText("gpt-4o")
+    const requested = calls.map((c) => c.url)
+    for (const path of [
+      `${API_ROOT}/usage?`,
+      `${API_ROOT}/usage/count`,
+      `${API_ROOT}/usage/summary`,
+    ]) {
+      expect(
+        requested.some(
+          (url) => url.includes(path) && url.includes("deployment_paid=true"),
+        ),
+        `${path} dropped the paid-by filter`,
+      ).toBe(true)
+    }
+    expect(selectTrigger("Paid by")).toHaveTextContent("Hosted")
+    expect(
+      screen.getByRole("img", { name: "Paid by: hosted provider" }),
+    ).toBeVisible()
+  })
+
   it("offers Web fetch as a named tool filter", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })

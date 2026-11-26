@@ -84,6 +84,7 @@ async def _identity(
     role: str | None,
     email: str | None = None,
     email_verified: bool = True,
+    email_proven: bool = True,
     full_name: str = "Someone",
 ) -> User:
     user = await UserRepository(db).create_local_identity(
@@ -93,6 +94,8 @@ async def _identity(
     )
     if email is not None and email_verified:
         user.email_verified_at = datetime.now(UTC)
+        if email_proven:
+            user.email_proven_at = user.email_verified_at
         db.add(user)
         await db.flush()
     if role is not None:
@@ -497,6 +500,16 @@ async def test_an_unverified_address_does_not_join(async_db: AsyncSession) -> No
     organization = await _organization(async_db, slug="acme")
     await _claim(async_db, organization, domain="acme.example")
     newcomer = await _identity(async_db, organization, role=None, email="new@acme.example", email_verified=False)
+
+    assert await _auto_join(async_db, newcomer) is None
+
+
+@pytest.mark.asyncio
+async def test_an_address_no_mailbox_proved_does_not_join(async_db: AsyncSession) -> None:
+    """An admin of any organization could invite the address, so its own word cannot admit it here."""
+    organization = await _organization(async_db, slug="acme")
+    await _claim(async_db, organization, domain="acme.example")
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example", email_proven=False)
 
     assert await _auto_join(async_db, newcomer) is None
 

@@ -58,7 +58,7 @@ def test_lists_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> None:
     # The schema advertised is the one the model is actually given.
     assert web_search["input_schema"]["required"] == ["query"]
     assert "query" in web_search["input_schema"]["properties"]
-    assert tools["otari_code_execution"]["input_schema"]["required"] == ["code"]
+    assert tools["otari_code_execution"]["input_schema"]["required"] == ["language", "code"]
     web_fetch = tools["otari_web_fetch"]
     assert web_fetch["available"] is True
     assert web_fetch["accepted_types"] == ["otari_web_fetch"]
@@ -73,6 +73,8 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (False, "not_configured")
+    # A deployment with no sandbox runs no language, so none is listed.
+    assert "enum" not in tools["otari_code_execution"]["input_schema"]["properties"]["language"]
 
 
 def test_configured_tools_report_available(tmp_path: Path) -> None:
@@ -86,6 +88,8 @@ def test_configured_tools_report_available(tmp_path: Path) -> None:
 
     for tool_id in ("otari_web_search", "otari_web_fetch", "otari_code_execution"):
         assert (tools[tool_id]["available"], tools[tool_id]["reason"]) == (True, None)
+    # The languages listed are the ones the deployment's sandbox runs.
+    assert tools["otari_code_execution"]["input_schema"]["properties"]["language"]["enum"] == ["python"]
 
 
 def test_accepted_types_are_canonical_only_by_default(tmp_path: Path) -> None:

@@ -370,9 +370,6 @@ class StaleGrowthSignal:
     async def record_onboarding_completed(self, **kwargs):
         return None
 
-    async def record_profile_updated(self, **kwargs):
-        return None
-
     async def record_account_deleted(self, **kwargs):
         return None
 

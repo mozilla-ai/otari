@@ -15,7 +15,6 @@ from gateway.api.routes import (
     auth_profile,
     auth_session,
     auth_signup,
-    auth_sso,
     auth_webauthn,
     batches,
     bootstrap,
@@ -54,7 +53,6 @@ from gateway.api.routes import (
     organization_keys,
     organization_pricing,
     organization_routing,
-    organization_sso,
     organization_usage,
     organizations,
     otlp,
@@ -72,6 +70,7 @@ from gateway.api.routes import (
     search,
     search_tools,
     settings,
+    subagent_savings,
     tool_settings,
     tools,
     usage,
@@ -150,8 +149,6 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     auth_webauthn.router,
     auth_oauth.router,
-    auth_sso.router,
-    organization_sso.router,
     embeddings.router,
     images.router,
     audio.router,
@@ -206,9 +203,11 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # different keys.
     organization_guardrail_definitions.router,
     organization_guardrails.router,
-    # The tenant-scoped read over the rows the operator usage router serves.
-    # Grouped by what it is scoped to, which is what decides who may call it.
+    # The tenant-scoped reads: over the rows the operator usage router serves,
+    # and over the recorded subagent decisions. Grouped by what they are scoped
+    # to, which is what decides who may call them.
     organization_usage.router,
+    subagent_savings.router,
     # The tenant-scoped half of the routing and alias tables, grouped for the
     # same reason.
     organization_routing.policies_router,
@@ -230,6 +229,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     workspace_web_search.router,
     web_search_keys.org_router,
     web_search_keys.workspace_router,
+    org_provider_keys.operator_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
     model_overrides.org_router,

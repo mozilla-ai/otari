@@ -35,7 +35,7 @@ class MembershipAdmission(Protocol):
         Raises:
             MembershipUpdateError: the role offered would leave the organization with no active owner.
             OrganizationMemberAddressUnprovenError: the person holds no membership here and only another
-                organization has vouched for their address.
+                organization recorded their address.
             OrganizationMemberDeactivatedError: the account is deactivated, so a membership grants nothing.
             OrganizationNotFoundError: the organization no longer exists.
 

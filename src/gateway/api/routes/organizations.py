@@ -45,7 +45,7 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.tenancy import (
-    AcceptInvitationResultPublic,
+    AcceptedMembershipPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
     ActiveOrganizationMemberPublic,
@@ -373,13 +373,15 @@ async def accept_caller_pending_membership(
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     identities: IdentityServiceDep,
-) -> AcceptInvitationResultPublic:
+) -> AcceptedMembershipPublic:
     """Accept an invitation addressed to the caller, resolving it to an active membership.
 
     Does the same work as ``POST /api/v1/invitations/accept``, including the
-    workspace assignments parked at invite time, and answers the same shape.
-    Addressed by membership id rather than by token: the caller is already the
-    addressee, so a token would add nothing their session does not carry.
+    workspace assignments parked at invite time. Addressed by membership id
+    rather than by token: the caller is already the addressee, so a token would
+    add nothing their session does not carry. It answers the membership alone,
+    because the next step that route carries is for a visitor whose only
+    credential is a link.
 
     Idempotent for any membership the caller already holds ``active``, which is
     what two clicks before the list refreshes produces: it answers that

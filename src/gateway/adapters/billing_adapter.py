@@ -54,9 +54,6 @@ class NullBillingAdapter(BillingPort):
     ) -> int | None:
         return None
 
-    async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
-        return None
-
     async def hold(self, *, organization_id: uuid.UUID, amount: Decimal) -> None:
         return None
 

@@ -52,7 +52,8 @@ import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
  * the layout (`TelemetryIdentity`, `AutoUpdate`, `ConnectionStatus`) live
  * inside `AppShellChrome`, so a replacement rendering a step *instead of* its
  * children unmounts all three. Only `ConnectionStatus` renders anything, a
- * `role="alert"` toast, and its condition can hold while a step is up.
+ * band pinned to the top of the content pane, and its condition can hold
+ * while a step is up.
  *
  * Two of the three cost something. `TelemetryIdentity`'s own docstring stops
  * being true for as long as it is unmounted: it is no longer mounted exactly
@@ -60,7 +61,7 @@ import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
  * funnel the telemetry seam exists to carry, so they would land with no actor
  * named. And `ConnectionStatus` is the app-level "the gateway is not answering",
  * which is precisely what someone posting a step's answers needs to be told, so
- * a replacement owns its own submit-failure feedback for as long as the toast is
+ * a replacement owns its own submit-failure feedback for as long as the band is
  * unmounted. `AutoUpdate` is the one that can wait: a step is short, the stale
  * tab keeps working, and the next page change after it picks the build up.
  *

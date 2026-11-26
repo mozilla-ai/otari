@@ -51,35 +51,166 @@
         }
       })()
     </script>
-    <!-- Paints the boot state below. A <style> block rather than a Tailwind
-         class (which the frontend standards otherwise rule out) because this has
-         to render before the bundle's stylesheet is a certainty: it is the thing
-         that covers loading the bundle. The colors read the design tokens where
-         globals.css has already loaded and fall back to its values where it has
-         not, so this stays one hex behind --color-background rather than a second
-         source of truth for it. -->
+    <!-- Paints the boot frame below: the sign-in shell's header, card and
+         footer at the geometry `app/BootFrame.tsx` and `LoginPageShell` give
+         them, so the screen React mounts next (the failure card, or the
+         sign-in card) lands on the same rect and only the card's contents
+         change. A <style> block rather than Tailwind classes (which the
+         frontend standards otherwise rule out) because this has to render
+         before the bundle's stylesheet is a certainty: it is the thing that
+         covers loading the bundle. Colors read the design tokens where
+         globals.css has loaded and fall back to its values where it has not,
+         so this stays one hex behind them rather than a second source of
+         truth. A change to the frame's geometry in BootFrame.tsx comes here
+         too. -->
     <style>
+      body {
+        margin: 0;
+      }
+      .app-boot,
+      .app-boot * {
+        box-sizing: border-box;
+      }
       .app-boot {
         display: flex;
-        align-items: center;
-        justify-content: center;
+        flex-direction: column;
         min-height: 100vh;
+        min-height: 100svh;
         background: var(--color-background, #f7f8f8);
+        color: var(--color-text-subtle, #5a5f6b);
+        font-family: var(--font-sans, Arial, sans-serif);
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+      }
+      .app-boot-header,
+      .app-boot-footer {
+        display: flex;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 3.5rem;
+        padding: 0 1rem;
+        background: var(--color-background, #f7f8f8);
+      }
+      .app-boot-header {
+        border-bottom: 1px solid var(--color-border, rgb(0 0 0 / 0.06));
+      }
+      .app-boot-footer {
+        border-top: 1px solid var(--color-border, rgb(0 0 0 / 0.06));
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .app-boot-footer-mark {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.8125rem;
+      }
+      .app-boot-lockup {
+        display: block;
+        width: auto;
+        height: 2.25rem;
+        color: var(--color-primary, #0098a4);
+      }
+      .app-boot-main {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        align-items: center;
+        padding: 1rem;
+      }
+      .app-boot-card {
+        position: relative;
+        display: flex;
+        flex-shrink: 0;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 28rem;
+        padding: 3rem 1.5rem 2rem;
+        border: 1px solid var(--color-border-strong, rgb(0 0 0 / 0.1));
+        background: var(--color-surface, #ffffff);
+      }
+      .app-boot-corner {
+        position: absolute;
+        width: 0.5rem;
+        height: 0.5rem;
+        border: 0 solid var(--color-primary, #0098a4);
+        pointer-events: none;
+      }
+      .app-boot-corner-start {
+        top: -1px;
+        left: -1px;
+        border-top-width: 2px;
+        border-left-width: 2px;
+      }
+      .app-boot-corner-end {
+        right: -1px;
+        bottom: -1px;
+        border-right-width: 2px;
+        border-bottom-width: 2px;
+      }
+      /* Held back a second, so a gateway that answers at once never shows it,
+         then eased in rather than cut in. */
+      .app-boot-wait {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+        opacity: 0;
+        animation: app-boot-show 150ms ease-out 1s forwards;
+      }
+      .app-boot-wait p {
+        margin: 0;
       }
       .app-boot-spinner {
         width: 1.75rem;
         height: 1.75rem;
-        border-radius: 9999px;
         border: 2px solid var(--color-border, rgb(0 0 0 / 0.06));
         border-top-color: var(--color-primary, #0098a4);
+        border-radius: 9999px;
         animation: app-boot-spin 0.7s linear infinite;
+      }
+      [data-theme="dark"] .app-boot {
+        background: var(--color-background, #08090a);
+        color: var(--color-text-subtle, #8a8f98);
+      }
+      [data-theme="dark"] .app-boot-header,
+      [data-theme="dark"] .app-boot-footer {
+        background: var(--color-background, #08090a);
+        border-color: var(--color-border, rgb(255 255 255 / 0.08));
+      }
+      [data-theme="dark"] .app-boot-card {
+        background: var(--color-surface, #0f1011);
+        border-color: var(--color-border-strong, rgb(255 255 255 / 0.14));
+      }
+      @media (min-width: 48rem) {
+        .app-boot-header,
+        .app-boot-footer {
+          padding-right: 1.5rem;
+          padding-left: 1.5rem;
+        }
+        .app-boot-main {
+          padding-top: 3.75rem;
+        }
+        .app-boot-card {
+          padding-right: 2rem;
+          padding-left: 2rem;
+        }
+      }
+      @keyframes app-boot-show {
+        to {
+          opacity: 1;
+        }
       }
       @keyframes app-boot-spin {
         to {
           transform: rotate(360deg);
         }
       }
+      /* The words appear at the same second without the ease, and the ring
+         holds still. */
       @media (prefers-reduced-motion: reduce) {
+        .app-boot-wait {
+          animation: app-boot-show 0s 1s forwards;
+        }
         .app-boot-spinner {
           animation: none;
         }
@@ -88,13 +219,32 @@
   </head>
   <body>
     <!-- Shown until React mounts. `main.tsx` reads GET /v1/bootstrap before it
-         renders anything, so without this the page is blank for that round trip,
-         and for the whole 8s deadline when a gateway accepts the connection and
-         then stalls. `createRoot().render()` clears the container on its first
-         render, so nothing here has to be torn down. -->
+         renders anything, so without this the page is blank for that round
+         trip, and for the whole 8s deadline when a gateway accepts the
+         connection and then stalls. `createRoot().render()` clears the
+         container on its first render, so nothing here has to be torn down.
+         The lockup is `ProductLockup`'s paths, inlined because no bundle has
+         loaded yet; it is not a link, because where home is comes from the
+         bootstrap. -->
     <div id="root">
-      <div class="app-boot" role="status" aria-label="Loading the dashboard">
-        <div class="app-boot-spinner"></div>
+      <div class="app-boot">
+        <header class="app-boot-header">
+          <svg class="app-boot-lockup" viewBox="0 0 1331 423" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Otari by Mozilla AI" focusable="false"><path fill="currentColor" d="M225.33 160.813C225.216 146.225 223.996 132.509 220.825 118.33C219.484 112.327 218.364 106.666 216.018 101.005L210.875 88.6101C200.289 65.3898 181.677 47.4412 157.018 39.1579C128.887 29.7141 97.4697 29.7207 69.2307 39.0035C54.2932 43.9132 41.6887 52.2704 31.1227 63.2836C27.5157 67.0463 24.4317 70.4871 21.8839 74.9206L14.3347 88.0535C10.4663 94.7874 8.62924 101.79 6.53746 109.201C3.50704 119.953 1.86444 130.617 1.02638 141.792L0.228596 152.456C-0.522301 171.391 0.52358 190.191 4.15739 208.904L10.6875 231.232C17.9953 250.811 30.5997 267.265 47.7696 279.116L58.6509 285.004C64.2828 288.057 70.3839 289.994 77.2023 291.576C102.009 297.346 127.164 296.882 151.42 290.887L158.333 288.298C163.428 287.057 167.672 284.696 172.311 282.16C190.299 272.335 203.433 256.578 211.881 238.067L216.011 227.315L220.805 210.084C224.391 193.652 225.471 177.682 225.337 160.813H225.33ZM167.819 225.404L162.737 235.19L158.46 240.97C155.591 244.855 145.956 251.2 140.023 253.184C121.948 259.236 98.9985 259.162 81.7613 251.697L75.0568 247.791C56.0699 236.739 51.3498 208.367 51.4505 186.904L51.7053 132.053C51.7453 123.233 53.3947 115.151 55.9759 106.961C64.1286 81.0981 84.6843 70.7489 111.18 70.3465C131.207 70.0445 151.099 75.2226 162.295 92.3595C164.541 95.8004 166.834 99.6569 168.235 103.695C172.472 115.882 174.269 128.377 174.269 141.369L174.289 186.267C174.289 199.722 172.338 212.949 167.819 225.39V225.404Z" /><path fill="currentColor" d="M293.166 292.014C275.072 290.773 267.507 281.328 266.06 263.87L266.027 128.089L235.26 128.123V93.8155L266.295 93.7283L271.785 79.5493L277.416 65.7658L282.089 54.196H313.32L313.46 93.8155H353.693V128.083L313.339 128.13L313.327 257.372L353.587 257.445L353.627 292.014H293.173H293.166Z" /><path fill="currentColor" d="M534.756 257.291L534.456 157.641C534.434 150.578 532.914 144.045 531.209 137.472C525.906 117.062 510.708 102.051 490.814 95.3912C471.621 88.9657 441.726 88.6237 422.391 94.1101L409.692 98.946C405.803 100.428 402.042 102.789 398.919 105.365L392.273 110.845C379.335 124.762 374.267 137.848 371.02 156.836H418.81C418.147 149.197 419.788 141.752 425.387 136.56C432.575 129.887 442.437 126.982 452.265 127.23C460.76 126.714 468.879 128.498 475.946 133.133L481.021 138.103C487.925 148.848 487.987 160.492 487.544 173.329L453.873 176.522C437.12 178.111 410.549 180.801 397.154 188.803L389.156 193.585C386.689 195.061 384.154 197.153 382.264 199.286L377.53 204.625C372.18 210.655 368.661 222.064 367.581 230.776C365.691 245.996 368.566 264.527 378.463 276.077C383.953 282.482 390.329 287.398 398.355 290.484C414.793 296.803 433.07 296.936 450.146 292.817C454.224 291.839 457.314 289.786 460.805 287.995C471.226 282.676 480.242 267.089 482.937 255.143H493.952L494.234 266.708C494.417 274.045 497.124 281.006 502.682 285.93C508.146 289.84 514.436 291.939 521.281 291.953L556.197 292.019V257.376L534.756 257.291ZM487.53 229.623C487.477 238.919 483.615 247.464 475.998 252.843C468.905 257.599 460.834 259.349 452.258 259.489C444.601 259.624 437.039 259.738 429.884 256.82C423.67 254.285 418.595 251.019 416.423 244.265C414.171 237.257 414.339 229.509 417.02 222.627C419.795 215.504 431.154 209.696 439.943 208.75L487.684 203.599L487.53 229.623Z" /><path fill="currentColor" d="M578.187 291.986V128.364L555.633 127.921L555.593 93.8685L618.467 93.8015L618.488 131.979H630.046C634.176 117.968 641.8 102.621 655.576 96.7862C661.758 93.0168 668.638 92.0441 675.856 91.4406L704.137 91.2729L704.243 128.075L660.872 128.23C655.865 128.25 651.226 129.216 646.506 130.57C630.489 135.165 626.11 150.444 625.245 166.461L625.219 292.019L578.194 291.993L578.187 291.986Z" /><path fill="currentColor" d="M732.27 292.017L732.282 128.193L708.215 128.052V93.7986L779.308 93.8187L779.301 291.977L732.27 292.017Z" /><path fill="currentColor" d="M729.108 36.1409L729.104 75.8273L780.726 75.8342L780.731 36.1475L729.108 36.1409Z" /><path fill="currentColor" d="M266.754 406.696V352.127H259.566V345.472H292.131C297.514 345.472 301.685 346.891 304.64 349.731C307.598 352.511 309.079 356.504 309.079 361.71C309.079 365.613 308.221 368.6 306.504 370.672C304.79 372.683 302.274 373.896 298.964 374.31V376.617C302.511 376.972 305.173 378.244 306.95 380.432C308.783 382.621 309.699 385.757 309.699 389.837C309.699 395.221 308.162 399.392 305.086 402.35C302.068 405.246 297.839 406.696 292.396 406.696H266.754ZM291.776 400.041C294.793 400.041 297.04 399.273 298.518 397.734C300.058 396.197 300.825 393.859 300.825 390.726V387.974C300.825 384.781 300.058 382.412 298.518 380.875C297.04 379.338 294.793 378.568 291.776 378.568H275.361V400.041H291.776ZM291.598 372.356C294.497 372.356 296.657 371.617 298.075 370.139C299.496 368.6 300.205 366.352 300.205 363.396V361C300.205 357.982 299.496 355.765 298.075 354.344C296.657 352.866 294.497 352.127 291.598 352.127H275.361V372.356H291.598ZM321.834 418.41V412.02H335.32L337.804 404.744H330.706L316.776 359.313H325.56L337.451 398.357H339.758L351.647 359.313H360.166L343.573 412.731C342.981 414.564 342.212 415.954 341.267 416.901C340.319 417.906 338.901 418.41 337.006 418.41H321.834ZM390.904 406.696V345.472H406.786L421.515 390.458H423.734L438.463 345.472H454.345V406.696H445.738V352.836H443.431L426.306 406.696H418.765L401.55 352.836H399.243V406.696H390.904ZM487.681 407.584C483.127 407.584 479.222 406.637 475.97 404.744C472.716 402.852 470.232 400.071 468.517 396.403C466.8 392.736 465.942 388.27 465.942 383.005C465.942 377.68 466.8 373.216 468.517 369.606C470.232 365.94 472.716 363.16 475.97 361.265C479.222 359.372 483.127 358.427 487.681 358.427C492.295 358.427 496.2 359.372 499.393 361.265C502.588 363.16 505.044 365.94 506.758 369.606C508.473 373.216 509.33 377.68 509.33 383.005C509.33 388.27 508.473 392.736 506.758 396.403C505.044 400.071 502.588 402.852 499.393 404.744C496.2 406.637 492.295 407.584 487.681 407.584ZM487.681 400.751C492.058 400.751 495.284 399.51 497.354 397.026C499.423 394.541 500.458 390.695 500.458 385.489V380.52C500.458 375.314 499.423 371.47 497.354 368.986C495.284 366.501 492.058 365.258 487.681 365.258C483.245 365.258 479.991 366.501 477.921 368.986C475.852 371.47 474.817 375.314 474.817 380.52V385.489C474.817 390.695 475.852 394.541 477.921 397.026C479.991 399.51 483.245 400.751 487.681 400.751ZM515.926 406.696V400.308L542.011 365.703H516.191V359.313H552.216V365.703L526.129 400.308H552.481V406.696H515.926ZM564.742 406.696V365.703H557.732V359.313H573.171V406.696H564.742ZM563.944 353.546V345.472H573.704V353.546H563.944ZM587.942 406.696V351.86H580.932V345.472H596.281V406.696H587.942ZM611.597 406.696V351.86H604.587V345.472H619.936V406.696H611.597ZM646.43 407.584C641.758 407.584 638.091 406.431 635.429 404.124C632.767 401.758 631.436 398.503 631.436 394.363C631.436 390.103 632.827 386.792 635.607 384.426C638.447 382.06 642.586 380.61 648.029 380.077L661.249 378.746V384.426L650.423 385.489C646.816 385.844 644.183 386.642 642.527 387.886C640.872 389.068 640.043 390.813 640.043 393.12V393.653C640.043 396.019 640.872 397.824 642.527 399.065C644.242 400.249 646.667 400.841 649.803 400.841C653.649 400.841 656.517 400.012 658.409 398.357C660.302 396.64 661.249 394.067 661.249 390.636V383.272V382.029V376.439C661.249 372.534 660.451 369.696 658.855 367.92C657.315 366.146 654.802 365.258 651.311 365.258C648.827 365.258 646.816 365.672 645.277 366.501C643.799 367.271 642.705 368.275 641.994 369.519C641.343 370.76 641.019 372.122 641.019 373.6V373.955H632.502C633.329 368.749 635.311 364.874 638.447 362.331C641.639 359.728 645.987 358.427 651.489 358.427C657.464 358.427 661.988 359.934 665.064 362.951C668.141 365.909 669.678 370.286 669.678 376.084V400.308H675.8V406.696H668.169C664.444 406.696 662.58 404.834 662.58 401.106V398.71H660.361C659.179 401.727 657.464 403.975 655.214 405.455C653.026 406.873 650.099 407.584 646.43 407.584ZM699.429 406.696L717.175 345.472H732.701L750.537 406.696H741.398L725.959 352.836H723.562L708.035 406.696H699.429ZM709.101 391.256L709.899 384.956H739.534L740.332 391.256H709.101ZM708.213 352.127V345.472H722.053V352.127H708.213ZM756.558 406.696V400.041H764.276V352.127H756.558V345.472H780.513V352.127H772.882V400.041H780.513V406.696H756.558Z" /><path fill="currentColor" d="M951.587 408.413C969.153 404.581 985.066 398.162 999.527 386.711C988.521 380.449 978.773 373.37 970.131 364.661L966.005 360.502C946.654 341.003 937.1 315.656 931.752 289.087L920.259 309.278L870.394 395.226C895.673 408.951 923.373 414.481 951.577 408.406L951.587 408.413Z" /><path fill="currentColor" d="M997.561 0.799202L1153.57 0C1154.1 4.77076 1153.51 7.95941 1153.14 12.3387C1149.18 60.7557 1115.43 101.197 1067.94 113.397L1118.69 201.448L1248.4 201.277C1242.96 199.467 1237.5 197.852 1232.08 195.633C1204.69 183.376 1189.63 156.008 1190.79 126.347L1191.23 45.7503C1201.4 45.1959 1211.06 47.5934 1220.26 51.8258C1242.95 62.2727 1256.75 82.8888 1260.68 108.333C1264.29 81.7716 1279.63 60.7313 1303.81 50.7086C1312.45 47.1368 1321.02 45.0734 1330.53 45.7747L1330.24 205.306C1330.22 218.468 1327.75 230.595 1324.99 243.211C1316.43 282.396 1292.88 319.192 1261.65 344.132L1255.29 349.202L1244.62 356.445L1234.65 362.65L1220.76 346.121C1218.84 343.838 1217.29 341.562 1215.24 339.369L1204.27 327.65C1202.16 325.39 1200.2 323.628 1198.07 321.558C1188.8 312.513 1178.86 303.084 1166.7 298.004C1167.48 299.383 1168.52 301.152 1169.56 301.896C1172.48 303.966 1174.15 306.455 1176.43 308.915C1182.58 315.58 1187.03 322.73 1191.6 330.617L1235.67 406.812C1216.19 418.294 1194.18 423.088 1171.76 422.183C1167.08 421.996 1162.84 421.939 1158.46 420.504C1118.93 414.035 1093.04 392.874 1073.46 358.941L1053.49 324.313L1029.04 282.894C1026.09 277.91 1023.98 273.027 1020.19 268.574L1025.19 289.93C1026.76 296.642 1028.2 303.07 1031.03 309.422C1035.45 324.796 1041.43 339.099 1047.49 353.925C1051.84 364.576 1057.4 373.661 1063.82 384.189C1026.31 380.487 993.982 364.682 967.995 339.032C960.821 331.956 954.275 324.893 949.074 316.298L941.387 303.575L933.528 287.046C927.757 271.679 922.745 256.145 922.703 239.232L922.329 73.5186C926.144 34.3985 957.396 2.16111 997.561 0.799202ZM1040.28 55.985C1050.03 55.985 1057.94 48.0827 1057.94 38.3291C1057.94 28.5757 1050.03 20.6733 1040.28 20.6733C1030.52 20.6733 1022.61 28.5757 1022.61 38.3291C1022.61 48.0827 1030.52 55.985 1040.28 55.985Z" /></svg>
+        </header>
+        <main class="app-boot-main">
+          <div class="app-boot-card">
+            <span class="app-boot-corner app-boot-corner-start" aria-hidden="true"></span>
+            <span class="app-boot-corner app-boot-corner-end" aria-hidden="true"></span>
+            <div class="app-boot-wait" role="status">
+              <span class="app-boot-spinner" aria-hidden="true"></span>
+              <p>Connecting to the gateway…</p>
+            </div>
+          </div>
+        </main>
+        <footer class="app-boot-footer">
+          <span>One gateway. Every model.</span>
+          <span class="app-boot-footer-mark">Mozilla AI</span>
+        </footer>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

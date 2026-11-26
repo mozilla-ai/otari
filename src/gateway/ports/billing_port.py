@@ -78,7 +78,6 @@ class InsufficientFundsError(Exception):
         message = message or f"Insufficient funds (${available:.2f}) to serve this request."
         self.public_message = message if action_url is None else f"{message} Add funds at {action_url}."
         super().__init__(self.public_message)
-        self.available = available
         self.action_url = action_url
 
 
@@ -155,21 +154,6 @@ class BillingPort(Protocol):
         ``actor_user_id``. The caller counts every call the port limits under one
         limit per organization, whichever models they are on, and a call waits
         briefly for a slot before it is refused.
-        """
-        ...
-
-    async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
-        """Refuse unless the organization has funds no hold has claimed.
-
-        The gate for a deployment-paid request with no upper-bound cost to
-        hold. :meth:`hold` would wave such a request through for want of an
-        amount, yet the deployment still owes the upstream bill, so an
-        organization whose funds are entirely held must not be served on the
-        strength of that.
-
-        Raises:
-            InsufficientFundsError: If every fund the organization has is held.
-
         """
         ...
 

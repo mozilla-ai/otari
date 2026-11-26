@@ -178,7 +178,7 @@ export function ServiceKeyFields({
   )
 
   return (
-    <div className="flex flex-col gap-3 border border-control-border p-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <Checkbox
           isSelected={value.isServiceKey}
@@ -233,7 +233,9 @@ export function ServiceKeyFields({
                   value.defaultBudgetId
                     ? "Each new end user gets its own copy of this budget."
                     : offered.length === 0
-                      ? `${scope === "deployment" ? "No deployment budgets yet" : "No organization budgets yet"}: create one under Spend & budgets.`
+                      ? scope === "deployment"
+                        ? "No deployment budgets yet: create one under Deployment budgets."
+                        : "No organization budgets yet: create one under Spend & budgets."
                       : "New end users have no limit of their own, only the key's."
                 }
                 options={[

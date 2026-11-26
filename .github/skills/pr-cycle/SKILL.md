@@ -29,9 +29,11 @@ repo-wide facts this skill leans on: the test notes and the generated artifacts.
    integration for route or database behavior). Mock the dashboard at the `apiFetch` boundary,
    not the hooks. Never weaken coverage, and never add a global pytest rerun policy: a genuinely
    flaky test carries `@pytest.mark.flaky(reruns=...)` and a stated reason.
-5. **Checks** must be green before opening (see [Running checks](#running-checks)), and
+5. **Checks.** Run the fast checks and the tests covering the paths you changed, and
    **regenerate whatever the change made stale** (see
-   [Generated artifacts](#generated-artifacts-a-pr-can-owe)).
+   [Generated artifacts](#generated-artifacts-a-pr-can-owe)). CI runs the rest on the PR;
+   [Running checks](#running-checks) says what is worth running locally and what to leave to
+   CI.
 6. **Commit.** Conventional Commits. End every message with a `Co-Authored-By:` trailer naming
    the model that wrote it (`Co-Authored-By: <your model> <noreply@anthropic.com>`). Fill in your
    own identity; do not copy a model name out of an example or another commit.
@@ -57,6 +59,14 @@ repo-wide facts this skill leans on: the test notes and the generated artifacts.
     approval on top of your instruction.
 
 ## Running checks
+
+CI runs every check a PR's paths call for: the unit and integration shards, `lint`,
+`typecheck`, the OSS-edition smoke gate and the rest. Each workflow's `paths` filter decides
+which of those a PR gets, so a docs-only PR runs few and a web-only one skips the Python
+matrix; a check that skips is one whose inputs the PR did not touch. The local run is for fast
+signal before you push, not for reproducing that set: run `make lint`, `make typecheck` and the
+tests covering the paths you changed, then let CI be the gate for the rest. Running the whole suite locally duplicates CI and
+buys nothing.
 
 From the repo root:
 

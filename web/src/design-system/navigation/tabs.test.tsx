@@ -258,6 +258,22 @@ describe("TabRow", () => {
     expect([...row.classList]).toContain("overflow-x-auto")
     expect([...row.classList]).toContain("max-w-full")
   })
+
+  it("wraps whole tabs onto another line when asked to", () => {
+    const { container } = render(
+      <TabRow wraps>
+        <Tab isActive onPress={() => undefined}>
+          Requests
+        </Tab>
+        <Tab isActive={false} onPress={() => undefined}>
+          Errors
+        </Tab>
+      </TabRow>,
+    )
+    const row = container.firstElementChild as HTMLElement
+    expect([...row.classList]).toContain("flex-wrap")
+    expect([...row.classList]).not.toContain("overflow-x-auto")
+  })
 })
 
 describe("Segmented", () => {

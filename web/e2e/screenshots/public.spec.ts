@@ -55,17 +55,17 @@ test("welcome page", async ({ page }) => {
 //
 // Four of them need this deployment to be able to send mail, and the E2E
 // gateway deliberately cannot: `e2e/otari.yml` configures no transport, and
-// `parity.bootstrap.spec.ts` asserts that `mail_ready` is false as part of what
-// this fixture *is*. So the bootstrap is stubbed for those four captures rather
-// than the fixture being changed underneath a spec that depends on it. It is
-// one boolean, on the one response the shell reads before it mounts.
-async function withMailReady(page: Page): Promise<void> {
+// `parity.bootstrap.spec.ts` asserts that `mail` is "none" as part of what this
+// fixture *is*. So the bootstrap is stubbed for those four captures rather than
+// the fixture being changed underneath a spec that depends on it. It is one
+// field, on the one response the shell reads before it mounts.
+async function withDeliveredMail(page: Page): Promise<void> {
   await page.route("**/v1/bootstrap", async (route) => {
     const response = await route.fetch()
     const bootstrap = await response.json()
     await route.fulfill({
       response,
-      json: { ...bootstrap, mail_ready: true },
+      json: { ...bootstrap, mail: "delivers" },
     })
   })
 }
@@ -125,7 +125,7 @@ async function stubInvitation(page: Page): Promise<void> {
 }
 
 test("signup", async ({ page }) => {
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await page.goto("/signup")
   await expect(
     page.getByRole("heading", { name: "Claim your account" }),
@@ -146,7 +146,7 @@ test("signup offering OAuth, address form folded and open", async ({
       response,
       json: {
         ...bootstrap,
-        mail_ready: true,
+        mail: "delivers",
         open_signup: true,
         oauth_providers: ["google", "github"],
       },
@@ -174,7 +174,7 @@ test("signup on a gateway that cannot send mail", async ({ page }) => {
 test("signup prefilled from an accepted invitation", async ({ page }) => {
   // The other half of the handoff below: the address arrives read-only, because
   // the invitation is bound to it (otari#835).
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await page.goto("/signup?email=ada%40example.com")
   await expect(page.getByLabel("Email")).toHaveValue("ada@example.com")
   await captureScreenshot(page, "signup-invited")
@@ -185,7 +185,7 @@ test("invitation accepted, ready to claim", async ({ page }) => {
   // invitation routes are stubbed for the reason the bootstrap is above: a real
   // pending token would have to be minted through the management API by a
   // signed-in operator, and this project runs in front of a session.
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await stubInvitation(page)
   await page.goto("/accept-invitation#token=not-a-real-token")
   await page.getByRole("button", { name: "Accept invitation" }).click()
@@ -196,7 +196,7 @@ test("invitation accepted, ready to claim", async ({ page }) => {
 })
 
 test("check your email", async ({ page }) => {
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await page.goto("/check-email?type=signup")
   await expect(
     page.getByRole("heading", { name: "Check your email" }),
@@ -205,7 +205,7 @@ test("check your email", async ({ page }) => {
 })
 
 test("resend verification", async ({ page }) => {
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await page.goto("/resend-verification")
   await expect(
     page.getByRole("heading", { name: "Send a new verification link" }),
@@ -214,7 +214,7 @@ test("resend verification", async ({ page }) => {
 })
 
 test("recover password", async ({ page }) => {
-  await withMailReady(page)
+  await withDeliveredMail(page)
   await page.goto("/recover-password")
   await expect(
     page.getByRole("heading", { name: "Set or reset your password" }),
@@ -288,7 +288,7 @@ test("signup offering OAuth behind published terms", async ({ page }) => {
       response,
       json: {
         ...bootstrap,
-        mail_ready: true,
+        mail: "delivers",
         open_signup: true,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",

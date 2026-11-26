@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
+    CodeExecutionPortDep,
     DirectToolAvailabilityDep,
     WorkspaceCodeExecutionPoliciesDep,
     WorkspaceFundingDep,
@@ -188,11 +189,11 @@ async def _direct_availability(
 
 
 def _managed_tools(
-    config: GatewayConfig, switches: _WorkspaceSwitches, direct: _DirectAvailability
+    config: GatewayConfig, switches: _WorkspaceSwitches, direct: _DirectAvailability, languages: tuple[str, ...]
 ) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
-    code_execution = code_execution_tool_definition()["function"]
+    code_execution = code_execution_tool_definition(languages)["function"]
     # The same question the request path asks, asked the same way: a hosted
     # provider needs no URL, so deriving this from sandbox_url would publish
     # "unavailable" for a deployment that runs code perfectly well.
@@ -249,6 +250,7 @@ async def list_tools(
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     funding: WorkspaceFundingDep,
     availability: DirectToolAvailabilityDep,
+    port: CodeExecutionPortDep,
 ) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 
@@ -262,4 +264,6 @@ async def list_tools(
     api_key, _ = auth
     switches = await _workspace_switches(config, api_key, web_policies, code_execution_policies, funding)
     direct = await _direct_availability(api_key, switches, availability)
-    return ToolsResponse(data=_managed_tools(config, switches, direct))
+    # A deployment with no sandbox runs no language.
+    languages = port.languages if port is not None else ()
+    return ToolsResponse(data=_managed_tools(config, switches, direct, languages))

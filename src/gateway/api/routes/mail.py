@@ -12,10 +12,9 @@ the rest of the management API:
   it the first time someone is invited. On a deployment with no transport it
   refuses with 503 up front and never pretends to have sent anything.
 
-The refusal is the reusable half. A surface with no non-mail fallback (the
-password-reset flow to come) gates on the same ``mail_ready`` the dashboard
-reads from ``/api/v1/bootstrap`` and refuses the same way, rather than accepting a
-request it will silently drop.
+The refusal is the reusable half. A surface with no non-mail fallback gates on
+the same question ``ready`` answers and refuses the same way, rather than
+accepting a request it will silently drop.
 """
 
 from typing import Annotated
@@ -45,8 +44,8 @@ class MailSettings(BaseModel):
     ready: bool = Field(
         description=(
             "Whether a message carrying a link back to this deployment can be sent, which is "
-            "what every message the control plane sends needs. Matches 'mail_ready' on "
-            f"{API_ROOT}/bootstrap."
+            "what every message the control plane sends needs. True for a transport that "
+            f"delivers to nobody. The 'mail' field on {API_ROOT}/bootstrap tells those apart."
         )
     )
     from_email: str | None = Field(description="The 'From' address on outgoing mail, if one is configured.")

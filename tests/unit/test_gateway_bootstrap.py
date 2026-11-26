@@ -119,7 +119,7 @@ def test_first_boot_seeds_a_fresh_database_without_sending_mail(
     with TestClient(create_app(config)) as client:
         assert client.get(f"{API_ROOT}/health").status_code == 200
         # And the deployment reports the truth about itself rather than failing later.
-        assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is False
+        assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "none"
 
     engine = create_engine(config.database_url)
     with Session(engine) as db:

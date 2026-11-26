@@ -135,7 +135,7 @@ class OrganizationMemberAddressUnresolvedError(TenancyConflictError):
 
 
 class OrganizationMemberAddressUnprovenError(TenancyConflictError):
-    """An address another organization vouched for, added or invited by a different one.
+    """An address only another organization recorded, added or invited by a different one.
 
     A password chosen through an invitation link is the inviting organization's
     word for the address, and that organization's admins held the link. Letting a

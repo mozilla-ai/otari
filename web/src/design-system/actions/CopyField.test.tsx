@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -386,6 +386,14 @@ describe("CopyField, concealed", () => {
 
     await user.click(field)
     expect(field.selectionStart).toBe(field.selectionEnd)
+
+    // Focused by the dialog that hands it over, the caret goes to the start,
+    // so a stand-in wider than its field shows its prefix.
+    field.blur()
+    field.setSelectionRange(5, 5)
+    act(() => field.focus())
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe(0)
 
     // Revealed, the field selects on focus the way every other one does.
     await user.click(screen.getByRole("button", { name: "Show Secret key" }))

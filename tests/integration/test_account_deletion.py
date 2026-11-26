@@ -297,7 +297,7 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     name="Ada's OpenAI",
                     encrypted_api_key="encrypted",
                     last4="abcd",
-                    client_args={"organization": "org-ada"},
+                    encrypted_client_args="encrypted-args",
                 ),
                 ProviderEndpoint(
                     workspace_id=account.workspace_id,
@@ -306,6 +306,7 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     api_base="https://vllm.example.com/v1",
                     encrypted_api_key="encrypted",
                     last4="abcd",
+                    encrypted_default_params="encrypted-defaults",
                 ),
                 OrgWebSearchKey(
                     organization_id=account.organization_id,
@@ -313,6 +314,7 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     name="Ada's Tavily",
                     encrypted_api_key="encrypted",
                     last4="abcd",
+                    encrypted_options="encrypted-options",
                 ),
                 WorkspaceMcpServer(
                     organization_id=account.organization_id,
@@ -338,6 +340,7 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     profile="ada-profile",
                     url="https://guardrails.example.com",
                     encrypted_credential="encrypted",
+                    encrypted_validate_kwargs="encrypted-kwargs",
                 ),
                 OIDCConnection(
                     organization_id=account.organization_id,
@@ -363,13 +366,13 @@ def _stored_secrets(session_factory: Callable[[], Session], account: Account) ->
     session = session_factory()
     try:
         return [
-            *session.query(col(OrgProviderKey.encrypted_api_key), col(OrgProviderKey.client_args))
+            *session.query(col(OrgProviderKey.encrypted_api_key), col(OrgProviderKey.encrypted_client_args))
             .filter(col(OrgProviderKey.organization_id) == account.organization_id)
             .all(),
-            *session.query(ProviderEndpoint.encrypted_api_key)
+            *session.query(ProviderEndpoint.encrypted_api_key, ProviderEndpoint.encrypted_default_params)
             .filter(ProviderEndpoint.workspace_id == account.workspace_id)
             .all(),
-            *session.query(OrgWebSearchKey.encrypted_api_key)
+            *session.query(OrgWebSearchKey.encrypted_api_key, OrgWebSearchKey.encrypted_options)
             .filter(OrgWebSearchKey.organization_id == account.organization_id)
             .all(),
             *session.query(WorkspaceMcpServer.encrypted_token)
@@ -378,7 +381,7 @@ def _stored_secrets(session_factory: Callable[[], Session], account: Account) ->
             *session.query(OrganizationGuardrailDefinition.encrypted_create_secrets)
             .filter(OrganizationGuardrailDefinition.organization_id == account.organization_id)
             .all(),
-            *session.query(OrganizationGuardrail.encrypted_credential)
+            *session.query(OrganizationGuardrail.encrypted_credential, OrganizationGuardrail.encrypted_validate_kwargs)
             .filter(OrganizationGuardrail.organization_id == account.organization_id)
             .all(),
             *session.query(OIDCConnection.encrypted_client_secret)

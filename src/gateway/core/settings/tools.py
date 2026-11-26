@@ -540,8 +540,9 @@ class ToolSettings(BaseModel):
         default=None,
         ge=1,
         description=(
-            "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10."
+            "How many search and fetch tool calls one request may make, together. Once reached, "
+            "later rounds no longer offer either tool, and a call past it gets a tool error the "
+            "model can recover from. When unset: 10."
         ),
     )
 

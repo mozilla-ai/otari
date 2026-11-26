@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   deltaFraction,
+  formatBucketTick,
   formatCost,
   formatCount,
   formatFileSize,
@@ -30,6 +31,22 @@ describe("formatNumber", () => {
     expect(formatNumber(1234567)).toBe("1,234,567")
     expect(formatNumber(null)).toBe("0")
     expect(formatNumber(undefined)).toBe("0")
+  })
+})
+
+describe("formatBucketTick", () => {
+  it("names a day bucket by its UTC day, whatever zone reads it", () => {
+    expect(formatBucketTick("2026-11-11T00:00:00Z", "day")).toBe("Nov 11")
+  })
+
+  it("names an hour bucket by its hour", () => {
+    expect(formatBucketTick("2026-11-11T14:00:00Z", "hour")).toMatch(
+      /^\d{1,2}\s?(AM|PM)$/,
+    )
+  })
+
+  it("hands back what is not a date", () => {
+    expect(formatBucketTick("soon", "day")).toBe("soon")
   })
 })
 

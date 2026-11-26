@@ -44,6 +44,41 @@ class EmailAssertion(StrEnum):
         return cls.VERIFIED if email_verified else cls.UNVERIFIED
 
 
+class AddressAuthority(StrEnum):
+    """What established an identity's sign-in address.
+
+    ``proves_the_holder`` is what ``email_proven_at`` records. An authority that could assert
+    any address answers false, because its word is not evidence that the holder controls it.
+    """
+
+    MAILBOX = ("mailbox", True)
+    """A link that reached the inbox, so whoever opened it receives mail at the address."""
+
+    OPERATOR = ("operator", True)
+    """Deployment authority supplied it, which sits above every organization here."""
+
+    ORGANIZATION = ("organization", False)
+    """One organization's word for an address any organization could have claimed."""
+
+    SESSION = ("session", False)
+    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
+
+    TRUSTED_PROVIDER = ("trusted_provider", True)
+    """A provider no tenant can configure, reporting this address verified.
+
+    NOTE: An organization's own connection is a provider too and is never this. A caller
+    must establish that no tenant sets what the provider says before naming this member.
+    """
+
+    proves_the_holder: bool
+
+    def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.proves_the_holder = proves_the_holder
+        return member
+
+
 class MailedLinkStatus(StrEnum):
     """Whether a mailed verification or password reset link can still be used.
 

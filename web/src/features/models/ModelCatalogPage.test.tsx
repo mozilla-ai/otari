@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -9,7 +10,7 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -27,6 +28,21 @@ import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+
+// DataTable caches each rendered row on its `columns`, so what the page hands
+// it must keep its identity while nothing about the columns changes.
+const columnsSeen: unknown[] = []
+vi.mock("@/design-system/data/DataTable", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/design-system/data/DataTable")>()
+  return {
+    ...actual,
+    DataTable: ((props: ComponentProps<typeof actual.DataTable>) => {
+      columnsSeen.push(props.columns)
+      return actual.DataTable(props)
+    }) as typeof actual.DataTable,
+  }
+})
 
 const CAPABILITIES = {
   reasoning: true,
@@ -802,6 +818,138 @@ describe("ModelCatalogPage", () => {
     expect(asked.at(-1)?.get("zero_data_retention")).toBe("true")
   })
 
+  it("hands the table the same columns across a change that is not a data location", async () => {
+    localStorage.setItem("otari.dashboard.modelsView", "table")
+    columnsSeen.length = 0
+    mockApi()
+    renderPage(<ModelCatalogPage />, "/models?data_location=DE")
+    const user = userEvent.setup()
+
+    await screen.findByRole("grid", { name: "Models" })
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search models" }),
+      "k",
+    )
+    await waitFor(() => expect(columnsSeen.length).toBeGreaterThan(2))
+
+    expect(new Set(columnsSeen).size).toBe(1)
+  })
+
+  it("explains only the locations it offers", async () => {
+    const facets = (data_locations: string[]) => ({
+      ...CATALOG.facets!,
+      data_locations,
+    })
+    mockApi({ catalog: { ...CATALOG, facets: facets(["US"]) } })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    // Neither the union nor Global is offered, so there is nothing to explain.
+    expect(screen.queryByText(/includes its member states/)).toBeNull()
+    expect(screen.queryByText(/declared global/)).toBeNull()
+    cleanup()
+
+    mockApi({ catalog: { ...CATALOG, facets: facets(["DE"]) } })
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    expect(
+      screen.getByText("European Union includes its member states."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/declared global/)).toBeNull()
+    cleanup()
+
+    mockApi({ catalog: { ...CATALOG, facets: facets(["GLOBAL"]) } })
+    renderPage(<ModelCatalogPage />)
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    expect(
+      screen.getByText("Global matches only providers declared global."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/member states/)).toBeNull()
+  })
+
+  it("narrows by data location, offering the union for its member states", async () => {
+    const asked: URLSearchParams[] = []
+    const glm = { ...GLM, data_locations: ["DE", "US"] }
+    const kimi = { ...KIMI, data_locations: ["GLOBAL"] }
+    const facets = {
+      ...CATALOG.facets!,
+      data_locations: ["DE", "GLOBAL", "US"],
+    }
+    mockApi({
+      list: (params) => {
+        asked.push(params)
+        const models =
+          params.get("data_location") === "EU" ? [glm] : [glm, kimi]
+        return { ...CATALOG, count: models.length, models, facets }
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      await within(list).findByText("Hosted in Germany, United States"),
+    ).toBeVisible()
+    expect(within(list).getByText("Hosted in Global")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Data location" }))
+    // The facet holds no `EU`, but Germany is a member state, so the union is offered.
+    expect(
+      screen
+        .getAllByRole("checkbox")
+        .map(
+          (box) =>
+            box.getAttribute("aria-label") ?? box.closest("label")?.textContent,
+        ),
+    ).toEqual(
+      expect.arrayContaining([
+        "Global",
+        "European Union",
+        "Germany",
+        "United States",
+      ]),
+    )
+    expect(
+      screen.getByText(
+        "European Union includes its member states. Global matches only providers declared global.",
+      ),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "European Union" }))
+
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
+    expect(asked.at(-1)?.getAll("data_location")).toEqual(["EU"])
+    expect(
+      screen.getByRole("button", { name: /^Data location\s*1$/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("names a model's data locations on its card and in the table", async () => {
+    const glm = { ...GLM, data_locations: ["US", "DE", "FR", "EU", "JP"] }
+    mockApi({ catalog: { ...CATALOG, models: [glm, KIMI] } })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      await within(list).findByText(
+        "Hosted in European Union, France, Germany +2 more",
+      ),
+    ).toBeVisible()
+    // A model with none declared says nothing about it.
+    expect(within(list).queryAllByText(/Hosted in/)).toHaveLength(1)
+
+    await user.click(screen.getByRole("radio", { name: "Table" }))
+    expect(
+      await screen.findByText(
+        /· Hosted in European Union, France, Germany \+2 more/,
+      ),
+    ).toBeVisible()
+  })
+
   it("narrows by what a model produces", async () => {
     mockApi({
       catalog: {
@@ -941,6 +1089,44 @@ describe("ModelCatalogPage", () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText("Updating models…")).not.toBeInTheDocument()
+  })
+
+  it("announces a refetch from beside the title, never from the list's own column", async () => {
+    let complete: (response: CatalogResponse) => void = () => {}
+    let first = true
+    mockApi({
+      list: () => {
+        if (first) {
+          first = false
+          return { ...CATALOG, count: 26 }
+        }
+        return new Promise<CatalogResponse>((resolve) => {
+          complete = resolve
+        })
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    const list = await screen.findByRole("list", { name: "Models" })
+
+    // At rest the line is already mounted, empty, and shares a row with the
+    // title: a refetch can only change its text, so nothing below it moves.
+    const title = screen.getByRole("heading", { name: "Models" })
+    const statusBesideTitle = () =>
+      screen
+        .getAllByRole("status")
+        .find((each) => each.parentElement?.contains(title))
+    const status = statusBesideTitle()!
+    expect(status).toBeEmptyDOMElement()
+    expect(status.parentElement).not.toContainElement(list)
+
+    await user.click(screen.getByRole("button", { name: /next/i }))
+    expect(await screen.findByText("Updating models…")).toBe(status)
+    await act(async () => {
+      complete({ ...CATALOG, count: 26, models: [KIMI] })
+    })
+    await waitFor(() => expect(status).toBeEmptyDOMElement())
+    expect(statusBesideTitle()).toBe(status)
   })
 
   it("shows a request error and lets clearing filters recover the cached catalog", async () => {

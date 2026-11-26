@@ -1452,7 +1452,7 @@ def test_an_upload_resolves_in_the_caller_s_own_completion(
 
 @pytest.fixture
 def files_off_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
-    yield from build_test_client(test_config.model_copy(update={"files_enabled": False}))
+    yield from build_test_client(test_config.model_copy(update={"files_api_enabled": False}))
 
 
 def test_files_switched_off_answer_404_and_report_why(

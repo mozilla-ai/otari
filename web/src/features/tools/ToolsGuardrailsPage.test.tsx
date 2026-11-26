@@ -162,13 +162,16 @@ const TOOLS: ToolsResponse = {
     {
       id: "otari_code_execution",
       object: "tool",
-      description: "Execute Python code in a sandboxed REPL.",
+      description: "Execute code in a sandboxed REPL.",
       available: false,
       accepted_types: ["otari_code_execution"],
       input_schema: {
         type: "object",
-        properties: { code: { type: "string" } },
-        required: ["code"],
+        properties: {
+          language: { type: "string" },
+          code: { type: "string" },
+        },
+        required: ["language", "code"],
       },
       example: { type: "otari_code_execution" },
     },

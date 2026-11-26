@@ -35,8 +35,8 @@ Reads only. Deleting rows and repricing them stay operator-only, as does
 (see ``usage.list_in_flight``), so there is nothing there to scope yet.
 
 Every aggregation is the usage service's, the one ``usage.py`` calls too. This
-module contributes route declarations and a scope, and nothing that could compute
-a different answer to the same question.
+module contributes route declarations, and nothing that could compute a different
+answer to the same question.
 """
 
 import uuid
@@ -44,11 +44,8 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, UsageServiceDep, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, UsageServiceDep, WorkspaceAccessDep, verify_master_key
 from gateway.api.routes.usage import (
     _API_KEY_MULTI_DESC,
     _COUNTS_DESC,
@@ -57,6 +54,7 @@ from gateway.api.routes.usage import (
     _ENDPOINT_DESC,
     _MAX_REQUEST_GROUPS,
     _MODEL_MULTI_DESC,
+    _PAID_DESC,
     _PRICED_DESC,
     _PROVIDER_DESC,
     _REQUEST_GROUP_DESC,
@@ -73,8 +71,6 @@ from gateway.api.routes.usage import (
 )
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.surface import Surface
-from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tenancy import Workspace
 from gateway.schemas.usage_and_telemetry import (
     Bucket,
     SeriesGroupBy,
@@ -85,18 +81,13 @@ from gateway.schemas.usage_and_telemetry import (
     UsageGroupedSeries,
     UsageSummary,
 )
-from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.authorization import (
-    resolve_visible_workspace_scope,
-    resolve_workspace_in_organization,
-)
 from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, parse_tag_filters
 
 router = APIRouter(
     prefix="/organizations/me/usage",
     tags=["organization-usage"],
     # Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
-    # What the caller may read is decided per request by the scope below, which
+    # What the caller may read is decided per request by ``readable_workspaces``, which
     # is the pattern the tenant-scoped routers already follow and the reason the
     # deployment operator gate does not belong here.
     dependencies=[Depends(verify_master_key)],
@@ -106,62 +97,10 @@ router = APIRouter(
 SURFACE = Surface("organization_usage")
 
 
-async def _scope(
-    db: AsyncSession,
-    *,
-    user: TenancyUser,
-    workspace_id: uuid.UUID | None,
-) -> UsageScope:
-    """The scope that confines a read to what this caller may see.
-
-    Resolved per request rather than cached on the session: a membership can be
-    suspended or a role changed between two requests, and the cheaper answer is
-    the one that goes stale in the unsafe direction.
-    """
-    organizations = OrganizationService(db, membership_listener=None)
-
-    if workspace_id is not None:
-        # Only the organization is resolved on this branch. The full scope would
-        # also build the caller's workspace-id set, which is deliberately
-        # unpaged, and the branch below discards it: the Activity page issues a
-        # list, a count, a summary and a series per filter change, so resolving
-        # it here would be four unbounded reads an interaction, for nothing.
-        # ``get_active_organization_for_user`` is the same refusal the full scope
-        # opens with, so a pointer with no live membership behind it still stops
-        # here rather than reaching the resolver below.
-        organization = await organizations.get_active_organization_for_user(user)
-        # Narrowing only. The resolver raises ``WorkspaceNotFoundError`` (404) for
-        # a workspace in another organization *and* for one in this organization
-        # the caller is not a member of, which is what keeps the parameter from
-        # being an existence oracle either way.
-        #
-        # The scope returned below duplicates the filter built from the same
-        # parameter, and that is deliberate: the scope has to be sufficient on its
-        # own, so a later change to how the filter is applied cannot leave a
-        # request scoped by nothing.
-        await resolve_workspace_in_organization(
-            db,
-            user=user,
-            workspace_id=workspace_id,
-            organization=organization,
-            organizations=organizations,
-        )
-        return UsageScope(workspaces=[workspace_id])
-
-    scope = await resolve_visible_workspace_scope(db, user=user, organizations=organizations)
-    if scope.sees_every_workspace:
-        return UsageScope(
-            workspaces=select(col(Workspace.id)).where(col(Workspace.organization_id) == scope.organization.id)
-        )
-    # A caller in no workspace yet gets an empty scope. An empty result, and
-    # deliberately not a 403: nothing was refused, there is simply nothing here.
-    return UsageScope(workspaces=scope.workspace_ids or [])
-
-
 @router.get("")
 async def list_organization_usage(
     identity: CurrentIdentity,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    access: WorkspaceAccessDep,
     usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -180,6 +119,7 @@ async def list_organization_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -193,7 +133,7 @@ async def list_organization_usage(
     JSON array, same separate ``/count`` for a paginator's total, confined to
     what the caller's membership lets them see. Scope is never a parameter here.
     """
-    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    scope = UsageScope(workspaces=await access.readable_workspaces(user=identity, workspace_id=workspace_id))
     filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
@@ -210,6 +150,7 @@ async def list_organization_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
@@ -219,7 +160,7 @@ async def list_organization_usage(
 @router.get("/count")
 async def count_organization_usage(
     identity: CurrentIdentity,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    access: WorkspaceAccessDep,
     usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -238,6 +179,7 @@ async def count_organization_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -252,7 +194,7 @@ async def count_organization_usage(
     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
     this surface has none. So this total keeps matching the list beside it.
     """
-    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    scope = UsageScope(workspaces=await access.readable_workspaces(user=identity, workspace_id=workspace_id))
     filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
@@ -269,6 +211,7 @@ async def count_organization_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
@@ -278,7 +221,7 @@ async def count_organization_usage(
 @router.get("/summary")
 async def organization_usage_summary(
     identity: CurrentIdentity,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    access: WorkspaceAccessDep,
     usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -297,6 +240,7 @@ async def organization_usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
@@ -310,7 +254,7 @@ async def organization_usage_summary(
     caller reads. The breakdown by user names the people inside the caller's own
     scope, which is the roster they can already read.
     """
-    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    scope = UsageScope(workspaces=await access.readable_workspaces(user=identity, workspace_id=workspace_id))
     filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
@@ -327,6 +271,7 @@ async def organization_usage_summary(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.summary(filters, scope, bucket=bucket, dimensions=dimensions, group_by_tag=group_by_tag)
@@ -335,7 +280,7 @@ async def organization_usage_summary(
 @router.get("/series")
 async def organization_usage_series(
     identity: CurrentIdentity,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    access: WorkspaceAccessDep,
     usage: UsageServiceDep,
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -355,6 +300,7 @@ async def organization_usage_series(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
@@ -365,7 +311,7 @@ async def organization_usage_series(
     dashboard serializes one filter object for both, so a filter one of them
     ignored would make the stacked chart disagree with the tiles beside it.
     """
-    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    scope = UsageScope(workspaces=await access.readable_workspaces(user=identity, workspace_id=workspace_id))
     filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
@@ -382,6 +328,7 @@ async def organization_usage_series(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.grouped_series(filters, scope, bucket=bucket, group_by=group_by)

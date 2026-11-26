@@ -203,13 +203,124 @@ describe("toTrace", () => {
     expect(byId.get("turn-0")?.cachedTokens).toBe(6)
   })
 
-  it("marks a failure a fallback recovered as a warning, not an error", () => {
-    const trace = toTrace(traceSummary(), traceDetail())
-    const recovered = trace.observations.find((o) => o.id === "llm-2")
+  describe("a recovered failure", () => {
+    const attempt = (
+      id: string,
+      seconds: number,
+      overrides: Parameters<typeof traceSpan>[0] = {},
+    ) =>
+      traceSpan({
+        span_id: id,
+        parent_span_id: "req-1",
+        request_id: "req-1",
+        kind: "llm",
+        model: "gpt-5",
+        start_time: new Date(
+          Date.parse("2026-10-07T12:00:00Z") + seconds * 1000,
+        ).toISOString(),
+        ...overrides,
+      })
+    const failedAttempt = (id: string, seconds: number, recovered: boolean) =>
+      attempt(id, seconds, {
+        outcome: "error",
+        recovered,
+        error_class: "status_504",
+      })
+    const read = (spans: ReturnType<typeof attempt>[], id: string) => {
+      const trace = toTrace(
+        traceSummary(),
+        traceDetail({ spans: [traceSpan({ span_id: "req-1" }), ...spans] }),
+      )
+      return trace.observations.find((o) => o.id === id)
+    }
 
-    expect(recovered?.level).toBe("WARNING")
-    expect(recovered?.statusMessage).toBe("error, recovered by a fallback")
-    expect(summarizeTrace(trace).totalCost).toBe(0.01)
+    it("is a warning, recovered by a fallback, when a later call answered", () => {
+      const recovered = read(
+        [failedAttempt("a", 1, true), attempt("b", 2)],
+        "a",
+      )
+
+      expect(recovered?.level).toBe("WARNING")
+      expect(recovered?.statusMessage).toBe("HTTP 504, recovered by a fallback")
+    })
+
+    it("is an error when the only later call failed too", () => {
+      const first = read(
+        [failedAttempt("a", 1, true), failedAttempt("b", 2, false)],
+        "a",
+      )
+
+      expect(first?.level).toBe("ERROR")
+      expect(first?.statusMessage).toBe("HTTP 504, the fallback also failed")
+    })
+
+    it("is an error at every step of a chain that never answered", () => {
+      const spans = [
+        failedAttempt("a", 1, true),
+        failedAttempt("b", 2, true),
+        failedAttempt("c", 3, false),
+      ]
+
+      expect(read(spans, "a")?.statusMessage).toBe(
+        "HTTP 504, the fallback also failed",
+      )
+      expect(read(spans, "b")?.level).toBe("ERROR")
+    })
+
+    it("claims neither outcome when the next call was blocked", () => {
+      const recovered = read(
+        [failedAttempt("a", 1, true), attempt("b", 2, { outcome: "blocked" })],
+        "a",
+      )
+
+      expect(recovered?.level).toBe("WARNING")
+      expect(recovered?.statusMessage).toBe(
+        "HTTP 504, routing tried the next candidate",
+      )
+    })
+
+    it("does not join calls that carry no request id", () => {
+      const recovered = read(
+        [
+          { ...failedAttempt("a", 1, true), request_id: null },
+          { ...attempt("b", 2), request_id: null },
+        ],
+        "a",
+      )
+
+      expect(recovered?.statusMessage).toBe(
+        "HTTP 504, routing tried the next candidate",
+      )
+    })
+
+    it("reads a fallback that starts at the same instant as later", () => {
+      const recovered = read(
+        [failedAttempt("a", 1, true), attempt("b", 1)],
+        "a",
+      )
+
+      expect(recovered?.statusMessage).toBe("HTTP 504, recovered by a fallback")
+    })
+
+    it("claims neither outcome when no later call is visible", () => {
+      const recovered = read([failedAttempt("a", 1, true)], "a")
+
+      expect(recovered?.level).toBe("WARNING")
+      expect(recovered?.statusMessage).toBe(
+        "HTTP 504, routing tried the next candidate",
+      )
+    })
+
+    it("keeps the cost of the shared fixture, whose recovered call has no later one", () => {
+      const trace = toTrace(traceSummary(), traceDetail())
+      const recovered = trace.observations.find((o) => o.id === "llm-2")
+
+      expect(recovered?.level).toBe("WARNING")
+      expect(recovered?.statusMessage).toBe(
+        "error, routing tried the next candidate",
+      )
+      expect(summarizeTrace(trace).totalCost).toBe(0.01)
+    })
   })
 
   it("draws guardrail checks and MCP connections as their own types", () => {

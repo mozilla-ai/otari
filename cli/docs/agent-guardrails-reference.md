@@ -278,7 +278,7 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
 | --- | --- | --- |
 | `rubric` | yes | Free text describing what to check. |
 | `when_changed` | no | Globs, in the `path` grammar. When given, the gate applies only to a session that changed a matching path, and otherwise resolves `not_applicable` without a model call. Omitted, it always applies. |
-| `judge_cli` | no | A string or ordered list of CLIs that may make this gate's call: `claude`, `codex`. See [Choosing a judge CLI](#choosing-a-judge-cli). |
+| `judge_cli` | no | A string or ordered list of CLIs that may make this gate's call: `claude`, `codex`, `pi`. See [Choosing a judge CLI](#choosing-a-judge-cli). |
 | `priority` | no | Integer, default `0`. |
 
 `enforcement` must be `advisory`; `required` is rejected at parse time, because a model's verdict is not reproducible and the diff and transcript it reads can be shaped by an attacker.
@@ -293,7 +293,7 @@ A rubric evaluated by a model instead of a mechanical match. Runs on `Stop` only
     judge_cli: [claude, codex]
 ```
 
-**The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. The call is billed to whatever account that CLI is signed into, not through Otari. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing.
+**The call.** For each applicable gate, `otari hook` sends the resolved CLI a prompt over stdin built from the `rubric`, the diff, and the assistant's own text replies from the session transcript (never tool calls or tool results), and requires exactly one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. Where that evidence goes depends on the CLI and model: `claude` and `codex` send it to whatever account the CLI is signed into, and bill it there. `pi` with no `--judge-model` sends it through Otari (`nebius:openai/gpt-oss-120b` on the pi-otari extension's `otari` provider), with the Otari credential that extension holds, so it is billed to that Otari key's budget and the provider account behind the model on that gateway. A `--judge-model` naming another pi provider sends it to that provider instead. It runs in `~/.otari/judge-workdir/`, not the repository being judged, and that directory is not a repository, so the call does not trigger the repository's own hooks and an `otari hook` entry there evaluates nothing. The call's environment also sets `OTARI_HOOK_IN_JUDGE`, which makes any `otari hook` it starts, such as the pi-otari extension's, exit 0 at once.
 
 **The diff** is `git diff HEAD` plus every untracked file the ignore rules do not exclude, each appended as a `new file` hunk. Bytes that are not valid UTF-8 are replaced.
 
@@ -326,7 +326,7 @@ Precedence, most specific first:
 
 1. The gate's own `judge_cli`.
 2. `--judge-cli` or `OTARI_HOOK_JUDGE_CLI`.
-3. For `otari hook`, the CLI `--harness` implies: `claude-code` uses `claude`, `codex` uses `codex`. For `otari guardrails check`, `claude`.
+3. For `otari hook`, the CLI `--harness` implies: `claude-code` uses `claude`, `codex` uses `codex`, and `pi` tries `pi`, then `claude`, then `codex`. For `otari guardrails check`, `claude`.
 
 The resulting list is tried in order, and the first entry found on `PATH` is used. When none is found, the error names every candidate tried.
 
@@ -334,8 +334,9 @@ The resulting list is tried in order, and the first entry found on `PATH` is use
 | --- | --- | --- |
 | `claude` | `claude -p --model <model> --tools "" --strict-mcp-config` | `claude-haiku-4-5-20251001` |
 | `codex` | `codex exec - [--model <model>] --sandbox read-only --ask-for-approval never --skip-git-repo-check --ephemeral --color never` | none: `--model` is passed only when given, so the account's own default applies |
+| `pi` | `pi -p --mode json --no-tools --no-session --no-skills --no-prompt-templates --no-context-files --offline --provider otari --model <model>` | `nebius:openai/gpt-oss-120b` through Otari, which needs the pi-otari extension; `--judge-model` replaces `--provider otari --model ...` with `--model <model>`, any pi model pattern |
 
-`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for either. With `claude`, every built-in tool and MCP server is disabled for the call, and their definitions are left out of the prompt. Codex has no equivalent flag, so `--sandbox read-only` and `--ask-for-approval never` bound what an attempted tool call can do, not whether the model attempts one. `--ephemeral` keeps the call from leaving a rollout file that a later `Stop` event could mistake for session evidence.
+`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for any of them. With `claude`, every built-in tool and MCP server is disabled for the call, and their definitions are left out of the prompt. Codex has no equivalent flag, so `--sandbox read-only` and `--ask-for-approval never` bound what an attempted tool call can do, not whether the model attempts one. `--ephemeral` keeps the call from leaving a rollout file that a later `Stop` event could mistake for session evidence. With `pi`, `--no-tools` leaves the model nothing to call, JSON mode keeps a reasoning model's thinking out of the verdict, and extensions stay on so the pi-otari extension loads and an Otari-routed model resolves.
 
 ### `verifier`
 
@@ -504,6 +505,42 @@ A deterministic gate written `advisory` uses `systemMessage` alone.
 - Code Mode does not dispatch `PreToolUse` for the shell and `apply_patch` calls it wraps (openai/codex#23411, open upstream), so a session running through Code Mode is checked at `Stop` only: by `git status` and by a scan of Codex's rollout JSONL transcript.
 - Codex has no read tool, so `pre_tool_use.read_target` is never collected.
 
+## Registering it for pi
+
+pi has no hook settings file. The pi-otari extension registers with pi and runs
+`otari hook --harness pi`, so `otari hook setup --harness pi` installs the
+extension instead. It runs `pi list` from `~/.otari/judge-workdir/`, so only a
+user-wide install counts: a package installed for one project with `pi install -l`
+does not load where the judge and `otari guardrails generate` run pi. If
+`@mozilla-ai/pi-otari` is not listed there it asks, then runs
+`pi install npm:@mozilla-ai/pi-otari`. If the installed version is older than
+0.7.2 it asks, then runs
+`pi update npm:@mozilla-ai/pi-otari`; a source pinned to an older version is an
+error naming the commands that replace the pin. Before 0.6.0 the extension never
+calls `otari hook`, and before 0.7.1 it sends commands that ran before the
+session's last edit as `bash_commands`. Before 0.7.2 it stops waiting for a `Stop` check after 20 seconds and allows the action, so a slow judge gate skips the required gates evaluated after it; from 0.7.2 it waits up to 600 seconds, the same as Claude Code. A non-zero exit from pi is an
+error. With no `pi` on `PATH` it prints the install instructions and exits 0.
+Inside a Git repository it also offers the starter `.otari/guardrails.yml`;
+it never writes `.claude` or `.codex` files for pi. `--repo-only` is refused,
+because the extension has no way to leave out your own gates.
+The payload uses pi's lowercase tool names and native `tool_input`:
+
+| pi tool | `tool_input` | Evidence surface |
+| --- | --- | --- |
+| `edit`, `write` | `{path}` | `pre_tool_use.edit_target` |
+| `read` | `{path}` | `pre_tool_use.read_target` |
+| `bash` | `{command}` | `pre_tool_use.command` |
+
+A `path` may be relative to `cwd`. Any other tool name is allowed. On `Stop`,
+`bash_commands` (a list of strings) replaces the transcript scan as command
+evidence; when it is absent, command evidence is `unknown`. The hook takes the
+list as given, so it must hold only the commands that ran after the session's
+last edit, as the Claude Code transcript scan does; otherwise a
+`command_if_changed` gate is satisfied by a command that ran before the edit it
+should have checked. `transcript_path`
+is ignored for pi, including by judge gates, because pi's session file is not
+Claude-format. Exit codes, output and fail-open behavior match Claude Code.
+
 ## Command-line reference
 
 ### `otari hook`
@@ -512,10 +549,10 @@ The callback a harness invokes, with its hook payload on stdin. Run at a termina
 
 | Option | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
-| `--harness` | | `claude-code` | `claude-code` or `codex`: the integration sending the callback. |
+| `--harness` | | `claude-code` | `claude-code`, `codex` or `pi`: the integration sending the callback. |
 | `--repo-only` | | off | Enforce this repository's guardrail alone, leaving out your own in `~/.otari/`. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
-| `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`). A gate's `judge_cli` overrides it. |
+| `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | the harness's own CLI | Comma-separated, ordered judge CLIs to try (`claude`, `codex`, `pi`). A gate's `judge_cli` overrides it. |
 | `--judge-dry-run` | `OTARI_HOOK_JUDGE_DRY_RUN` | off | Skip the judge model calls and report what would have run. |
 | `--max-judges` | `OTARI_HOOK_MAX_JUDGES` | `5` | Judge gates evaluated per event, from 1 to 20. Any other value runs the default, with a notice. |
 | | `OTARI_URL`, `OTARI_API_KEY` | unset | The Otari server to report checks to, and the API key to send them with, which needs the `telemetry:write` and `agents` scopes. See [What `otari hook` reports](#what-otari-hook-reports). |
@@ -538,12 +575,12 @@ Without `OTARI_URL`, a harness's own OpenTelemetry trace export (`OTEL_TRACES_EX
 
 ### `otari hook setup`
 
-Registers the hook in the current Git repository; refuses outside one. When the repository has no guardrail, it offers to write a starter `.otari/guardrails.yml`.
+With `claude-code` or `codex`, registers the hook in the current Git repository, and refuses outside one. With `pi`, installs or updates the pi-otari extension for your user, which needs no repository, so it also runs outside one. In either case, inside a repository that has no guardrail, it offers to write a starter `.otari/guardrails.yml`. It refuses to write either file where a symlink, on the file or on a directory above it, leads out of the repository.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`. |
-| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. |
+| `--harness` | `claude-code` | `claude-code` writes `.claude/settings.local.json`; `codex` writes `.codex/hooks.json`; `pi` installs the pi-otari extension (see [Registering it for pi](#registering-it-for-pi)). |
+| `--repo-only` | off | Register the hook with `--repo-only`, so it enforces this repository's guardrail alone. The `PreToolUse` matcher is then picked from the repository's own gates. Refused with `--harness pi`. |
 
 Re-running `setup`:
 
@@ -636,10 +673,11 @@ Proposes gates from the repository's AGENTS.md, or CLAUDE.md where that is the o
 | --- | --- | --- | --- |
 | `--source <file>` | | `AGENTS.md`, then `CLAUDE.md`, in the repository root | Doc to read candidate rules from. |
 | `--guardrail-file <file>` | | `.otari/guardrails.yml`, or `.otari/guardrails/generated.yml` in a repository that keeps a directory | File to append accepted gates to. |
-| `--cli` | `OTARI_GUARDRAILS_GENERATE_CLI` | `claude`, then `codex` | Comma-separated, ordered CLIs to try; the first found on `PATH` is used. |
+| `--cli` | `OTARI_GUARDRAILS_GENERATE_CLI` | `claude`, then `codex`, then `pi` | Comma-separated, ordered CLIs to try; the first found on `PATH` is used. |
 | `--model` | `OTARI_GUARDRAILS_GENERATE_MODEL` | the CLI's own default | Model for the one generation call. |
 
 - It names the resolved CLI and asks for confirmation before sending the doc. The generation call times out after 300 seconds.
+- When a symlink takes the default file out of the repository (a directory of rules shared between repositories, say), it first names where the file resolves and asks whether to append there; Enter declines. A `--guardrail-file` is written where it points, without asking.
 - Proposals are shown one at a time, the screen cleared between each, numbered "N of total", with a single-keypress `[y]es/[n]o/[e]dit/[q]uit` prompt. With no controlling terminal (piped stdin, a CI runner) it reads an Enter-terminated line instead.
 - A proposal whose `id` is already declared anywhere in the composed guardrail is skipped without asking, naming the file that has it.
 - Every accepted gate, edited or not, is parsed before it is written, so an unknown field, an invalid glob or a `judge` gate proposed as `required` is refused in the terminal.
