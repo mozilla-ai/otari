@@ -2,7 +2,7 @@
 
 help:
 	@printf "Available targets:\n"
-	@printf "  dev  Run Otari with uvicorn --reload using .env\n"
+	@printf "  dev  Run Otari with uvicorn --reload using .env, and the mail sink beside it\n"
 	@printf "  dashboard Build the admin dashboard into src/gateway/static/dashboard\n"
 	@printf "  test Run full test suite (unit + integration), across PYTEST_WORKERS workers\n"
 	@printf "  test-unit Run unit tests, across PYTEST_WORKERS workers\n"
@@ -22,7 +22,18 @@ help:
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
 	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
 
+# Starts the mail sink first, because a deployment that cannot deliver a link
+# cannot prove a mailbox, and signup, verification, a password reset and an
+# invitation all need one. Not fatal when Docker is absent: the rest of Otari
+# runs without mail, so this says what is unavailable and carries on.
 dev:
+	@if docker info >/dev/null 2>&1; then \
+		docker compose --profile mail up -d mailpit >/dev/null 2>&1 \
+			&& printf "mail sink on http://localhost:%s\n" "$${OTARI_MAILPIT_WEB_PORT:-8025}" \
+			|| printf "mail sink did not start: link-bearing flows are unavailable\n"; \
+	else \
+		printf "Docker is not running, so there is no mail sink: link-bearing flows are unavailable\n"; \
+	fi
 	@set -a; \
 	if [ -f .env ]; then . ./.env; fi; \
 	set +a; \
