@@ -4,8 +4,7 @@ Only fields the logging rule lets an error carry (design section 7): the
 provider, its HTTP status, a tag, and whether a retry may help; never a body,
 a URL or exception text. The direct endpoint's 502 carries them as headers,
 and a failed entry in Chat Completions' ``otari_tool_calls`` carries them as its
-``error`` when the call's backend kept them: the fetch backend does, and the
-old search backend does not.
+``error`` when the call's backend kept them.
 """
 
 from dataclasses import asdict, dataclass

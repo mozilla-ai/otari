@@ -35,6 +35,7 @@ from openai.types.responses.response import IncompleteDetails
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 from openresponses_types.types import InputTokensDetails as BridgedInputTokensDetails
 
+from any_search import SearchHit
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
@@ -266,15 +267,15 @@ async def test_loop_executes_owned_function_call_and_completes(monkeypatch: pyte
 class _FakeSearchPool(_FakePool):
     """A pool that owns ``web_search`` and buffers hits like the real search backend.
 
-    ``take_last_results`` is what marks it as the gateway's own search rather than
+    ``take_last_hits`` is what marks it as the gateway's own search rather than
     an MCP server that happens to expose the same tool name.
     """
 
     def __init__(self) -> None:
         super().__init__(tool_names=["web_search"], results={"web_search": "[1] Result\nhttps://a"})
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://a", "title": "A"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://a", title="A", raw={})]
 
 
 @pytest.mark.asyncio

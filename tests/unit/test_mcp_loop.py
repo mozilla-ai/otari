@@ -29,6 +29,7 @@ from any_llm.types.completion import (
 )
 from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
+from any_search import SearchHit
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
@@ -327,7 +328,7 @@ async def test_loop_executes_mcp_tool_and_completes(monkeypatch: pytest.MonkeyPa
 class _FakeSearchPool(_FakePool):
     """A pool that owns ``web_search`` and buffers hits like the real search backend.
 
-    ``take_last_results`` is what marks it as the gateway's own search rather than
+    ``take_last_hits`` is what marks it as the gateway's own search rather than
     an MCP server that happens to expose the same tool name.
     """
 
@@ -341,8 +342,8 @@ class _FakeSearchPool(_FakePool):
             raise RuntimeError("backend down")
         return await super().call_tool(name, arguments)
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://a", "title": "A"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://a", title="A", raw={})]
 
 
 def _search_call(call_id: str, query: str) -> tuple[str, str, str]:

@@ -845,7 +845,8 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
 
     In today's order of precedence: the licensed provider with its key, else
     ``web_search_url`` as a SearXNG backend searching ``web_search_engines`` or,
-    when those are unset, the four engines the old backend asks for. Both are
+    when those are unset, the four engines a setup with no setting of its own asks
+    for. Both are
     read with the environment as a fallback, as the in-loop backend reads them.
     An empty value counts as unset.
     """

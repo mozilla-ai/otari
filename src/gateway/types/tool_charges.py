@@ -63,8 +63,7 @@ def gateway_tool_pricing_key(tool: str) -> str:
     runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
     A search or fetch on a configured tool, in the loop or direct, is priced under
     that tool's own row. This key prices a web tool's call that a workspace's
-    organization key served, whose provider the deployment cannot price, or that
-    the older backend ran.
+    organization key served, or one on the search the legacy settings describe.
     """
     return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
 

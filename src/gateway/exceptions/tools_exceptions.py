@@ -622,9 +622,9 @@ class DirectToolFailedError(TenancyError):
     """The provider failed a direct tool call, or could not be reached.
 
     ``message`` is the provider's own account, for the usage row and the log
-    only: an old client's can quote the upstream body. ``headers`` carry the
-    failure's safe fields for the caller (decision 67), and ``upstream_status``
-    is the provider's HTTP status when it gave one.
+    only, since it can quote the upstream body. ``headers`` carry the failure's
+    safe fields for the caller (decision 67), and ``upstream_status`` is the
+    provider's HTTP status when it gave one.
     """
 
     status_code = status.HTTP_502_BAD_GATEWAY
@@ -716,13 +716,11 @@ class WebSearchOptionRefusedError(TenancyValidationError):
 class WebSearchCredentialRefusedError(TenancyError):
     """A workspace's search or fetch credential its provider cannot be called with as it is.
 
-    One without a key or base URL its provider needs, which the library or the
-    old code would fill from the server's own settings, so the deployment's key
-    or endpoint would serve the tenant; one without the key a provider with an
-    address of its own takes, whose calls would run keyless from the
-    deployment's address; or one naming a base URL the code that
-    serves its provider cannot use, which would send the tenant's key to the
-    provider's public endpoint instead. A 502: the fault is in a stored
+    One without a key or base URL its provider needs, which the library would
+    fill from the server's own settings, so the deployment's key or endpoint
+    would serve the tenant; or one without the key a provider with an address of
+    its own takes, whose calls would run keyless from the deployment's address.
+    A 502: the fault is in a stored
     credential, not in the request.
     """
 
