@@ -31,6 +31,9 @@ self-hoster walks on day one:
    names what would turn it on, and a send is refused rather than accepted and
    dropped. That is the state every self-hoster who wants no email is in, so it
    is the state the gate has to prove still boots and still says so honestly.
+9. An access token reads that usage back through the MCP server at ``/mcp``,
+   which runs on the app's lifespan, so a server that mounts but never starts
+   fails here.
 
 Both provider endpoints are a mock OpenAI-compatible server this script runs, so
 the gate needs no provider secret and runs identically on a fork PR.
@@ -767,6 +770,42 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
     log("Usage for the completion is readable back")
 
 
+def check_mcp_server(base_url: str, admin: dict[str, str], names: Names) -> None:
+    """Mint an access token, read this run's usage back through ``/mcp`` with it, and delete it."""
+    status, created = _request(
+        "POST", f"{base_url}{API_ROOT}/auth/access-tokens", headers=admin, payload={"name": "smoke"}
+    )
+    _expect(status, 201, f"POST {API_ROOT}/auth/access-tokens", created)
+    headers = {
+        "Authorization": f"Bearer {created['token']}",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": "2025-06-18",
+    }
+    # Narrowed to the identity this run minted, so a summary that reads back is this run's usage
+    # rather than a total that would be non-zero on any deployment that had ever served a request.
+    call = {"name": "get_usage_summary", "arguments": {"user_id": [names.user_id], "dimensions": ["none"]}}
+    status, answer = _request(
+        "POST",
+        f"{base_url}/mcp",
+        headers=headers,
+        payload={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": call},
+    )
+    revoke_url = f"{base_url}{API_ROOT}/auth/access-tokens/{created['id']}"
+    try:
+        _expect(status, 200, "POST /mcp tools/call", answer)
+        try:
+            result = answer["result"]
+            tokens = json.loads(result["content"][0]["text"])["totals"]["total_tokens"]
+        except (TypeError, LookupError, ValueError):
+            raise SmokeFailure(f"The MCP server did not answer get_usage_summary: {answer!r}") from None
+        if result.get("isError") or not isinstance(tokens, int) or tokens < 1:
+            raise SmokeFailure(f"get_usage_summary through /mcp shows none of {names.user_id}'s usage: {answer!r}")
+    finally:
+        status, revoked = _request("DELETE", revoke_url, headers=admin)
+        _expect(status, 204, f"DELETE {API_ROOT}/auth/access-tokens/{{id}}", revoked)
+    log("An access token reads this run's usage through the MCP server")
+
+
 def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, names: Names) -> None:
     admin = {KEY_HEADER: MASTER_KEY}
     check_health(base_url)
@@ -777,6 +816,7 @@ def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, name
     run_completion(base_url, key, provider, names)
     check_usage_recorded(base_url, admin, names)
     check_mail_is_honestly_unavailable(base_url, admin)
+    check_mcp_server(base_url, admin, names)
 
 
 # --------------------------------------------------------------------------- #

@@ -31,9 +31,6 @@ _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 # from any other foreign key on this table and is not listed here.
 _FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
-WorkspaceIds = Collection[uuid.UUID] | Select[uuid.UUID]
-"""Some workspaces: their ids, or a subquery selecting them."""
-
 
 def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
@@ -175,6 +172,17 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
             query.order_by(func.lower(col(Workspace.name)), col(Workspace.id)).offset(skip).limit(limit)
         )
         return list(rows.scalars().all()), count
+
+    async def get_as_stored(self, workspace_id: uuid.UUID) -> Workspace | None:
+        """Return the workspace as the database holds it now, past this session's copy of the row.
+
+        For a caller that waited on ``lock``: a deletion of the workspace commits before that lock is granted,
+        and :meth:`get` would answer from the identity map with the row the deletion removed.
+        """
+        result = await self.db.execute(
+            select(Workspace).where(col(Workspace.id) == workspace_id).execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
 
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""

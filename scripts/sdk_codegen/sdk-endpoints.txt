@@ -74,6 +74,7 @@ GET /api/v1/oauth/apps/workspaces # Browser app consent workspace selection
 GET /api/v1/oauth/apps/authorize # Browser authorization entry point
 POST /api/v1/oauth/apps/authorize # Browser session consent
 POST /api/v1/oauth/apps/token # Public PKCE credential delivery
+POST /api/v1/oauth/apps/register # Self-registration for MCP clients (RFC 7591)
 POST /api/v1/oauth/apps/revoke # OAuth public-client token revocation; browser and native app integration.
 # The RFC 7523 token exchange the Anthropic SDKs and Claude Code already speak
 # when ANTHROPIC_BASE_URL points at Otari. A client that wants workload identity
@@ -304,6 +305,9 @@ POST /api/v1/auth/webauthn/register/options         # dashboard-only
 POST /api/v1/auth/webauthn/register                 # dashboard-only
 POST /api/v1/auth/webauthn/authenticate/options     # dashboard-only
 POST /api/v1/auth/webauthn/authenticate             # dashboard-only
+GET /api/v1/auth/access-tokens                      # dashboard-only
+POST /api/v1/auth/access-tokens                     # dashboard-only
+DELETE /api/v1/auth/access-tokens/{token_id}        # dashboard-only
 GET /api/v1/auth/webauthn/credentials               # dashboard-only
 PATCH /api/v1/auth/webauthn/credentials/{credential_id}    # dashboard-only
 DELETE /api/v1/auth/webauthn/credentials/{credential_id}   # dashboard-only

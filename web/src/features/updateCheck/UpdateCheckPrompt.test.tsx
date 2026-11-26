@@ -317,6 +317,27 @@ describe("UpdateCheckPrompt", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
+  it("does not ask when the organization context read fails, which leaves no workspace selected", async () => {
+    const { fetchMock } = mockApi(updateCheckStatus())
+    const served = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation((input, init) =>
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
+        ? Promise.resolve(jsonResponse({ detail: "boom" }, 500))
+        : (served?.(input, init) ?? Promise.resolve(jsonResponse({}))),
+    )
+    renderPrompt()
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(`${API_ROOT}/hosted-providers`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
   it("asks an operator who belongs to no workspace, who has no first request to wait for", async () => {
     mockApi(updateCheckStatus(), operatorContext({ workspace_memberships: [] }))
     renderPrompt()

@@ -7,11 +7,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select, tuple_, update
+from sqlalchemy import ColumnElement, and_, case, func, null, or_, select, tuple_, update
 from sqlalchemy.engine import RowMapping
 
 from gateway.core.metered_pricing import ChargeLine
-from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
+from gateway.core.sql import (
+    WorkspaceIds,
+    bucket_expr,
+    canonical_bucket,
+    dialect_name,
+    in_workspaces,
+    match_any,
+    utc_bound,
+)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import MIN_THROUGHPUT_TOKENS
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
@@ -167,7 +175,7 @@ class UsageScope:
     narrows the scope to the rows one key wrote.
     """
 
-    workspaces: Collection[uuid.UUID] | Select[uuid.UUID] | None
+    workspaces: WorkspaceIds | None
     api_key_id: str | None = None
 
 
@@ -244,18 +252,9 @@ _GROUP_COLUMNS: dict[str, Any] = {
 
 def _scope_conditions(scope: UsageScope) -> list[ColumnElement[bool]]:
     conditions: list[ColumnElement[bool]] = []
-    workspaces = scope.workspaces
-    if isinstance(workspaces, Select):
-        conditions.append(UsageLog.workspace_id.in_(workspaces))
-    elif workspaces is not None:
-        ids = sorted(workspaces)
-        if not ids:
-            # Belongs to no workspace yet: nothing was refused, there is simply nothing here.
-            conditions.append(false())
-        elif len(ids) == 1:
-            conditions.append(UsageLog.workspace_id == ids[0])
-        else:
-            conditions.append(UsageLog.workspace_id.in_(ids))
+    if scope.workspaces is not None:
+        # An empty set is a caller in no workspace yet: nothing was refused, there is simply nothing here.
+        conditions.append(in_workspaces(UsageLog.workspace_id, scope.workspaces))
     if scope.api_key_id is not None:
         conditions.append(UsageLog.api_key_id == scope.api_key_id)
     return conditions

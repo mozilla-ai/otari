@@ -6,7 +6,6 @@ from gateway.repositories.routing.subagent_decision_repository import (
     DecisionSums,
     DecisionWindow,
     SubagentDecisionRepository,
-    Workspaces,
 )
 
 __all__ = [
@@ -15,5 +14,4 @@ __all__ = [
     "DecisionWindow",
     "RoutingPolicyRepository",
     "SubagentDecisionRepository",
-    "Workspaces",
 ]
