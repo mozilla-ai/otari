@@ -1915,8 +1915,10 @@ class WorkspaceMcpServerService:
                 self.db, user=user, workspace=workspace, organizations=self.organizations
             )
         else:
-            membership = await self.organizations.members.get_active_by_organization_and_user(organization_id, user.id)
-            still_manages = membership is not None and membership.role in MANAGEMENT_ROLES
+            # Read from the row: the membership `_managed` loaded is this session's copy, and would still hold
+            # a role a demotion committed while the lock was awaited.
+            role = await self.organizations.members.active_role(organization_id, user.id)
+            still_manages = role in MANAGEMENT_ROLES
         # Asked again under the locks: a removal from the organization that held them has committed by now.
         if not still_manages:
             raise NotAuthorizedError

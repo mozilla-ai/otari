@@ -9,21 +9,22 @@ import ipaddress
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
-from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.exceptions.tools_exceptions import (
     McpServerIsOrganizationsError,
     McpServerNameTakenError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
 )
-from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import McpSharedConnection, WorkspaceMcpServerOverride
+from gateway.models.tenancy import OrganizationMember, User, Workspace
+from gateway.models.tools import McpSharedConnection, WorkspaceMcpServer, WorkspaceMcpServerOverride
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceMemberRepository, WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerOverrideRepository, WorkspaceMcpServerRepository
 from gateway.services.tenancy import OrganizationService
@@ -129,6 +130,43 @@ async def test_only_the_organization_s_owners_and_admins_manage_its_servers(
             )
         with pytest.raises(TenancyError):
             await _workspaces(async_db).workspaces(user=user, server_id=jira)
+
+
+async def test_a_create_that_waited_behind_a_demotion_is_refused(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The role is read as stored once the lock is held, not from the session's copy of the membership.
+
+    The caller's membership is already in the session when the create starts. A demotion holding the
+    organization's lock commits just before the create is granted it (simulated on a session of its own),
+    and a read answered from the session's copy would still see an admin.
+    """
+    world = await _world(async_db, config)
+    admin = await _member(async_db, await _organization_of(async_db, world), role="admin", name="Admin")
+    await async_db.commit()
+    admin_id, organization_id = admin.id, world.workspace.organization_id
+    # As the route's own permission check leaves it: the membership loaded in this session.
+    loaded = await OrganizationService(async_db, membership_listener=None).members.get_active_by_organization_and_user(
+        organization_id, admin_id
+    )
+    assert loaded is not None and loaded.role == "admin"
+    original = OrganizationRepository.lock_settings
+
+    async def demoted_while_waiting(self: OrganizationRepository, organization_id: uuid.UUID) -> None:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            await other.execute(
+                update(OrganizationMember).where(col(OrganizationMember.user_id) == admin_id).values(role="member")
+            )
+            await other.commit()
+        await original(self, organization_id)
+
+    monkeypatch.setattr(OrganizationRepository, "lock_settings", demoted_while_waiting)
+    with pytest.raises(NotAuthorizedError):
+        await _add(async_db, config, admin)
+    await async_db.rollback()
+
+    stored = await async_db.execute(select(WorkspaceMcpServer.id).where(col(WorkspaceMcpServer.workspace_id).is_(None)))
+    assert stored.scalars().all() == [], "nothing stored"
 
 
 async def _organization_of(db: AsyncSession, world: _World):  # type: ignore[no-untyped-def]
