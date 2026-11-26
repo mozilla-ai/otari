@@ -1230,12 +1230,14 @@ class DataLocations:
         """The declared locations of an offering on ``instance``, distinct and sorted.
 
         A ``hosted`` offering is its provider's. An offering on a name that is
-        a hosted region's is that region's, whichever key the catalog labels it
-        on, because a pinned region is not itself listed as a hosted provider.
-        Nothing else declares one: a ``config.yml`` instance and an
-        organization's own key never take a location, not even from a hosted
-        provider of the same name.
+        a hosted region's is that region's, whether the catalog labels it
+        hosted or organization, because a pinned region is not itself listed as
+        a hosted provider. Nothing else declares one: a ``config.yml`` instance
+        and an organization's own key never take a location, not even from a
+        hosted provider or region of the same name.
         """
+        if served_on == "deployment":
+            return []
         if served_on == "hosted" and instance in self.hosted:
             return sorted(set(self.hosted[instance]))
         return sorted(set(self.regions.get(instance, ())))

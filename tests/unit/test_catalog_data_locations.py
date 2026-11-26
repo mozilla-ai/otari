@@ -24,3 +24,7 @@ def test_an_instance_nothing_hosted_declares_takes_no_location() -> None:
     assert LOCATIONS.of("berlin", "deployment") == []
     assert LOCATIONS.of("legacy@eu", "organization") == []
     assert LOCATIONS.of("nebius", "hosted") == []
+
+
+def test_a_providers_instance_named_like_a_region_takes_no_location() -> None:
+    assert LOCATIONS.of("berlin@virginia", "deployment") == []
