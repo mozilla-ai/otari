@@ -720,7 +720,7 @@ for it works against Otari with its base URL changed. `include_raw` and
   a call that names it runs on it in any case; any other name is a 400 listing
   it. The deployment pays: it is priced under `otari:web_search`, and an
   `allowed_tools` grants it by that name. Once any search tool exists, the
-  legacy backend is neither served nor listed here.
+  search the legacy settings describe is neither served nor listed here.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search

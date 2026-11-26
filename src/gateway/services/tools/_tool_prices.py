@@ -2,8 +2,8 @@
 
 A tool call is priced at settlement by its rate keys: an instance's own row
 alone, or the tool's ``otari:<tool>`` row for a call on an organization key or
-on the old backend, with only the operator's prices counting for a call the
-deployment paid for. The check at admission
+on the search the legacy settings describe, with only the operator's prices
+counting for a call the deployment paid for. The check at admission
 looks the same rows up the same way, so a request it admits settles priced. The
 lookup needs the request's database session, so the caller makes it; this
 module says which rows to look up, which requests skip the check, and what the
@@ -64,7 +64,7 @@ _TOOL_NAMES = {tool: name for name, tool in _TOOL_TYPES.items()}
 
 
 def _on_its_own_row(name: str, *, deployment_paid: bool) -> PricedTool:
-    """A tool whose calls are recorded with no label, so ``otari:<tool>`` prices them, as the old backend's are."""
+    """A tool whose calls are recorded with no label of their own, so ``otari:<tool>`` prices them."""
     return PricedTool(name, None, (gateway_tool_pricing_key(name),), deployment_paid)
 
 
@@ -73,13 +73,8 @@ def _priced_code_execution(image: str | None) -> PricedTool:
     return PricedTool(CODE_EXECUTION_TOOL_NAME, None, code_execution_rate_keys(image), True)
 
 
-def _priced_search(in_loop: InLoopSearch | None, *, on_credential: bool) -> PricedTool:
-    """The search on the libraries under its label and rows, else on the old backend, under ``otari:web_search``.
-
-    ``on_credential`` says the old backend searches with the workspace's own key.
-    """
-    if in_loop is None:
-        return _on_its_own_row(WEB_SEARCH_TOOL_NAME, deployment_paid=not on_credential)
+def _priced_search(in_loop: InLoopSearch) -> PricedTool:
+    """The search under the label and rows of what it runs on."""
     search = in_loop.search
     return PricedTool(WEB_SEARCH_TOOL_NAME, search.label, search.rate_keys, not search.on_credential)
 
@@ -117,7 +112,9 @@ def admitted_tools(
         # The sandbox is the deployment's, whichever backend runs it.
         used[CODE_EXECUTION_TOOL_NAME] = [_priced_code_execution(code_execution_image)]
     if web.search_tool_entry is not None:
-        search = _priced_search(web.in_loop_search, on_credential=web.search_credential is not None)
+        # Admission resolves what a granted search runs on, so a declared one has an InLoopSearch.
+        assert web.in_loop_search is not None
+        search = _priced_search(web.in_loop_search)
         pages = _priced_enrichment(web.enrichment)
         used[WEB_SEARCH_TOOL_NAME] = [search, pages] if pages is not None else [search]
     if web.fetch is not None:
@@ -199,7 +196,8 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
             continue
         if tool.name == WEB_SEARCH_TOOL_NAME:
             in_loop = resolve_in_loop_search(config, None)
-            priced.append(_priced_search(in_loop, on_credential=False))
+            assert in_loop is not None, "a configured search tool resolves what runs it"
+            priced.append(_priced_search(in_loop))
             if (pages := _priced_enrichment(enrichment_for(config, in_loop))) is not None:
                 priced.append(pages)
         elif tool.name == WEB_FETCH_TOOL_NAME:

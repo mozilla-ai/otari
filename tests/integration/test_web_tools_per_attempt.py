@@ -36,6 +36,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from any_search import SearchHit
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
@@ -218,8 +219,8 @@ class _FakeWebBackend:
         self.calls.append((name, arguments))
         return "page text"
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://example.com", "title": "Example"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://example.com", title="Example", raw={})]
 
     def take_last_fetch(self) -> Any:
         return SimpleNamespace(text="page text", final_url="https://example.com")

@@ -48,6 +48,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
+from any_search import SearchHit
 from gateway.exceptions.tools_exceptions import McpServerDeclarationError
 from gateway.services import mcp_loop as chat_loop_module
 from gateway.services import mcp_loop_messages as messages_loop_module
@@ -103,8 +104,8 @@ class _Search(_Backend):
     def __init__(self, *, fail: bool = False) -> None:
         super().__init__(WEB_SEARCH_TOOL_NAME, fail=fail)
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://python.org", "title": "Python"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://python.org", title="Python", raw={})]
 
 
 def _exec_result() -> ResultBlock:
