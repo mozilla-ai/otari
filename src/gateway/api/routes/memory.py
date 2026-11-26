@@ -118,8 +118,8 @@ async def _call_tool(service: MemoryService, caller: MemoryCaller, params: objec
         413: {"description": "The message exceeds 64 KiB."},
         415: {"description": "Only application/json is accepted."},
     },
-    # Memory is an MCP server whose tools a key calls, so it takes the scope every MCP tool call takes.
-    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
+    # Searching and reading take memory:read; the tools that change memory take memory:write as well.
+    openapi_extra=key_scope(KeyScope.MEMORY_READ),
 )
 async def memory_mcp(request: Request, service: MemoryServiceDep, caller: MemoryCallerDep) -> Response:
     """Answer one MCP JSON-RPC message: initialize, ping, tools/list or tools/call."""
@@ -164,7 +164,7 @@ async def memory_mcp(request: Request, service: MemoryServiceDep, caller: Memory
     "/mcp",
     status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
     responses={405: {"description": "No stream."}},
-    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
+    openapi_extra=key_scope(KeyScope.MEMORY_READ),
 )
 async def memory_mcp_stream() -> Response:
     """No server-to-client stream: every answer comes back on the POST that asked."""

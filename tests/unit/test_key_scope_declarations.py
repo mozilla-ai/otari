@@ -92,6 +92,8 @@ def app(tmp_path_factory: pytest.TempPathFactory, monkeypatch_module: pytest.Mon
         federation_issuers=[FederationIssuer(issuer="https://scopes.invalid")],
         federation_audiences=["https://scopes.invalid"],
         feedback_enabled=True,
+        # Mounted as scripts/generate_openapi.py mounts it, so memory's MCP endpoint is read too.
+        memory_enabled=True,
     )
     return create_app(config)
 
@@ -149,9 +151,15 @@ def test_only_the_catalog_reads_are_open_to_every_key(app: FastAPI) -> None:
     assert open_routes == OPEN_TO_EVERY_KEY
 
 
+# Scopes no route declares, because the route a key reaches takes another and its handler asks for this one
+# per call: memory's MCP endpoint takes memory:read, and its tools that change memory take memory:write too.
+CHECKED_PER_CALL = {KeyScope.MEMORY_WRITE}
+
+
 def test_every_scope_guards_a_route(app: FastAPI) -> None:
     guarded = {declared_key_scope(route) for _, route in _routes(app)}
-    assert set(KeyScope) <= guarded, sorted(set(KeyScope) - guarded)
+    assert set(KeyScope) - CHECKED_PER_CALL <= guarded, sorted(set(KeyScope) - CHECKED_PER_CALL - guarded)
+    assert not CHECKED_PER_CALL & guarded, "a scope a route declares is no longer checked per call only"
 
 
 def test_the_openapi_document_publishes_each_declaration(app: FastAPI) -> None:

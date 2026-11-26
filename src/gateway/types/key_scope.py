@@ -35,6 +35,8 @@ class KeyScope(StrEnum):
     CODE_EXECUTE = "code:execute"
     MCP_READ = "mcp:read"
     MCP_EXECUTE = "mcp:execute"
+    MEMORY_READ = "memory:read"
+    MEMORY_WRITE = "memory:write"
     TELEMETRY_WRITE = "telemetry:write"
     AGENTS_WRITE = "agents:write"
     USAGE_READ = "usage:read"
@@ -47,7 +49,8 @@ class KeyScope(StrEnum):
 # What a key is given when its creator names no scopes: calling models and the
 # tools a model call may declare, which is what most keys are for. The MCP scopes
 # reach only a server the workspace attached and the caller signed in to, or one
-# a request declares inline where the workspace allows request servers.
+# a request declares inline where the workspace allows request servers. The memory
+# scopes reach only the workspace's own memory, and only where it is turned on.
 DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (
     KeyScope.INFERENCE_RUN,
     KeyScope.WEB_SEARCH,
@@ -55,6 +58,8 @@ DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (
     KeyScope.CODE_EXECUTE,
     KeyScope.MCP_READ,
     KeyScope.MCP_EXECUTE,
+    KeyScope.MEMORY_READ,
+    KeyScope.MEMORY_WRITE,
 )
 
 # Only a service key has end users, so only a service key may hold these.

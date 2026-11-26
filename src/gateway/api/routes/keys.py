@@ -113,8 +113,8 @@ def _organization_service_key() -> ColumnElement[bool]:
 # The ``scopes`` field's description on every surface that writes a key.
 CREATE_SCOPES_DESCRIPTION = (
     "The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', "
-    "'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing "
-    "else. The end-users scopes are a service key's alone."
+    "'code:execute', 'mcp:read', 'mcp:execute', 'memory:read' and 'memory:write': it calls models and tools, lists "
+    "MCP servers and uses its workspace's memory, and nothing else. The end-users scopes are a service key's alone."
 )
 UPDATE_SCOPES_DESCRIPTION = (
     "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. "

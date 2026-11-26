@@ -14,6 +14,8 @@ WORKSPACE_SCOPE_OFF = "Shared workspace memory is off for this workspace. Use th
 ENTRY_NOT_FOUND = "No memory entry with that id."
 PROPOSAL_NOT_FOUND = "No proposal waiting for review with that id."
 READ_ONLY = "Workspace viewers can search memory but not change it."
+NO_READ_SCOPE = "This API key lacks the 'memory:read' scope, which memory's tools and automatic recall require."
+NO_WRITE_SCOPE = "This API key lacks the 'memory:write' scope, which changing memory requires."
 NOT_YOURS = "Only the entry's author, its owner or a workspace admin can forget it."
 TOO_LONG = "That is longer than memory keeps. Shorten it to {limit} characters."
 REFUSED = "Memory does not keep {what}. Remove it and propose again."
@@ -87,6 +89,13 @@ class MemoryReadOnlyError(TenancyForbiddenError):
 
     def __init__(self) -> None:
         super().__init__(READ_ONLY)
+
+
+class MemoryWriteScopeMissingError(TenancyForbiddenError):
+    """The caller's role may change memory, but the API key it called with lacks memory:write."""
+
+    def __init__(self) -> None:
+        super().__init__(NO_WRITE_SCOPE)
 
 
 class NotYoursToForgetError(TenancyForbiddenError):

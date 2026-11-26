@@ -69,6 +69,12 @@ under a data key of its workspace.
 An agent reaches memory in one of two ways, and both reach the same tools with
 the same checks.
 
+Either way, the API key needs memory's scopes: `memory:read` to search, read
+and be recalled to, and `memory:write` as well to propose, confirm, flag or
+forget. A key created without naming its scopes gets both; a key made before
+memory had them holds neither until they are added to it. A member's role still
+applies on top: a workspace viewer changes nothing, whatever its key holds.
+
 ### Through Otari's tool loop
 
 A request routed through Otari, on any model, gets memory's tools beside its
@@ -88,9 +94,10 @@ gets them without asking, and one that sends `Otari-Memory: off` does not. A
 request that neither asks nor is offered them reaches the provider unchanged.
 
 The request's API key must name a member of its workspace. Asking for memory
-where it cannot be had (memory off for the workspace or its organization, or a
-key with no member behind it) is refused before the provider is called; not
-asking never is. No provider is sent the `otari_memory` declaration, and an MCP
+where it cannot be had (memory off for the workspace or its organization, a
+key with no member behind it, or one without `memory:read`) is refused before
+the provider is called; not asking never is, and a key without `memory:read`
+then gets neither the tools nor automatic recall. No provider is sent the `otari_memory` declaration, and an MCP
 server cannot expose a tool under one of memory's names.
 
 ### As an MCP server

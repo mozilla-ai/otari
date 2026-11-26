@@ -20,7 +20,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions import TenancyError
-from gateway.exceptions.memory_exceptions import MEMORY_OFF, MemoryToolsRefusedError
+from gateway.exceptions.memory_exceptions import MEMORY_OFF, NO_READ_SCOPE, MemoryToolsRefusedError
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import MANAGEMENT_ROLES
@@ -58,6 +58,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
     resolve_organization_guardrails,
     run_organization_guardrails,
 )
+from gateway.types.key_scope import KeyScope
 
 
 def verify_memory_service_token(request: Request, config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
@@ -316,6 +317,7 @@ async def memory_caller_for(
         is_manager=organization_manager or workspace_role in MANAGEMENT_ROLES,
         # A workspace viewer recalls what the workspace knows and writes nothing to it.
         can_write=organization_manager or workspace_role != "viewer",
+        key_may_write=KeyScope.MEMORY_WRITE in api_key.scopes,
         api_key_id=api_key.id,
         session_id=session_id[:255] if session_id else None,
         model=model[:255] if model else None,
@@ -403,6 +405,11 @@ class MemoryToolAdmission:
         if caller is None:
             if asked:
                 raise MemoryToolsRefusedError(NOT_A_MEMBER)
+            return None
+        if api_key is not None and KeyScope.MEMORY_READ not in api_key.scopes:
+            # A key without memory:read gets neither memory's tools nor what automatic recall would add.
+            if asked:
+                raise MemoryToolsRefusedError(NO_READ_SCOPE)
             return None
         async with create_unit_of_work() as uow:
             service = build_memory_service(uow, self._config, self._keys, self._container)

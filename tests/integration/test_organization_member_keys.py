@@ -1428,7 +1428,16 @@ def test_a_member_key_gets_the_default_scopes_unless_it_names_its_own(client: Te
     )
     assert code == status.HTTP_200_OK, wider
 
-    assert plain["scopes"] == ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"]
+    assert plain["scopes"] == [
+        "inference:run",
+        "web:search",
+        "web:fetch",
+        "code:execute",
+        "mcp:read",
+        "mcp:execute",
+        "memory:read",
+        "memory:write",
+    ]
     assert wider["scopes"] == ["inference:run", "usage:read"]
 
 

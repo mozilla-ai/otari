@@ -7,6 +7,7 @@ export type ScopeGroupKey =
   | "batches"
   | "tools"
   | "mcp"
+  | "memory"
   | "agents"
   | "usage"
   | "endUsers"
@@ -61,6 +62,16 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
     risk: "Acts on the systems those tools reach",
     hint: "Without it, the workspace's MCP servers do nothing for this key",
   },
+  "memory:read": {
+    label: "Search and recall the workspace's agent memory",
+    group: "memory",
+    hint: "Without it, agent memory does nothing for this key",
+  },
+  "memory:write": {
+    label: "Save, confirm, flag and forget agent memory entries",
+    group: "memory",
+    risk: "Changes what every agent in the workspace recalls",
+  },
   "telemetry:write": { label: "Send OpenTelemetry data", group: "agents" },
   "agents:write": {
     label: "Coding-agent hooks and model recommendations",
@@ -92,6 +103,7 @@ const GROUP_HEADINGS: Record<
   models: { label: "Models" },
   tools: { label: "Tools" },
   mcp: { label: "MCP" },
+  memory: { label: "Agent memory" },
   files: { label: "Files", isAdvanced: true },
   batches: { label: "Batches", isAdvanced: true },
   agents: { label: "Coding agents", isAdvanced: true },

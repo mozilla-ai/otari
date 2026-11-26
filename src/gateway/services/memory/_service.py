@@ -24,6 +24,7 @@ from gateway.exceptions.memory_exceptions import (
     MemoryReadOnlyError,
     MemoryRefusedError,
     MemoryTooLongError,
+    MemoryWriteScopeMissingError,
     NotYoursToForgetError,
     WorkspaceScopeOffError,
 )
@@ -166,6 +167,8 @@ class MemoryCaller:
     member_id: uuid.UUID
     is_manager: bool
     can_write: bool = True
+    # Whether the caller's API key holds memory:write; its role may allow a change its key does not.
+    key_may_write: bool = True
     api_key_id: str | None = None
     session_id: str | None = None
     model: str | None = None
@@ -1258,6 +1261,8 @@ def guarded_decision(decision: Decision, alike: Sequence[float]) -> Decision:
 def _require_write(caller: MemoryCaller) -> None:
     if not caller.can_write:
         raise MemoryReadOnlyError
+    if not caller.key_may_write:
+        raise MemoryWriteScopeMissingError
 
 
 def _visible(caller: MemoryCaller, switches: _Switches, entry: OpenedEntry) -> bool:

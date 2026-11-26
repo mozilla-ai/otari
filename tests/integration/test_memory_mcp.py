@@ -53,6 +53,7 @@ def _key(
     memory_on: bool = True,
     organization_on: bool = True,
     workspace_role: str = "member",
+    scopes: list[str] | None = None,
 ) -> dict[str, str]:
     """A key for a member of the default workspace's organization (or for a billing user with no person behind it)."""
     with db_session_factory() as session:
@@ -88,7 +89,12 @@ def _key(
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": f"memory-{uuid.uuid4().hex[:8]}", "user_id": user_id, "exclude_from_budget": True},
+        json={
+            "key_name": f"memory-{uuid.uuid4().hex[:8]}",
+            "user_id": user_id,
+            "exclude_from_budget": True,
+            **({"scopes": scopes} if scopes is not None else {}),
+        },
         headers=master_key_header,
     )
     assert resp.status_code == 200, resp.text
@@ -248,6 +254,19 @@ def test_a_viewer_searches_and_writes_nothing(
     assert _call(memory_client, viewer, "memory_search", query="deploy")["isError"] is False
     result = _call(memory_client, viewer, "memory_propose", text=DEPLOY, kind="procedure")
     assert result["isError"] is True and "viewers" in result["content"][0]["text"]
+
+
+def test_a_key_needs_memory_read_to_reach_memory_and_memory_write_to_change_it(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    reader = _key(memory_client, master_key_header, db_session_factory, scopes=["inference:run", "memory:read"])
+    neither = _key(memory_client, master_key_header, db_session_factory, scopes=["inference:run"])
+
+    assert _call(memory_client, reader, "memory_search", query="deploy")["isError"] is False
+    result = _call(memory_client, reader, "memory_propose", text=DEPLOY, kind="procedure")
+    assert result["isError"] is True and "memory:write" in result["content"][0]["text"]
+    response = memory_client.post(MCP, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=neither)
+    assert response.status_code == 403
 
 
 def test_memorys_model_calls_show_as_usage_outside_any_budget(

@@ -33,6 +33,8 @@ def test_new_keys_call_models_and_the_built_in_tools() -> None:
         KeyScope.CODE_EXECUTE,
         KeyScope.MCP_READ,
         KeyScope.MCP_EXECUTE,
+        KeyScope.MEMORY_READ,
+        KeyScope.MEMORY_WRITE,
     )
 
 

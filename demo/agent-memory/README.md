@@ -76,6 +76,22 @@ Leave `FIREWORKS_API_KEY` as it is; `seed.sh` skips the provider. In `otari-conf
 The Open WebUI demo needs a model that calls tools well: set `MODEL` in `webui/up.sh` to one your providers
 serve.
 
+## Updating a demo you already set up
+
+When the branch took main in (November 26), two things changed for a demo whose database already exists:
+
+- **A migration id.** Main has a migration with the id the memory rerank skip used, so that one is
+  `69080982e58d` now. Before `./start.sh`, if you ran the demo after November 18:
+
+  ```bash
+  docker exec otari-memory-pg psql -U otari_app -d otari_memory \
+    -c "UPDATE alembic_version SET version_num = '69080982e58d' WHERE version_num = 'a7c9e1b3d5f8'"
+  ```
+
+- **Key scopes.** API keys carry scopes, and memory takes `memory:read` (search, recall, its MCP endpoint) and
+  `memory:write` (propose, confirm, flag, forget). A new key gets both; one made before them holds neither. Run
+  `./seed.sh` again once the gateway is up: it adds them to Alice's and Bob's keys.
+
 ## Start over
 
 ```bash

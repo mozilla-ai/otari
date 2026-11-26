@@ -161,6 +161,20 @@ def test_asking_where_memory_cannot_be_had_is_refused_before_the_provider_is_cal
     assert sent == []
 
 
+def test_a_key_without_memory_read_asking_for_memory_is_refused_and_one_not_asking_goes_without(
+    memory_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    models_only = _key(memory_client, master_key_header, db_session_factory, scopes=["inference:run"])
+
+    with _provider(_completion(None)) as sent:
+        refused = _chat(memory_client, models_only, tools=[{"type": "otari_memory"}])
+        served = _chat(memory_client, models_only)
+
+    assert refused.status_code == 403 and "memory:read" in refused.text
+    assert served.status_code == 200
+    assert len(sent) == 1 and "tools" not in sent[0], "nothing of memory reaches the provider for that key"
+
+
 def test_where_the_deployment_does_not_offer_memory_asking_for_it_is_refused(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:

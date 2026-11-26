@@ -93,8 +93,20 @@ touch "$HERE/keys.env"; chmod 600 "$HERE/keys.env"
   printf 'OTARI_DEMO_WORKSPACE=%s\n' "$WS"
 } >"$HERE/keys.env.new"
 mv "$HERE/keys.env.new" "$HERE/keys.env"; chmod 600 "$HERE/keys.env"
-rm -f "$HERE/.last.json"
 echo "keys.env written"
+
+# A key made before memory had scopes of its own holds neither memory:read nor memory:write, and a scope added
+# later is never granted to a key that did not ask for it: add them to the demo's keys, keeping what they hold.
+echo "== memory scopes on the demo's keys"
+call GET "/keys?workspace_id=$WS&limit=1000" >/dev/null
+python3 - "$HERE/.last.json" <<'PY' | while read -r key_id scopes; do call PATCH "/keys/$key_id" "{\"scopes\": $scopes}"; done
+import json, sys
+for key in json.load(open(sys.argv[1])):
+    held = key.get("scopes") or []
+    if (key.get("key_name") or "").startswith("memory-demo-") and not {"memory:read", "memory:write"} <= set(held):
+        print(key["id"], json.dumps(held + [s for s in ("memory:read", "memory:write") if s not in held]))
+PY
+rm -f "$HERE/.last.json"
 
 echo
 echo "Next: terminal/prepare.sh --quick, then pick a demo in README.md."

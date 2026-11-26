@@ -12773,7 +12773,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read', 'mcp:execute', 'memory:read' and 'memory:write': it calls models and tools, lists MCP servers and uses its workspace's memory, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -12910,7 +12910,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read', 'mcp:execute', 'memory:read' and 'memory:write': it calls models and tools, lists MCP servers and uses its workspace's memory, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -16305,7 +16305,7 @@ export interface components {
          *     only a service key may hold them.
          * @enum {string}
          */
-        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
+        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "memory:read" | "memory:write" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.

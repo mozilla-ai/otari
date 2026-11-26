@@ -44,7 +44,16 @@ def test_a_key_created_without_scopes_calls_models_and_tools_and_nothing_else(
     key = _create(client, master_key_header)
     headers = _header(key)
 
-    assert key["scopes"] == ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"]
+    assert key["scopes"] == [
+        "inference:run",
+        "web:search",
+        "web:fetch",
+        "code:execute",
+        "mcp:read",
+        "mcp:execute",
+        "memory:read",
+        "memory:write",
+    ]
     assert "'usage:read'" in _refusal(client.get(f"{API_ROOT}/key/budget", headers=headers))
     assert "'telemetry:write'" in _refusal(client.post("/otlp/v1/logs", json={}, headers=headers))
     assert "'usage:write'" in _refusal(
