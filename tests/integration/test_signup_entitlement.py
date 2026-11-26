@@ -19,7 +19,7 @@ from gateway.repositories.organizations.organization_invitation_repository impor
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.user_service import create_user_for_signup
+from gateway.services.tenancy.user_service import SignupSubmission, create_user_for_signup
 
 from .tenancy_helpers import NO_BLOCKED_ADDRESSES, create_organization, membership_listener_on
 
@@ -110,13 +110,11 @@ async def _signup(
         session,
         config or _config(),
         background_tasks=BackgroundTasks(),
-        email=_EMAIL,
-        password=_PASSWORD,
-        uow=uow,
-        organizations=OrganizationService(session, membership_listener=membership_listener_on(uow), uow=uow),
         blocked_addresses=NO_BLOCKED_ADDRESSES,
         invites=invites(uow),
-        invite_token=_TOKEN,
+        organizations=OrganizationService(session, membership_listener=membership_listener_on(uow), uow=uow),
+        submission=SignupSubmission(email=_EMAIL, password=_PASSWORD, invite_token=_TOKEN),
+        uow=uow,
     )
 
 

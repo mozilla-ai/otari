@@ -50,6 +50,7 @@ below is what gives it a way to sign in.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import BackgroundTasks
@@ -383,6 +384,17 @@ async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SignupSubmission:
+    """What somebody submitted at the signup form, as the one unit it arrives as."""
+
+    email: str
+    password: str
+    full_name: str | None = None
+    invite_token: str | None = None
+    terms_accepted: bool = False
+
+
 class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
 
@@ -392,15 +404,11 @@ async def create_user_for_signup(
     config: GatewayConfig,
     *,
     background_tasks: BackgroundTasks,
-    email: str,
-    password: str,
-    uow: UnitOfWork,
-    organizations: OrganizationService,
     blocked_addresses: BlockedAddresses,
     invites: SignupInvitePort,
-    invite_token: str | None,
-    full_name: str | None = None,
-    terms_accepted: bool = False,
+    organizations: OrganizationService,
+    submission: SignupSubmission,
+    uow: UnitOfWork,
 ) -> User | None:
     """Claim an identity ``organization_service`` already added to an organization, register a new
     one where the deployment allows it, or do nothing.
@@ -420,8 +428,8 @@ async def create_user_for_signup(
     An address that is already verified is mailed a notice that it has an account and how it signs in.
     An unknown address is registered where ``open_signup`` is on, and refused otherwise.
     An identity ``unverified_identity_is_claimable`` refuses is refused too.
-    An invitation entitling the address answers ahead of both of those rules.
     So is an address the deployment's email blocklist matches, before its identity is looked up.
+    An invitation entitling the address answers ahead of both of those rules.
     A verified address is refused because a password set on it would sign in with no proof of the mailbox.
     A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
     ``password`` is validated before the lookup, so a policy violation answers the same for every address.
@@ -436,8 +444,8 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
-    ``invite_token`` is the invitation the caller named, and None where they named none.
-    Where ``invites`` answers that it entitles an account, the address is recorded as the
+    ``submission.invite_token`` is the invitation the caller named, and None where they named
+    none. Where ``invites`` answers that it entitles an account, the address is recorded as the
     mailbox the link reached, no verification email is sent, and the caller can sign in at
     once. That answer is taken inside the transaction that writes the account, so an
     invitation canceled in the meantime is not honored. An entitled signup gets the account
@@ -451,12 +459,13 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
+    password = submission.password
     validate_new_password(password)
-    if config.terms_url is not None and not terms_accepted:
+    if config.terms_url is not None and not submission.terms_accepted:
         raise TermsNotAcceptedError
-    full_name = _normalized_full_name(full_name)
+    full_name = _normalized_full_name(submission.full_name)
 
-    address = validated_email(email)
+    address = validated_email(submission.email)
     if await blocked_addresses.blocked_among([address]):
         await verify_absent_password_async(password)
         return None
@@ -474,8 +483,8 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
-            entitled = invite_token is not None and await invites.entitles_an_account(
-                invite_token, claimed_address=address
+            entitled = submission.invite_token is not None and await invites.entitles_an_account(
+                submission.invite_token, claimed_address=address
             )
             if not entitled:
                 # Refused before anything is written, because the block rolls back on the raise.
@@ -527,7 +536,7 @@ async def create_user_for_signup(
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
                     hours=config.email_verification_expiry_hours
                 )
-            if terms_accepted:
+            if submission.terms_accepted:
                 values["terms_accepted_at"] = datetime.now(UTC)
             # NOTE: A provider sign-in or another first password can commit after the check above.
             # The condition in this write decides.
@@ -1001,6 +1010,7 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 
 
 __all__ = [
+    "SignupSubmission",
     "authenticate",
     "create_user_for_signup",
     "describe_caller",

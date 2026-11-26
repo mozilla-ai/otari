@@ -1129,11 +1129,11 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     session,
                     config,
                     background_tasks=BackgroundTasks(),
-                    email="iris@example.com",
-                    password=f"signup-password-{index}",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
                     invites=NullSignupInviteAdapter(),
-                    invite_token=None,
+                    submission=user_service.SignupSubmission(
+                        email="iris@example.com", password=f"signup-password-{index}"
+                    ),
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1207,11 +1207,9 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
                     session,
                     GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com"),
                     background_tasks=BackgroundTasks(),
-                    email="iris@example.com",
-                    password="signup-password",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
                     invites=NullSignupInviteAdapter(),
-                    invite_token=None,
+                    submission=user_service.SignupSubmission(email="iris@example.com", password="signup-password"),
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1308,11 +1306,9 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             session,
             config,
             background_tasks=BackgroundTasks(),
-            email="nova@example.com",
-            password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
             invites=NullSignupInviteAdapter(),
-            invite_token=None,
+            submission=user_service.SignupSubmission(email="nova@example.com", password="signup-password"),
             **claim_writes(session),
         )
 
@@ -1406,11 +1402,9 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
             session,
             config,
             background_tasks=BackgroundTasks(),
-            email="nova@example.com",
-            password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
             invites=NullSignupInviteAdapter(),
-            invite_token=None,
+            submission=user_service.SignupSubmission(email="nova@example.com", password="signup-password"),
             **claim_writes(session),
         )
 

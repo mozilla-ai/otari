@@ -45,6 +45,7 @@ from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.user_service import (
+    SignupSubmission,
     create_user_for_signup,
     resend_verification_email,
     verify_email,
@@ -175,15 +176,17 @@ async def signup(
             db,
             config,
             background_tasks=background_tasks,
-            email=body.email,
-            password=body.password,
-            uow=uow,
-            organizations=organizations,
             blocked_addresses=identities,
             invites=invites,
-            invite_token=body.invite,
-            full_name=body.full_name,
-            terms_accepted=body.terms_accepted,
+            organizations=organizations,
+            submission=SignupSubmission(
+                email=body.email,
+                password=body.password,
+                full_name=body.full_name,
+                invite_token=body.invite,
+                terms_accepted=body.terms_accepted,
+            ),
+            uow=uow,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
