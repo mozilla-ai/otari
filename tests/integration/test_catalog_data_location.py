@@ -311,3 +311,24 @@ def test_a_pinned_region_outside_the_workspaces_locations_is_not_shown(client: T
     shown = _offering_locations(detail)
     assert shown["berlin:glm-5.3"] == ["DE"]
     assert "US" not in {location for locations in shown.values() for location in locations}
+
+
+@pytest.fixture
+def legacy_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    """A configured hosted provider named before regions, whose own name holds ``@``."""
+    mcs.clear_catalog_cache()
+    legacy = {"legacy@eu": {"provider": "openai", "api_base": "http://127.0.0.1:9/v1", "data_location": "DE"}}
+    try:
+        for client in build_test_client(_config(postgres_url, hosted_providers=legacy)):
+            bind_model_provider(client, HostedModelProvider("legacy@eu", models={"legacy@eu": ["glm-5.3"]}))
+            _price(client, _MASTER, "legacy@eu:glm-5.3", 0.5, 2.0)
+            yield client
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_provider_named_with_the_separator_is_read_by_its_whole_name(legacy_client: TestClient) -> None:
+    """Regions come from the region rows, so ``legacy@eu`` is a provider's name here, not a region."""
+    detail = _get(legacy_client, f"{_CATALOG}/z-ai/glm-5.3", headers=_MASTER)
+
+    assert _offering_locations(detail)["legacy@eu:glm-5.3"] == ["DE"]

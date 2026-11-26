@@ -27,7 +27,6 @@ from typing import Any
 from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig, hosted_key_optional
-from gateway.core.settings.inference import data_location_admitted
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.providers_exceptions import (
@@ -122,7 +121,12 @@ from gateway.services.providers._hosted_name_index import (
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing, HostedServingBuilder
-from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
+from gateway.services.providers._hosted_sources import (
+    HostedDataLocations,
+    HostedProviderProfile,
+    HostedSource,
+    HostedSources,
+)
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.providers._workspace_hosted_access import workspace_allowed_data_locations
@@ -1132,8 +1136,8 @@ class HostedProviderService:
 
     async def data_locations(
         self, *, organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
-    ) -> dict[str, tuple[str | None, ...]]:
-        """Where each enabled provider serveable to ``organization_id`` keeps request data, by name.
+    ) -> HostedDataLocations:
+        """Where each enabled provider serveable to ``organization_id`` keeps request data, and each of its regions.
 
         ``None`` is the deployment's own view, which sees every provider. A
         location is None where the connection declares none. For a
@@ -1142,13 +1146,7 @@ class HostedProviderService:
         """
         async with self.uow:
             found = await self.sources.data_locations(organization_id)
-        allowed = workspace_allowed_data_locations(workspace_id)
-        if allowed is None:
-            return found
-        return {
-            name: tuple(location for location in locations if data_location_admitted(location, allowed))
-            for name, locations in found.items()
-        }
+        return found.within(workspace_allowed_data_locations(workspace_id))
 
     async def profiles(self) -> dict[str, HostedProviderProfile]:
         """Every hosted provider's implementation, terms of service and privacy policy, by name.

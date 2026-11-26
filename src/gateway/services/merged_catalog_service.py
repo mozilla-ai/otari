@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import REGION_SEPARATOR, GatewayConfig
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
@@ -1219,20 +1219,26 @@ async def viewer_zero_data_retention(
 
 @dataclass(frozen=True)
 class DataLocations:
-    """Where each hosted provider the viewer may use keeps request data, by name; an undeclared location is left out."""
+    """Where the viewer's hosted providers and their regions keep request data; an undeclared location is left out."""
 
     hosted: dict[str, tuple[str, ...]]
+    """By a hosted provider's name."""
+    regions: dict[str, tuple[str, ...]]
+    """By a region's name (``tokenhub@sg``), for an offering pinned to it."""
 
     def of(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> list[str]:
-        """The declared locations of an offering on ``instance``, distinct and sorted, where ``served_on`` is hosted.
+        """The declared locations of an offering on ``instance``, distinct and sorted.
 
-        A ``config.yml`` instance and an organization's own key declare none. A name holding the region
-        separator (``tokenhub@sg``) is a hosted region's, which a hosted provider's own name may never hold,
-        whatever whose key the catalog labels the offering on, so it is read as hosted.
+        A ``hosted`` offering is its provider's. An offering on a name that is
+        a hosted region's is that region's, whichever key the catalog labels it
+        on, because a pinned region is not itself listed as a hosted provider.
+        Nothing else declares one: a ``config.yml`` instance and an
+        organization's own key never take a location, not even from a hosted
+        provider of the same name.
         """
-        if served_on != "hosted" and REGION_SEPARATOR not in instance:
-            return []
-        return sorted(set(self.hosted.get(instance, ())))
+        if served_on == "hosted" and instance in self.hosted:
+            return sorted(set(self.hosted[instance]))
+        return sorted(set(self.regions.get(instance, ())))
 
 
 async def viewer_data_locations(
@@ -1243,9 +1249,11 @@ async def viewer_data_locations(
     ``workspace_id`` is the workspace the catalog is narrowed to, if any: only the locations it accepts are kept.
     """
     declared = await hosted_providers.data_locations(organization_id=organization_id, workspace_id=workspace_id)
-    return DataLocations(
-        hosted={name: tuple(each for each in locations if each is not None) for name, locations in declared.items()}
-    )
+
+    def declared_only(found: dict[str, tuple[str | None, ...]]) -> dict[str, tuple[str, ...]]:
+        return {name: tuple(each for each in locations if each is not None) for name, locations in found.items()}
+
+    return DataLocations(hosted=declared_only(declared.providers), regions=declared_only(declared.regions))
 
 
 async def apply_organization_pricing(
