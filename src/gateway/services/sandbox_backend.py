@@ -311,7 +311,6 @@ class SandboxBackend:
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
         files: SandboxFiles | None = None,
-        files_base_url: str | None = None,
         container: ContainerLease | None = None,
         containers: SandboxContainers | None = None,
         on_lease: Callable[[ContainerLease], None] | None = None,
@@ -326,10 +325,6 @@ class SandboxBackend:
         # The lease this request holds once the session is open, for the route
         # to report. Only set when a registry will hold the sandbox.
         self.lease: ContainerLease | None = None
-        # Where this deployment serves ``/v1/files`` from: a loop answering in
-        # OpenAI's vocabulary needs a URL to announce a produced image with.
-        # None outside a request (tests, direct use), which announces none.
-        self.files_base_url = files_base_url
         # The request's file bridge, or None when it has no uploads to seed and
         # nowhere to keep what a run produces (tests, direct use).
         self._files = files

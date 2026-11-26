@@ -103,19 +103,6 @@ describe("App", () => {
     ).toBeInTheDocument()
   })
 
-  it("says so when the deployment context could not be read", () => {
-    // main.tsx passes null when /v1/bootstrap did not answer. Assuming a
-    // deployment and rendering its dashboard is the failure to avoid.
-    renderApp(null)
-
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /does not know what it is connected to/,
-    )
-    expect(
-      screen.queryByRole("heading", { name: "Sign in to Otari" }),
-    ).toBeNull()
-  })
-
   it("renders the accept-invitation page ahead of the sign-in screen", async () => {
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       if (

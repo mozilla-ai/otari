@@ -6,8 +6,57 @@ import { describe, expect, it } from "vitest"
 import {
   buildManifest,
   MANIFEST_PATH,
+  pwaManifest,
   rewriteManifestLink,
 } from "../pwaManifest"
+
+const HOSTED = "A hosted description."
+
+type Middleware = (
+  req: { url?: string },
+  res: { setHeader: () => void; end: (body: string) => void },
+  next: () => void,
+) => void
+
+// Drives the plugin's hooks the way Vite does, without a build: the resolved
+// config first, then the bundle and the dev server.
+function runPlugin(options?: Parameters<typeof pwaManifest>[0]) {
+  const plugin = pwaManifest(options) as unknown as {
+    configResolved: (config: { base: string }) => void
+    generateBundle: (this: {
+      emitFile: (file: { source: string }) => void
+    }) => void
+    configureServer: (server: {
+      middlewares: { use: (middleware: Middleware) => void }
+    }) => void
+  }
+  plugin.configResolved({ base: "/dashboard/" })
+
+  let emitted = ""
+  plugin.generateBundle.call({
+    emitFile: (file) => {
+      emitted = file.source
+    },
+  })
+
+  let served = ""
+  plugin.configureServer({
+    middlewares: {
+      use: (middleware) =>
+        middleware(
+          { url: `/dashboard/${MANIFEST_PATH}` },
+          {
+            setHeader: () => {},
+            end: (body) => {
+              served = body
+            },
+          },
+          () => {},
+        ),
+    },
+  })
+  return { emitted: JSON.parse(emitted), served: JSON.parse(served) }
+}
 
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
@@ -74,5 +123,22 @@ describe("the generated web app manifest", () => {
     // A file re-added to public/ would be copied over the emitted one and
     // reintroduce the hardcoded "/" silently; the plugin is the only source.
     expect(existsSync(join(WEB, "public", MANIFEST_PATH))).toBe(false)
+  })
+
+  it("takes a description from the build that imports it", () => {
+    expect(buildManifest("/", { description: HOSTED }).description).toBe(HOSTED)
+    expect(buildManifest("/", {})).toEqual(buildManifest("/"))
+  })
+
+  it("emits and dev-serves the same overridden description", () => {
+    const { emitted, served } = runPlugin({ description: HOSTED })
+    expect(emitted.description).toBe(HOSTED)
+    expect(served).toEqual(emitted)
+  })
+
+  it("emits and dev-serves the default description without options", () => {
+    const { emitted, served } = runPlugin()
+    expect(emitted).toEqual(buildManifest("/dashboard/"))
+    expect(served).toEqual(emitted)
   })
 })

@@ -235,25 +235,6 @@ class GrowthSignalPort(Protocol):
         """
         ...
 
-    async def record_profile_updated(
-        self,
-        *,
-        background_tasks: BackgroundTasks,
-        user_id: uuid.UUID,
-        email: str,
-        full_name: str | None,
-    ) -> None:
-        """Notify of an edited display name worth reflecting on the vendor's record.
-
-        Nothing calls this, for the reason ``record_onboarding_completed``
-        gives about its own answers: the surface is not in this tree. An
-        identity's ``full_name`` is written at signup and by OAuth and never
-        edited again, and ``PATCH /v1/users`` edits the ``alias`` on a
-        request-plane attribution row, which is a billing label rather than a
-        person's display name.
-        """
-        ...
-
     async def record_account_deleted(
         self,
         *,

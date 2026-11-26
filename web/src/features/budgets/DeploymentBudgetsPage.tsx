@@ -18,7 +18,6 @@ import type {
   CreateBudgetRequest,
   User,
 } from "@/client"
-import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -50,12 +49,8 @@ import {
 } from "@/shared/api/workspaces"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
-import {
-  budgetLabel,
-  budgetLabeler,
-  shortBudgetId,
-  unnamedBudgetLabel,
-} from "./budgetLabel"
+import { BudgetIdCell } from "./BudgetIdCell"
+import { budgetLabel, budgetLabeler, unnamedBudgetLabel } from "./budgetLabel"
 import { CountLimitFields, countToInput, parseCount } from "./CountLimitFields"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
 
@@ -690,14 +685,7 @@ export function DeploymentBudgetsPage() {
       {
         id: "id",
         header: "ID",
-        cell: (budget) => (
-          // Only a prefix is rendered; the copy hands over the whole id.
-          <CopyableValue value={budget.budget_id} label="budget id">
-            <code className="text-mono-micro" title={budget.budget_id}>
-              {shortBudgetId(budget.budget_id)}
-            </code>
-          </CopyableValue>
-        ),
+        cell: (budget) => <BudgetIdCell budgetId={budget.budget_id} />,
       },
       {
         id: "limit",

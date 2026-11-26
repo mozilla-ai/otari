@@ -1,8 +1,9 @@
 """Every setting keeps the name a deployment configures it by."""
 
 import json
+import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from enum import Enum
 from pathlib import Path
 from unittest import mock
@@ -12,6 +13,7 @@ import yaml
 from pydantic import BaseModel
 
 from gateway.core.config import GatewayConfig, load_config
+from gateway.log_config import logger as gateway_logger
 
 # Each name is a config.yml key, and OTARI_<NAME> is its environment variable.
 _SETTING_NAMES = frozenset(
@@ -66,8 +68,8 @@ _SETTING_NAMES = frozenset(
         "federation_member_rules",
         "feedback_enabled",
         "fetch_tools",
+        "files_api_enabled",
         "files_backend",
-        "files_enabled",
         "files_gemini_inline_max_bytes",
         "files_local_dir",
         "files_max_bytes",
@@ -96,6 +98,10 @@ _SETTING_NAMES = frozenset(
         "invitation_expiry_hours",
         "invitation_mail_limit_per_address",
         "invitation_mail_limit_per_organization",
+        "invitation_per_address_per_day",
+        "invitation_per_day",
+        "invitation_resend_limit",
+        "invitation_resend_wait_minutes",
         "log_writer_strategy",
         "mail_from_email",
         "mail_from_name",
@@ -265,3 +271,129 @@ def test_every_setting_with_a_default_is_read_from_its_environment_variable(name
     os.environ[f"OTARI_{name.upper()}"] = _environment_value(_default(name))
 
     assert name in load_config().model_fields_set
+
+
+def _load_logging(config_file: Path, caplog: pytest.LogCaptureFixture) -> GatewayConfig:
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=gateway_logger.name):
+            return load_config(str(config_file))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_a_renamed_setting_is_still_read_from_its_old_yaml_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A deployment on the old name keeps its value and is told the new one, not that the key is unknown."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_enabled: false\n", encoding="utf-8")
+
+    config = _load_logging(config_file, caplog)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert config.files_api_enabled is False
+    assert [message for message in messages if "files_enabled" in message and "files_api_enabled" in message]
+    assert not [message for message in messages if "unknown config keys" in message]
+
+
+def test_a_renamed_setting_is_still_read_from_its_old_environment_variable(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    os.environ["OTARI_FILES_ENABLED"] = "false"
+
+    config = _load_logging(config_file, caplog)
+
+    assert config.files_api_enabled is False
+    assert [record for record in caplog.records if "OTARI_FILES_ENABLED" in record.getMessage()]
+
+
+def test_the_new_name_of_a_renamed_setting_wins_over_the_old_one(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_enabled: false\nfiles_api_enabled: true\n", encoding="utf-8")
+    assert load_config(str(config_file)).files_api_enabled is True
+
+    os.environ["OTARI_FILES_ENABLED"] = "true"
+    os.environ["OTARI_FILES_API_ENABLED"] = "false"
+    assert load_config(str(config_file)).files_api_enabled is False
+
+
+def test_an_invalid_old_variable_is_ignored_once_the_new_one_is_set(tmp_path: Path) -> None:
+    """The new name wins, so a bad old value cannot stop the boot; without the new name it still does."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    os.environ["OTARI_FILES_ENABLED"] = "obsolete"
+    os.environ["OTARI_FILES_API_ENABLED"] = "false"
+
+    assert load_config(str(config_file)).files_api_enabled is False
+    assert GatewayConfig().files_api_enabled is False
+
+    del os.environ["OTARI_FILES_API_ENABLED"]
+    with pytest.raises(ValueError):
+        load_config(str(config_file))
+    with pytest.raises(ValueError):
+        GatewayConfig()
+
+
+def test_an_old_name_in_the_structured_environment_beats_the_new_name_in_the_file(tmp_path: Path) -> None:
+    """Each source is renamed before the sources merge, so the environment still overrides the file."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("files_api_enabled: true\n", encoding="utf-8")
+    os.environ["OTARI_CONFIG_YAML"] = "files_enabled: false\n"
+
+    assert load_config(str(config_file)).files_api_enabled is False
+
+
+def _warnings_while(
+    build: Callable[[], GatewayConfig], caplog: pytest.LogCaptureFixture
+) -> tuple[GatewayConfig, list[str]]:
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=gateway_logger.name):
+            config = build()
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    return config, [record.getMessage() for record in caplog.records if "deprecated name" in record.getMessage()]
+
+
+def test_a_config_built_directly_reads_the_old_name(caplog: pytest.LogCaptureFixture) -> None:
+    """An embedder that builds GatewayConfig without load_config still turns the API off with the old name."""
+    config, warnings = _warnings_while(lambda: GatewayConfig.model_validate({"files_enabled": False}), caplog)
+
+    assert config.files_api_enabled is False
+    assert len(warnings) == 1
+    both = {"files_enabled": False, "files_api_enabled": True}
+    assert GatewayConfig.model_validate(both).files_api_enabled is True
+
+
+def test_a_config_built_directly_reads_the_old_environment_variable(caplog: pytest.LogCaptureFixture) -> None:
+    os.environ["OTARI_FILES_ENABLED"] = "false"
+
+    config, warnings = _warnings_while(GatewayConfig, caplog)
+
+    assert config.files_api_enabled is False
+    assert [warning for warning in warnings if "OTARI_FILES_ENABLED" in warning]
+
+    os.environ["OTARI_FILES_API_ENABLED"] = "true"
+    assert GatewayConfig().files_api_enabled is True
+
+
+def test_a_copy_of_the_config_reads_the_old_name(caplog: pytest.LogCaptureFixture) -> None:
+    """model_copy does not validate its update, so the old name is renamed there too."""
+    config, warnings = _warnings_while(lambda: GatewayConfig().model_copy(update={"files_enabled": False}), caplog)
+
+    assert config.files_api_enabled is False
+    assert len(warnings) == 1
+
+
+def test_load_config_names_the_old_environment_variable_once(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    os.environ["OTARI_FILES_ENABLED"] = "false"
+
+    config, warnings = _warnings_while(lambda: load_config(str(config_file)), caplog)
+
+    assert config.files_api_enabled is False
+    assert len(warnings) == 1

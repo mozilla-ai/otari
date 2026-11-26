@@ -142,6 +142,8 @@ export interface UsageFilters {
   // and pinning it to the two built-ins forced a cast at the one call site that
   // drills into a named tool.
   tool?: string
+  // Who paid the provider: true = only rows a hosted provider served, false = the rest.
+  deployment_paid?: boolean
 }
 
 /** Which tool/guardrail service a settings test targets. A path parameter in the

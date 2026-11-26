@@ -348,8 +348,9 @@ from their own code, so it filters on the endpoint label as well as the source
 The activation-state table stores only dismissal and setup-key state.
 
 Key issuance requires workspace management authority and rotates the existing
-setup key. `activation_guide` disables eligibility without unmounting the
-endpoints.
+setup key, except for a member who does not manage the workspace
+(`WorkspaceMemberActivationState`). `activation_guide` disables eligibility
+without unmounting the endpoints.
 
 ## Data and migrations
 

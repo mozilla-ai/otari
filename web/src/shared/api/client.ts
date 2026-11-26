@@ -42,6 +42,21 @@ export class ApiError extends Error {
 }
 
 /**
+ * A response the browser was told to fetch from somewhere else, read by a
+ * caller that asked not to follow it (`redirect: "manual"`). The browser hides
+ * where it pointed, but the fact of it is the answer: the gateway's own routes
+ * do not redirect, so something in front of it, typically a proxy or an access
+ * gate sending this browser to sign in, answered instead. Followed, the same
+ * redirect fails on CORS when it crosses origins and reads as a network fault.
+ */
+export class RedirectedError extends Error {
+  constructor() {
+    super("The request was redirected.")
+    this.name = "RedirectedError"
+  }
+}
+
+/**
  * The dashboard's default retry policy for a failed query: twice, except for
  * an auth failure, which will not fix itself. `app/provider.tsx` installs it,
  * and a hook that refuses one more status composes with it rather than
@@ -648,6 +663,64 @@ async function readJson<T>(
 }
 
 /**
+ * Whether the gateway answers at all, for the outage check.
+ *
+ * Resolves on any response, whatever its status: a 401, a 404 or a 500 is the
+ * gateway (or something in front of it) answering, which is all this asks.
+ * The result is that status, or `null` for an answer whose status cannot be
+ * read: a redirect to another origin, such as an access proxy's sign-in page,
+ * fails the ordinary read on CORS, and a `no-cors` read of the same path then
+ * shows that something answered there. Rejects with `ApiError` status 0 only
+ * when nothing answers, by network fault or by `signal`. Not `apiFetch`, whose
+ * 401 handler signs the operator out: a liveness check refused by an access
+ * proxy must not end a session.
+ */
+export async function probeGateway(
+  path: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  try {
+    const response = await request(path, { method: "GET", signal })
+    await response.body?.cancel()
+    return response.status
+  } catch (error) {
+    if (isTimeout(error) || signal.aborted) {
+      throw new ApiError(0, "The gateway did not respond in time.")
+    }
+  }
+  try {
+    await reachesAfterRedirects(path, signal)
+    return null
+  } catch (error) {
+    if (isTimeout(error) || signal.aborted) {
+      throw new ApiError(0, "The gateway did not respond in time.")
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+}
+
+/**
+ * Whether following `path`'s redirects reaches anything that answers, from
+ * any origin. A `no-cors` read follows a cross-origin redirect without needing
+ * the destination's consent and resolves with an opaque response if anything
+ * answers there; it rejects only when nothing does. The response is unreadable
+ * by design, which is fine: this asks whether the destination is up, never
+ * what it said. Rejects with the fetch's own error.
+ */
+export async function reachesAfterRedirects(
+  path: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await request(path, {
+    method: "GET",
+    mode: "no-cors",
+    redirect: "follow",
+    signal,
+  })
+  await response.body?.cancel()
+}
+
+/**
  * Read something the gateway serves at its own root rather than under the API.
  *
  * A handful of things are not API resources and are mounted beside the
@@ -719,6 +792,12 @@ export async function apiFetch<T>(
       throw new ApiError(0, timeoutMessage)
     }
     throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+
+  // Before the status checks: an opaque redirect reports status 0 and would
+  // otherwise read as a gateway that never answered.
+  if (response.type === "opaqueredirect") {
+    throw new RedirectedError()
   }
 
   // Only 401. A 401 means the credential is gone: the session expired or was

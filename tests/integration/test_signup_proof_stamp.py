@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import User
-from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import OrganizationService
@@ -31,7 +31,7 @@ def _config(*, sends_links: bool = True) -> GatewayConfig:
 
 
 async def _signup(
-    session: AsyncSession, *, proof: AddressProof | None, config: GatewayConfig | None = None
+    session: AsyncSession, *, proof: AddressAuthority | None, config: GatewayConfig | None = None
 ) -> User | None:
     organization = await create_organization(session, slug=f"signup-{proof or 'none'}")
     identity = await UserRepository(session).create_local_identity(
@@ -57,7 +57,7 @@ async def _signup(
 
 
 async def test_a_mailbox_proof_proves_the_address(async_db: AsyncSession) -> None:
-    claimed = await _signup(async_db, proof=AddressProof.MAILBOX)
+    claimed = await _signup(async_db, proof=AddressAuthority.MAILBOX)
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
@@ -66,7 +66,7 @@ async def test_a_mailbox_proof_proves_the_address(async_db: AsyncSession) -> Non
 
 async def test_a_shared_proof_verifies_the_address_without_proving_it(async_db: AsyncSession) -> None:
     """Domain auto-join refuses an unproved address, so the stamp is what keeps that rule working."""
-    claimed = await _signup(async_db, proof=AddressProof.SHARED)
+    claimed = await _signup(async_db, proof=AddressAuthority.ORGANIZATION)
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
@@ -75,7 +75,7 @@ async def test_a_shared_proof_verifies_the_address_without_proving_it(async_db: 
 
 async def test_a_proved_address_signs_up_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
     """The proof stands in for the verification link, so no deployment setting gates it."""
-    claimed = await _signup(async_db, proof=AddressProof.MAILBOX, config=_config(sends_links=False))
+    claimed = await _signup(async_db, proof=AddressAuthority.MAILBOX, config=_config(sends_links=False))
 
     assert claimed is not None
     assert claimed.email_verified_at is not None

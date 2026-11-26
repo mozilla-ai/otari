@@ -7,10 +7,13 @@ import {
   UPDATE_CHECK_DOC,
   useOperatorUpdateCheck,
 } from "@/features/updateCheck/useOperatorUpdateCheck"
+import { useWorkspaceActivation } from "@/shared/api/activation"
 import { useHostedProviders } from "@/shared/api/hostedProviders"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import { useAnswerUpdateCheck } from "@/shared/api/updateCheck"
 import { docsSourceHref } from "@/shared/helpers/docs"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const SNOOZED_KEY = "otari.updateCheckPrompt.snoozedUntil"
 // How long closing the question without answering keeps it away.
@@ -60,13 +63,49 @@ function useHadProviderAtLoad(enabled: boolean): boolean {
 }
 
 /**
+ * Whether the selected workspace had served its first successful request, or
+ * dismissed the setup guide, when the dashboard loaded, read off the guide's
+ * own query. Latched once, so a first request landing during this load (the
+ * setup sheet's success face) does not raise the question over it. A failed
+ * read is a no, tried again on the next load; no workspace is a yes, since that
+ * operator would never be asked, but only once the context answered: a failed
+ * context read also leaves no workspace selected.
+ */
+function useActivatedAtLoad(enabled: boolean): boolean {
+  const { selected, isSettled } = useSelectedWorkspace()
+  // The operator answer rather than `isUnknown`, which reads false while a
+  // failed context read is being retried.
+  const { answer } = useDeploymentOperator()
+  const workspaceId = selected?.workspace_id ?? null
+  const [atLoad, setAtLoad] = useState<boolean | undefined>(undefined)
+  // Released once latched, so this observer never keeps the guide's poll alive.
+  const activation = useWorkspaceActivation(
+    workspaceId,
+    enabled && atLoad === undefined,
+  )
+  if (enabled && atLoad === undefined) {
+    if (activation.isSuccess) {
+      setAtLoad(
+        activation.data.status === "activated" || activation.data.dismissed,
+      )
+    } else if (activation.isError) {
+      setAtLoad(false)
+    } else if (isSettled && workspaceId === null && answer !== "pending") {
+      setAtLoad(answer === "operator")
+    }
+  }
+  return atLoad === true
+}
+
+/**
  * Asks a deployment operator, once, whether to check for new releases and
  * security fixes. Nothing is sent until somebody answers here or config does.
  *
  * Only asked where the answer does something: never on a development build,
  * which is never checked, and never where config already answered. Never on
  * a first visit either: someone who just deployed came to connect a provider,
- * so the question waits for a load that finds one already set up.
+ * so the question waits for a load that finds one already set up, and a
+ * workspace that has served its first request or dismissed the guide.
  *
  * Both answers are stored, so the question does not come back. Closing the
  * frame without answering is neither: it is snoozed in this browser for a
@@ -75,15 +114,16 @@ function useHadProviderAtLoad(enabled: boolean): boolean {
 export function UpdateCheckPrompt() {
   const status = useOperatorUpdateCheck()
   const hadProviderAtLoad = useHadProviderAtLoad(status !== undefined)
-  const answer = useAnswerUpdateCheck()
-  const [snoozedUntil, setSnoozedUntil] = useState(readSnoozedUntil)
-
-  const isAsking =
+  const canAsk =
     status !== undefined &&
     status.answered_by === null &&
     status.checkable &&
-    hadProviderAtLoad &&
-    Date.now() >= snoozedUntil
+    hadProviderAtLoad
+  const activatedAtLoad = useActivatedAtLoad(canAsk)
+  const answer = useAnswerUpdateCheck()
+  const [snoozedUntil, setSnoozedUntil] = useState(readSnoozedUntil)
+
+  const isAsking = canAsk && activatedAtLoad && Date.now() >= snoozedUntil
 
   if (!isAsking) {
     return null

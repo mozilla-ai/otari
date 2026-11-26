@@ -76,23 +76,3 @@ class User(Base):
     api_keys = relationship("APIKey", back_populates="user", passive_deletes=True)
     usage_logs = relationship("UsageLog", back_populates="user", passive_deletes=True)
     reset_logs = relationship("BudgetResetLog", back_populates="user", passive_deletes=True)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        return {
-            "user_id": self.user_id,
-            "alias": self.alias,
-            "spend": self.spend,
-            "reserved": self.reserved,
-            "budget_id": self.budget_id,
-            "allowed_models": self.allowed_models,
-            "allowed_tools": self.allowed_tools,
-            "budget_started_at": self.budget_started_at.isoformat() if self.budget_started_at else None,
-            "next_budget_reset_at": self.next_budget_reset_at.isoformat() if self.next_budget_reset_at else None,
-            "blocked": self.blocked,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "metadata": self.metadata_,
-            "parent_user_id": self.parent_user_id,
-            "external_id": self.external_id,
-        }

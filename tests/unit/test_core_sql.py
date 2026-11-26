@@ -1,11 +1,14 @@
 """Unit tests for the cross-layer SQL helpers in `gateway.core.sql`."""
 
 import sqlite3
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import Select, Uuid, column, false, select
+from sqlalchemy.dialects import sqlite
 
-from gateway.core.sql import LIKE_ESCAPE, contains_pattern, utc_bound
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern, in_workspaces, utc_bound
 
 
 def _like(text: str, term: str) -> bool:
@@ -60,3 +63,25 @@ def test_aware_bound_is_left_alone() -> None:
 
 def test_missing_bound_stays_missing() -> None:
     assert utc_bound(None) is None
+
+
+def _sql(condition: object) -> str:
+    return str(condition.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))  # type: ignore[attr-defined]
+
+
+def test_no_workspaces_match_nothing() -> None:
+    assert _sql(in_workspaces(column("workspace_id"), [])) == _sql(false())
+
+
+def test_one_workspace_is_an_equality() -> None:
+    workspace_id = uuid.uuid4()
+    assert " = " in _sql(in_workspaces(column("workspace_id"), {workspace_id}))
+
+
+def test_several_workspaces_are_an_in_list() -> None:
+    assert " IN " in _sql(in_workspaces(column("workspace_id"), {uuid.uuid4(), uuid.uuid4()}))
+
+
+def test_a_workspace_subquery_is_an_in_subquery() -> None:
+    subquery: Select[uuid.UUID] = select(column("id", Uuid()))
+    assert "IN (SELECT id" in _sql(in_workspaces(column("workspace_id"), subquery))

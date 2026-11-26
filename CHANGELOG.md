@@ -4,6 +4,61 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.58.0](https://github.com/mozilla-ai/otari/releases/tag/v0.58.0) - 2026-11-26
+
+
+
+### Bug Fixes
+
+- Settle audited changes per transaction, so savepoints and close cannot lose or invent one in [#3576](https://github.com/mozilla-ai/otari/pull/3576) by [@daavoo](https://github.com/daavoo) ([`702565d`](https://github.com/mozilla-ai/otari/commit/702565db3fca2edfc958664ba234ae7d0e1d5f8b))
+- **web:** Keep retrying the first gateway read, and redesign the boot and outage screens in [#3592](https://github.com/mozilla-ai/otari/pull/3592) by [@jigjigjig](https://github.com/jigjigjig) ([`de5f051`](https://github.com/mozilla-ai/otari/commit/de5f051602e1b4801d74882e97d27efc771b4599))
+- **dashboard:** Put More filters under the Requests tab's filters, above the chart in [#3593](https://github.com/mozilla-ai/otari/pull/3593) by [@daavoo](https://github.com/daavoo) ([`6ebd536`](https://github.com/mozilla-ai/otari/commit/6ebd5364a14e3b13c3cbe5e832543d645a220e52))
+- **dashboard:** Keep the hosted marker's label when the model name is long in [#3598](https://github.com/mozilla-ai/otari/pull/3598) by [@daavoo](https://github.com/daavoo) ([`924a5f6`](https://github.com/mozilla-ai/otari/commit/924a5f6a4b8c9962b1be61acac26e177f9e0752d))
+- **files:** Keep the file sweep running when the files API is off by [@mufasil](https://github.com/mufasil) ([`74b03b4`](https://github.com/mozilla-ai/otari/commit/74b03b48faa67ac8678afc2ddb4e9e4a495ace22))
+- **files:** Rename old keys per config source and catch only database errors at boot by [@mufasil](https://github.com/mufasil) ([`917acd6`](https://github.com/mozilla-ai/otari/commit/917acd609d0e1df290681319d775719f9785ef44))
+- **files:** Read the old setting name on a directly built config and count stale copy rows at boot by [@mufasil](https://github.com/mufasil) ([`152ac68`](https://github.com/mozilla-ai/otari/commit/152ac685f9ffcefb85f999ae633e1e6c1d670881))
+- **config:** Skip the old files variable once the new one is set in [#3556](https://github.com/mozilla-ai/otari/pull/3556) by [@mufasil](https://github.com/mufasil) ([`2e6f543`](https://github.com/mozilla-ai/otari/commit/2e6f543e9cf1a4cad2e9d0563116425222658d76))
+- **onboarding:** Keep the update question and the connect code from showing when they should not in [#3605](https://github.com/mozilla-ai/otari/pull/3605) by [@jigjigjig](https://github.com/jigjigjig) ([`7dca545`](https://github.com/mozilla-ai/otari/commit/7dca545336cd6b730aa75da8ef14785be12002b8))
+
+
+### Features
+
+- Record who changed an audited setting, and from what, on the request span by [@daavoo](https://github.com/daavoo) ([`cca0036`](https://github.com/mozilla-ai/otari/commit/cca003679ba5c8b4e4c2f5e0b1a9ffbfb3c1a78a))
+- **dashboard:** Show what hosted providers served apart from your own keys in [#3563](https://github.com/mozilla-ai/otari/pull/3563) by [@daavoo](https://github.com/daavoo) ([`b997414`](https://github.com/mozilla-ai/otari/commit/b99741495ce153048824f66e0703f9ba1e49ccba))
+- **organizations:** Settle the invitation limits and build the services in [#3594](https://github.com/mozilla-ai/otari/pull/3594) by [@peteski22](https://github.com/peteski22) ([`95764c7`](https://github.com/mozilla-ai/otari/commit/95764c72b48e21c8eaf55837b7d2b7a0fe620d3e))
+- **dashboard:** Let a build set the web app manifest's description in [#3603](https://github.com/mozilla-ai/otari/pull/3603) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f30657d`](https://github.com/mozilla-ai/otari/commit/f30657d1764886b4bcbab7109e4d0ad3e8f9a917))
+- **onboarding:** Show operators and members only the onboarding steps they need in [#3587](https://github.com/mozilla-ai/otari/pull/3587) by [@jigjigjig](https://github.com/jigjigjig) ([`89c5595`](https://github.com/mozilla-ai/otari/commit/89c55953f25d2602cc1c1b5ba5cc356f290499f4))
+- **catalog:** Filter and list models by hosted data location in [#3604](https://github.com/mozilla-ai/otari/pull/3604) by [@jigjigjig](https://github.com/jigjigjig) ([`8119cad`](https://github.com/mozilla-ai/otari/commit/8119cad6792a58e8735b413cd973deadc26b6d01))
+- **models:** List a model's description, release date and knowledge cutoff in [#3577](https://github.com/mozilla-ai/otari/pull/3577) by [@daavoo](https://github.com/daavoo) ([`1039f33`](https://github.com/mozilla-ai/otari/commit/1039f339e4a40ad668bfc579829c695cfb623ca9))
+
+
+### Maintenance
+
+- **BREAKING:** **identity:** One place decides what an address proves in [#3595](https://github.com/mozilla-ai/otari/pull/3595) by [@peteski22](https://github.com/peteski22) ([`0bc3a10`](https://github.com/mozilla-ai/otari/commit/0bc3a10738e6991a62f481feeb6d13ede7863c72))
+
+
+
+### New Contributors
+
+- [@mufasil](https://github.com/mufasil) made their first contribution in [#3556](https://github.com/mozilla-ai/otari/pull/3556)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.57.1...v0.58.0
+## [0.57.1](https://github.com/mozilla-ai/otari/releases/tag/v0.57.1) - 2026-11-25
+
+
+
+### Bug Fixes
+
+- **dashboard:** Show budget ids on the organization's Spend & budgets table in [#3588](https://github.com/mozilla-ai/otari/pull/3588) by [@jigjigjig](https://github.com/jigjigjig) ([`c435fd3`](https://github.com/mozilla-ai/otari/commit/c435fd342c2ae3257729c037c1ad65c83676906f))
+- **dashboard:** Say when a trace's fallback also failed in [#3589](https://github.com/mozilla-ai/otari/pull/3589) by [@jigjigjig](https://github.com/jigjigjig) ([`cf86a9b`](https://github.com/mozilla-ai/otari/commit/cf86a9b0ad5792fd1cb2f5781dd982bcf7bb05ca))
+
+
+### Security
+
+- **identity:** Prove only the address the provider asserted in [#3590](https://github.com/mozilla-ai/otari/pull/3590) by [@peteski22](https://github.com/peteski22) ([`2c0be82`](https://github.com/mozilla-ai/otari/commit/2c0be821693253fa8d34c7b1bebf710f97fd5535))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.57.0...v0.57.1
 ## [0.57.0](https://github.com/mozilla-ai/otari/releases/tag/v0.57.0) - 2026-11-25
 
 

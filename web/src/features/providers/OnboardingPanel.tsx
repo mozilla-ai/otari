@@ -4,6 +4,7 @@ import { Button } from "@/design-system/actions/Button"
 import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
 import { PlatformConnect } from "@/features/providers/PlatformConnect"
+import { OWN_KEYS, useWelcomeAnswer } from "@/features/welcome/welcomeAnswer"
 import { welcomeGuideLink } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -31,6 +32,8 @@ function Step({
 
 // Shown on first run (no provider configured yet). It disappears the moment a
 // provider exists, so it is a nudge to the first key, not a permanent banner.
+// An operator who told the welcome they bring their own keys is not offered
+// otari.ai here again; the page header still offers it.
 export function OnboardingPanel({
   onAddProvider,
   needsPricing,
@@ -49,6 +52,8 @@ export function OnboardingPanel({
 }) {
   const deployment = useDeployment()
   const { href } = welcomeGuideLink(deployment)
+  const answeredOwnKeys = useWelcomeAnswer() === OWN_KEYS
+  const offersConnect = deployment.platform_connect && !answeredOwnKeys
   const addProvider = (
     // Disabled at 0.4 rather than hidden. Blocked is not the same as
     // empty: an operator whose server has no secret key has to see the
@@ -73,7 +78,7 @@ export function OnboardingPanel({
         <div>
           <h2 className="text-display-sub">Welcome to Otari</h2>
           <p className="mt-1 text-sm text-muted">
-            {deployment.platform_connect
+            {offersConnect
               ? "You are signed in. Connect otari.ai or add a provider of your own to start serving models."
               : "You are signed in. Add a provider to start serving models: three quick steps."}
           </p>
@@ -125,7 +130,7 @@ export function OnboardingPanel({
           to meter new models with public rates.
         </p>
       ) : null}
-      {deployment.platform_connect ? (
+      {offersConnect ? (
         // Two ways to the first model, side by side and neither ahead of the
         // other: the same button, and nothing chosen for the operator.
         <div className="grid gap-4 md:grid-cols-2">

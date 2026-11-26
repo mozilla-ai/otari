@@ -74,6 +74,7 @@ export const MCP_CATALOG_SYNC_POLL_MS = 5_000
 export const MCP_SERVER_REQUESTS = "mcp-server-requests"
 export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
+export const GATEWAY_LIVENESS = "gateway-liveness"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key
 // edit invalidates KEYS, and that changes nothing about which identities may
@@ -203,6 +204,10 @@ export const MAILED_LINK_STATUS = "mailed-link-status"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
+// How often the liveness probe behind `useGatewayUnreachable` asks again while
+// the gateway is not answering: often enough that the alarm clears within a few
+// seconds of it coming back.
+export const GATEWAY_LIVENESS_RECHECK_MS = 5_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

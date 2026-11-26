@@ -38,6 +38,7 @@ GLM = model(
     release_date="2026-07-01",
     providers=["fireworks", "nebius"],
     zero_data_retention_providers=["fireworks"],
+    data_locations=["DE", "US"],
     provider_count=2,
     selectors=["fireworks:accounts/fireworks/models/glm-5p3", "nebius:zai-org/GLM-5.3"],
     price_sources=["defaults", "deployment"],
@@ -59,6 +60,7 @@ KIMI = model(
     input_modalities=["image", "text"],
     output_modalities=["image", "text"],
     providers=["nebius"],
+    data_locations=["GLOBAL"],
     price_sources=["defaults"],
     min_input_price_per_million=0.6,
     min_output_price_per_million=2.4,
@@ -113,6 +115,16 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"type": ["embedding"]}, []),
         ({"zero_data_retention": True}, [GLM]),
         ({"zero_data_retention": True, "provider": ["nebius"]}, [GLM]),
+        ({"data_location": ["DE"]}, [GLM]),
+        ({"data_location": ["de"]}, [GLM]),
+        ({"data_location": ["US"]}, [GLM]),
+        ({"data_location": ["US", "GLOBAL"]}, [GLM, KIMI]),
+        # A zone admits its member states, as a workspace's allowed locations do; a country never admits a zone.
+        ({"data_location": ["EU"]}, [GLM]),
+        ({"data_location": ["GLOBAL"]}, [KIMI]),
+        ({"data_location": ["FR"]}, []),
+        ({"data_location": ["EU"], "provider": ["nebius"], "capability": ["reasoning"]}, [GLM]),
+        ({"data_location": ["EU"], "provider": ["home_lab"]}, []),
     ],
 )
 def test_filters_preserve_the_dashboard_semantics(filters: dict[str, Any], expected: list[CatalogModelSummary]) -> None:
@@ -248,3 +260,21 @@ def test_a_model_has_one_price_unit_only_where_every_priced_offering_bills_in_it
     assert common_price_unit(["image"]) == "image"
     assert common_price_unit(["token", "image"]) is None
     assert common_price_unit([]) is None
+
+
+def test_a_data_location_is_validated_and_normalized() -> None:
+    assert CatalogQuery(data_location=["de", " eu "]).data_location == ["DE", "EU"]
+    with pytest.raises(ValidationError):
+        CatalogQuery(data_location=["Atlantis"])
+
+
+def test_a_model_with_no_declared_location_matches_no_location_filter() -> None:
+    assert query_catalog([LOCAL], CatalogQuery(data_location=["EU", "US", "GLOBAL"])).models == []
+    assert query_catalog([LOCAL], CatalogQuery()).models == [LOCAL]
+
+
+def test_the_facet_lists_the_locations_of_the_whole_catalog_whatever_the_filters() -> None:
+    page = query_catalog(MODELS, CatalogQuery(data_location=["GLOBAL"], include_facets=True))
+    assert page.facets is not None
+    assert page.facets.data_locations == ["DE", "GLOBAL", "US"]
+    assert query_catalog([LOCAL], CatalogQuery(include_facets=True)).facets.data_locations == []  # type: ignore[union-attr]

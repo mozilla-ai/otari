@@ -21,6 +21,9 @@ MODELS_DEV = parse_catalog(
             "models": {
                 "gpt-4o": {
                     "name": "GPT-4o",
+                    "description": "OpenAI's flagship multimodal model",
+                    "knowledge": "2023-09",
+                    "release_date": "2024-05-13",
                     "tool_call": True,
                     "structured_output": True,
                     "modalities": {"input": ["text", "image"], "output": ["text"]},
@@ -105,6 +108,9 @@ def test_capabilities_map_models_dev_flags_to_openrouter_fields() -> None:
         supported_parameters=["tools", "tool_choice", "response_format"],
         input_modalities=["text", "image"],
         output_modalities=["text"],
+        description="OpenAI's flagship multimodal model",
+        release_date="2024-05-13",
+        knowledge_cutoff="2023-09",
     )
 
 
@@ -162,15 +168,18 @@ def test_apply_model_metadata_fills_capabilities() -> None:
     assert model.name == "GPT-4o"
     assert model.supported_parameters == ["tools", "tool_choice", "response_format"]
     assert model.architecture == ModelArchitecture(input_modalities=["text", "image"], output_modalities=["text"])
+    assert model.description == "OpenAI's flagship multimodal model"
+    assert (model.release_date, model.knowledge_cutoff) == ("2024-05-13", "2023-09")
 
 
 def test_an_alias_takes_its_targets_capabilities_but_not_its_name() -> None:
-    """The target's display name would say what the alias hides."""
+    """The target's display name, description and dates would say what the alias hides."""
     alias = ModelObject(id="house-4o", created=0, owned_by="otari")
 
     apply_model_metadata(_config(), MODELS_DEV, alias, metadata_selector="openai:gpt-4o", with_name=False)
 
     assert alias.name is None
+    assert (alias.description, alias.release_date, alias.knowledge_cutoff) == (None, None, None)
     assert alias.supported_parameters == ["tools", "tool_choice", "response_format"]
 
 
@@ -180,3 +189,19 @@ def test_an_undescribed_model_reports_unknown_capabilities() -> None:
     apply_model_metadata(_config(), MODELS_DEV, model)
 
     assert (model.name, model.supported_parameters, model.architecture) == (None, None, None)
+
+
+def test_an_undescribed_model_clears_what_an_earlier_pass_filled() -> None:
+    """A model reread under a provider models.dev does not know keeps nothing the earlier read gave it."""
+    model = ModelObject(
+        id="nebius:made-up-model-xyz",
+        created=0,
+        owned_by="nebius",
+        description="stale",
+        release_date="2024-05-13",
+        knowledge_cutoff="2023-09",
+    )
+
+    apply_model_metadata(_config(), MODELS_DEV, model)
+
+    assert (model.description, model.release_date, model.knowledge_cutoff) == (None, None, None)

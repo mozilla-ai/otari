@@ -209,25 +209,26 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         )
     if statuses != {status.HTTP_400_BAD_REQUEST}:
         return None
-    if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
+    codes = {error_code_of(answer.headers) for answer in answers}
+    if codes == {CONTEXT_LENGTH_EXCEEDED}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=prompt_too_long_for_every_attempt_detail(len(errors)),
             headers=error_headers(CONTEXT_LENGTH_EXCEEDED),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_CONTENT}:
+    if codes == {UNSUPPORTED_CONTENT}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_images_detail(len(errors)),
             headers=error_headers(UNSUPPORTED_CONTENT),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {STRUCTURED_OUTPUT_FAILED}:
+    if codes == {STRUCTURED_OUTPUT_FAILED}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=structured_output_failed_for_every_attempt_detail(len(errors)),
             headers=error_headers(STRUCTURED_OUTPUT_FAILED),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
+    if codes == {UNSUPPORTED_PARAMETER}:
         parameters = (UpstreamFailure(error).unsupported_parameter_name for error in errors)
         named = {name for name in parameters if name is not None}
         return HTTPException(
@@ -238,7 +239,7 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
     reasons = {answer.detail for answer in answers}
-    shared = reasons.pop() if len(reasons) == 1 else ProviderDetail.BAD_REQUEST
+    shared = reasons.pop() if len(reasons) == 1 else None
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=all_attempts_rejected_detail(len(errors), None if shared == ProviderDetail.BAD_REQUEST else shared),

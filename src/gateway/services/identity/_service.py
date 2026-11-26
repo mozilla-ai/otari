@@ -8,6 +8,8 @@ from typing import Protocol, cast
 
 import idna
 
+from gateway.core.address_proof import record_address
+from gateway.core.addresses import same_address
 from gateway.core.email_domains import blocklist_entry, blocklist_keys
 from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -31,6 +33,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.identity import (
+    AddressAuthority,
     BlockedEmail,
     EmailAssertion,
     MailedLinkStatus,
@@ -49,7 +52,7 @@ from gateway.services.identity._enforcement import (
 )
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
-from gateway.services.oauth_service import provider_label
+from gateway.services.oauth_service import provider_label, trusts_email_claim
 from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import (
@@ -161,7 +164,8 @@ class IdentityService:
         """Sign in the account that an identity a provider has proven belongs to.
 
         An identity linked to an account signs in as that account, and its password and verification stay as they are,
-        unless the address is verified but unproved: the sign-in then proves it, as a first sign-in does.
+        unless a provider whose word no tenant can set asserts that same address as verified: the sign-in then
+        proves it, as a first sign-in does. An organization's own connection never does, whatever it asserts.
         An identity with no link signs in as the account the identity provider policy returns, and is linked to it,
         except an identity from one organization's own OIDC connection, which instead signs in to the one account
         that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
@@ -592,7 +596,7 @@ class IdentityService:
             if is_organization_connection_provider(external.provider):
                 await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
-            password_removed = await self._prove_unproved_address(account)
+            password_removed = await self._prove_unproved_address(account, external)
             self._take_display_name_from_sso(account, external)
             self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
@@ -619,8 +623,8 @@ class IdentityService:
         """Resolve a first sign-in from one organization's own OIDC connection, bypassing the identity provider port.
 
         What makes the claimed address usable here is the organization's DNS proof of its domain, not the
-        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so the
-        assertion is not read, and ``trust_email_verified`` stays off for every connection.
+        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so no
+        assertion of its own is evidence about an address.
 
         Raises:
             SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
@@ -668,19 +672,24 @@ class IdentityService:
         account.full_name = external.full_name
         self._users.stage(account)
 
-    async def _prove_unproved_address(self, account: User) -> bool:
-        """Prove a verified address nobody proved, and say whether a password went with it.
+    async def _prove_unproved_address(self, account: User, external: ProviderIdentity) -> bool:
+        """Prove the account's address where this sign-in asserts it, and say whether a password went with it.
 
-        The link was made when the provider verified this account's address, so its holder owns the account.
-        Such an address had a password chosen through a link its mailbox never saw, so that password, the
-        reset and verification links, the sessions and the passkeys set up since go, as on a first sign-in.
+        A proof means the holder of the address authenticated, so the password chosen through a link
+        its mailbox never saw, the reset and verification links, the sessions and the passkeys set up
+        since all go, as on a first sign-in.
+
+        What a provider asserts is evidence only about the address it named, and only where no tenant
+        can set what it says. An address the account holds for another reason is left alone.
 
         NOTE: An unverified address is left alone. A first sign-in handles that case instead.
         """
         if account.email_verified_at is None or account.email_proven_at is not None:
             return False
+        if not _asserts_this_address(account, external):
+            return False
         password_removed = account.hashed_password is not None
-        account.email_proven_at = datetime.now(UTC)
+        record_address(account, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
         account.hashed_password = None
         account.email_verification_token_hash = None
         account.email_verification_token_expires_at = None
@@ -709,6 +718,19 @@ class IdentityService:
         if account is None or not account.is_active:
             raise OAuthIdentityUnknownError(label)
         return account
+
+
+def _asserts_this_address(account: User, external: ProviderIdentity) -> bool:
+    """Whether this sign-in is evidence that the holder of the account's address authenticated.
+
+    A provider whose claim a tenant can set is not evidence, whatever it reports. One that
+    reports no verified address, or reports a different one, says nothing about this address.
+    """
+    if not trusts_email_claim(external.provider):
+        return False
+    if external.email_verified is not EmailAssertion.VERIFIED or external.email is None:
+        return False
+    return account.email is not None and same_address(external.email, account.email)
 
 
 def _reset_path(token: str) -> str:

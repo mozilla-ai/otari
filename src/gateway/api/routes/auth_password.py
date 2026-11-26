@@ -53,11 +53,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, get_db, verify_master_key
 from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.exceptions.identity_exceptions import CurrentPasswordRequiredError, EmailChangeNotSupportedError
+from gateway.models.identity import AddressAuthority
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
 from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
-from gateway.services.tenancy.user_service import AddressAuthority, set_password, update_password
+from gateway.services.tenancy.user_service import set_password, update_password
 
 # Auth is declared on the router rather than left to arrive through
 # ``CurrentIdentity``, matching `organizations.py`: the credential check is then

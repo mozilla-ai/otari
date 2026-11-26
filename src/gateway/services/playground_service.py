@@ -282,7 +282,7 @@ class LocalToolOffer:
 
     def files(self) -> ToolAvailability:
         """Uploads, unless the deployment turned them off."""
-        if not self._config.files_enabled:
+        if not self._config.files_api_enabled:
             return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
         return ToolAvailability(configured=True, enabled=True)
 

@@ -262,44 +262,6 @@ class UsageLog(Base):
     api_key = relationship("APIKey", back_populates="usage_logs")
     user = relationship("User", back_populates="usage_logs")
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        return {
-            "id": self.id,
-            "api_key_id": self.api_key_id,
-            "user_id": self.user_id,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-            "model": self.model,
-            "endpoint": self.endpoint,
-            "source": self.source,
-            "source_label": self.source_label,
-            "tags": self.tags,
-            "counts_toward_budget": self.counts_toward_budget,
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
-            "cache_read_tokens": self.cache_read_tokens,
-            "cache_write_tokens": self.cache_write_tokens,
-            "cache_write_1h_tokens": self.cache_write_1h_tokens,
-            "reasoning_tokens": self.reasoning_tokens,
-            "cache_tokens_in_prompt": self.cache_tokens_in_prompt,
-            "billing_meters": self.billing_meters,
-            "pricing_breakdown": self.pricing_breakdown,
-            "cost": self.cost,
-            "tool_cost": self.tool_cost,
-            "status": self.status,
-            "error_message": self.error_message,
-            "stream_cut_by": self.stream_cut_by,
-            "status_code": self.status_code,
-            "latency_ms": self.latency_ms,
-            "provider_latency_ms": self.provider_latency_ms,
-            "policy_name": self.policy_name,
-            "selection_reason": self.selection_reason,
-            "attempt_position": self.attempt_position,
-            "attempt_count": self.attempt_count,
-            "request_group_id": self.request_group_id,
-        }
-
 
 class AgentTelemetry(Base):
     """Content-free outcome metrics and behavioral events from coding agents."""

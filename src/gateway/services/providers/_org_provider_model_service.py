@@ -88,7 +88,7 @@ from gateway.services.catalog import (
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
-from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
+from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.providers._owned_endpoint_network import (
     OwnedEndpointAddressError,
@@ -264,16 +264,6 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.pricing_tiers = list(default.pricing_tiers or [])
     row.unit = default.unit or "token"
     row.rates = rates_of(default)
-
-
-def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
-    """Community default rates for several models. Synchronous; run off the loop."""
-    resolved: dict[str, ModelPricing] = {}
-    for model in models:
-        default = default_model_pricing(provider, model, as_of)
-        if default is not None:
-            resolved[model] = default
-    return resolved
 
 
 async def _endpoint_refusal(provider: str, api_base: str) -> str | None:

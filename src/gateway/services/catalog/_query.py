@@ -4,6 +4,7 @@ import re
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 
+from gateway.core.settings.inference import data_location_admitted
 from gateway.schemas.catalog import (
     CatalogCapability,
     CatalogFacets,
@@ -86,6 +87,7 @@ def _matching_models(
     input_modalities = set(query.input_modality)
     output_modalities = set(query.output_modality)
     types = set(query.type)
+    locations = set(query.data_location)
 
     def matches(model: CatalogModelSummary) -> bool:
         if term and not _search_matches(model, term):
@@ -113,6 +115,8 @@ def _matching_models(
         if not _pricing_matches(model, query.pricing) or not _source_matches(model, query.source):
             return False
         if query.zero_data_retention and not model.zero_data_retention_providers:
+            return False
+        if locations and not any(data_location_admitted(each, locations) for each in model.data_locations):
             return False
         return not query.released_within_days or (
             model.release_date is not None and released_after <= model.release_date <= released_before
@@ -166,6 +170,7 @@ def _catalog_facets(models: Sequence[CatalogModelSummary]) -> CatalogFacets:
             for vendor in sorted(vendor_slugs, key=lambda vendor: (vendor.casefold(), vendor))
         ],
         types=sorted({model.type for model in models if model.type is not None}),
+        data_locations=sorted({location for model in models for location in model.data_locations}),
     )
 
 

@@ -881,9 +881,6 @@ class RecordingBilling:
     ) -> int | None:
         return None
 
-    async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
-        raise AssertionError("the completion path places no holds")
-
     async def hold(self, *, organization_id: uuid.UUID, amount: Decimal) -> None:
         raise AssertionError("the completion path places no holds")
 

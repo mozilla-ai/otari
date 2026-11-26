@@ -8232,10 +8232,10 @@ export interface paths {
          * Dismiss Workspace Activation
          * @description Retire the guide for this workspace. Permanent, and idempotent.
          *
-         *     Workspace owners and admins only. It retires the card and nothing else: the
-         *     key the guide issued keeps working, because the operator asked for it and
-         *     may well have pasted it somewhere already. Revoking one is the Keys page's
-         *     job.
+         *     For a member who does not manage the workspace, for them alone; a viewer is
+         *     refused. It retires the card and nothing else: the key the guide issued
+         *     keeps working, because the operator asked for it and may well have pasted it
+         *     somewhere already. Revoking one is the Keys page's job.
          */
         post: operations["workspace-activation-dismiss_workspace_activation"];
         delete?: never;
@@ -8255,12 +8255,13 @@ export interface paths {
         put?: never;
         /**
          * Create Workspace Activation Key
-         * @description Issue the workspace's setup API key, rotating the one the guide already issued.
+         * @description Issue the setup API key, rotating the one the guide already issued.
          *
-         *     Workspace owners and admins only, like every other action that changes a
-         *     workspace. The plaintext is returned once and never stored, so a reopened
-         *     guide rotates the same key row rather than collecting a second one, and
-         *     answers 409 once the workspace has activated or the guide was dismissed.
+         *     The workspace's for its owners and admins, the caller's own for a member who
+         *     does not manage it; a viewer is refused. The plaintext is returned once and
+         *     never stored, so a reopened guide rotates the same key row rather than
+         *     collecting a second one, and answers 409 once the guide is finished or was
+         *     dismissed.
          */
         post: operations["workspace-activation-create_workspace_activation_key"];
         delete?: never;
@@ -11373,6 +11374,11 @@ export interface components {
          */
         CatalogFacets: {
             /**
+             * Data Locations
+             * @description Every data location a hosted provider declares for an authorized model, as listed, sorted.
+             */
+            data_locations?: string[];
+            /**
              * Providers
              * @description Every provider instance offering an authorized model, sorted.
              */
@@ -11403,6 +11409,11 @@ export interface components {
              * @description The largest any offering serves.
              */
             context_window?: number | null;
+            /**
+             * Data Locations
+             * @description Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.
+             */
+            data_locations?: string[];
             /**
              * Default Pricing
              * @description Whether an unpriced model is metered at the models.dev default.
@@ -11524,6 +11535,11 @@ export interface components {
              */
             context_window?: number | null;
             /**
+             * Data Locations
+             * @description Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.
+             */
+            data_locations?: string[];
+            /**
              * Deprecated
              * @description True only when every offering with metadata says so.
              * @default false
@@ -11634,6 +11650,11 @@ export interface components {
             context_window?: number | null;
             /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key. */
             credential: components["schemas"]["CatalogCredential"];
+            /**
+             * Data Locations
+             * @description Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, distinct and sorted; empty where it declares none and for every other offering.
+             */
+            data_locations?: string[];
             /**
              * Discovered
              * @description Whether the provider itself reported this model.
@@ -17429,8 +17450,12 @@ export interface components {
              * @default false
              */
             deployment_managed: boolean;
+            /** Description */
+            description?: string | null;
             /** Id */
             id: string;
+            /** Knowledge Cutoff */
+            knowledge_cutoff?: string | null;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
             /** Name */
@@ -17448,6 +17473,8 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            /** Release Date */
+            release_date?: string | null;
             /** Supported Parameters */
             supported_parameters?: string[] | null;
             /** Type */
@@ -24496,12 +24523,12 @@ export interface components {
             activation_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
              * Dismissed
-             * @description Whether someone skipped the guide for this workspace.
+             * @description Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member.
              */
             dismissed: boolean;
             /**
              * Experience Eligible
-             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
+             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, and the caller may run requests there. For someone who manages the workspace, nobody dismissed it and no request in the workspace has succeeded yet; for a member who does not, they have not dismissed it and no request of their own has succeeded yet.
              */
             experience_eligible: boolean;
             /** @description The setup key the guide already issued, so a reopened guide can offer it instead of rotating it. Null until one is issued, once it is revoked, deleted or expired, when the caller is not the one it was issued to, and whenever the guide is not offered to this caller. */
@@ -24510,7 +24537,7 @@ export interface components {
             latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
              * Status
-             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.
+             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all. For a member who does not manage the workspace, only their own requests count.
              * @enum {string}
              */
             status: "waiting" | "failed" | "activated";
@@ -27561,6 +27588,8 @@ export interface operations {
                 source?: "all" | "discovered" | "custom";
                 /** @description Only models at least one provider declared to keep no prompt or completion data offers. */
                 zero_data_retention?: boolean;
+                /** @description Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none. */
+                data_location?: string[];
                 /** @description Release window ending today (UTC); zero disables it. Unknown and future releases do not match. */
                 released_within_days?: number;
                 sort?: "name" | "released" | "input" | "output" | "context" | "providers";

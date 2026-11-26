@@ -122,7 +122,6 @@ class OIDCConnectionService:
         self._repositories = repositories
         self._connections = repositories.connections
         self._links = repositories.links
-        self._passkeys = repositories.passkeys
         self._pending_states = repositories.pending_states
         # NOTE: On the request's session rather than this service's Unit of Work. The library claims
         # the pending state during an exchange this service does not wrap, by which time a block

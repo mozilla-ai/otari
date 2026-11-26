@@ -1808,9 +1808,9 @@ class WorkspaceActivationState(Base):
     and crosses services. Here the usage row is written by this process into this
     database, so the derivation is exact.
 
-    One row per workspace, not per workspace and viewer: the guide is about a
-    workspace's first request, so dismissing it says "this workspace is set up,
-    stop offering the guide" for everyone who can manage it.
+    One row per workspace, for the people who manage it: dismissing it says "this
+    workspace is set up, stop offering the guide" for all of them. Members who do
+    not manage it have ``WorkspaceMemberActivationState``.
     """
 
     __tablename__ = "workspace_activation_state"
@@ -1835,6 +1835,43 @@ class WorkspaceActivationState(Base):
     )
     # Gotcha: a plain DateTime(timezone=True) reads back naive on SQLite. The dashboard
     # then shows it as local time.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class WorkspaceMemberActivationState(Base):
+    """The setup guide's state for one member of a workspace who does not manage it.
+
+    The guide is per workspace for the workspace's owners and admins
+    (``WorkspaceActivationState``), and per person for its members. A member who
+    may run requests there without managing it (the member key surface's
+    contributor rule, so never a viewer) is offered the guide for their own
+    first request: their own usage rows count (``UsageLog.user_id``), and their
+    dismissal and setup key are theirs, the key held to what a key they create
+    for themselves is (``self_service``, inheriting their model and tool access).
+    One row per workspace and person. Whether they have activated is, again,
+    not a column: it is their own first successful request in the workspace.
+    """
+
+    __tablename__ = "workspace_member_activation_state"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    first_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    last_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    dismissed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # ``SET NULL`` for the reason ``WorkspaceActivationState.api_key_id`` is.
+    api_key_id: Mapped[str | None] = mapped_column(
+        ForeignKey("api_keys.id", ondelete="SET NULL"), default=None, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),
@@ -1928,6 +1965,7 @@ __all__ = [
     "WorkspaceAssignmentRequest",
     "WorkspaceCreate",
     "WorkspaceMember",
+    "WorkspaceMemberActivationState",
     "WorkspaceMemberCreate",
     "WorkspaceMemberPublic",
     "WorkspaceMemberUpdate",

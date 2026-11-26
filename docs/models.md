@@ -232,6 +232,17 @@ All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 
+From the same models.dev entry, each model also carries `description`,
+`release_date` and `knowledge_cutoff`, the training data cutoff. Both dates are
+as models.dev writes them, `YYYY-MM-DD` or, where it knows only the month,
+`YYYY-MM`. A model several providers serve takes the earliest release date any
+of them gives, and the description and cutoff of the provider tried first,
+else of any other, as its page in the catalog does. An alias leaves all three
+out, and so does a model models.dev does not describe. `created` stays the
+provider's own timestamp, 0 where its listing gives none; it is a different
+fact, so a client ordering models by when they came out sorts by
+`release_date`, which orders only the models models.dev dates.
+
 ### Overriding a model's details
 
 Where a provider's server and models.dev say nothing about a model, or say it
@@ -591,7 +602,7 @@ unknown kind. A model's `type` is the kind most of its offerings give (see
 model on the page names its kind. Repeat `input_modality`,
 `output_modality`, or `capability` to require every selected value. The endpoint
 also accepts `search`, `min_context`, `max_input`, `pricing`, `source`,
-`zero_data_retention`, and `released_within_days`. Release windows end today in
+`zero_data_retention`, `data_location`, and `released_within_days`. Release windows end today in
 UTC and exclude unknown and future dates. `max_input` is a price per million
 tokens, so it excludes models with no known input rate and models priced in
 another unit. `pricing=priced` keeps every model with a priced offering,
@@ -606,13 +617,30 @@ provider account, which Otari does not check; whose declaration applies is in
 page marks these models and their offerings, and its **Data retention** filter
 sets the parameter.
 
+Each model lists in `data_locations` where the hosted providers offering it keep
+request data, and each `hosted` offering lists its own provider's: ISO 3166-1
+alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted, one for each place the
+provider may serve from, so a provider with several enabled regions gives several
+(see [Data location](hosted-providers.md#data-location)). A provider with no
+declared location, every `providers:` instance and an organization's own key add
+none, so a model offered only by those lists none. Repeat `data_location` to keep
+the models any selected location serves. It matches as a workspace's
+`allowed_data_locations` does: `EU` also matches each EU member state, a country
+never matches `EU`, and `GLOBAL` matches only `GLOBAL`. A model whose location is
+undeclared matches no `data_location`. When a workspace narrows the catalog
+(`workspace_id`, or an API key's own workspace) and accepts only some locations,
+only those are listed and matched. This is discovery: which provider serves a
+request is decided at dispatch, as before. The Models page's **Data location** filter
+sets the parameter, and each model names its locations in a "Hosted in" line.
+
 `sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
 with `direction=asc` or `desc`. Unknown values sort last in either direction;
 names and catalog ids break ties so pages have a stable order. A price sort
 compares a price only with prices in its unit: models priced per token come
 first, then each other unit's models in turn.
 
-Request `include_facets=true` to receive the provider, vendor and type choices from
+Request `include_facets=true` to receive the provider, vendor, type and data location
+choices (`facets.data_locations`, as listed on the models, not widened to `EU`) from
 the complete authorized catalog, whatever the filters match, so a filter that
 matches nothing can still be undone. `facets.total_count` counts authorized
 models before filtering. `facets` is null unless requested, and never names a

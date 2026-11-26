@@ -183,6 +183,11 @@ class ModelObject(BaseModel):
     # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
     # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
     type: ModelType | None = None
+    # models.dev's description, release date and training cutoff (``YYYY-MM-DD``, or ``YYYY-MM``), as the catalog's
+    # model page shows them. ``None`` where models.dev has no entry, and for an alias, whose target they would name.
+    description: str | None = None
+    release_date: str | None = None
+    knowledge_cutoff: str | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -1215,6 +1220,47 @@ async def viewer_zero_data_retention(
             else frozenset()
         ),
     )
+
+
+@dataclass(frozen=True)
+class DataLocations:
+    """Where the viewer's hosted providers and their regions keep request data; an undeclared location is left out."""
+
+    hosted: dict[str, tuple[str, ...]]
+    """By a hosted provider's name."""
+    regions: dict[str, tuple[str, ...]]
+    """By a region's name (``tokenhub@sg``), for an offering pinned to it."""
+
+    def of(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> list[str]:
+        """The declared locations of an offering on ``instance``, distinct and sorted.
+
+        A ``hosted`` offering is its provider's. An offering on a name that is
+        a hosted region's is that region's, whether the catalog labels it
+        hosted or organization, because a pinned region is not itself listed as
+        a hosted provider. Nothing else declares one: a ``config.yml`` instance
+        and an organization's own key never take a location, not even from a
+        hosted provider or region of the same name.
+        """
+        if served_on == "deployment":
+            return []
+        if served_on == "hosted" and instance in self.hosted:
+            return sorted(set(self.hosted[instance]))
+        return sorted(set(self.regions.get(instance, ())))
+
+
+async def viewer_data_locations(
+    hosted_providers: "HostedProviderService", organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
+) -> DataLocations:
+    """What the hosted providers serveable to the viewer's organization declare as their data locations.
+
+    ``workspace_id`` is the workspace the catalog is narrowed to, if any: only the locations it accepts are kept.
+    """
+    declared = await hosted_providers.data_locations(organization_id=organization_id, workspace_id=workspace_id)
+
+    def declared_only(found: dict[str, tuple[str | None, ...]]) -> dict[str, tuple[str, ...]]:
+        return {name: tuple(each for each in locations if each is not None) for name, locations in found.items()}
+
+    return DataLocations(hosted=declared_only(declared.providers), regions=declared_only(declared.regions))
 
 
 async def apply_organization_pricing(

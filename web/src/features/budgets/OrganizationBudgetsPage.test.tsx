@@ -206,6 +206,38 @@ describe("OrganizationBudgetsPage", () => {
     expect(within(table).getByText("2 ceilings")).toBeInTheDocument()
   })
 
+  it("shows each budget's short id and copies the full one, for the end-user API", async () => {
+    mockApi({
+      budgets: [
+        organizationBudget(),
+        organizationBudget({
+          budget_id: "cccccccc-1111-2222-3333-555555555555",
+          name: "Support weekly",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    const table = await screen.findByRole("grid", {
+      name: "Organization budgets",
+    })
+    expect(
+      await within(table).findByRole("columnheader", { name: "ID" }),
+    ).toBeInTheDocument()
+    const first = (await within(table).findByText("bbbbbbbb")).closest("tr")!
+    const second = within(table).getByText("cccccccc").closest("tr")!
+    expect(within(first).getByText("Engineering monthly")).toBeInTheDocument()
+    expect(within(second).getByText("Support weekly")).toBeInTheDocument()
+
+    await user.click(
+      within(second).getByRole("button", { name: "Copy budget id" }),
+    )
+    expect(await navigator.clipboard.readText()).toBe(
+      "cccccccc-1111-2222-3333-555555555555",
+    )
+  })
+
   it("shows no spend column on a budget, because that figure is not the tenant's", async () => {
     // The deployment page sums `users.spend`, which is deployment-wide and has
     // no tenancy column, so the same column here would be a cross-tenant read.

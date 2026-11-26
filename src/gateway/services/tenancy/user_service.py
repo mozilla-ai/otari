@@ -51,12 +51,12 @@ below is what gives it a way to sign in.
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.address_proof import address_values, mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -74,9 +74,9 @@ from gateway.exceptions.identity_exceptions import (
     VerificationPasswordIncorrectError,
     VerificationTokenInvalidError,
 )
+from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import CallerIdentityPublic, SignInMeans, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
-from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -102,35 +102,11 @@ _EMAIL_UNIQUE_INDEX = "ix_user_email"
 # that has no password of its own to burn the cost against (resend, request a
 # reset): the value is never checked against anything, only its length and the
 # fixed bcrypt cost matter, so a constant is as good as a real one.
+# What an invitation token may establish. The port is rebindable, so a wider answer would let
+# an overlay stamp a proof from a token rather than from a mailbox.
+_INVITATION_AUTHORITIES = frozenset({AddressAuthority.MAILBOX, AddressAuthority.ORGANIZATION})
+
 _TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
-
-
-class AddressAuthority(StrEnum):
-    """What established an identity's sign-in address.
-
-    ``proves_the_holder`` is what ``email_proven_at`` records. An authority that could assert
-    any address answers false, because its word is not evidence that the holder controls it.
-    """
-
-    MAILBOX = ("mailbox", True)
-    """A link that reached the inbox, so whoever opened it receives mail at the address."""
-
-    OPERATOR = ("operator", True)
-    """Deployment authority supplied it, which sits above every organization here."""
-
-    ORGANIZATION = ("organization", False)
-    """One organization's word for an address any organization could have claimed."""
-
-    SESSION = ("session", False)
-    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
-
-    proves_the_holder: bool
-
-    def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
-        member = str.__new__(cls, value)
-        member._value_ = value
-        member.proves_the_holder = proves_the_holder
-        return member
 
 
 async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
@@ -263,14 +239,11 @@ async def set_password(
         )
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
-        _record_address(identity, now=datetime.now(UTC), authority=authority)
+        record_address(identity, now=datetime.now(UTC), authority=authority)
     elif identity.email is None:
         raise SignInAddressRequiredError
-    elif identity.hashed_password is None and identity.email_verified_at is None:
-        # A first password makes an address the identity already held usable. It
-        # establishes nothing about who receives mail there, so a proof already
-        # recorded is left alone rather than retired.
-        identity.email_verified_at = datetime.now(UTC)
+    elif identity.hashed_password is None:
+        mark_address_usable(identity, now=datetime.now(UTC))
     identity.hashed_password = await hash_password_async(new_password)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
@@ -429,7 +402,7 @@ async def create_user_for_signup(
     blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
-    proof: AddressProof | None = None,
+    proof: AddressAuthority | None = None,
 ) -> User | None:
     """Claim an identity ``organization_service`` already added to an organization, register a new
     one where the deployment allows it, or do nothing.
@@ -469,6 +442,8 @@ async def create_user_for_signup(
     no verification email is sent, so the caller can sign in at once. A shared proof leaves
     ``email_proven_at`` null, because an organization's word for an address is weaker than
     the address answering and does not satisfy every rule a proved address does.
+    An authority an invitation cannot carry is ignored, and the signup proceeds as though
+    the caller named no invitation.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -477,6 +452,8 @@ async def create_user_for_signup(
     caller tell it from the early return by response time. The account is
     durable whether or not the message goes out.
     """
+    if proof not in _INVITATION_AUTHORITIES:
+        proof = None
     mailer = Mailer(config)
     if proof is None:
         mailer.require_ready()
@@ -532,9 +509,7 @@ async def create_user_for_signup(
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
             if proof is not None:
-                values["email_verified_at"] = datetime.now(UTC)
-                if proof is AddressProof.MAILBOX:
-                    values["email_proven_at"] = datetime.now(UTC)
+                values.update(address_values(proof, now=datetime.now(UTC)))
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
@@ -646,7 +621,7 @@ async def verify_email(
         ):
             raise VerificationTokenInvalidError
 
-    _record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.MAILBOX)
+    record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.MAILBOX)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
     db.add(identity)
@@ -690,8 +665,7 @@ async def resend_verification_email(
     )
     if (
         identity is None
-        or identity.hashed_password is None
-        or identity.email_verified_at is not None
+        or identity.sign_in_means is not SignInMeans.UNVERIFIED_PASSWORD
         or not identity.is_active
         or not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup)
     ):
@@ -872,7 +846,7 @@ async def reset_password(
     identity.password_reset_token_hash = None
     identity.password_reset_token_expires_at = None
     unverified = identity.email_verified_at is None
-    _record_address(
+    record_address(
         identity,
         now=now,
         authority=AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX,
@@ -883,20 +857,6 @@ async def reset_password(
     db.add(identity)
     await db.commit()
     return identity if first_claim else None
-
-
-def _record_address(identity: User, *, now: datetime, authority: AddressAuthority) -> None:
-    """Stamp what established this identity's address, keeping a proof implied by a verification.
-
-    ``email_verified_at`` records the first verification and is never moved, so it stays the
-    date the address became usable. ``email_proven_at`` is not monotonic.
-
-    NOTE: An authority that does not prove the holder also retires an earlier proof, because
-    whoever supplied the address can sign in from here on.
-    """
-    if identity.email_verified_at is None:
-        identity.email_verified_at = now
-    identity.email_proven_at = now if authority.proves_the_holder else None
 
 
 def _schedule_account_exists_notice(

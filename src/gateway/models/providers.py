@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
 from sqlalchemy import (
     JSON,
@@ -81,15 +81,6 @@ class ModelAlias(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "target": self.target,
-            "user_id": self.user_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
 
 
 class ProviderCredential(Base):
@@ -393,6 +384,8 @@ class WorkspaceProviderPolicy(Base):
     """
 
     __tablename__ = "workspace_provider_policies"
+    # Recorded on the request's span when they change (core/change_audit.py).
+    __audited__: ClassVar[tuple[str, ...]] = ("require_zero_data_retention", "allowed_data_locations")
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True

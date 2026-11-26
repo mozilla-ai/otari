@@ -206,7 +206,6 @@ from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import REPORTED_SOURCE, ModelPricing, SettledSource
 from gateway.models.tools import (
-    CodeExecutor,
     ResolvedCodeExecutionPolicy,
     ResolvedWebSearchConfig,
     WebTool,
@@ -3378,7 +3377,6 @@ class ToolContext:
         sandbox_exec_timeout_s: int | None = None,
         sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
-        code_execution_executor: CodeExecutor | None = None,
         sandbox_container_lease: ContainerLease | None = None,
         sandbox_containers: SandboxContainerRegistry | None = None,
         web: AdmittedWebTools | None = None,
@@ -3424,10 +3422,6 @@ class ToolContext:
         self.sandbox_container_lease = sandbox_container_lease
         self.sandbox_containers = sandbox_containers
         self.container_lease: ContainerLease | None = None
-        # Who was decided to run the request's code-execution declaration, when it
-        # made one: ``OTARI`` or ``PROVIDER``, never ``AUTO``. ``None`` when the
-        # request declared no code execution at all.
-        self.code_execution_executor = code_execution_executor
         # The managed web tools admitted for the request, and what runs them.
         self.web = web if web is not None else NO_WEB_TOOLS
         # The app's client, which a provider fetch instance is called through. None outside
@@ -3526,7 +3520,6 @@ class ToolContext:
             tally=self.tally,
             trace=self.trace,
             files=self.sandbox_files,
-            files_base_url=self.sandbox_files.base_url if self.sandbox_files is not None else None,
             container=self.sandbox_container_lease,
             containers=self.sandbox_containers,
             on_lease=self._note_container_lease,
@@ -4021,7 +4014,6 @@ async def prepare_gateway_tools(
             sandbox_exec_timeout_s=code.exec_timeout_s,
             sandbox_session_image=code.session_image,
             sandbox_allowed_tools=code.allowed_tools,
-            code_execution_executor=code.executor,
             sandbox_container_lease=code.container_lease,
             sandbox_containers=code.containers,
             web=web_access,
