@@ -14,7 +14,7 @@ import {
  * may read. Explicit, because a link that names no workspace opens on the
  * shell's selection instead.
  */
-export const ALL_WORKSPACES = "all"
+const ALL_WORKSPACES = "all"
 
 const URL_DEFAULTS = {
   workspace: "",
@@ -34,7 +34,7 @@ export const workspaceSearch = (workspaceId: string) => ({
  * The workspace the URL names for a Sessions view: an id, "" for every
  * workspace, or undefined where it names none and the view follows the shell.
  */
-export function useCarriedWorkspace(): string | undefined {
+function useCarriedWorkspace(): string | undefined {
   const raw = useSearch({
     strict: false,
     select: (search: DashboardSearch) => search.workspace,
