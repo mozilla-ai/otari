@@ -7,6 +7,7 @@ import type {
   UsageEntry,
   UsageGroupRow,
   UsageSummary,
+  WorkspaceActivation,
   WorkspaceBudgetDefault,
 } from "@/client"
 import { MemberHome } from "@/features/home/MemberHome"
@@ -25,6 +26,7 @@ import {
   organizationMember,
   SURFACES,
   usageTotals,
+  workspaceActivation,
   workspaceBudgetDefault,
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
@@ -137,6 +139,7 @@ async function renderMemberHome({
   byModel = [],
   hosted = 0,
   cached = 0,
+  firstRun,
 }: {
   windowCost: number
   periodCost: number
@@ -153,6 +156,12 @@ async function renderMemberHome({
   hosted?: number
   /** The window's input tokens read from cache, of 1,000. */
   cached?: number
+  /**
+   * Wei in Platform with no key and no session yet, and what the setup guide's
+   * reads answer: the server's offer (`"pending"` never answers) and the
+   * models Wei may call.
+   */
+  firstRun?: { activation: WorkspaceActivation | "pending"; models: string[] }
 }): Promise<URL[]> {
   const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
@@ -167,17 +176,40 @@ async function renderMemberHome({
     const query = new URLSearchParams(search)
     switch (path) {
       case "/organizations/me":
-        return Response.json(AS_WEI)
+        return Response.json(
+          firstRun
+            ? {
+                ...AS_WEI,
+                workspace_memberships: [
+                  { workspace_id: PLATFORM, name: "Platform", role: "member" },
+                ],
+              }
+            : AS_WEI,
+        )
+      case `/workspaces/${PLATFORM}/activation`:
+        return firstRun?.activation === "pending"
+          ? new Promise<Response>(() => {})
+          : Response.json(firstRun?.activation ?? {})
+      case "/models":
+        return Response.json({
+          object: "list",
+          data: (firstRun?.models ?? []).map((id) => ({
+            id,
+            object: "model",
+            created: 0,
+            owned_by: "openai",
+          })),
+        })
       case "/organizations/me/members":
         return Response.json({ data: [member], count: 1 })
       case `/workspaces/${PLATFORM}/member-budget-policies`:
         return Response.json({ data: defaults, count: defaults.length })
       case "/organizations/me/keys":
-        return Response.json([LAPTOP])
+        return Response.json(firstRun ? [] : [LAPTOP])
       case "/organizations/me/usage":
         return Response.json([refusal])
       case "/organizations/me/traces/count":
-        return Response.json({ count: 3 })
+        return Response.json({ count: firstRun ? 0 : 3 })
       case "/organizations/me/usage/summary": {
         const start = query.get("start_date") ?? ""
         const isWindow =
@@ -248,7 +280,9 @@ async function renderMemberHome({
         <Provider>
           <DeploymentProvider
             value={bootstrap(
-              hasTraces ? { surfaces: [...SURFACES, "traces"] } : {},
+              hasTraces || firstRun
+                ? { surfaces: [...SURFACES, "traces"] }
+                : {},
             )}
           >
             <SelectedWorkspaceProvider>
@@ -261,6 +295,73 @@ async function renderMemberHome({
   )
   return asked
 }
+
+describe("MemberHome, on a first run", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const FIRST_RUN = "Start your first agent"
+
+  it("holds its first-run band back while the setup guide is offered", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      firstRun: {
+        activation: workspaceActivation(),
+        models: ["openai:gpt-4o-mini"],
+      },
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        asked.some((url) => url.pathname.endsWith(`${PLATFORM}/activation`)),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: FIRST_RUN })).toBeNull()
+  })
+
+  it("holds its first-run band back until the setup guide's offer answers", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      firstRun: { activation: "pending", models: ["openai:gpt-4o-mini"] },
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        asked.some((url) => url.pathname.endsWith(`${PLATFORM}/activation`)),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: FIRST_RUN })).toBeNull()
+  })
+
+  it.each([
+    [
+      "the member skipped the guide",
+      {
+        activation: workspaceActivation({
+          experience_eligible: false,
+          dismissed: true,
+        }),
+        models: ["openai:gpt-4o-mini"],
+      },
+    ],
+    [
+      "there is no model to call, so the guide holds back",
+      { activation: workspaceActivation(), models: [] },
+    ],
+  ])("shows its first-run band when %s", async (_case, firstRun) => {
+    await renderMemberHome({ windowCost: 0, periodCost: 0, firstRun })
+
+    expect(
+      await screen.findByRole("heading", { name: FIRST_RUN }),
+    ).toBeInTheDocument()
+  })
+})
 
 describe("MemberHome, by model", () => {
   afterEach(() => {

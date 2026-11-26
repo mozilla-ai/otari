@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { MailReadiness } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import {
+  readSignInReason,
+  rememberSignInReason,
+} from "@/features/auth/signInReason"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -103,6 +107,71 @@ vi.mock("@/features/auth/overlayLoginRefusalHint", () => ({
     </div>
   ),
 }))
+
+// The sign-in reason seam, passed through to the base resolver unless a test
+// stands in for an edition that resolves a reason of its own.
+const editionReason = vi.hoisted(() => ({ current: null as string | null }))
+vi.mock("@/features/auth/overlaySignInReason", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/auth/overlaySignInReason")>()
+  return {
+    useSignInReason: () => {
+      const base = actual.useSignInReason()
+      return editionReason.current ?? base
+    },
+  }
+})
+
+describe("Login, sent here for a reason", () => {
+  afterEach(() => {
+    editionReason.current = null
+  })
+
+  it.each([
+    [["password"], "One account for every model."],
+    [["master_key"], "Sign in with your master key to browse models"],
+  ] as const)(
+    "says the reason in place of the default description (%s)",
+    (signInMethods, defaultText) => {
+      rememberSignInReason("Sign in to join Acme.")
+      render(
+        <Mounted signInMethods={[...signInMethods]}>
+          <Login />
+        </Mounted>,
+      )
+
+      expect(screen.getByText("Sign in to join Acme.")).toBeInTheDocument()
+      expect(screen.queryByText(new RegExp(defaultText))).toBeNull()
+      // Not the extra status line a notice draws.
+      expect(screen.queryByRole("status")).toBeNull()
+      expect(readSignInReason()).toBeNull()
+    },
+  )
+
+  it("keeps the default description when nothing gave a reason", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("One account for every model.")).toBeInTheDocument()
+  })
+
+  it("says the reason an edition's resolver gives", () => {
+    editionReason.current = "Sign in to finish your subscription."
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText("Sign in to finish your subscription."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("One account for every model.")).toBeNull()
+  })
+})
 
 describe("Login", () => {
   it("leaves the edition's region choice to the page's header, not the card", () => {

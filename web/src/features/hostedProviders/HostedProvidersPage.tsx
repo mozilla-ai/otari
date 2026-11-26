@@ -30,6 +30,7 @@ import {
   PlatformConnect,
 } from "@/features/providers/PlatformConnect"
 import { SecretKeyMissingBanner } from "@/features/providers/SecretKeyMissingBanner"
+import { OWN_KEYS, useWelcomeAnswer } from "@/features/welcome/welcomeAnswer"
 import { ApiError } from "@/shared/api/client"
 import { useDeploymentAdminAccess } from "@/shared/api/deployment"
 import {
@@ -304,6 +305,9 @@ export function HostedProvidersPage() {
   // shown on a page that was reloaded, without the operator asking for it.
   const connectStatus = usePlatformConnectStatus(isGranted && isConnectOffered)
   const [isConnectOpen, setIsConnectOpen] = useState(false)
+  // Skipping the welcome takes otari.ai out of the empty page's first-run
+  // panel, so the header keeps offering it there.
+  const answeredOwnKeys = useWelcomeAnswer() === OWN_KEYS
   const update = useUpdateHostedProvider()
   const remove = useDeleteHostedProvider()
   const catalogUpdate = useHostedCatalogUpdate()
@@ -393,6 +397,8 @@ export function HostedProvidersPage() {
   // would tell an operator their live providers are gone.
   const isEmpty =
     !providers.error && !providers.isPending && tableRows.length === 0
+  const isConnectInHeader =
+    isConnectOffered && (tableRows.length > 0 || answeredOwnKeys)
 
   const hostedColumns: DataTableColumn<HostedProvider>[] = [
     {
@@ -508,7 +514,7 @@ export function HostedProvidersPage() {
               <FiRefreshCw aria-hidden className="size-4" />
               Update catalog
             </Button>
-            {isConnectOffered && tableRows.length > 0 ? (
+            {isConnectInHeader ? (
               <Button
                 className="min-h-11 md:min-h-9"
                 isDisabled={isKeyEncryptionMissing}
@@ -549,6 +555,19 @@ export function HostedProvidersPage() {
         />
       ) : null}
 
+      {isConnectInHeader &&
+      !isKeyEncryptionMissing &&
+      (isConnectOpen || connectStatus.data?.status === "pending") ? (
+        <section
+          aria-label="Connect otari.ai"
+          className="mb-4 border border-border p-4"
+        >
+          <PlatformConnect
+            // The empty page's own route to the setup guide, as the panel's.
+            onConnected={isEmpty ? () => void navigate({ to: "/" }) : undefined}
+          />
+        </section>
+      ) : null}
       {isEmpty ? (
         <OnboardingPanel
           onAddProvider={openAdd}
@@ -569,17 +588,6 @@ export function HostedProvidersPage() {
         />
       ) : (
         <>
-          {isConnectOffered &&
-          tableRows.length > 0 &&
-          !isKeyEncryptionMissing &&
-          (isConnectOpen || connectStatus.data?.status === "pending") ? (
-            <section
-              aria-label="Connect otari.ai"
-              className="mb-4 border border-border p-4"
-            >
-              <PlatformConnect />
-            </section>
-          ) : null}
           {tableRows.length > 0 && health.data && health.data.total > 0 ? (
             <HealthSummary
               healthy={health.data.healthy}

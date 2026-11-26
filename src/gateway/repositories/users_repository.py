@@ -119,6 +119,17 @@ async def get_or_create_attribution_user(db: AsyncSession, *, user_id: str, alia
         return await _revive(winner)
 
 
+async def is_attribution_user_revoked(db: AsyncSession, user_id: str) -> bool:
+    """Whether the request-plane owner a tenancy identity bills through exists and is soft-deleted.
+
+    That is the operator's revocation of the identity's spend, which
+    :func:`get_or_create_attribution_user` would undo by reviving the row, so a
+    member's own key surface asks this first and refuses.
+    """
+    deleted_at = (await db.execute(select(User.deleted_at).where(User.user_id == user_id))).scalar_one_or_none()
+    return deleted_at is not None
+
+
 async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
     """Return which of ``user_ids`` name a usable request-plane owner.
 

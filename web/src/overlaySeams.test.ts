@@ -34,6 +34,7 @@ const SEAM_MODULES = [
   "features/auth/overlayAuthShellSlot.tsx",
   "features/auth/overlayLoginRefusalHint.tsx",
   "features/auth/overlayPublicAuthFields.tsx",
+  "features/auth/overlaySignInReason.ts",
   "features/home/overlayHomeAccount.tsx",
   "features/playground/overlayErrorAction.tsx",
   "shared/api/overlayRequestPolicy.ts",

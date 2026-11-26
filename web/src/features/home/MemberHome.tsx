@@ -53,7 +53,9 @@ import {
 import { TopModelCell } from "@/features/usage/TopModelCell"
 import { billedTokenTotal, cacheSums } from "@/features/usage/usageTotals"
 import { useTopModels } from "@/features/usage/useTopModels"
+import { useWorkspaceActivation } from "@/shared/api/activation"
 import { useKeys } from "@/shared/api/apiKeys"
+import { useModels } from "@/shared/api/models"
 import { useOrganizationMembers } from "@/shared/api/organizations"
 import { useTraceCount } from "@/shared/api/traces"
 import { useRefusedUsage, useUsageSummary } from "@/shared/api/usage"
@@ -216,6 +218,20 @@ export function MemberHome({
     graphic ?? (hasGraphicRow ? <span aria-hidden /> : undefined)
   const isFirstRun =
     !keys.isLoading && !hasActiveKey(keys.data ?? [], now) && sessionCount === 0
+  // While the setup guide is offered to this member it is their first run, so
+  // the band below stays away: the same reads the guide opens on (the layout
+  // mounts it over Home), a model to call and the server's offer.
+  const asksGuide = isFirstRun && canCreateKey
+  const activation = useWorkspaceActivation(workspaceId, asksGuide, {
+    poll: false,
+  })
+  const models = useModels(asksGuide, workspaceId)
+  const isGuideOffered =
+    activation.data?.experience_eligible === true &&
+    (models.data?.data.length ?? 0) > 0
+  // Until both answer, the band could flash in and out under the guide.
+  const isGuideSettled =
+    !asksGuide || (!activation.isPending && !models.isPending)
   const mySessions = {
     ...sessionsSearchFor(window),
     ...(me ? { user_id: me } : {}),
@@ -454,7 +470,7 @@ export function MemberHome({
       <ErrorBanner error={spend.error} />
       {/* Needs attention (`MemberAttentionBand`) is held back until it reads
           each row's scope right; only the first-run band shows here. */}
-      {isFirstRun ? (
+      {isFirstRun && isGuideSettled && !isGuideOffered ? (
         <MemberFirstRun workspace={workspace} canCreateKey={canCreateKey} />
       ) : null}
       <KpiStrip isEmpty={false} columns={4}>

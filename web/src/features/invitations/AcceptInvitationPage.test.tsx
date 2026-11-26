@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { InvitationPreview, MailReadiness } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { readSignInAddress } from "@/features/auth/signInAddress"
+import {
+  forgetSignInReason,
+  readSignInReason,
+} from "@/features/auth/signInReason"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { currentRoute } from "@/shared/helpers/appLocation"
@@ -39,6 +43,7 @@ function mockApi(opts: {
   sessionEmail?: string
   /** A status the profile read fails with instead. */
   profileStatus?: number
+  organizationName?: string
 }) {
   const accepted: unknown[] = []
   const nextStep = opts.nextStep ?? "sign_in"
@@ -55,7 +60,7 @@ function mockApi(opts: {
       }
       return {
         email: "ada@example.com",
-        organization_name: "Acme",
+        organization_name: opts.organizationName ?? "Acme",
         role: "admin",
         expires_at: "2026-01-08T00:00:00+00:00",
         next_step: nextStep,
@@ -92,7 +97,7 @@ function mockApi(opts: {
             ? "use_another_way_in"
             : nextStep
       return {
-        organization_name: "Acme",
+        organization_name: opts.organizationName ?? "Acme",
         role: "admin",
         next_step: acceptStep,
         ways_in: waysInFor(acceptStep),
@@ -187,6 +192,24 @@ describe("AcceptInvitationPage", () => {
     ).toBeNull()
     await user.click(screen.getByRole("button", { name: "Go to sign in" }))
     expect(currentRoute()).toBe("/")
+    expect(readSignInReason()).toBe("Sign in to join Acme.")
+    forgetSignInReason()
+  })
+
+  it("gives the sign-in screen a reason that does without an organization name", async () => {
+    mockApi({ organizationName: "" })
+    const user = userEvent.setup()
+    renderPage("/accept-invitation?token=abc123")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Accept invitation" }),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Go to sign in" }),
+    )
+
+    expect(readSignInReason()).toBe("Sign in to accept your invitation.")
+    forgetSignInReason()
   })
 
   it("names the provider where this deployment cannot mail a link", async () => {

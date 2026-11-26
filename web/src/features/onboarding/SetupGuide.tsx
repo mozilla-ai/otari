@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ActivationIssuedKey, WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
+import { canManageWorkspace } from "@/features/organization/roles"
 import {
   useCreateActivationKey,
   useDismissActivation,
   useWorkspaceActivation,
 } from "@/shared/api/activation"
 import { useModels } from "@/shared/api/models"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
@@ -23,15 +25,17 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
  * **A sheet over the page, not a panel on it.** A dashboard whose workspace has
  * never served a request has nothing on it worth reading, so the guide takes
  * the screen the way the platform's flow did, and is offered once: every way
- * out, Skip or a link to another page, retires it for the workspace. It composes with the Overview's own
+ * out, Skip or a link to another page, retires it for whoever it was offered
+ * to (the workspace, or one member). It composes with the Overview's own
  * getting-started panel rather than competing with it: that one is shown while
  * the gateway has no provider, when a request cannot succeed yet, and this one
  * takes over once one exists.
  *
  * **Offered on either Overview.** Who may be offered it is the server's answer
- * (`experience_eligible`, which ends in `has_workspace_management_access`), so
- * it goes to whoever manages the workspace: on a multi-tenant deployment a
- * tenant, and not the person who operates the deployment.
+ * (`experience_eligible`): whoever manages the workspace, for the workspace's
+ * first request (on a multi-tenant deployment a tenant, and not the person who
+ * operates the deployment), and a member who may run requests there, for their
+ * own. Member Home holds its own first-run band back while it is offered.
  *
  * Mounted from the Overview rather than from the shell, which is where
  * `canServeRequests` is answered and where a new operator lands.
@@ -60,8 +64,15 @@ export function SetupGuide({
   // route to this would be handing out a key for a call that cannot succeed, and
   // on the operator page the getting-started panel is the right guide instead.
   const activation = useWorkspaceActivation(workspaceId, canServeRequests)
+  const context = useOrganizationContext().data
+  // Offered for their own first request in a workspace other people already
+  // use, so the sheet leaves out what only holds for its managers.
+  const isMember =
+    context !== undefined && !canManageWorkspace(context, selected?.role)
 
-  if (!workspaceId || !activation.data) {
+  // Checked here too, not only through `enabled`: another reader of the same
+  // query (the update-check prompt) can fill the cache this observer sees.
+  if (!canServeRequests || !workspaceId || !activation.data) {
     return null
   }
 
@@ -73,6 +84,7 @@ export function SetupGuide({
       key={workspaceId}
       workspaceId={workspaceId}
       workspaceName={selected?.name}
+      isMember={isMember}
       activation={activation.data}
       checkFailed={activation.isError}
       onCheckNow={() => activation.refetch()}
@@ -87,12 +99,14 @@ function keyFingerprint({ key_prefix, key_suffix }: ActivationIssuedKey) {
 function SetupFlow({
   workspaceId,
   workspaceName,
+  isMember,
   activation: data,
   checkFailed,
   onCheckNow,
 }: {
   workspaceId: string
   workspaceName?: string
+  isMember: boolean
   activation: WorkspaceActivation
   checkFailed: boolean
   /** Resolves when the re-check lands, so the control can report it. */
@@ -218,6 +232,7 @@ function SetupFlow({
           ? setupFailureCopy(data.latest_attempt.error_category)
           : undefined
       }
+      isMember={isMember}
       attemptAt={
         data.status === "failed" ? data.latest_attempt?.occurred_at : undefined
       }
