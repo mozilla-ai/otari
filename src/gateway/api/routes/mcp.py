@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
+    McpToolListingsDep,
     WorkspaceMcpServersDep,
     get_config,
     get_db,
@@ -121,8 +122,6 @@ from gateway.types.key_scope import KeyScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
-
-    from fastapi import Response
 
     from gateway.models.mcp import ResolvedMcpServer
 
@@ -674,13 +673,19 @@ async def list_mcp_tools(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     servers: WorkspaceMcpServersDep,
+    listings: McpToolListingsDep,
+    http_response: Response,
 ) -> McpToolsResponse:
     """List the tools a stored MCP server exposes to the authenticated workspace.
 
-    Call this once per server when preparing a model or workflow run, and reuse
-    the answer for every tool from that server for the length of the run: there
-    is no cross-run cache in this version, so a later run rediscovers and
-    staleness stays bounded without any invalidation state to keep.
+    Otari keeps each server's own tool listing for up to five minutes and answers
+    from it, so calling this at the start of every run costs no connection to the
+    server. The `Age` response header says how many seconds old the listing is,
+    and `Cache-Control: no-cache` on the request asks the server again. A kept
+    listing is never served across an edit to the server (its `server_revision`
+    changes) or to a different credential, so each user of a per-user server is
+    answered from a listing read with their own token. The key's access rule is
+    applied on every call, never kept.
 
     The response is the whole authorized catalog or an error. It is never
     partial, because a caller would read a short catalog as the complete input
@@ -715,11 +720,16 @@ async def list_mcp_tools(
             patterns = _caller_patterns(principal, server)
             try:
                 catalog = await discover_stored_tools(
-                    server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
+                    server,
+                    lambda name: is_mcp_tool_allowed(patterns, name),
+                    contacts=mcp_server_contacts,
+                    listings=listings,
+                    refresh=_asks_to_revalidate(raw_request),
                 )
             except McpExecutionError as failed:
                 raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
             visible, warnings = catalog.tools, catalog.warnings
+            http_response.headers["Age"] = str(int(catalog.age_s))
 
             response = McpToolsResponse(
                 server_id=server.id,
@@ -760,14 +770,23 @@ async def list_mcp_tools(
         raise
 
     logger.info(
-        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
+        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d age_s=%d duration_ms=%.2f",
         getattr(raw_request.state, "otari_request_id", "-"),
         mcp_server_id,
         len(visible),
         len(warnings),
+        int(catalog.age_s),
         (time.monotonic() - started) * 1000,
     )
     return response
+
+
+def _asks_to_revalidate(request: Request) -> bool:
+    """Whether the request's ``Cache-Control`` carries ``no-cache`` or ``max-age=0``."""
+    directives = {
+        directive.strip().lower().replace(" ", "") for directive in request.headers.get("cache-control", "").split(",")
+    }
+    return "no-cache" in directives or "max-age=0" in directives
 
 
 @router.post(
