@@ -1086,6 +1086,8 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     __tablename__ = "workspace"
     __table_args__ = (
         UniqueConstraint("organization_id", "name", name="uq_workspace_organization_name"),
+        # The target of composite foreign keys that tie a row's organization to its workspace's.
+        Index("uq_workspace_organization_id", "organization_id", "id", unique=True),
         CheckConstraint(
             "activation_classification IN ('eligible', 'internal', 'automated', 'migrated', 'enterprise_assisted')",
             name="check_workspace_activation_classification",

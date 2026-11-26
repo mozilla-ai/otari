@@ -627,7 +627,11 @@ async def test_a_member_sees_the_tools_their_own_rule_admits(
 
     await _sign_in(async_db, config, world, world.member)
     await WorkspaceMcpServerGrantRepository(async_db).put(
-        world.server.id, api_key_ids=[], user_ids=[str(world.member.id)], tools=["delete_file"]
+        await _row(async_db, world.server.id),
+        workspace_id=world.workspace.id,
+        api_key_ids=[],
+        user_ids=[str(world.member.id)],
+        tools=["delete_file"],
     )
     await async_db.commit()
     own = await service.my_tools(user=world.member, **ids)

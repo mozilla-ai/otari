@@ -2901,6 +2901,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/mcp_sign_in_link_use_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.McpServerAlias": {
+        "repository": "gateway/repositories/tools/mcp_server_alias_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.McpServerRequest": {
         "repository": "gateway/repositories/tools/mcp_server_request_repository.py",
         "baseline": (),
@@ -2934,6 +2938,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.WorkspaceMcpServerLogo": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_logo_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.WorkspaceMcpServerOverride": {
+        "repository": "gateway/repositories/tools/workspace_mcp_server_override_repository.py",
         "baseline": (),
     },
     "gateway.models.tools.WorkspaceWebSearchConfig": {
