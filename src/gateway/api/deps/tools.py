@@ -106,6 +106,7 @@ from gateway.services.tools import (
     DirectToolRate,
     DirectToolService,
     DirectToolUsage,
+    McpToolListings,
     McpUserTokens,
     McpWorkspaceServers,
     OrganizationMcpServerWorkspaceService,
@@ -205,6 +206,15 @@ async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]
 
 
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
+
+
+def get_mcp_tool_listings(request: Request) -> McpToolListings | None:
+    """The app's kept MCP tool listings, or ``None`` outside the app's lifespan, where discovery keeps nothing."""
+    listings: McpToolListings | None = getattr(request.app.state, "mcp_tool_listings", None)
+    return listings
+
+
+McpToolListingsDep = Annotated[McpToolListings | None, Depends(get_mcp_tool_listings)]
 
 
 def get_web_provider_client(request: Request) -> httpx.AsyncClient:

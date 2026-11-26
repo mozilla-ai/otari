@@ -3204,10 +3204,14 @@ export interface paths {
          * List Mcp Tools
          * @description List the tools a stored MCP server exposes to the authenticated workspace.
          *
-         *     Call this once per server when preparing a model or workflow run, and reuse
-         *     the answer for every tool from that server for the length of the run: there
-         *     is no cross-run cache in this version, so a later run rediscovers and
-         *     staleness stays bounded without any invalidation state to keep.
+         *     Otari keeps each server's own tool listing for up to five minutes and answers
+         *     from it, so calling this at the start of every run costs no connection to the
+         *     server. The `Age` response header says how many seconds old the listing is,
+         *     and `Cache-Control: no-cache` on the request asks the server again. A kept
+         *     listing is never served across an edit to the server (its `server_revision`
+         *     changes) or to a different credential, so each user of a per-user server is
+         *     answered from a listing read with their own token. The key's access rule is
+         *     applied on every call, never kept.
          *
          *     The response is the whole authorized catalog or an error. It is never
          *     partial, because a caller would read a short catalog as the complete input

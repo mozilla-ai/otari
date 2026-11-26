@@ -217,6 +217,7 @@ from gateway.services.tools import (
     SANDBOX_KEY_ENV,
     AttachedMcpServerIndex,
     LegacySearchValues,
+    McpToolListings,
     build_web_provider_client,
     load_sandbox_credentials_at_startup,
     register_builtin_fetcher,
@@ -1389,6 +1390,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # refused start never leaves one open. One per app: web tools, the search
             # endpoint and the connection tests call their providers through it.
             app.state.web_provider_client = build_web_provider_client()
+            # Per lifespan, so a restarted app never serves a listing its last run kept.
+            app.state.mcp_tool_listings = McpToolListings()
             # In the background, so a slow key source never holds the boot.
             if config.trace_capture_enabled and config.trace_content_enabled:
                 content_check = asyncio.create_task(_check_trace_content(app.state.trace_content))
