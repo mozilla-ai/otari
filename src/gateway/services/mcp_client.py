@@ -504,7 +504,7 @@ class MCPClientPool:
         started = datetime.now(UTC)
         try:
             result = await self._servers[owner].session.call_tool(name, arguments)
-        except Exception:
+        except Exception as exc:
             if self._tally is not None:
                 self._tally.record_failure(name)
             self._spans.record(
@@ -514,6 +514,7 @@ class MCPClientPool:
                 tool_name=name,
                 mcp_server=owner,
                 mcp_server_id=self._servers[owner].stored_server_id,
+                error_type=failure_class(exc),
             )
             raise
         self._spans.record(
