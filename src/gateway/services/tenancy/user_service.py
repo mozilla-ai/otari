@@ -410,10 +410,11 @@ async def create_user_for_signup(
     submission: SignupSubmission,
     uow: UnitOfWork,
 ) -> User | None:
-    """Claim an identity ``organization_service`` already added to an organization, register a new
-    one where the deployment allows it, or do nothing.
+    """Claim an identity ``organization_service`` already added to an organization, create the one
+    an invitation allows, register a new one where the deployment allows it, or do nothing.
 
-    Which of the three depends on ``open_signup`` (otari-ai#2100). Off, the
+    An invitation that allows an account answers ahead of the other three, which depend on
+    ``open_signup`` (otari-ai#2100). Off, the
     default and the single-tenant posture, this only ever completes an identity
     an admin already added or invited by address (password-less, per
     ``organization_service``'s own docstrings) and creates nothing from nothing,
@@ -429,7 +430,7 @@ async def create_user_for_signup(
     An unknown address is registered where ``open_signup`` is on, and refused otherwise.
     An identity ``unverified_identity_is_claimable`` refuses is refused too.
     So is an address the deployment's email blocklist matches, before its identity is looked up.
-    An invitation entitling the address answers ahead of both of those rules.
+    An invitation that allows an account for the address answers ahead of both of those rules.
     A verified address is refused because a password set on it would sign in with no proof of the mailbox.
     A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
     ``password`` is validated before the lookup, so a policy violation answers the same for every address.
@@ -448,7 +449,8 @@ async def create_user_for_signup(
     none. Where ``invites`` allows an account for it, the address is recorded as proved by the
     mailbox the link reached, no verification email is sent, and the caller can sign in at once.
     That answer is read in the transaction that writes the account, so the two commit together.
-    Such an account belongs to no organization of its own until the invitation is accepted.
+    Such an account founds no organization of its own. The invitation grants its membership
+    when it is accepted.
 
     NOTE: The answer is read without locking the invitation, so a cancellation committed between
     the read and the write is not seen. The window is this transaction's own remaining work.

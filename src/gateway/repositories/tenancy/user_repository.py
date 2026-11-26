@@ -131,7 +131,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         """Stage an identity for this address, or return None if an identity already holds it.
 
         A taken address leaves the transaction usable. An identity staged with no organization
-        belongs to none until something grants it a membership.
+        acts in none until something sets one.
 
         NOTE: A NULL address never conflicts in the unique index, so passing none always succeeds.
         """

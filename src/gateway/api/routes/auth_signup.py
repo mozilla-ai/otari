@@ -5,11 +5,13 @@ routes: the person completing signup or opening a verification link holds no
 master key and no session yet, and the token or address in the request is
 their whole proof of anything here.
 
-What signup may do depends on ``open_signup``. Off, the default, it only ever
-claims an identity ``organization_service`` already put on the roster (an admin
-added or invited the address) and creates nothing from nothing. On, an address
-nobody has added is registered instead, with an organization of its own. See
-``user_service.create_user_for_signup``'s own docstring for both.
+What signup may do depends on the invitation the request names and on
+``open_signup``. An invitation that allows an account creates one whatever that
+setting says. With no invitation and the setting off, the default, signup only
+ever claims an identity an admin already added or invited by address, and
+creates nothing from nothing. With it on, an address nobody has added is
+registered instead, with an organization of its own. See
+``user_service.create_user_for_signup``'s own docstring.
 
 Either way it is enumeration-safe the same way resend and reset-request are: the
 response never says whether the address was unknown, already claimed, or
