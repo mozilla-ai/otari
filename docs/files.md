@@ -379,8 +379,9 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
   deleted, so a workspace makes room by deleting files or waiting for them to
   expire. Usage is read before the bytes flow, so uploads running at the same
   time can each take the room that was left: N of them can together store up
-  to N times that room. Treat the limits as a bound on steady-state storage,
-  not an exact quota.
+  to N times that room. The limits bound the files a workspace holds, not an
+  exact quota, and not physical storage: a deleted or expired file stops
+  counting at once, but its bytes stay until the sweep reclaims them.
   `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
   below keeps reclaiming expired and deleted files. With it off, a backend that
   cannot be built (an `s3` backend with no bucket, say) is logged at startup
