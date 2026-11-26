@@ -320,7 +320,8 @@ async def test_call_tool_sanitizes_transport_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("https://internal.test/?token=secret")))
-    pool = MCPClientPool([])
+    trace = SimpleNamespace(record_tool_call=Mock())
+    pool = MCPClientPool([], trace=cast(Any, trace))
     pool._servers["fixture"] = _ConnectedServer(
         name="fixture",
         session=cast(Any, session),
@@ -338,6 +339,8 @@ async def test_call_tool_sanitizes_transport_failure(
     assert warnings == [("MCP tool %s execution failed: %s", "lookup", "RuntimeError")]
     assert "internal.test" not in str(warnings)
     assert "secret" not in str(warnings)
+    # The span names the failure by its class, never its message.
+    assert trace.record_tool_call.call_args.kwargs["error_type"] == "RuntimeError"
 
 
 @pytest.mark.asyncio

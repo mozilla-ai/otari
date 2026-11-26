@@ -68,6 +68,10 @@ class WebToolFailure:
         """The four fields as Chat Completions' ``otari_tool_calls`` entries carry them, ``None`` kept."""
         return asdict(self)
 
+    def as_span_error(self) -> dict[str, Any]:
+        """The fields a failed call's tool span records: the tag as its error type, the status and the provider."""
+        return {"error_type": self.tag, "error_status": self.status, "error_provider": self.provider}
+
     def as_headers(self) -> dict[str, str]:
         """The four fields as the direct endpoint's 502 headers; ``retryable`` is ``true`` or ``false``."""
         headers = {ERROR_TAG_HEADER: self.tag, ERROR_RETRYABLE_HEADER: "true" if self.retryable else "false"}

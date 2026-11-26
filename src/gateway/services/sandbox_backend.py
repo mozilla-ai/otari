@@ -624,11 +624,11 @@ class SandboxBackend:
             return TOOL_BUDGET_EXCEEDED_TEXT
         try:
             result, block, file_ids = await self._exec_tool(code, language)
-        except Exception:
+        except Exception as exc:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
-            self._spans.record(started, ok=False, arguments=arguments)
+            self._spans.record(started, ok=False, arguments=arguments, error_type=type(exc).__name__)
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
