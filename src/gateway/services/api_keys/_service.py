@@ -262,6 +262,7 @@ class ApiKeyService:
         *,
         owner_id: str,
         organization_id: uuid.UUID | None = None,
+        key_slugs: Collection[str] = (),
     ) -> None:
         """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
 
@@ -285,6 +286,7 @@ class ApiKeyService:
                 owner_id=owner_id,
                 workspace_id=key.workspace_id,
                 organization_id=organization_id,
+                key_slugs=key_slugs,
             )
             for column, value in changes.items():
                 setattr(key, column, value)
@@ -300,6 +302,7 @@ class ApiKeyService:
         owner_id: str | None,
         workspace_id: uuid.UUID | None = None,
         organization_id: uuid.UUID | None = None,
+        key_slugs: Collection[str] = (),
     ) -> AccessLists:
         """The ``allowed_models`` and ``allowed_tools`` to store on a key or a user, each checked only if it changes.
 
@@ -310,7 +313,8 @@ class ApiKeyService:
         for the offerings the owner may use. The owner is read in a block of its own,
         whose commit would also store what the caller had staged, so a route calls
         this first. ``workspace_id`` or ``organization_id`` names whose catalog a
-        catalog ID in a changed list is read from.
+        catalog ID in a changed list is read from, and ``key_slugs`` the slugs of
+        that organization's keys, which an entry may name.
 
         Raises:
             ValueError: a changed list names something unknown, or grants more than the owner's.
@@ -328,6 +332,7 @@ class ApiKeyService:
                 workspace_id=workspace_id,
                 organization_id=organization_id,
                 within=owner.models if owner is not None else None,
+                key_slugs=key_slugs,
             )
             if models_changed
             else stored.models,
