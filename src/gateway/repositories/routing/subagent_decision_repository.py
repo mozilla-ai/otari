@@ -4,28 +4,33 @@ Built on the Unit of Work. Flushes, never commits.
 """
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Never
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import case, func, select
 
-from gateway.core.sql import BucketGrain, bucket_expr, canonical_bucket, dialect_name, utc_bound
+from gateway.core.sql import (
+    BucketGrain,
+    WorkspaceIds,
+    bucket_expr,
+    canonical_bucket,
+    dialect_name,
+    in_workspaces,
+    utc_bound,
+)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.routing import SUBAGENT_OUTCOME_ESTIMATED, SUBAGENT_OUTCOME_MEASURED, SubagentDecision
 from gateway.repositories.base_repository import BaseRepository
-
-Workspaces = Collection[uuid.UUID] | Select[uuid.UUID]
-"""The workspaces a read may cover: their ids, or a subquery selecting them."""
 
 
 @dataclass(frozen=True)
 class DecisionWindow:
     """The decisions a read covers. ``workspaces`` comes from the caller's scope, never from a client filter."""
 
-    workspaces: Workspaces
+    workspaces: WorkspaceIds
     start: datetime
     end: datetime
     user_ids: Sequence[str] | None = None
@@ -146,7 +151,7 @@ class SubagentDecisionRepository(BaseRepository[SubagentDecision, Never, Never])
     ) -> list[DecisionSums]:
         """The sums of the window's decisions per distinct value of ``groups``, or one row for none."""
         statement = select(*groups, *_SUMS).where(
-            SubagentDecision.workspace_id.in_(_ids(window.workspaces)),
+            in_workspaces(SubagentDecision.workspace_id, window.workspaces),
             SubagentDecision.created_at >= utc_bound(window.start),
             SubagentDecision.created_at < utc_bound(window.end),
         )
@@ -163,10 +168,6 @@ class SubagentDecisionRepository(BaseRepository[SubagentDecision, Never, Never])
             DecisionSums(tuple(row[:width]), *(_number(value) for value in row[width:]))
             for row in (await self.db.execute(statement)).all()
         ]
-
-
-def _ids(workspaces: Workspaces) -> Any:
-    return workspaces if isinstance(workspaces, Select) else sorted(workspaces)
 
 
 def _number(value: Any) -> Any:
