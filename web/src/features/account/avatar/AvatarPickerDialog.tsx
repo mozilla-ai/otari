@@ -6,6 +6,7 @@ import { Dialog } from "@/design-system/feedback/Dialog"
 
 import { AvatarField, FIELD_FACES } from "./AvatarField"
 import { sampleFaces } from "./faces"
+import { playPickerSound } from "./sounds"
 
 /**
  * A fresh deal of faces for the field, with `keep` in the slot it had (or the
@@ -37,16 +38,25 @@ export function AvatarPickerDialog({
   const [draft, setDraft] = useState(initial)
   const [order, setOrder] = useState(() => deal(initial))
 
+  // Cancel, the close control, Escape and a backdrop press all leave the same way.
+  const dismiss = () => {
+    playPickerSound("cancel")
+    onOpenChange(false)
+  }
+
   return (
     <Dialog
       isOpen={isOpen}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => (next ? onOpenChange(true) : dismiss())}
       title="Choose an avatar"
       description="Shown beside your name in the sidebar. Drag to see more."
       footerStart={
         <Button
           size="sm"
-          onPress={() => setOrder((previous) => deal(draft, previous))}
+          onPress={() => {
+            playPickerSound("shuffle")
+            setOrder((previous) => deal(draft, previous))
+          }}
         >
           <FiShuffle aria-hidden className="h-3.5 w-3.5" />
           Shuffle
@@ -54,13 +64,14 @@ export function AvatarPickerDialog({
       }
       actions={
         <>
-          <Button size="sm" onPress={() => onOpenChange(false)}>
+          <Button size="sm" onPress={dismiss}>
             Cancel
           </Button>
           <Button
             size="sm"
             variant="primary"
             onPress={() => {
+              playPickerSound("save")
               onSave(draft)
               onOpenChange(false)
             }}
