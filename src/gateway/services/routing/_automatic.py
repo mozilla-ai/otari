@@ -45,6 +45,10 @@ _MISSING_MODEL = re.compile(
     r"|(do not|don't) have access to (the )?model|model not found",
     re.IGNORECASE | re.DOTALL,
 )
+# A 404 naming something the request referenced, such as a previous response or an uploaded file, is not the model's.
+_REQUEST_RESOURCE = re.compile(
+    r"\b(file|batch|response|conversation|thread|vector[ _]store|container)s?\b", re.IGNORECASE
+)
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
 _ACCOUNT_FIELDS = frozenset(
     {
@@ -218,7 +222,7 @@ class AutomaticObservation:
         now = router.clock()
         if missing:
             unhealthy = account = False
-            router.remember_missing(self.selection.tenant, self.key)
+            router.remember_missing(self.selection.tenant, self.selection.mode, self.key)
             self.selection.forget_key(self.key)
         # A failed credential is the account's, not the offering's: it cools the account alone.
         credential = account and unhealthy
@@ -239,7 +243,7 @@ class AutomaticObservation:
             router.cool_account(self.account, now)
         elif success:
             router.accounts.pop(self.account, None)
-            router.missing.pop(router._digest(("missing", self.selection.tenant, self.key)), None)
+            router.missing.pop(router._digest(("missing", self.selection.tenant, self.selection.mode, self.key)), None)
         if unhealthy:
             self.selection.forget_key(self.key)
         if success and self.selection.affinity:
@@ -290,14 +294,20 @@ class AutomaticRouter:
     def is_missing_model(exc: BaseException) -> bool:
         """Whether the provider does not serve the model on this credential: a 404, or a 400 or 403 saying so.
 
+        A 404 counts unless it names something the request referenced and not the model.
         A status the gateway raised itself is never the provider's.
         """
         if isinstance(exc, HTTPException):
             return False
         status_code = upstream_exception_shape(exc)[1]
-        if status_code == 404:
+        if status_code not in (400, 403, 404):
+            return False
+        message = upstream_error_message(exc)
+        if _MISSING_MODEL.search(message):
             return True
-        return status_code in (400, 403) and _MISSING_MODEL.search(upstream_error_message(exc)) is not None
+        if status_code != 404:
+            return False
+        return re.search(r"\bmodel", message, re.IGNORECASE) is not None or not _REQUEST_RESOURCE.search(message)
 
     def account_key(self, attempt: Attempt, tenant: str = "") -> str:
         """Identify the credential an attempt is sent on, whatever model it names, for one ``tenant``.
@@ -323,13 +333,13 @@ class AutomaticRouter:
         while len(self.refusals) > _LIMIT:
             self.refusals.popitem(last=False)
 
-    def remember_missing(self, tenant: str, candidate: str) -> None:
-        """Record that the offering ``candidate`` identifies, on its credential, does not serve ``tenant``.
+    def remember_missing(self, tenant: str, mode: str, candidate: str) -> None:
+        """Record that the offering ``candidate`` identifies, on its credential, does not serve ``tenant`` in ``mode``.
 
         Refused for an hour, then three, then twelve while it is still missing each time a refusal lapses.
         A failure during a refusal restarts it at the same length; one long after it lapsed starts over.
         """
-        key = self._digest(("missing", tenant, candidate))
+        key = self._digest(("missing", tenant, mode, candidate))
         now = self.clock()
         previous = self.missing.pop(key, None)
         step = 0
@@ -394,7 +404,7 @@ class AutomaticRouter:
             account = self.accounts.get(self.account_key(attempt, tenant))
             if (health and health.cooldown > now) or (account and account[0] > now):
                 cooling.add(selector)
-            missing = self.missing.get(self._digest(("missing", tenant, keys[selector])))
+            missing = self.missing.get(self._digest(("missing", tenant, mode, keys[selector])))
             if self.refusals.get(self._digest((scope, selector)), 0) > now or (missing and missing[0] > now):
                 refused.add(selector)
         affinity = self._digest((scope, plan.policy_name, anchor)) if anchor else None

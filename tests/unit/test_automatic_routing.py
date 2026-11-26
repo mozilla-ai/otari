@@ -733,6 +733,9 @@ def test_a_model_the_credential_does_not_serve_ranks_last_for_its_tenant_for_an_
         (403, "You do not have access to model `deepseek-ai/DeepSeek-V4-Flash-0731`.", True),
         (404, "Model not found, inaccessible, and/or not deployed", True),
         (403, "Model example is not accessible on this account", True),
+        (404, "model: claude-example", True),
+        (404, "Previous response with id 'resp_123' not found.", False),
+        (404, "No such File object: file-abc123", False),
         (400, "max_tokens is too large for this model", False),
         (403, "Invalid API key", False),
         (503, "The model is overloaded", False),
@@ -822,3 +825,12 @@ def test_a_model_missing_again_long_after_starts_over(router: AutomaticRouter, n
     assert plan.automatic is not None
     plan.automatic.start(plan.head).finish(missing=True)
     assert next(iter(router.missing.values()))[0] - now[0] == pytest.approx(3600)
+
+
+def test_a_missing_model_is_remembered_per_endpoint(router: AutomaticRouter) -> None:
+    """A model one API lacks is not ranked last for another API the offering still serves."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    assert _rank(router, tenant="workspace-a", mode="responses:completion").head.instance == "us"
