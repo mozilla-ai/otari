@@ -8,6 +8,7 @@ gateway's own slots is not.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -23,9 +24,10 @@ from sqlalchemy.orm import Session
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
+from gateway.models.tenancy import Organization, Workspace
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.services import mcp_stateless
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import McpServerContacts
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
@@ -57,7 +59,7 @@ def _answers(monkeypatch: pytest.MonkeyPatch, outcomes: list[str]) -> None:
     async def open_session(*args: Any, **kwargs: Any) -> AsyncIterator[_Session]:
         outcome = outcomes.pop(0)
         if outcome == "error":
-            raise MCPError(-32603, "Internal error")
+            raise MCPError(-32603, "Internal error: upstream said sk-live-secret")
         if outcome == "hang":
             await asyncio.sleep(30)
         yield _Session()
@@ -65,10 +67,15 @@ def _answers(monkeypatch: pytest.MonkeyPatch, outcomes: list[str]) -> None:
     monkeypatch.setattr(mcp_stateless, "open_session", open_session)
 
 
-def _store_server(test_db: Session, api_key_id: str) -> WorkspaceMcpServer:
+def _store_server(test_db: Session, api_key_id: str, *, workspace_id: uuid.UUID | None = None) -> WorkspaceMcpServer:
     key = test_db.get(APIKey, api_key_id)
     assert key is not None and key.workspace_id is not None
-    row = WorkspaceMcpServer(workspace_id=key.workspace_id, name="apify", url=PUBLIC_URL)
+    row = WorkspaceMcpServer(
+        workspace_id=workspace_id or key.workspace_id,
+        name="apify",
+        url=PUBLIC_URL,
+        encrypted_token=encrypt_secret("apify_api_token"),
+    )
     test_db.add(row)
     test_db.commit()
     test_db.refresh(row)
@@ -109,6 +116,32 @@ def test_a_server_that_answers_between_failures_reads_degraded_with_its_last_fai
     assert health["error"] is None
     assert health["tools"] == ["search"]
     assert health["last_failure"] == {"failed_at": failing["checked_at"], "error": "not_mcp", "http_status": None}
+    for stored in (failing, health):
+        # A cause by name only: never the server's own message, its address or its credential.
+        text = json.dumps(stored)
+        for secret in ("sk-live-secret", "Internal error", "93.184.216.34", "apify_api_token"):
+            assert secret not in text, secret
+
+
+def test_discovery_of_another_workspace_s_server_records_nothing_on_it(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    contacts: McpServerContacts,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization = test_db.query(Organization).first()
+    assert organization is not None
+    other = Workspace(name="Other", organization_id=organization.id)
+    test_db.add(other)
+    test_db.commit()
+    row = _store_server(test_db, api_key_obj["id"], workspace_id=other.id)
+    _answers(monkeypatch, ["error"])
+
+    assert _discover(client, api_key_header, row.id) == 404
+
+    assert _health(client, contacts, test_db, row) is None
 
 
 def test_a_listing_the_route_deadline_cuts_short_is_recorded_as_a_timeout(
