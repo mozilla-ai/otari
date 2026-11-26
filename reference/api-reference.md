@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/07ab0be7041063506a99d3631e239c3958de05fb/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e1d7081489ca337e02d633a4ac7d03158632efff/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL

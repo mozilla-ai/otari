@@ -367,11 +367,22 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 ## Configuration
 
-See [config.example.yml](https://github.com/mozilla-ai/otari/blob/07ab0be7041063506a99d3631e239c3958de05fb/config.example.yml) for the full list. Key knobs:
+See [config.example.yml](https://github.com/mozilla-ai/otari/blob/e1d7081489ca337e02d633a4ac7d03158632efff/config.example.yml) for the full list. Key knobs:
 
 - `files_api_enabled` (formerly `files_enabled`, which still works and logs a
   deprecation warning), `files_backend`, `files_max_bytes`,
   `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
+- `files_workspace_max_bytes`, `files_workspace_max_files`: the most bytes and
+  uploads one workspace may hold at once, counting files not yet deleted or
+  expired (code-execution outputs, bounded per call above, are not counted, so
+  an upload naming their purpose, `code_execution_output`, is refused with 400): 1 GB and 500 files by default, and `null` in the config file sets
+  no limit. An upload past either is refused with 413 and nothing stored is
+  deleted, so a workspace makes room by deleting files or waiting for them to
+  expire. Usage is read before the bytes flow, so uploads running at the same
+  time can each take the room that was left: N of them can together store up
+  to N times that room. The limits bound the files a workspace holds, not an
+  exact quota, and not physical storage: a deleted or expired file stops
+  counting at once, but its bytes stay until the sweep reclaims them.
   `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
   below keeps reclaiming expired and deleted files. With it off, a backend that
   cannot be built (an `s3` backend with no bucket, say) is logged at startup
