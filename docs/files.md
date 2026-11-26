@@ -372,6 +372,12 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 - `files_api_enabled` (formerly `files_enabled`, which still works and logs a
   deprecation warning), `files_backend`, `files_max_bytes`,
   `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
+- `files_workspace_max_bytes`, `files_workspace_max_files`: the most bytes and
+  uploads one workspace may hold at once, counting files not yet deleted or
+  expired. Unset by default, which sets no limit. An upload past either is
+  refused with 413 and nothing stored is deleted, so a workspace makes room by
+  deleting files or waiting for them to expire. Usage is read before the bytes
+  flow, so uploads racing for the last room can overshoot a little.
   `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
   below keeps reclaiming expired and deleted files. With it off, a backend that
   cannot be built (an `s3` backend with no bucket, say) is logged at startup

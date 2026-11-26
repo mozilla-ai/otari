@@ -85,6 +85,8 @@ _SETTING_NAMES = frozenset(
         "files_storage_options",
         "files_sweep_interval_sec",
         "files_url",
+        "files_workspace_max_bytes",
+        "files_workspace_max_files",
         "forwarded_allow_ips",
         "guardrail_thread_pool_size",
         "health_checks_enabled",

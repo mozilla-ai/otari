@@ -242,7 +242,12 @@ def _content_disposition(filename: str) -> str:
 @router.post(
     "/files",
     responses={
-        413: {"description": "The upload exceeds the configured maximum size."},
+        413: {
+            "description": (
+                "The upload exceeds the configured maximum size, or its workspace already holds "
+                "as many files or bytes as the deployment allows."
+            )
+        },
         422: {
             "description": "Validation Error",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},

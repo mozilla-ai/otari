@@ -28,6 +28,7 @@ from gateway.exceptions.files_exceptions import (
     FileStorageError,
     UnknownPageCursorError,
     UploadTooLargeError,
+    WorkspaceStorageFullError,
 )
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
@@ -97,8 +98,11 @@ class _StubFiles:
         delete_error: Exception | None = None,
         rows: list[FileObject] | None = None,
         reservation_gone: bool = False,
+        usage: tuple[int, int] = (0, 0),
     ) -> None:
         self._add_error = add_error
+        self._usage = usage
+        self.usage_reads: list[uuid.UUID] = []
         self._delete_error = delete_error
         self._rows = rows or []
         self._reservation_gone = reservation_gone
@@ -106,6 +110,10 @@ class _StubFiles:
         self.stored: list[FileObject] = []
         self.removed: list[str] = []
         self.discarded: list[str] = []
+
+    async def workspace_usage(self, workspace_id: uuid.UUID) -> tuple[int, int]:
+        self.usage_reads.append(workspace_id)
+        return self._usage
 
     async def add(self, record: FileObject) -> None:
         if self._add_error is not None:
@@ -233,6 +241,61 @@ async def test_an_upload_past_the_ceiling_is_refused_and_gives_its_reservation_b
 
     assert files.removed == [files.added[0].id]
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_no_workspace_allowance_reads_no_usage() -> None:
+    files = _StubFiles()
+
+    await _service(_MemoryStore(), files).store(_upload(b"a,b\n"))
+
+    assert files.usage_reads == []
+
+
+@pytest.mark.asyncio
+async def test_an_upload_within_the_workspace_allowance_is_stored() -> None:
+    store = _MemoryStore()
+    files = _StubFiles(usage=(1, 4))
+
+    record = await _service(store, files, files_workspace_max_bytes=8, files_workspace_max_files=2).store(
+        _upload(b"a,b\n")
+    )
+
+    assert files.usage_reads == [_WORKSPACE]
+    assert store.blobs == {record.storage_ref: b"a,b\n"}
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_at_its_file_count_refuses_an_upload_before_reserving_it() -> None:
+    store = _MemoryStore()
+    files = _StubFiles(usage=(2, 4))
+
+    with pytest.raises(WorkspaceStorageFullError):
+        await _service(store, files, files_workspace_max_files=2).store(_upload(b"a,b\n"))
+
+    assert files.added == []
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_an_upload_past_the_workspace_bytes_is_refused_and_keeps_nothing() -> None:
+    store = _MemoryStore()
+    files = _StubFiles(usage=(1, 6))
+
+    with pytest.raises(WorkspaceStorageFullError):
+        await _service(store, files, files_workspace_max_bytes=8).store(_upload(b"a,b\n"))
+
+    assert files.removed == [files.added[0].id]
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_master_key_upload_is_checked_against_the_default_workspace() -> None:
+    files = _StubFiles()
+
+    await _service(_MemoryStore(), files, files_workspace_max_files=5).store(_upload(b"a,b\n", workspace_id=None))
+
+    assert files.usage_reads == [_DEFAULT_WORKSPACE]
 
 
 @pytest.mark.asyncio

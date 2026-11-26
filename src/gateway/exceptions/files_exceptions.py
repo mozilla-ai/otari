@@ -45,6 +45,15 @@ class UploadTooLargeError(TenancyError):
         super().__init__(f"File exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB")
 
 
+class WorkspaceStorageFullError(TenancyError):
+    """The upload would take its workspace past the deployment's storage allowance."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+
+    def __init__(self) -> None:
+        super().__init__("This workspace has reached its file storage limit; delete files to upload more")
+
+
 class UnknownPageCursorError(TenancyValidationError):
     """The page token names no position this gateway issued."""
 

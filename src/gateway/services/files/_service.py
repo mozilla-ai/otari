@@ -21,6 +21,7 @@ from gateway.exceptions.files_exceptions import (
     FileStorageError,
     UnknownPageCursorError,
     UploadTooLargeError,
+    WorkspaceStorageFullError,
 )
 from gateway.log_config import logger
 from gateway.models.files import FileObject, new_file_id
@@ -203,13 +204,18 @@ class FileService:
 
         Raises:
             UploadTooLargeError: the upload ran past the deployment's ceiling.
+            WorkspaceStorageFullError: the upload would take its workspace past its allowance.
             EmptyUploadError: the upload carried no bytes.
             FileStorageError: the file could not be recorded.
         """
+        upload, allowance = await self._allowance(upload)
+        chunks = _capped(upload.chunks, self._config.files_max_bytes)
+        if allowance is not None:
+            chunks = _within_allowance(chunks, allowance)
         file_id = new_file_id()
         storage_ref = await self._file_store.allocate(file_id)
         record = await self._reserve(upload, file_id, storage_ref)
-        if await self._write(record, _capped(upload.chunks, self._config.files_max_bytes)) == 0:
+        if await self._write(record, chunks) == 0:
             raise EmptyUploadError
         logger.info(
             "Stored file %s (%d bytes) for user %s in workspace %s",
@@ -506,6 +512,38 @@ class FileService:
             raise FileNotServedError
         return cursor.created_at, cursor.id
 
+    async def _allowance(self, upload: NewFile) -> tuple[NewFile, int | None]:
+        """Check the upload's workspace has room, and return the bytes it may still take.
+
+        The upload comes back with its workspace resolved. None means no byte
+        allowance applies. The check reads usage before the bytes flow, so two
+        uploads racing for the last room can both land: the allowance bounds
+        storage, it is not an exact quota.
+
+        Raises:
+            WorkspaceStorageFullError: the workspace holds as many files or bytes as it may.
+            FileStorageError: the workspace's usage could not be read.
+        """
+        max_bytes = self._config.files_workspace_max_bytes
+        max_files = self._config.files_workspace_max_files
+        if max_bytes is None and max_files is None:
+            return upload, None
+        try:
+            async with self._uow:
+                workspace_id = upload.workspace_id
+                if workspace_id is None:
+                    workspace_id = await self._default_workspace()
+                count, used = await self._files.workspace_usage(workspace_id)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to read file usage for workspace %s: %s", upload.workspace_id, exc)
+            raise FileStorageError("Could not read the workspace's file usage") from exc
+        if max_files is not None and count >= max_files:
+            raise WorkspaceStorageFullError
+        remaining = None if max_bytes is None else max_bytes - used
+        if remaining is not None and remaining <= 0:
+            raise WorkspaceStorageFullError
+        return replace(upload, workspace_id=workspace_id), remaining
+
     async def _reserve(self, upload: NewFile, file_id: str, storage_ref: str) -> FileObject:
         """Record the file pending, so its bytes are named before they are written.
 
@@ -607,6 +645,16 @@ async def _capped(chunks: AsyncIterator[bytes], max_bytes: int) -> AsyncIterator
         total += len(chunk)
         if total > max_bytes:
             raise UploadTooLargeError(max_bytes)
+        yield chunk
+
+
+async def _within_allowance(chunks: AsyncIterator[bytes], allowance: int) -> AsyncIterator[bytes]:
+    """Yield the upload's bytes, refusing it once it would take its workspace past ``allowance``."""
+    total = 0
+    async for chunk in chunks:
+        total += len(chunk)
+        if total > allowance:
+            raise WorkspaceStorageFullError
         yield chunk
 
 

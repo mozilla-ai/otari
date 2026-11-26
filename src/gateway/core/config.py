@@ -1265,6 +1265,23 @@ class GatewayConfig(
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
     )
+    files_workspace_max_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Most bytes of uploads one workspace may hold at once, counting files not yet deleted or "
+            "expired. An upload that would go past it is refused with 413, and nothing stored is deleted. "
+            "None sets no limit."
+        ),
+    )
+    files_workspace_max_files: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Most uploads one workspace may hold at once, counting files not yet deleted or expired. "
+            "An upload past it is refused with 413, and nothing stored is deleted. None sets no limit."
+        ),
+    )
     files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=16 * 1024 * 1024,
         ge=1,
