@@ -18,6 +18,7 @@ import {
   keyBudgetIncomplete,
   useKeyBudgets,
 } from "@/features/keys/KeyBudgetField"
+import { KeyLifetimeNote } from "@/features/keys/KeyLifetimeNote"
 import { heldScopes, KeyScopeFields } from "@/features/keys/KeyScopeFields"
 import { OwnerAccessNote } from "@/features/keys/OwnerAccessNote"
 import {
@@ -81,6 +82,8 @@ export function EditKeyForm({
   const users = useUsers(isDeploymentWide)
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "")
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at))
+  // The expiry this save was clamped to, "" for a save that clamped nothing.
+  const [lifetimeCappedTo, setLifetimeCappedTo] = useState("")
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     apiKey.allowed_models ?? undefined,
   )
@@ -164,6 +167,7 @@ export function EditKeyForm({
 
   const submit = () => {
     if (isSaving || isBlocked) return
+    setLifetimeCappedTo("")
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -185,8 +189,31 @@ export function EditKeyForm({
     update.mutate(
       { id: apiKey.id, body },
       {
-        onSuccess: () => {
-          if (!budgetChanged) return onClose()
+        onSuccess: (result) => {
+          // A clamped write stays on the form: the expiry is not what was
+          // asked for, and the note that says where it landed would be
+          // unreadable from behind a closed dialog. The field takes the
+          // stored value and the seed follows, so the form reads as saved.
+          const done = () => {
+            if (!result.cappedTo) return onClose()
+            const capped = toDatetimeLocal(result.cappedTo)
+            setLifetimeCappedTo(result.cappedTo)
+            setExpiresAt(capped)
+            reseed({
+              keyName,
+              expiresAt: capped,
+              allowedModels,
+              allowedTools,
+              excludeFromBudget,
+              serviceKey,
+              keyScopes,
+              rejectUserMismatch,
+              scopeValid,
+              toolScopeValid,
+              budgetDraft,
+            })
+          }
+          if (!budgetChanged) return done()
           // A refusal stays on the form, reported through `applyError`.
           keyBudgets
             .change({
@@ -195,7 +222,7 @@ export function EditKeyForm({
               draft: budgetDraft,
               current: ceiling,
             })
-            .then(onClose, () => {})
+            .then(done, () => {})
         },
       },
     )
@@ -229,8 +256,9 @@ export function EditKeyForm({
         label="Expires"
         value={expiresAt}
         onChange={setExpiresAt}
-        description="Blank clears the expiry."
+        description="Blank clears the expiry, or, where the deployment caps key lifetime, sets it at the cap."
       />
+      <KeyLifetimeNote cappedTo={lifetimeCappedTo} />
       {showBudget ? (
         <KeyBudgetField
           value={budgetDraft}

@@ -14,6 +14,7 @@ import {
 } from "@/features/keys/ExistingBudgetSelect"
 import { ExpiryFields } from "@/features/keys/ExpiryFields"
 import { EMPTY_KEY_BUDGET, useKeyBudgets } from "@/features/keys/KeyBudgetField"
+import { KeyLifetimeNote } from "@/features/keys/KeyLifetimeNote"
 import {
   DEFAULT_KEY_SCOPES,
   heldScopes,
@@ -73,6 +74,7 @@ function KeyCreated({
   created,
   limitError,
   budgetApplied,
+  lifetimeCapped,
   memberLabels,
   isOpen,
   onOpenChange,
@@ -84,6 +86,8 @@ function KeyCreated({
   limitError?: unknown
   /** Set when the key exists but the budget picked for it could not be applied. */
   budgetApplied: { error?: unknown; name?: string }
+  /** The expiry the deployment's key-lifetime cap clamped this key to, "" for none. */
+  lifetimeCapped: string
   memberLabels: ReadonlyMap<string, string>
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -138,6 +142,7 @@ function KeyCreated({
       ) : budgetApplied.name ? (
         <p className="text-caption">Capped by {budgetApplied.name}.</p>
       ) : null}
+      <KeyLifetimeNote cappedTo={lifetimeCapped} />
     </FormDialog>
   )
 }
@@ -218,6 +223,8 @@ export function CreateKeyDialog({
   ])
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [created, setCreated] = useState<CreateKeyResponse>()
+  // The expiry the gateway clamped this create to, "" when it clamped nothing.
+  const [lifetimeCapped, setLifetimeCapped] = useState("")
   const limitErrorId = useId()
   // Held across the await: a second press lands before `isPending` renders.
   const isSubmitting = useRef(false)
@@ -243,6 +250,7 @@ export function CreateKeyDialog({
     setExcludeFromBudget(false)
     setBudgetChoice(OWN_LIMIT)
     setCreated(undefined)
+    setLifetimeCapped("")
     create.reset()
     limits.clearError()
     keyBudgets.reset()
@@ -263,6 +271,7 @@ export function CreateKeyDialog({
           error: keyBudgets.applyError ?? undefined,
           name: keyBudgets.applied,
         }}
+        lifetimeCapped={lifetimeCapped}
         memberLabels={memberLabels}
         isOpen={isOpen}
         onOpenChange={onOpenChange}
@@ -310,7 +319,7 @@ export function CreateKeyDialog({
 
   const mint = async () => {
     // Only the operator's surface takes an owner and a budget exemption.
-    const key = await create.mutateAsync(
+    const { key, cappedTo } = await create.mutateAsync(
       isOperator
         ? {
             ...shared,
@@ -339,6 +348,7 @@ export function CreateKeyDialog({
         period,
       )
     }
+    setLifetimeCapped(cappedTo)
     setCreated(key)
   }
 
@@ -446,7 +456,7 @@ export function CreateKeyDialog({
               That time is in the past; the key would be rejected immediately.
             </span>
           ) : (
-            "Optional. The key stops working at this time."
+            "Optional. The key stops working at this time, or earlier where the deployment caps key lifetime."
           )
         }
       />

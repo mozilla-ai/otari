@@ -22,10 +22,10 @@ import { pickOption, selectTrigger } from "@/tests/select"
 
 const SECRET = "gw-NEWSECRET0000000000000000000000000000000000000000000000"
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   })
 }
 
@@ -44,11 +44,14 @@ function mockApi({
   isOperator,
   budgets = [],
   defaults = [],
+  createCap,
 }: {
   role: Role
   isOperator: boolean
   budgets?: Budget[]
   defaults?: WorkspaceBudgetDefault[]
+  /** Set to answer the create with the lifetime-cap header carrying it. */
+  createCap?: string
 }) {
   const writes: { url: string; body: Record<string, unknown> }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -66,15 +69,19 @@ function mockApi({
       >
       writes.push({ url, body })
       if (/\/keys$/.test(url)) {
-        return json({
-          ...apiKey({
-            id: "key-new",
-            key_name: String(body.key_name),
-            key_prefix: SECRET.slice(0, 10),
-            key_suffix: SECRET.slice(-4),
-          }),
-          key: SECRET,
-        })
+        return json(
+          {
+            ...apiKey({
+              id: "key-new",
+              key_name: String(body.key_name),
+              key_prefix: SECRET.slice(0, 10),
+              key_suffix: SECRET.slice(-4),
+            }),
+            key: SECRET,
+          },
+          200,
+          createCap ? { "Otari-Key-Lifetime-Capped": createCap } : undefined,
+        )
       }
       return json({ id: "ceiling-1", ...body }, 201)
     }
@@ -190,6 +197,26 @@ describe("CreateKeyDialog", () => {
     expect(within(created).queryByLabelText("curl")).toBeNull()
     expect(
       within(created).getByRole("button", { name: "Create another" }),
+    ).toBeVisible()
+  })
+
+  it("says so when the deployment's key-lifetime cap set the new key's expiry", async () => {
+    // A key minted with no expiry comes back from a capped deployment with
+    // one; without the header read, that expiry would appear from nowhere.
+    mockApi({
+      role: "owner",
+      isOperator: false,
+      createCap: "2026-03-01T00:00:00+00:00",
+    })
+    const { user, dialog } = await openDialog()
+    await user.type(within(dialog).getByLabelText("Name"), "ci-bot")
+    await createKey(user, dialog)
+
+    const created = await screen.findByRole("dialog", {
+      name: "API key created",
+    })
+    expect(
+      within(created).getByText(/This deployment caps key lifetime/),
     ).toBeVisible()
   })
 

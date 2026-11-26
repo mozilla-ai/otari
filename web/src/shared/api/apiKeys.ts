@@ -11,7 +11,7 @@ import type {
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, apiFetchWithHeaders } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
@@ -67,20 +67,32 @@ export function useKeys(workspaceId?: string, enabled = true) {
   })
 }
 
+// The expiry a key write was clamped to by the deployment's
+// `max_api_key_lifetime_days`. The gateway sends it only when clamping
+// happened, and exposes it to browsers precisely so these hooks can read it.
+export const KEY_LIFETIME_CAPPED_HEADER = "Otari-Key-Lifetime-Capped"
+
 // Create returns the plaintext key exactly once (in `key`); the caller reveals it
 // and must never write the response into the query cache. The member surface's
 // body is a subset of the operator's (no owner, no budget exemption), which is
 // the page's branch to build; the union keeps a member body from being forced
 // to carry fields its endpoint refuses to honor.
+//
+// `cappedTo` carries the header above: a key minted with no expiry can come
+// back *with* one, and the dialog has to say so rather than let the key read
+// as unexpiry'd. "" when nothing was clamped.
 export function useCreateKey() {
   const queryClient = useQueryClient()
   const scope = useKeysScope()
   return useMutation({
-    mutationFn: (body: CreateKeyRequest | CreateOwnKeyRequest) =>
-      apiFetch<CreateKeyResponse>(scope.base, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    mutationFn: async (body: CreateKeyRequest | CreateOwnKeyRequest) => {
+      const { body: key, headers } =
+        await apiFetchWithHeaders<CreateKeyResponse>(scope.base, {
+          method: "POST",
+          body: JSON.stringify(body),
+        })
+      return { key, cappedTo: headers.get(KEY_LIFETIME_CAPPED_HEADER) ?? "" }
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
   })
 }
@@ -89,17 +101,19 @@ export function useUpdateKey() {
   const queryClient = useQueryClient()
   const scope = useKeysScope()
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       id,
       body,
     }: {
       id: string
       body: UpdateKeyRequest | UpdateOwnKeyRequest
-    }) =>
-      apiFetch<ApiKey>(`${scope.base}/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+    }) => {
+      const { body: key, headers } = await apiFetchWithHeaders<ApiKey>(
+        `${scope.base}/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      )
+      return { key, cappedTo: headers.get(KEY_LIFETIME_CAPPED_HEADER) ?? "" }
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
   })
 }

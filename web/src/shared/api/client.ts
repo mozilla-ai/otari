@@ -761,10 +761,13 @@ export async function siteFetch<T>(path: string): Promise<T> {
   return readJson<T>(response, TIMEOUT_MESSAGE)
 }
 
-export async function apiFetch<T>(
+// One management request that answered, with the timeout message naming its
+// deadline. `apiFetch` and `apiFetchWithHeaders` share everything through here:
+// URL building, the 401 sign-out, and the refusal extraction.
+async function apiFetchResponse(
   path: string,
-  init: RequestInit = {},
-): Promise<T> {
+  init: RequestInit,
+): Promise<{ response: Response; timeoutMessage: string }> {
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
   // A form body's content type carries the multipart boundary, which only the
@@ -820,12 +823,35 @@ export async function apiFetch<T>(
   if (!response.ok) {
     throw await refusalError(response)
   }
+  return { response, timeoutMessage }
+}
 
+export async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const { response, timeoutMessage } = await apiFetchResponse(path, init)
   if (response.status === 204) {
     return undefined as T
   }
-
   return readJson<T>(response, timeoutMessage)
+}
+
+/**
+ * `apiFetch`, plus the response headers, for the few callers that read one.
+ *
+ * A header is the only channel some answers travel on, and the parsed body
+ * throws them away; the key create and update hooks are today's only readers.
+ */
+export async function apiFetchWithHeaders<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ body: T; headers: Headers }> {
+  const { response, timeoutMessage } = await apiFetchResponse(path, init)
+  return {
+    body: await readJson<T>(response, timeoutMessage),
+    headers: response.headers,
+  }
 }
 
 /**
