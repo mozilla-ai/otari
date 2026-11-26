@@ -489,20 +489,17 @@ async def create_user_for_signup(
             if not entitled:
                 # Refused before anything is written, because the block rolls back on the raise.
                 mailer.require_ready()
-            if identity is not None and not entitled:
-                # An identity no organization still wants gets what a new address gets, and a lost race rolls it back.
-                await organizations.provision_tenancy_for_claim(
-                    identity, open_signup=config.open_signup, full_name=full_name
-                )
             if identity is None:
                 if entitled:
                     # The membership is the invitation's to grant, so this writes the account alone.
-                    identity = await UserRepository(db).try_create(
+                    staged = await UserRepository(db).try_create(
                         email=address, full_name=full_name, active_organization_id=None
                     )
-                    if identity is None:
+                    if staged is None:
+                        # This answers like every other enumeration-safe refusal.
                         await verify_absent_password_async(password)
                         raise _SignupRaceLostError
+                    identity = staged
                 elif not config.open_signup:
                     # The same bcrypt cost as the branch above, for the same reason: an
                     # address this deployment will not register has to answer in about
@@ -518,6 +515,12 @@ async def create_user_for_signup(
                         raise _SignupRaceLostError
                     identity = registration.identity
             else:
+                if not entitled:
+                    # An identity no organization still wants gets what a new address gets,
+                    # and a lost race rolls it back.
+                    await organizations.provision_tenancy_for_claim(
+                        identity, open_signup=config.open_signup, full_name=full_name
+                    )
                 await organizations.lock_identity(identity.id)
                 if not entitled and not await unverified_identity_is_claimable(
                     organizations, identity, open_signup=config.open_signup
