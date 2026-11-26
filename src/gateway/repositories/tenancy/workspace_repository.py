@@ -176,6 +176,17 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         )
         return list(rows.scalars().all()), count
 
+    async def get_as_stored(self, workspace_id: uuid.UUID) -> Workspace | None:
+        """Return the workspace as the database holds it now, past this session's copy of the row.
+
+        For a caller that waited on ``lock``: a deletion of the workspace commits before that lock is granted,
+        and :meth:`get` would answer from the identity map with the row the deletion removed.
+        """
+        result = await self.db.execute(
+            select(Workspace).where(col(Workspace.id) == workspace_id).execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""
         result = await self.db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
