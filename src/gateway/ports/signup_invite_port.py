@@ -9,8 +9,9 @@ class SignupInvitePort(Protocol):
     async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         """Whether an invitation named by ``token`` allows an account for ``claimed_address``.
 
-        An implementation must answer true only for a link that reached the claimed mailbox,
-        because the answer is taken as proof of that mailbox.
+        NOTE: An implementation must answer true only for a link that reached the claimed
+        mailbox. A true answer is recorded as that mailbox having answered, which is the
+        strongest thing an address can carry, and no caller can check the claim.
 
         NOTE: An implementation must read through the request's own Unit of Work. The answer is
         used in the transaction that writes the account, and one read through a session of its
