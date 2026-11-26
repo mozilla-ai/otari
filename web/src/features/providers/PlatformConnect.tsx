@@ -52,11 +52,12 @@ export function usePlatformConnectFlow(
   useEffect(() => {
     if (state === "pending") {
       attempt.current ??= { onConnected }
-    } else if (state === "connected" && attempt.current) {
-      const { onConnected: approved } = attempt.current
-      attempt.current = null
-      approved?.()
+      return
     }
+    // Any other state ends the attempt; only an approval reports it.
+    const ended = attempt.current
+    attempt.current = null
+    if (state === "connected") ended?.onConnected?.()
   }, [state, onConnected])
 
   // The blank tab while the gateway has not answered. The per-call callbacks
