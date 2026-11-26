@@ -3923,6 +3923,14 @@
       "CatalogFacets": {
         "description": "The filter rail's choices, from the caller's whole authorized catalog rather than one page.",
         "properties": {
+          "data_locations": {
+            "description": "Every data location a hosted provider declares for an authorized model, as listed, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "providers": {
             "description": "Every provider instance offering an authorized model, sorted.",
             "items": {
@@ -3999,6 +4007,14 @@
             ],
             "description": "The largest any offering serves.",
             "title": "Context Window"
+          },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "default_pricing": {
             "description": "Whether an unpriced model is metered at the models.dev default.",
@@ -4303,6 +4319,14 @@
             "description": "The largest any offering serves.",
             "title": "Context Window"
           },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "deprecated": {
             "default": false,
             "description": "True only when every offering with metadata says so.",
@@ -4590,6 +4614,14 @@
           "credential": {
             "$ref": "#/components/schemas/CatalogCredential",
             "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key."
+          },
+          "data_locations": {
+            "description": "Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, distinct and sorted; empty where it declares none and for every other offering.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",
@@ -16959,9 +16991,31 @@
             "title": "Deployment Managed",
             "type": "boolean"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
           },
           "max_output_tokens": {
             "anyOf": [
@@ -17008,6 +17062,17 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
           },
           "supported_parameters": {
             "anyOf": [
@@ -32347,12 +32412,12 @@
             "description": "The first request that succeeded, which is the guide's receipt. Null until one does."
           },
           "dismissed": {
-            "description": "Whether someone skipped the guide for this workspace.",
+            "description": "Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member.",
             "title": "Dismissed",
             "type": "boolean"
           },
           "experience_eligible": {
-            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
+            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, and the caller may run requests there. For someone who manages the workspace, nobody dismissed it and no request in the workspace has succeeded yet; for a member who does not, they have not dismissed it and no request of their own has succeeded yet.",
             "title": "Experience Eligible",
             "type": "boolean"
           },
@@ -32379,7 +32444,7 @@
             "description": "The most recent request, so a failure can be reported while the guide keeps waiting."
           },
           "status": {
-            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.",
+            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all. For a member who does not manage the workspace, only their own requests count.",
             "enum": [
               "waiting",
               "failed",
@@ -35052,7 +35117,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.57.1"
+    "version": "0.58.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -38607,6 +38672,21 @@
               "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
               "title": "Zero Data Retention",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+            "in": "query",
+            "name": "data_location",
+            "required": false,
+            "schema": {
+              "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Data Location",
+              "type": "array"
             }
           },
           {
@@ -63813,7 +63893,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/dismiss": {
       "post": {
-        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nFor a member who does not manage the workspace, for them alone; a viewer is\nrefused. It retires the card and nothing else: the key the guide issued\nkeeps working, because the operator asked for it and may well have pasted it\nsomewhere already. Revoking one is the Keys page's job.",
         "operationId": "workspace-activation-dismiss_workspace_activation",
         "parameters": [
           {
@@ -63865,7 +63945,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/key": {
       "post": {
-        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "description": "Issue the setup API key, rotating the one the guide already issued.\n\nThe workspace's for its owners and admins, the caller's own for a member who\ndoes not manage it; a viewer is refused. The plaintext is returned once and\nnever stored, so a reopened guide rotates the same key row rather than\ncollecting a second one, and answers 409 once the guide is finished or was\ndismissed.",
         "operationId": "workspace-activation-create_workspace_activation_key",
         "parameters": [
           {

@@ -202,14 +202,15 @@ for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
 the `otari` implementation.
 
 The first time a deployment operator opens the dashboard in a browser, on a
-gateway not yet connected, a **Welcome to Otari** dialog offers otari.ai, with a
-link to its plans. It is remembered per browser, not per account: skip it or
-close it and that browser does not show it again, while a new browser, or an
-existing operator after upgrading, sees it once. It is not shown where
-`platform_url` is empty or the gateway cannot encrypt a provider key.
+gateway with no provider yet, a **Welcome to Otari** dialog offers otari.ai or a
+provider of your own. It is remembered per browser, not per account: skip it or
+close it and that browser does not show it again, while a new browser sees it
+once until a provider exists. It is not shown where `platform_url` is empty or
+the gateway cannot encrypt a provider key.
 
 On the Hosted providers page, **Connect otari.ai** is offered beside adding a
-provider of your own:
+provider of your own; after **Skip, I'll use my own keys** it stays in the
+page's header only:
 
 1. The gateway asks otari.ai for a code and opens its approval page in a new
    tab. The page here shows the code and the link while it waits.
