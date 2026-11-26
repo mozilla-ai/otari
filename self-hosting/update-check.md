@@ -6,9 +6,10 @@ that has it on asks otari.ai whether a newer release or a security advisory for
 its version exists, and shows the answer in the dashboard and in the logs.
 
 Nothing is sent until somebody decides. A deployment operator is asked when
-they open the dashboard and the deployment already has a provider, so the
-question never stands in the way of setting it up; the answer is stored and the
-question does not come back. Closing the question without answering sends
+they open the dashboard, the deployment already has a provider and their
+workspace has served its first successful request or skipped the setup guide,
+so the question never stands in the way of setting it up; the answer is stored
+and the question does not come back. Closing the question without answering sends
 nothing and asks again a week later in that browser; **Settings → Update
 check** answers it in the meantime.
 
@@ -56,8 +57,8 @@ for that release, and for 30 days for any later one.
 
 ## Turning it on or off
 
-- **In the dashboard:** **Settings → Update check**, or the question asked on
-  first visit. Operators only.
+- **In the dashboard:** **Settings → Update check**, or the question asked once
+  the first request has been served or the setup guide skipped. Operators only.
 - **In configuration:** `update_check: true` or `false` in `config.yml`, or
   `OTARI_UPDATE_CHECK=true|false`. This answers for the operators: the
   dashboard shows the answer and cannot change it. Use it for a deployment

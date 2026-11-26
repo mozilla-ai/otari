@@ -59,7 +59,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/6ebd5364a14e3b13c3cbe5e832543d645a220e52/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/2e6f543e9cf1a4cad2e9d0563116425222658d76/docs/public/openapi.json).
 
 A service key created without naming scopes can make model calls for its end
 users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
