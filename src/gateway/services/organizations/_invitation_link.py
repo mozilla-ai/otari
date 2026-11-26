@@ -17,8 +17,8 @@ from gateway.services.organizations._delivery_rule import DeliveryRule
 class InvitationLink(SignupInvitePort):
     """Answers what an invitation link still opens, for everybody who holds one.
 
-    One reader for the whole question, so a link the deployment refuses cannot go on proving an
-    address somewhere else.
+    One reader for the whole question, so a link the deployment refuses cannot go on allowing an
+    account somewhere else.
     """
 
     def __init__(
