@@ -16,12 +16,14 @@ refresh.
 """
 
 import asyncio
+from collections.abc import Collection, Sequence
 from contextvars import ContextVar
 
 from gateway.core.config import REGION_SEPARATOR, GatewayConfig, region_instance
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
+from gateway.models.providers import HostedProviderRegion
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
 
 HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
@@ -99,6 +101,45 @@ def hosted_data_location(name: str) -> str | None:
 def hosted_provider_named(name: str) -> bool:
     """Whether a hosted provider goes by exactly ``name``, rather than a region of one."""
     return name in _providers
+
+
+def serving_data_locations(
+    name: str,
+    provider_location: str | None,
+    regions: Sequence[HostedProviderRegion],
+    provider_names: Collection[str],
+) -> tuple[str | None, ...]:
+    """Where the hosted provider ``name`` may keep request data: one entry per place it may serve from.
+
+    A provider with regions gives each enabled region's own declaration, never
+    the provider's, leaving out a region a provider of its whole name shadows
+    (it does not serve); one with none gives its own. ``None`` stands for a
+    connection that declares nothing. The one place this is decided, so the
+    catalog and the workspace narrowing cannot disagree.
+    """
+    if not regions:
+        return (provider_location,)
+    return tuple(location for _, location in _serving_regions(name, regions, provider_names))
+
+
+def serving_region_data_locations(
+    name: str, regions: Sequence[HostedProviderRegion], provider_names: Collection[str]
+) -> dict[str, str | None]:
+    """The declared location of each region of ``name`` a request may be pinned to, by its name (``tokenhub@sg``).
+
+    The regions :func:`serving_data_locations` counts: enabled, and not shadowed by a provider of that whole name.
+    """
+    return dict(_serving_regions(name, regions, provider_names))
+
+
+def _serving_regions(
+    name: str, regions: Sequence[HostedProviderRegion], provider_names: Collection[str]
+) -> list[tuple[str, str | None]]:
+    return [
+        (region_instance(name, region.slug), region.data_location)
+        for region in regions
+        if region.enabled and region_instance(name, region.slug) not in provider_names
+    ]
 
 
 class HostedRegionIndex:
@@ -182,17 +223,8 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             declared.add(row.name)
         else:
             declared.discard(row.name)
-        own = regions.get(row.id, [])
         # A region a provider of its whole name shadows does not serve, so it is not where data may go.
-        locations[row.name] = (
-            tuple(
-                region.data_location
-                for region in own
-                if region.enabled and region_instance(row.name, region.slug) not in providers
-            )
-            if own
-            else (row.data_location,)
-        )
+        locations[row.name] = serving_data_locations(row.name, row.data_location, regions.get(row.id, []), providers)
     for row in rows:
         for region in regions.get(row.id, []):
             instance = region_instance(row.name, region.slug)

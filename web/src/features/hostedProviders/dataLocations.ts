@@ -115,7 +115,7 @@ export function providerDataLocations(
 }
 
 /** EU member states, which an allowed list naming `EU` admits as well. */
-const EU_MEMBER_STATES = new Set(
+export const EU_MEMBER_STATES = new Set(
   (
     "AT BE BG CY CZ DE DK EE ES FI FR GR HR HU IE IT LT LU LV MT NL PL PT RO " +
     "SE SI SK"

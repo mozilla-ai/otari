@@ -43,7 +43,11 @@ from gateway.services.providers._hosted_runtime import (
     organization_to_serve,
     serve_on_hosted_provider,
 )
-from gateway.services.providers._hosted_sources import HostedSources, refuse_unsafe_configured_endpoints
+from gateway.services.providers._hosted_sources import (
+    HostedDataLocations,
+    HostedSources,
+    refuse_unsafe_configured_endpoints,
+)
 from gateway.services.providers._missing_credential import (
     missing_provider_credential,
     unpriced_model_refusal,
@@ -94,6 +98,7 @@ __all__ = [
     "CountryGate",
     "CountryNotServedError",
     "HostedCatalogUpdate",
+    "HostedDataLocations",
     "HostedProviderService",
     "HostedRegionIndex",
     "HostedServing",

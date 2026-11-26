@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from gateway.core.config import REGION_SEPARATOR, GatewayConfig
+from gateway.core.settings.inference import data_location_admitted
 from gateway.core.settings.providers import HostedProviderEntry
 from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
@@ -23,6 +24,7 @@ from gateway.services.providers._hosted_credentials import (
     lookup_name,
     region_credential_of,
 )
+from gateway.services.providers._hosted_name_index import serving_data_locations, serving_region_data_locations
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
@@ -35,6 +37,33 @@ class HostedProviderProfile:
     implementation: str
     terms_url: str | None
     privacy_url: str | None
+
+
+@dataclass(frozen=True)
+class HostedDataLocations:
+    """Where hosted providers keep request data, as a viewer may use them.
+
+    ``providers`` is by the provider's name, one entry per place it may serve
+    from. ``regions`` is by a region's name (``tokenhub@sg``), for an offering
+    pinned to it, built from the region rows and never by splitting a name.
+    ``None`` stands for a connection that declares nothing.
+    """
+
+    providers: dict[str, tuple[str | None, ...]]
+    regions: dict[str, tuple[str | None, ...]]
+
+    def within(self, allowed: frozenset[str] | None) -> "HostedDataLocations":
+        """Only the locations ``allowed`` admits, as dispatch serves a workspace; ``None`` for any location."""
+        if allowed is None:
+            return self
+
+        def kept(found: dict[str, tuple[str | None, ...]]) -> dict[str, tuple[str | None, ...]]:
+            return {
+                name: tuple(each for each in locations if data_location_admitted(each, allowed))
+                for name, locations in found.items()
+            }
+
+        return HostedDataLocations(providers=kept(self.providers), regions=kept(self.regions))
 
 
 @dataclass(frozen=True)
@@ -257,6 +286,24 @@ class HostedSources:
             for source in await self.all()
             if source.enabled and source.zero_data_retention and not source.withheld_from(organization_id)
         )
+
+    async def data_locations(self, organization_id: uuid.UUID | None) -> HostedDataLocations:
+        """Where each enabled hosted provider ``organization_id`` may use keeps request data, and each region of one.
+
+        Read from the declarations themselves, as the workspace narrowing
+        reads them (:func:`serving_data_locations`), with no key decrypted.
+        """
+        everything = await self.all()
+        names = {source.name for source in everything}
+        providers: dict[str, tuple[str | None, ...]] = {}
+        regions: dict[str, tuple[str | None, ...]] = {}
+        for source in everything:
+            if not source.enabled or source.withheld_from(organization_id):
+                continue
+            providers[source.name] = serving_data_locations(source.name, source.data_location, source.regions, names)
+            for instance, location in serving_region_data_locations(source.name, source.regions, names).items():
+                regions[instance] = (location,)
+        return HostedDataLocations(providers=providers, regions=regions)
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""

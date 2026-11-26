@@ -3923,6 +3923,14 @@
       "CatalogFacets": {
         "description": "The filter rail's choices, from the caller's whole authorized catalog rather than one page.",
         "properties": {
+          "data_locations": {
+            "description": "Every data location a hosted provider declares for an authorized model, as listed, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "providers": {
             "description": "Every provider instance offering an authorized model, sorted.",
             "items": {
@@ -3999,6 +4007,14 @@
             ],
             "description": "The largest any offering serves.",
             "title": "Context Window"
+          },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "default_pricing": {
             "description": "Whether an unpriced model is metered at the models.dev default.",
@@ -4303,6 +4319,14 @@
             "description": "The largest any offering serves.",
             "title": "Context Window"
           },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "deprecated": {
             "default": false,
             "description": "True only when every offering with metadata says so.",
@@ -4590,6 +4614,14 @@
           "credential": {
             "$ref": "#/components/schemas/CatalogCredential",
             "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key."
+          },
+          "data_locations": {
+            "description": "Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, distinct and sorted; empty where it declares none and for every other offering.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",
@@ -38607,6 +38639,21 @@
               "description": "Only models at least one provider declared to keep no prompt or completion data offers.",
               "title": "Zero Data Retention",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+            "in": "query",
+            "name": "data_location",
+            "required": false,
+            "schema": {
+              "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Data Location",
+              "type": "array"
             }
           },
           {

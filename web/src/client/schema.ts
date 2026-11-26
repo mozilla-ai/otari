@@ -11374,6 +11374,11 @@ export interface components {
          */
         CatalogFacets: {
             /**
+             * Data Locations
+             * @description Every data location a hosted provider declares for an authorized model, as listed, sorted.
+             */
+            data_locations?: string[];
+            /**
              * Providers
              * @description Every provider instance offering an authorized model, sorted.
              */
@@ -11404,6 +11409,11 @@ export interface components {
              * @description The largest any offering serves.
              */
             context_window?: number | null;
+            /**
+             * Data Locations
+             * @description Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.
+             */
+            data_locations?: string[];
             /**
              * Default Pricing
              * @description Whether an unpriced model is metered at the models.dev default.
@@ -11525,6 +11535,11 @@ export interface components {
              */
             context_window?: number | null;
             /**
+             * Data Locations
+             * @description Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.
+             */
+            data_locations?: string[];
+            /**
              * Deprecated
              * @description True only when every offering with metadata says so.
              * @default false
@@ -11635,6 +11650,11 @@ export interface components {
             context_window?: number | null;
             /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key. */
             credential: components["schemas"]["CatalogCredential"];
+            /**
+             * Data Locations
+             * @description Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, distinct and sorted; empty where it declares none and for every other offering.
+             */
+            data_locations?: string[];
             /**
              * Discovered
              * @description Whether the provider itself reported this model.
@@ -27562,6 +27582,8 @@ export interface operations {
                 source?: "all" | "discovered" | "custom";
                 /** @description Only models at least one provider declared to keep no prompt or completion data offers. */
                 zero_data_retention?: boolean;
+                /** @description Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none. */
+                data_location?: string[];
                 /** @description Release window ending today (UTC); zero disables it. Unknown and future releases do not match. */
                 released_within_days?: number;
                 sort?: "name" | "released" | "input" | "output" | "context" | "providers";

@@ -121,9 +121,15 @@ from gateway.services.providers._hosted_name_index import (
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing, HostedServingBuilder
-from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
+from gateway.services.providers._hosted_sources import (
+    HostedDataLocations,
+    HostedProviderProfile,
+    HostedSource,
+    HostedSources,
+)
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
+from gateway.services.providers._workspace_hosted_access import workspace_allowed_data_locations
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, reencrypted
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 from gateway.types.model_type import ModelType, OfferedModelType
@@ -1127,6 +1133,20 @@ class HostedProviderService:
         """
         async with self.uow:
             return await self.sources.zero_data_retention_names(organization_id)
+
+    async def data_locations(
+        self, *, organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
+    ) -> HostedDataLocations:
+        """Where each enabled provider serveable to ``organization_id`` keeps request data, and each of its regions.
+
+        ``None`` is the deployment's own view, which sees every provider. A
+        location is None where the connection declares none. For a
+        ``workspace_id`` that accepts only some locations, only those are kept,
+        as dispatch serves a request billed to it from no other.
+        """
+        async with self.uow:
+            found = await self.sources.data_locations(organization_id)
+        return found.within(workspace_allowed_data_locations(workspace_id))
 
     async def profiles(self) -> dict[str, HostedProviderProfile]:
         """Every hosted provider's implementation, terms of service and privacy policy, by name.
