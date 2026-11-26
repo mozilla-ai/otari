@@ -1272,8 +1272,10 @@ refuse such a value when a tool is saved.
   Firecrawl credit on the published plans costs from $0.0006 (Scale, billed
   yearly) to $0.005 (the Hobby plan's extra credits), so a search for 10 results
   costs $0.0012 to $0.01. Every 10 results past the first 10 add 2 Firecrawl
-  credits, so a workspace's `max_results` ceiling also bounds what one search can
-  cost. `scrapeOptions`, which returns
+  credits, so a workspace's `max_results` ceiling bounds the base charge of one
+  search. To bound the whole charge, an operator must also bound
+  `scrapeOptions`, since a PDF it scrapes adds 1 Firecrawl credit per page parsed
+  and the search adapter sets no page ceiling. `scrapeOptions`, which returns
   each result's page as text, adds 1 Firecrawl credit per page scraped, plus the
   scrape options' own, so a scraped search for 10 results costs 12 Firecrawl
   credits. `scrapeOptions` is not a cost tier, so a workspace or a request can set
