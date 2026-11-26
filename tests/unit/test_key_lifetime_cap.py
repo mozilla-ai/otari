@@ -1,6 +1,6 @@
 """The ``max_api_key_lifetime_days`` clamp on a key's requested expiry.
 
-The route behaviour lives with the routes (``tests/integration/test_max_key_lifetime.py``);
+The route behavior lives with the routes (``tests/integration/test_max_key_lifetime.py``);
 this pins the pure arithmetic: what is stored, and when the answer counts as clamped.
 """
 
