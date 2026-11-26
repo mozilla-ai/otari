@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from "react"
+import { type RefObject, useEffect, useId, useRef, useState } from "react"
 import type { CreateKeyResponse, KeyScope } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -218,6 +218,7 @@ export function CreateKeyDialog({
   ])
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [created, setCreated] = useState<CreateKeyResponse>()
+  const limitErrorId = useId()
   // Held across the await: a second press lands before `isPending` renders.
   const isSubmitting = useRef(false)
   const hasSecret = created !== undefined
@@ -396,7 +397,7 @@ export function CreateKeyDialog({
                 inputMode="decimal"
                 placeholder="No limit"
                 isInvalid={!isLimitValid}
-                errorMessage="Enter a number above zero, like 12.50, or leave it empty."
+                describedBy={isLimitValid ? undefined : limitErrorId}
                 shouldReserveMessage={false}
               />
             </div>
@@ -412,13 +413,18 @@ export function CreateKeyDialog({
               />
             </div>
           </div>
-          <p
-            className={`text-sm ${isLimitValid ? "text-muted" : "text-danger"}`}
-          >
-            {isLimitValid
-              ? "Optional. Past it, requests on this key are refused until the limit resets. An hourly limit stops an agent caught in a loop. Its owner’s limit applies as well."
-              : null}
-          </p>
+          {/* The error spans the row: the 160px field is too narrow for it. */}
+          {isLimitValid ? (
+            <p className="text-sm text-muted">
+              Optional. Past it, requests on this key are refused until the
+              limit resets. An hourly limit stops an agent caught in a loop. Its
+              owner’s limit applies as well.
+            </p>
+          ) : (
+            <p id={limitErrorId} role="alert" className="text-sm text-danger">
+              Enter a number above zero, like 12.50, or leave it empty.
+            </p>
+          )}
         </div>
       ) : keyBudgets.canCap ? null : (
         // Production takes a key's limit from owners and admins only, so the
@@ -444,7 +450,7 @@ export function CreateKeyDialog({
           )
         }
       />
-      <Disclosure heading="More options">
+      <Disclosure heading="More options" isFlush>
         <div className="flex flex-col gap-5">
           <KeyScopeFields
             value={keyScopes}

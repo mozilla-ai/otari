@@ -119,6 +119,9 @@ catalog_router = APIRouter(prefix="/code", tags=["code-execution"], dependencies
 
 CODE_EXECUTE_ENDPOINT = "/v1/code/execute"
 SANDBOX_NOT_CONFIGURED_DETAIL = "code execution is not available: no sandbox is configured on this gateway"
+# The language of ``CodeExecuteRequest.code``.
+_LANGUAGE = "python"
+SANDBOX_RUNS_NO_PYTHON_DETAIL = "code execution is not available: this gateway's sandbox does not run Python"
 FILES_NOT_ENABLED_DETAIL = "file_ids needs the Files API, which this gateway has turned off"
 FILE_NOT_FOUND_DETAIL_TEMPLATE = "File '{file_id}' was not found"
 # A direct run is admitted as this declaration, so the workspace's policy reads it as the in-loop tool's.
@@ -213,6 +216,8 @@ async def execute_code(
 
     if port is None:
         raise await refuse(SANDBOX_NOT_CONFIGURED_DETAIL, status.HTTP_400_BAD_REQUEST)
+    if _LANGUAGE not in port.languages:
+        raise await refuse(SANDBOX_RUNS_NO_PYTHON_DETAIL, status.HTTP_400_BAD_REQUEST)
 
     workspace_id = await workspace_for_key_id(db, api_key_id)
     file_bridge = build_sandbox_file_bridge(
@@ -390,13 +395,12 @@ async def execute_code(
         image=admitted.session_image,
         allowed_tools=admitted.allowed_tools,
         files=file_bridge,
-        files_base_url=file_bridge.base_url if file_bridge is not None else None,
         container=claimed,
         containers=containers,
     )
     try:
         async with backend:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": request.code})
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"language": _LANGUAGE, "code": request.code})
             execution = backend.take_executions()[-1]
     except SandboxNotReachableError as exc:
         error = _sandbox_failure(exc, claimed)

@@ -175,6 +175,7 @@ GET /api/v1/routing/recommenders                    # dashboard-only
 POST /api/v1/routing/recommenders                   # dashboard-only
 PATCH /api/v1/routing/recommenders/{recommender_id}  # dashboard-only
 DELETE /api/v1/routing/recommenders/{recommender_id} # dashboard-only
+GET /api/v1/organizations/me/subagent-savings       # dashboard-only
 # Provider credentials (runtime provider management)
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
@@ -344,6 +345,7 @@ POST /api/v1/routing/policies                       # not yet wrapped
 DELETE /api/v1/routing/policies/{name}              # not yet wrapped
 POST /api/v1/routing/policies/explain               # not yet wrapped
 POST /api/v1/routing/recommend                      # not yet wrapped
+PUT /api/v1/routing/decisions/{decision_id}/outcome # not yet wrapped
 # Pricing refresh workflow
 POST /api/v1/pricing/refresh/reject                 # not yet wrapped
 GET /api/v1/pricing/refresh/pending                 # not yet wrapped
@@ -569,6 +571,10 @@ POST /api/v1/organizations/me/provider-keys/{key_id}/archive                  # 
 POST /api/v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
 DELETE /api/v1/organizations/me/provider-keys/{key_id}/default                # dashboard-only
+# Re-sealing every tenant's stored credentials after OTARI_SECRET_KEY changes.
+# Deployment-wide rather than tenant-scoped, and run by hand from the rotation
+# procedure, like the hosted-provider and search-tool halves of it.
+POST /api/v1/organization-provider-keys/reencrypt                             # operator surface
 # The models offered on one of those keys, their rates and their serving
 # switches (otari#643 follow-up). Same surface, same reason: an SDK caller sends
 # a model and a key, and which of an organization's adopted models are served

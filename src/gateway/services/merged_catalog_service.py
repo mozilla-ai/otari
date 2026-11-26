@@ -29,10 +29,14 @@ from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedModels, ModelProviderPort
+from gateway.repositories.organizations import BootstrapMarkerRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.alias_service import effective_aliases
 from gateway.services.catalog import ModelArchitecture, ModelType, apply_model_metadata, load_catalog_metadata
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist, workspace_serves_target
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
+from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -52,7 +56,6 @@ from gateway.services.provider_kwargs import (
     split_selector,
 )
 from gateway.services.providers import narrow_hosted_models, workspace_requires_zero_data_retention
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
     hosted_allowlist_entries,
@@ -124,6 +127,15 @@ class ModelPricingInfo(BaseModel):
     )
 
 
+def _deployment_access(db: AsyncSession) -> DeploymentAdministrationAccess:
+    """Build the reader that says whether a caller operates the deployment."""
+    return DeploymentAdministrationAccess(
+        UserRepository(db),
+        OrganizationMemberRepository(db),
+        BootstrapOperatorMarker(BootstrapMarkerRepository(db)),
+    )
+
+
 def pricing_info(pricing: PriceRow) -> ModelPricingInfo:
     """The wire shape of one stored, default, or override price row."""
     try:
@@ -171,6 +183,11 @@ class ModelObject(BaseModel):
     # What kind of model this is (``chat``, ``embedding``, ...; see ``services/catalog/_model_type``), so a
     # client can offer chat models alone. ``None`` where neither the provider's listing nor models.dev says.
     type: ModelType | None = None
+    # models.dev's description, release date and training cutoff (``YYYY-MM-DD``, or ``YYYY-MM``), as the catalog's
+    # model page shows them. ``None`` where models.dev has no entry, and for an alias, whose target they would name.
+    description: str | None = None
+    release_date: str | None = None
+    knowledge_cutoff: str | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -588,7 +605,7 @@ async def hosted_providers_withheld_from(
     """
     organization_id: uuid.UUID | None
     if session_identity is not None:
-        if await DeploymentAdministrationAccess(db).has_administration_access(session_identity):
+        if await _deployment_access(db).has_administration_access(session_identity):
             return frozenset()
         organization_id = session_identity.active_organization_id
     else:
@@ -662,9 +679,7 @@ async def catalog_scope(
             deployment_key_models=hosted_models,
         )
     if session_identity is not None:
-        if workspace_id is None and await DeploymentAdministrationAccess(db).has_administration_access(
-            session_identity
-        ):
+        if workspace_id is None and await _deployment_access(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
             # models. Not every organization's, which would cross the tenant line
             # the rest of this function draws, and not none: on a deployment with
@@ -1205,6 +1220,47 @@ async def viewer_zero_data_retention(
             else frozenset()
         ),
     )
+
+
+@dataclass(frozen=True)
+class DataLocations:
+    """Where the viewer's hosted providers and their regions keep request data; an undeclared location is left out."""
+
+    hosted: dict[str, tuple[str, ...]]
+    """By a hosted provider's name."""
+    regions: dict[str, tuple[str, ...]]
+    """By a region's name (``tokenhub@sg``), for an offering pinned to it."""
+
+    def of(self, instance: str, served_on: Literal["deployment", "hosted", "organization"]) -> list[str]:
+        """The declared locations of an offering on ``instance``, distinct and sorted.
+
+        A ``hosted`` offering is its provider's. An offering on a name that is
+        a hosted region's is that region's, whether the catalog labels it
+        hosted or organization, because a pinned region is not itself listed as
+        a hosted provider. Nothing else declares one: a ``config.yml`` instance
+        and an organization's own key never take a location, not even from a
+        hosted provider or region of the same name.
+        """
+        if served_on == "deployment":
+            return []
+        if served_on == "hosted" and instance in self.hosted:
+            return sorted(set(self.hosted[instance]))
+        return sorted(set(self.regions.get(instance, ())))
+
+
+async def viewer_data_locations(
+    hosted_providers: "HostedProviderService", organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
+) -> DataLocations:
+    """What the hosted providers serveable to the viewer's organization declare as their data locations.
+
+    ``workspace_id`` is the workspace the catalog is narrowed to, if any: only the locations it accepts are kept.
+    """
+    declared = await hosted_providers.data_locations(organization_id=organization_id, workspace_id=workspace_id)
+
+    def declared_only(found: dict[str, tuple[str | None, ...]]) -> dict[str, tuple[str, ...]]:
+        return {name: tuple(each for each in locations if each is not None) for name, locations in found.items()}
+
+    return DataLocations(hosted=declared_only(declared.providers), regions=declared_only(declared.regions))
 
 
 async def apply_organization_pricing(

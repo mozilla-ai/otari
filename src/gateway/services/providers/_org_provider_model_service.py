@@ -38,9 +38,10 @@ resolves community defaults, both of which can take the whole discovery timeout.
 
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from any_llm import LLMProvider
 from fastapi import BackgroundTasks
@@ -87,7 +88,7 @@ from gateway.services.catalog import (
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
-from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
+from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.providers._owned_endpoint_network import (
     OwnedEndpointAddressError,
@@ -95,9 +96,19 @@ from gateway.services.providers._owned_endpoint_network import (
     owned_endpoint_http_client,
     owned_endpoint_sdk_client,
 )
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
-from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    SecretDecryptionError,
+    decrypt_mapping,
+    decrypt_secret,
+)
+from gateway.services.tenancy.org_provider_key_service import (
+    OrgProviderKeyService,
+    UnservableEndpointError,
+    endpoint_auth_headers,
+)
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.endpoint_auth import UnreadableEndpointAuthError
 from gateway.types.model_type import ModelType, OfferedModelType
 from gateway.types.price_unit import PriceUnit
 
@@ -113,12 +124,36 @@ _UNDECRYPTABLE = (
     "The stored key cannot be decrypted. Was OTARI_SECRET_KEY rotated? Re-enter the credential, then try again."
 )
 
+# What an admin needs when an address refuses a key that carries two
+# credentials. Neither the endpoint nor a proxy in front of it says which one it
+# refused, so naming one would send the admin to rotate the wrong credential.
+_ENDPOINT_CREDENTIAL_REJECTED = (
+    "The endpoint or its proxy rejected a credential. This key sends an API key and an endpoint credential, "
+    "so check both."
+)
+
+# What an admin needs when a stored endpoint credential cannot be sent as it
+# stands. Dialing without it would ask the address a different question from the
+# one every dispatch asks, so the credential is reported instead of a model list.
+_ENDPOINT_CREDENTIAL_UNSERVABLE = (
+    "The stored endpoint credential cannot be sent as it stands, so this key serves nothing. "
+    "Replace it, or clear the base URL to remove it."
+)
+
 _RATE_FIELDS = (
     "input_price_per_million",
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
 )
+
+
+@dataclass(frozen=True)
+class _DialCredential:
+    """What a key dials its provider with, decrypted."""
+
+    api_key: str | None
+    client_args: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -229,16 +264,6 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.pricing_tiers = list(default.pricing_tiers or [])
     row.unit = default.unit or "token"
     row.rates = rates_of(default)
-
-
-def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> dict[str, ModelPricing]:
-    """Community default rates for several models. Synchronous; run off the loop."""
-    resolved: dict[str, ModelPricing] = {}
-    for model in models:
-        default = default_model_pricing(provider, model, as_of)
-        if default is not None:
-            resolved[model] = default
-    return resolved
 
 
 async def _endpoint_refusal(provider: str, api_base: str) -> str | None:
@@ -865,16 +890,46 @@ class OrgProviderModelService:
         return {model: rate for model in wanted if (rate := by_key.get(f"{prefix}:{model}")) is not None}
 
     @staticmethod
-    def _credential(key: OrgProviderKey) -> dict[str, object] | None:
-        """The client arguments this key dials with, or None when it will not decrypt."""
-        if key.encrypted_api_key is None:
-            return {}
+    def _credential(key: OrgProviderKey) -> _DialCredential | None:
+        """What this key dials with, or None when it will not decrypt.
+
+        One gate for both stored secrets: the API key and the client extras are
+        sealed with the same box, so a key that reads neither is reported the
+        same way whichever of the two the row carries.
+        """
         try:
-            return {"api_key": decrypt_secret(key.encrypted_api_key)}
+            return _DialCredential(
+                api_key=None if key.encrypted_api_key is None else decrypt_secret(key.encrypted_api_key),
+                client_args=decrypt_mapping(key.encrypted_client_args),
+            )
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return None
 
-    async def _dial(self, key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
+    @staticmethod
+    def _carries_endpoint_auth(key: OrgProviderKey) -> bool:
+        """Whether this key sends a second credential on every request, readable or not.
+
+        A credential this build cannot read sends no header, so an address that
+        refuses the request is still refusing the endpoint credential.
+        """
+        try:
+            return key.endpoint_auth is not None
+        except UnreadableEndpointAuthError:
+            return True
+
+    @classmethod
+    def _named_refusal(cls, discovery: ProviderDiscovery, key: OrgProviderKey) -> ProviderDiscovery:
+        """The discovery an admin can act on, where a refusal could have named either credential.
+
+        A key that carries an endpoint credential sends two credentials on one
+        request, and a refusal of either arrives the same way. Passing the
+        address's own wording on would read as a verdict on the API key alone.
+        """
+        if discovery.credentials_rejected and cls._carries_endpoint_auth(key):
+            return replace(discovery, error=_ENDPOINT_CREDENTIAL_REJECTED)
+        return discovery
+
+    async def _dial(self, key: OrgProviderKey, credential: _DialCredential, *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key, and keep what its engine says.
 
         Never raises, never echoes the key.
@@ -882,9 +937,15 @@ class OrgProviderModelService:
         Kept under the key and its organization: another organization can list a
         different server under the same prefix.
         """
-        api_key = credential.get("api_key")
-        client_args: dict[str, object] = tenant_client_args(key.provider, key.client_args)
+        api_key = credential.api_key
+        client_args: dict[str, object] = tenant_client_args(key.provider, credential.client_args)
         engine_client = None
+        try:
+            endpoint_headers = endpoint_auth_headers(key)
+        except (SecretBoxUnavailableError, SecretDecryptionError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_UNDECRYPTABLE)
+        except (UnreadableEndpointAuthError, UnservableEndpointError):
+            return ProviderDiscovery(provider=key.provider, models=[], error=_ENDPOINT_CREDENTIAL_UNSERVABLE)
         if key.api_base:
             # The organization chose this address, so it is held to public
             # addresses and dialed through the pinned client, as dispatch is.
@@ -893,15 +954,23 @@ class OrgProviderModelService:
                 return ProviderDiscovery(provider=key.provider, models=[], error=refusal)
             client_args["http_client"] = owned_endpoint_sdk_client(LLMProvider(key.provider))
             engine_client = owned_endpoint_http_client()
-        discovery = await test_provider_credentials(
-            key.provider,
-            api_key=api_key if isinstance(api_key, str) else None,
-            api_base=key.api_base,
-            client_args=client_args or None,
-            # An organization's key never borrows the deployment's own credentials.
-            declared=False,
-            timeout=timeout,
-            engine_client=engine_client,
+            if endpoint_headers:
+                client_args["default_headers"] = endpoint_headers
+        discovery = self._named_refusal(
+            await test_provider_credentials(
+                key.provider,
+                api_key=api_key if isinstance(api_key, str) else None,
+                api_base=key.api_base,
+                client_args=client_args or None,
+                # An organization's key never borrows the deployment's own credentials.
+                declared=False,
+                timeout=timeout,
+                engine_client=engine_client,
+                # What this call puts on the wire, so an upstream echoing its
+                # own refusal cannot send a credential back in the error text.
+                sent_values=[api_key if isinstance(api_key, str) else None, *endpoint_headers.values()],
+            ),
+            key,
         )
         if discovery.error is None:
             await record_served_models(

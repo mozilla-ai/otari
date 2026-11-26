@@ -958,10 +958,10 @@ def test_open_signup_gives_an_identity_whose_invitation_was_revoked_before_verif
         assert client.get(f"{API_ROOT}/organizations/me").json()["role"] == "owner"
 
 
-def test_open_signup_gives_a_removed_vouched_member_its_own_organization_when_a_reset_proves_the_address(
+def test_open_signup_gives_a_removed_unproved_member_its_own_organization_when_a_reset_proves_the_address(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A password chosen from an invitation link only vouches for the address; the reset is what claims it."""
+    """A password chosen from an invitation link does not prove the address; the reset is what claims it."""
     with _client(tmp_path, open_signup=True) as client:
         invitation = _invite(client, email="ada@example.com")
         # The console transport reaches no mailbox, so the link comes back for the inviter to pass on.

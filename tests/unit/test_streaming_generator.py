@@ -1288,3 +1288,47 @@ async def test_a_client_that_hangs_up_on_the_error_event_is_still_billed() -> No
     await _consume_hanging_up_after(gen, ANTHROPIC_STREAM_FORMAT.error_payload)
 
     assert settled == ["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("is_external_failure", "expected_level"),
+    [
+        (lambda _exc: True, logging.WARNING),
+        (lambda _exc: False, logging.ERROR),
+        (None, logging.ERROR),
+    ],
+)
+async def test_a_failed_stream_is_logged_at_the_level_its_cause_calls_for(
+    caplog: pytest.LogCaptureFixture,
+    is_external_failure: Callable[[BaseException], bool] | None,
+    expected_level: int,
+) -> None:
+    """A provider's failure is a warning; the gateway's own, or one nobody classified, is an error."""
+
+    async def _failing_stream() -> AsyncIterator[str]:
+        raise RuntimeError(_PROVIDER_CRASHED)
+        yield  # pragma: no cover
+
+    async def _ignore_error(exc: BaseException) -> None:
+        return None
+
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=gateway_logger.name):
+            async for _ in streaming_generator(
+                stream=_failing_stream(),
+                format_chunk=_format_chunk,
+                extract_usage=lambda _: None,
+                fmt=OPENAI_STREAM_FORMAT,
+                on_complete=_noop_complete,
+                on_error=_ignore_error,
+                label="test:model",
+                is_external_failure=is_external_failure,
+            ):
+                pass
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [record] = [r for r in caplog.records if r.getMessage().startswith("Streaming error for test:model")]
+    assert record.levelno == expected_level

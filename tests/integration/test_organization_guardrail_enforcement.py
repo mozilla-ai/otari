@@ -688,8 +688,38 @@ def test_a_definition_this_worker_does_not_hold_fails_closed(
 
     assert response.status_code == 502
     assert response.json()["error"]["message"] == "guardrail profile 'prompt-injection' could not be evaluated"
+    assert response.json()["code"] == "guardrail_unavailable"
+    assert response.headers["Otari-Error-Code"] == "guardrail_unavailable"
     assert guardrails.calls == []
     assert definition["id"] not in response.text
+
+
+def test_a_mandate_with_no_service_refuses_without_blaming_the_request(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otari#2937: the caller named nothing, so the refusal does not send them to their request."""
+    monkeypatch.delenv("OTARI_GUARDRAILS_URL", raising=False)
+    _mandate(
+        client,
+        master_key_header,
+        profile="prompt-injection",
+        mode="block",
+        on_unavailable="block",
+        applies_to_all_workspaces=True,
+    )
+    guardrails = _Guardrails(valid=True)
+
+    response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
+
+    assert response.status_code == 424
+    assert response.json()["code"] == "guardrail_not_configured"
+    message = response.json()["error"]["message"]
+    assert "'prompt-injection' is required for this request" in message
+    assert "`url`" not in message
+    assert guardrails.calls == []
 
 
 def test_a_definition_this_worker_does_not_hold_honors_a_fail_open_entry(

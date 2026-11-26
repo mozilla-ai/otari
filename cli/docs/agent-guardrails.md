@@ -65,7 +65,8 @@ the only type that calls a model, and it can only be `advisory`.
 
 ## Registering the hook
 
-Run `otari hook setup` inside the Git repository you want to guard.
+Run `otari hook setup` inside the Git repository you want to guard. `--harness pi`
+installs an extension rather than writing a settings file, so it also runs outside one.
 
 ### Claude Code
 
@@ -99,6 +100,28 @@ project's hooks only after you accept them: start Codex in the repository and ru
 The Codex integration is newer than the Claude Code one; see
 [Registering it for Codex](agent-guardrails-reference.md#registering-it-for-codex)
 for what it cannot see.
+
+### pi
+
+pi is wired by the pi-otari extension, not by a settings file:
+
+```bash
+otari hook setup --harness pi
+```
+
+installs the extension (`pi install npm:@mozilla-ai/pi-otari`) rather than
+writing a hook file, and writes nothing under `.claude` or `.codex`. If `pi` is
+not on `PATH` it prints those install instructions instead. If the extension is
+already installed for your user it says so, offers `pi update` when the installed
+version predates guardrail support, and otherwise asks before installing. Inside a Git
+repository it also offers the same starter `.otari/guardrails.yml` as the other
+harnesses; outside one it installs the extension only. The extension
+calls `otari hook --harness pi` with pi's own tool names (`bash`, `read`,
+`edit`, `write`) and `tool_input` (`command` or `path`). An `edit` or `write`
+path is an edit target, a `read` path is a read target, and a `bash` command is
+a command. On `Stop` the extension sends the session's commands as
+`bash_commands`; pi's session file is never parsed. Exit codes and output are
+the same as for Claude Code.
 
 ## Writing a gate
 
@@ -318,8 +341,8 @@ CLAUDE.md when that is the only one:
 otari guardrails generate
 ```
 
-1. Confirm the model CLI it names (`claude -p` or `codex exec`) before it sends
-   the file.
+1. Confirm the model CLI it names (`claude -p`, `codex exec` or `pi -p`) before
+   it sends the file.
 2. Answer each proposal with `y`, `n`, `e` (edit) or `q`. Only accepted gates are
    written.
 3. Run `otari guardrails validate` on the result.

@@ -6,8 +6,20 @@ import type { Register } from 'claude-code'
 // Claude Code collects them at install time and loads nothing without them.
 const RECOMMEND_PATH = '/api/v1/routing/recommend'
 const DEADLINE_MS = 3000
+// What a routed subagent consumed goes back to Otari, which works out what the
+// recommendation saved. Token counts and model ids only, never content.
+const outcomePath = (decisionId: string): string => `/api/v1/routing/decisions/${encodeURIComponent(decisionId)}/outcome`
+const OUTCOME_DEADLINE_MS = 2000
+const MAX_USAGE_LINES = 16
 
-type Recommendation = { model: string; reason?: string }
+type Tally = {
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+}
+type Recommendation = { model: string; reason?: string; decision_id?: string }
 
 // The key travels in a header, so plain http is for a gateway on this machine
 // only. A remote http URL is refused at spawn time rather than at load: a
@@ -37,6 +49,13 @@ export const register: Register = (on, options) => {
   const base = String(options.otari_url).replace(/\/$/, '')
   const key = String(options.otari_api_key)
   const transportProblem = plainHttpToRemoteHost(base) ? 'otari_url must use https unless it points at this machine' : undefined
+  // Otari's id for its decision, by the subagent that decision started. Kept
+  // for this load only: a subagent routed before a reload is not reported.
+  const decisions = new Map<string, string>()
+  // What each routed subagent's turns have consumed so far, per model, for when
+  // the engine's own totals are not there. Otari replaces the previous report
+  // with each one, so what is sent must always be the running total.
+  const consumed = new Map<string, Map<string, Tally>>()
 
   on('agent.spawn', async ($, e, next) => {
     // Claude Code ignores `model` for a fork, which always inherits the
@@ -69,6 +88,9 @@ export const register: Register = (on, options) => {
 
     const spawned = await next({ ...e, model: recommended.model })
     if (spawned.deny !== undefined) return spawned
+    if (typeof recommended.decision_id === 'string' && recommended.decision_id !== '' && spawned.agentId !== undefined) {
+      decisions.set(spawned.agentId, recommended.decision_id)
+    }
     const why = recommended.reason === undefined ? '' : ` (${recommended.reason})`
     $.ui.log(`${e.subagentType} ${spawned.agentId ?? ''} starts on ${spawned.model}, Otari's choice${why}`)
     return spawned
@@ -92,6 +114,48 @@ export const register: Register = (on, options) => {
           `cache read ${u.cache_read_input_tokens}, cache write ${u.cache_creation_input_tokens}, ${seconds}s` +
           (e.isAborted ? ', aborted' : ''),
       )
+    }
+    const decisionId = e.agentId === undefined ? undefined : decisions.get(e.agentId)
+    if (e.agentId !== undefined && decisionId !== undefined) {
+      const agentId = e.agentId
+      const own = consumed.get(agentId) ?? new Map<string, Tally>()
+      consumed.set(agentId, own)
+      if (e.usage !== undefined) {
+        const sum = own.get(e.usage.model)
+        own.set(e.usage.model, {
+          model: e.usage.model,
+          input_tokens: (sum?.input_tokens ?? 0) + e.usage.input_tokens,
+          output_tokens: (sum?.output_tokens ?? 0) + e.usage.output_tokens,
+          cache_read_input_tokens: (sum?.cache_read_input_tokens ?? 0) + e.usage.cache_read_input_tokens,
+          cache_creation_input_tokens: (sum?.cache_creation_input_tokens ?? 0) + e.usage.cache_creation_input_tokens,
+        })
+      }
+      // The report is a courtesy to the dashboard: whatever becomes of it, the
+      // turn ends as it would have, and within the deadline.
+      const report = (async () => {
+        // The engine's running totals cover every turn of the subagent, so they win.
+        const listed = (await $.agent.list()).find((a) => a.id === agentId)?.usage
+        const usage = listed !== undefined && listed.length > 0 ? listed : [...own.values()]
+        if (usage.length === 0) return
+        await $.http.fetch(`${base}${outcomePath(decisionId)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+          body: JSON.stringify({
+            usage: usage.slice(0, MAX_USAGE_LINES).map((u) => ({
+              model: u.model,
+              input_tokens: u.input_tokens,
+              output_tokens: u.output_tokens,
+              cache_read_tokens: u.cache_read_input_tokens,
+              cache_write_tokens: u.cache_creation_input_tokens,
+            })),
+          }),
+        })
+      })()
+      try {
+        await Promise.race([report, $.clock.sleep(OUTCOME_DEADLINE_MS)])
+      } catch {
+        // Unreachable, or refused: Otari keeps the decision with no outcome.
+      }
     }
     return next(e)
   })

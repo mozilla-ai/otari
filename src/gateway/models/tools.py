@@ -57,7 +57,9 @@ class SearchToolCredential(Base):
     # Named for its unit; the config-file key it stands in for is plain ``timeout``,
     # and ``to_public_dict`` / the overlay entry both use that name.
     timeout_seconds: Mapped[float | None] = mapped_column()
-    options: Mapped[dict[str, Any]] = mapped_column("options", JSON, default=dict)
+    # Free-form provider options, which can carry a credential, so they are held
+    # the way the API key above is.
+    encrypted_options: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -65,11 +67,12 @@ class SearchToolCredential(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    def to_public_dict(self) -> dict[str, Any]:
+    def to_public_dict(self, options: dict[str, Any] | None) -> dict[str, Any]:
         """Serialize for the API. Never includes the secret, only ``last4``.
 
-        ``options`` is free-form, so it is masked by key name in case it holds a
-        credential.
+        ``options`` is passed in rather than read off the row, because the row
+        holds it encrypted and decrypting belongs to the service layer. It is
+        free-form, so it is masked by key name in case it holds a credential.
         """
         return {
             "name": self.name,
@@ -79,7 +82,7 @@ class SearchToolCredential(Base):
             "api_base": self.api_base,
             "last4": self.last4,
             "timeout": self.timeout_seconds,
-            "options": redact_secret_like_values(self.options) or {},
+            "options": redact_secret_like_values(options) or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -853,7 +856,9 @@ class OrgWebSearchKey(Base):
     provider: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     api_base: Mapped[str | None] = mapped_column(String(1024), default=None)
-    options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Free-form provider options, which can carry a credential, so they are held
+    # the way the API key below is.
+    encrypted_options: Mapped[str | None] = mapped_column(Text, default=None)
     encrypted_api_key: Mapped[str | None] = mapped_column(Text, default=None)
     last4: Mapped[str | None] = mapped_column(String(8), default=None)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)

@@ -29,6 +29,7 @@ import {
   useUpdateHealthCheckSettings,
 } from "@/shared/api/healthChecks"
 import { looksLikeAddress, parseAddresses } from "@/shared/helpers/addresses"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import { formatDateTimeMinutes } from "@/shared/helpers/format"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -364,7 +365,7 @@ function addressProblem(addresses: string[]): string | undefined {
 
 /** Who hears about a failure. Saved apart from the schedule, which has its own Save. */
 function AlertsCard({ saved }: { saved: string[] }) {
-  const { mail_ready } = useDeployment()
+  const { mail } = useDeployment()
   const update = useUpdateHealthCheckSettings()
   const [draft, setDraft] = useState(saved.join("\n"))
   const addresses = parseAddresses(draft).map((address) =>
@@ -379,10 +380,10 @@ function AlertsCard({ saved }: { saved: string[] }) {
       description="One email when a model stops answering, and one when it answers again. A run that changes nothing sends nothing, so a provider that stays down all night sends two emails, not one an hour."
     >
       <div className="flex flex-col gap-4 py-4">
-        {mail_ready ? null : (
+        {mailDelivers(mail) ? null : (
           <InfoBanner tone="warning">
-            This deployment can't send email yet, so nobody below hears about a
-            failure. Set up outgoing mail in{" "}
+            Alerts from this deployment aren't working yet. Check outgoing mail
+            in{" "}
             <Link to="/settings" className="text-link hover:underline">
               Settings
             </Link>

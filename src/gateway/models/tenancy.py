@@ -53,6 +53,7 @@ exactly as the platform's own tenancy models do.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import field_validator
@@ -141,6 +142,35 @@ MAX_FULL_NAME_LENGTH = 255
 AVATAR_FACE_COUNT = 203_896
 
 
+class SignInMeans(StrEnum):
+    """The sign-in credentials an identity carries.
+
+    The members are exclusive and cover every identity. ``completes_sign_in`` is whether the
+    credentials alone can open a session. A password on an address nobody has verified cannot,
+    because authentication refuses an unverified address once the password it carries has been
+    proven.
+
+    NOTE: ``completes_sign_in`` answers for the credentials only. A caller that admits a sign-in
+    must read ``is_active`` as well.
+
+    NOTE: ``WITHOUT_PASSWORD`` is a provider or a passkey. Nothing enforces that, so a flow that
+    verifies an address must leave a password, a provider or a passkey behind.
+    """
+
+    NONE = ("none", False)
+    PASSWORD = ("password", True)
+    UNVERIFIED_PASSWORD = ("unverified_password", False)
+    WITHOUT_PASSWORD = ("without_password", True)
+
+    completes_sign_in: bool
+
+    def __new__(cls, value: str, completes_sign_in: bool) -> "SignInMeans":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.completes_sign_in = completes_sign_in
+        return member
+
+
 class UserBase(SQLModel):
     """Fields an identity carries on the wire."""
 
@@ -206,12 +236,10 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
     email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
-    # Set beside ``email_verified_at`` when the verification is an organization
-    # admin's word rather than a proof: a first password chosen through an
-    # invitation link, which the inviter also holds. Domain auto-join ignores a
-    # vouched address, a provider sign-in treats it as unverified, and a
-    # password reset (a mailbox proof) clears it.
-    email_vouched_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # Set beside ``email_verified_at`` where the address was proved by its holder:
+    # a link that reached the mailbox, or a provider that verified it. Null where
+    # the verification is an organization admin's word instead.
+    email_proven_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # otari#650's own columns, added alongside rather than reusing
     # ``email_verification_token`` above: that one is carried verbatim for
     # hosted-edition parity and stores a raw token per its own comment, and
@@ -270,6 +298,21 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # until they pick one, and the dashboard then draws the face their id hashes
     # to, so nobody needs a row written to have an avatar.
     avatar_face: int | None = Field(default=None)
+
+    @property
+    def sign_in_means(self) -> SignInMeans:
+        """The sign-in credentials this identity carries.
+
+        NOTE: This says nothing about whether the identity is active. A caller that
+        cares reads ``is_active`` as well.
+        """
+        if self.hashed_password is not None:
+            if self.email_verified_at is None:
+                return SignInMeans.UNVERIFIED_PASSWORD
+            return SignInMeans.PASSWORD
+        if self.email_verified_at is None:
+            return SignInMeans.NONE
+        return SignInMeans.WITHOUT_PASSWORD
 
 
 class DeploymentUserOrganizationPublic(SQLModel):
@@ -1184,36 +1227,57 @@ class InvitationUpdate(SQLModel):
 InvitationWayIn = Literal["provider", "password_reset"]
 
 
+class InvitationNextStep(StrEnum):
+    """What an invitee does to get in, as Otari decides it.
+
+    The members are exclusive and cover every pending invitation.
+    ``set_password`` means accepting may choose this address's first password.
+    ``sign_in`` means the address's credentials open a session.
+    ``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.
+    ``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.
+
+    NOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.
+    The other two leave it empty.
+    """
+
+    SET_PASSWORD = ("set_password", False)
+    SIGN_IN = ("sign_in", False)
+    USE_ANOTHER_WAY_IN = ("use_another_way_in", True)
+    VERIFY_EMAIL = ("verify_email", True)
+
+    carries_ways_in: bool
+
+    def __new__(cls, value: str, carries_ways_in: bool) -> "InvitationNextStep":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.carries_ways_in = carries_ways_in
+        return member
+
+
 class InvitationPreviewPublic(SQLModel):
     """What an unauthenticated visitor sees before committing to accept.
 
     Deliberately narrow: the address it was sent to, the organization's name,
-    and the role on offer. The token is the caller's only credential here, not
-    a session, so this carries nothing that identifies who sent it or any
-    other member.
+    the role on offer, and what to do next.
+    The token is the caller's only credential here, not a session, so this
+    carries nothing that identifies who sent it or any other member.
     """
 
     email: str
     organization_name: str
     role: str
     expires_at: datetime
-    needs_password: bool = Field(
+    next_step: InvitationNextStep = Field(
         description=(
-            "Whether accepting should also set the invited address's first password. False when the address "
-            "already has a way in, and also when another organization has it as a member or invitee, since this "
-            "link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a "
-            "password whenever this is false."
+            "What the invited address does to get in. Accept refuses a password unless this is 'set_password'."
         )
-    )
-    can_sign_in: bool = Field(
-        description="Whether the invited address can already sign in, with a password or through a provider."
     )
     ways_in: list[InvitationWayIn] = Field(
         description=(
-            "When the address cannot sign in yet and this link will not set its password, what this deployment "
-            "offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and "
-            "'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when "
-            "the deployment offers neither, in which case whoever administers it has to help."
+            "What this deployment offers instead, where next_step names them: 'provider' (sign in with Google "
+            "or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty for the "
+            "other steps, and empty where the deployment offers neither, in which case whoever administers it "
+            "has to help."
         )
     )
 
@@ -1319,9 +1383,9 @@ class AcceptInvitationRequest(SQLModel):
         default=None,
         max_length=_MAX_SUBMITTED_PASSWORD,
         description=(
-            "Sets the invited identity's password in the same step, when the preview reported "
-            "needs_password. Needs no mail: the link is the proof, whether it was emailed or an "
-            "admin handed it over."
+            "Sets the invited identity's password in the same step, where the preview answered "
+            "a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was "
+            "emailed or an admin handed it over."
         ),
     )
     full_name: str | None = Field(
@@ -1330,34 +1394,22 @@ class AcceptInvitationRequest(SQLModel):
     terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
 
 
-class AcceptInvitationResultPublic(SQLModel):
-    """What accepting produces: enough for the accept page to say where the visitor landed.
-
-    No session and no token. When the request carried a password, the identity
-    can sign in straight away; otherwise it stays password-less until claimed by
-    signup or a provider sign-in.
-    """
+class AcceptedMembershipPublic(SQLModel):
+    """The membership an accepted invitation produced."""
 
     organization_name: str
     role: str
-    password_set: bool = Field(default=False, description="Whether this accept set the identity's password.")
-    verification_pending: bool = Field(
-        default=False,
-        description=(
-            "Whether the invited address chose a password through signup and has not verified it yet, "
-            "so it has to open its verification link before it can sign in."
-        ),
-    )
-    can_sign_in: bool = Field(
-        default=True,
-        description=(
-            "Whether the invited address can sign in now, with a password (this accept's included) or through "
-            "a provider. False when it accepted without one and has never signed in."
-        ),
-    )
+
+
+class AcceptInvitationResultPublic(AcceptedMembershipPublic):
+    """What accepting through the link produced, and what it leaves the invitee to do.
+
+    No session and no token: ``next_step`` is the whole of what comes next.
+    """
+
+    next_step: InvitationNextStep = Field(description="What the invited address does now that it has accepted.")
     ways_in: list[InvitationWayIn] = Field(
-        default_factory=list,
-        description="When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+        description="What this deployment offers instead, where next_step names them, as the preview's ways_in says."
     )
 
 
@@ -1758,9 +1810,9 @@ class WorkspaceActivationState(Base):
     and crosses services. Here the usage row is written by this process into this
     database, so the derivation is exact.
 
-    One row per workspace, not per workspace and viewer: the guide is about a
-    workspace's first request, so dismissing it says "this workspace is set up,
-    stop offering the guide" for everyone who can manage it.
+    One row per workspace, for the people who manage it: dismissing it says "this
+    workspace is set up, stop offering the guide" for all of them. Members who do
+    not manage it have ``WorkspaceMemberActivationState``.
     """
 
     __tablename__ = "workspace_activation_state"
@@ -1793,6 +1845,43 @@ class WorkspaceActivationState(Base):
     )
 
 
+class WorkspaceMemberActivationState(Base):
+    """The setup guide's state for one member of a workspace who does not manage it.
+
+    The guide is per workspace for the workspace's owners and admins
+    (``WorkspaceActivationState``), and per person for its members. A member who
+    may run requests there without managing it (the member key surface's
+    contributor rule, so never a viewer) is offered the guide for their own
+    first request: their own usage rows count (``UsageLog.user_id``), and their
+    dismissal and setup key are theirs, the key held to what a key they create
+    for themselves is (``self_service``, inheriting their model and tool access).
+    One row per workspace and person. Whether they have activated is, again,
+    not a column: it is their own first successful request in the workspace.
+    """
+
+    __tablename__ = "workspace_member_activation_state"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    first_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    last_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    dismissed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # ``SET NULL`` for the reason ``WorkspaceActivationState.api_key_id`` is.
+    api_key_id: Mapped[str | None] = mapped_column(
+        ForeignKey("api_keys.id", ondelete="SET NULL"), default=None, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 __all__ = [
     "DeploymentAdminAccessPublic",
     "DeploymentUserOrganizationPublic",
@@ -1817,6 +1906,7 @@ __all__ = [
     "WORKSPACE_MEMBER_STATUSES",
     "AcceptInvitationRequest",
     "AcceptInvitationResultPublic",
+    "AcceptedMembershipPublic",
     "ActiveOrganizationMemberCreateRequest",
     "ActiveOrganizationMemberCreateResultPublic",
     "ActiveOrganizationMemberPublic",
@@ -1829,6 +1919,7 @@ __all__ = [
     "DashboardSession",
     "Invitation",
     "InvitationCreate",
+    "InvitationNextStep",
     "InvitationPreviewPublic",
     "InvitationStatus",
     "InvitationUpdate",
@@ -1859,6 +1950,7 @@ __all__ = [
     "OrganizationsPublic",
     "PendingOrganizationInvitationPublic",
     "PendingOrganizationInvitationsPublic",
+    "SignInMeans",
     "SwitchActiveOrganizationRequest",
     "User",
     "UserCreate",
@@ -1875,6 +1967,7 @@ __all__ = [
     "WorkspaceAssignmentRequest",
     "WorkspaceCreate",
     "WorkspaceMember",
+    "WorkspaceMemberActivationState",
     "WorkspaceMemberCreate",
     "WorkspaceMemberPublic",
     "WorkspaceMemberUpdate",

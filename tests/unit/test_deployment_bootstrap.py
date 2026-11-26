@@ -77,9 +77,9 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        # The trace explorer, the Health page, the MCP catalog and the update check are core features, published
-        # on top of the declared surfaces while they are on.
-        "surfaces": sorted({*SURFACES, "health_checks", "mcp_catalog", "traces", "update_check"}),
+        # The trace explorer, the Health page, the MCP catalog, organization SSO and the update check are core
+        # features, published on top of the declared surfaces while they are on.
+        "surfaces": sorted({*SURFACES, "health_checks", "mcp_catalog", "organization_sso", "traces", "update_check"}),
         "sign_in_methods": ["master_key"],
         "docs_url": None,
         "terms_url": None,
@@ -88,11 +88,12 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "maintenance_mode": False,
         "passkeys_enabled": True,
         "passkeys_ready": False,
+        "organization_oidc_enabled": True,
         "oauth_providers": [],
         "feedback_enabled": False,
         "platform_connect": True,
         "federation_member_rules": False,
-        "mail_ready": False,
+        "mail": "none",
         "public_catalog": False,
         "open_signup": False,
     }
@@ -223,19 +224,18 @@ def test_member_federation_rules_are_published_when_the_setting_is_on(
         assert client.get(f"{API_ROOT}/bootstrap").json()["federation_member_rules"] is True
 
 
-def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
+def test_mail_sends_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
     """What the dashboard gates a mail-dependent affordance on.
 
-    A transport alone is not enough: every message the gateway sends
-    carries a link back into this deployment, and it needs its own address to
-    build one.
+    A transport alone is not enough: every message the deployment sends
+    carries a link back into it, and it needs its own address to build one.
     """
     transport_only = _gateway_config(tmp_path)
     transport_only.smtp_host = "smtp.example.com"
     transport_only.mail_from_email = "otari@example.com"
 
     with TestClient(create_app(transport_only)) as client:
-        assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is False
+        assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "none"
 
     reset_config()
     reset_db()
@@ -246,7 +246,21 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
     ready.public_base_url = "https://otari.example.com"
 
     with TestClient(create_app(ready)) as client:
-        assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is True
+        assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "delivers"
+
+
+def test_mail_separates_a_send_nobody_receives_from_a_delivered_one(tmp_path: Path) -> None:
+    """A console deployment sends every message and no recipient gets one.
+
+    One flag for both questions is what let the dashboard promise an inbox it
+    never reached, so the two states are told apart here rather than merged.
+    """
+    logged = _gateway_config(tmp_path)
+    logged.mail_transport = "console"
+    logged.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(logged)) as client:
+        assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "sends_only"
 
 
 def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_path: Path) -> None:
@@ -294,8 +308,29 @@ SURFACE_ROUTE_PREFIXES = {
     "update_check": f"{API_ROOT}/update-check",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
+    "organization_sso": f"{API_ROOT}/organizations/me/sso",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
+    "subagent_savings": f"{API_ROOT}/organizations/me/subagent-savings",
 }
+
+
+def test_a_deployment_with_sso_off_offers_no_sso_sign_in(tmp_path: Path) -> None:
+    """The sign-in screen renders ahead of every surface gate, so it reads this field instead.
+
+    Answered from the features the app resolved rather than from the setting, so a deployment
+    that withholds the routes cannot publish the same answer as one that serves them.
+    """
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
+        master_key=MASTER_KEY,
+        organization_oidc_enabled=False,
+    )
+
+    with TestClient(create_app(config)) as client:
+        payload = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert payload["organization_oidc_enabled"] is False
+    assert "organization_sso" not in payload["surfaces"]
 
 
 def test_the_organization_guardrail_surface_is_published(tmp_path: Path) -> None:

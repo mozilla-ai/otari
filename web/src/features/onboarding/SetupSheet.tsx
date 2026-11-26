@@ -58,6 +58,7 @@ export function SetupSheet({
   baseUrl,
   model,
   failure,
+  isMember = false,
   attemptAt,
   isChecking,
   checkFailed,
@@ -87,6 +88,8 @@ export function SetupSheet({
   /** The first model the gateway can serve, when it can serve one. */
   model?: string
   failure?: SetupFailure
+  /** A member joining a workspace that may already have traffic, so its empty-dashboard note is left out. */
+  isMember?: boolean
   attemptAt?: string
   isChecking: boolean
   checkFailed: boolean
@@ -201,9 +204,12 @@ export function SetupSheet({
         />
       }
       footerStart={
-        <p className="text-caption">
-          Usage and the activity log stay empty until your first request lands.
-        </p>
+        isMember ? undefined : (
+          <p className="text-caption">
+            Usage and the activity log stay empty until your first request
+            lands.
+          </p>
+        )
       }
       actions={
         // The wrapper names a place (see actions.md), which is all it does:

@@ -13,6 +13,7 @@ from gateway.api.deps._base import (
     get_config,
     get_container,
 )
+from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
 from gateway.auth.models import hash_key
 from gateway.core.config import (
@@ -47,7 +48,6 @@ from gateway.services.api_keys import (
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.secret_box import configured_secret_keys
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.workspace_scope import (
     organization_for_key_id,
 )
@@ -615,7 +615,7 @@ async def require_deployment_operator(
     of its own, so admitting a non-operator is spelled at a router instead of
     hidden in one route's decorator.
     """
-    if session_identity is not None and not await DeploymentAdministrationAccess(db).has_administration_access(
+    if session_identity is not None and not await deployment_administration_access(db).has_administration_access(
         session_identity
     ):
         record_auth_failure("not_deployment_operator")
@@ -739,7 +739,7 @@ async def catalog_reader_operates_deployment(
     does not.
     """
     if session_identity is not None:
-        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
+        return await deployment_administration_access(db).has_administration_access(session_identity)
     _, is_master_key = auth
     return is_master_key
 

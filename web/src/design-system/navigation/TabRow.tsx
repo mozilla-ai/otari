@@ -95,7 +95,25 @@ export function Tab({
  * implement. Each tab is a button with its own name and `aria-pressed`, which is
  * what a screen reader needs; the row is only spacing.
  */
-export function TabRow({ children }: { children: ReactNode }) {
+export function TabRow({
+  children,
+  wraps = false,
+}: {
+  children: ReactNode
+  /**
+   * Wraps whole tabs onto another line instead of scrolling. For the few
+   * answers to one question, where an answer hidden past the edge reads as no
+   * answer; a row of sibling views keeps scrolling. A label still never wraps.
+   */
+  wraps?: boolean
+}) {
+  if (wraps) {
+    return <div className="flex flex-wrap items-center gap-1">{children}</div>
+  }
+  return <ScrollingTabRow>{children}</ScrollingTabRow>
+}
+
+function ScrollingTabRow({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   // A row that scrolls has to say so: the edge with more beyond it fades out,
   // and an edge with nothing past it stays sharp, so a row that fits is drawn

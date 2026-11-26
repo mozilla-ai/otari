@@ -369,11 +369,14 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
-- `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
-  upload storage (see [Storage backends](#storage-backends)). With
-  `files_enabled` off, a backend that cannot be built (an `s3` backend with no
-  bucket, say) is logged at startup rather than stopping it, and a stored
-  `file_id` then does not resolve; with it on, the same fault stops the boot.
+- `files_api_enabled` (formerly `files_enabled`, which still works and logs a
+  deprecation warning), `files_backend`, `files_max_bytes`,
+  `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
+  `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
+  below keeps reclaiming expired and deleted files. With it off, a backend that
+  cannot be built (an `s3` backend with no bucket, say) is logged at startup
+  rather than stopping it, and a stored `file_id` then does not resolve and the
+  sweep cannot run; with it on, the same fault stops the boot.
 - `files_output_max_files`, `files_output_max_bytes`,
   `files_provider_copy_max_sec`: limits on files produced by code execution
   (see [A file the provider's own sandbox produced](#a-file-the-providers-own-sandbox-produced)).
@@ -382,7 +385,9 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 - `files_sweep_interval_sec`: the background sweep (hourly by default, `0` to
   disable). An expired file answers 404 at once; the sweep then reclaims its
   bytes and row, along with those of deleted files and of uploads that never
-  completed.
+  completed, and drops the rows of provider copies that expired or never
+  finished. With it at `0`, a deployment that still holds any of these says so
+  at startup, since nothing else reclaims them.
 - `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
 a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see

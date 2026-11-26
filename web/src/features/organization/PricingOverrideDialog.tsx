@@ -127,7 +127,7 @@ export interface PricingOverrideDialogProps {
   onOpenChange: (open: boolean) => void
   /** The row being edited; absent means this is an add. */
   editing?: OrganizationPricingOverride
-  /** A selector to open an add on, as the catalog's "Set your rate" link arrives with one. */
+  /** A selector to open an add on, as the catalog's "Set your rate…" action arrives with one. */
   initialModelKey?: string
   /** Every stored override, so an overlapping period is refused before the request. */
   existing: readonly OrganizationPricingOverride[]

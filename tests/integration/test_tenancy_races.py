@@ -53,7 +53,7 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -289,6 +289,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
             identity,
             new_password="a-real-password",
             sso_enforcement=NO_SSO_ENFORCEMENT,
+            authority=AddressAuthority.OPERATOR,
             email="contested@example.com",
         )
         # `set_password` returns None, so the racer that got through reports a

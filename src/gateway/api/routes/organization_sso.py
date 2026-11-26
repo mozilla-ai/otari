@@ -13,6 +13,9 @@ at it.
 from fastapi import APIRouter, Depends, status
 
 from gateway.api.deps import CurrentIdentity, OIDCConnectionServiceDep, verify_master_key
+from gateway.api.routes import auth_sso
+from gateway.core.feature import CoreFeature
+from gateway.core.surface import Surface
 from gateway.schemas.identity import (
     OIDCConnectionEnabledRequest,
     OIDCConnectionRequest,
@@ -131,3 +134,13 @@ async def put_organization_sso_enforcement(
         break_glass_user_id=request.break_glass_user_id,
         break_glass_waived=request.break_glass_waived,
     )
+
+
+# One entry carries both routers, so configuring a connection and signing in through one
+# are switched together.
+FEATURE = CoreFeature(
+    name="organization_sso",
+    surface=Surface("organization_sso"),
+    enabled=lambda config: config.organization_oidc_enabled,
+    routers=lambda config: (auth_sso.router, router),
+)

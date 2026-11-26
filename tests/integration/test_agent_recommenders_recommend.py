@@ -5,20 +5,28 @@ adapter calls it. These pin which router answers and what the caller is
 charged: the row switched on at its rates, the hold when the upstream reports
 no tokens, nothing for a free router, and nothing answering with no row
 stored or every row off. Nothing the operator stored, and nothing the caller sent, reaches a
-log or a usage row.
+log or a usage row. Each answer leaves a ``subagent_decisions`` row, and a call
+that was not answered leaves none.
 """
 
 import logging
+import uuid
 from collections.abc import Iterator
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from gateway.adapters.agent_model_recommender_adapter import NOT_CONFIGURED
 from gateway.core.config import API_ROOT
 from gateway.log_config import logger as gateway_logger
+from gateway.models.routing import SubagentDecision
+from gateway.repositories.routing import SubagentDecisionRepository
 from gateway.services.inference import DecisionProviderError
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
 from gateway.services.secret_box import generate_secret_key
@@ -27,6 +35,7 @@ RECOMMEND = f"{API_ROOT}/routing/recommend"
 ROUTERS = f"{API_ROOT}/routing/recommenders"
 STORED_KEY = "sk-or-stored-router-1234"
 TASK = "List the files under src/ and report what each module does."
+DESCRIPTION = "Survey the source tree"
 ANSWER: dict[str, Any] = {
     "model": "decider-1.0",
     "answers": {
@@ -56,17 +65,19 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
         gateway_logger.removeHandler(caplog.handler)
 
 
-def _spawn() -> dict[str, Any]:
-    return {
+def _spawn(**fields: Any) -> dict[str, Any]:
+    spawn: dict[str, Any] = {
         "harness": "claude-code",
         "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
         "tool_use_id": "toolu_01",
         "agent_type": "Explore",
-        "description": "List files",
+        "description": DESCRIPTION,
         "prompt": TASK,
         "parent_model": "claude-opus-5",
         "requested_model": None,
     }
+    spawn.update(fields)
+    return spawn
 
 
 def _mock_decision(answer: dict[str, Any] | None = None, *, side_effect: Exception | None = None) -> Any:
@@ -94,6 +105,10 @@ def _usage_rows(client: TestClient, master_key_header: dict[str, str], user_id: 
     )
     assert rows.status_code == 200, rows.text
     return [dict(row) for row in rows.json()]
+
+
+def _decisions(db: Session) -> list[SubagentDecision]:
+    return list(db.execute(select(SubagentDecision)).scalars())
 
 
 def test_the_stored_router_answers_at_its_rates(
@@ -240,6 +255,7 @@ def test_neither_the_key_nor_the_task_reaches_a_log_or_a_usage_row(
     master_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
     gateway_logs: pytest.LogCaptureFixture,
+    test_db: Session,
 ) -> None:
     _store(client, master_key_header)
 
@@ -250,6 +266,92 @@ def test_neither_the_key_nor_the_task_reaches_a_log_or_a_usage_row(
 
     logged = "\n".join(record.getMessage() for record in gateway_logs.records)
     rows = str(_usage_rows(client, master_key_header, api_key_obj["user_id"]))
-    for secret in (STORED_KEY, TASK):
+    decisions = str([vars(decision) for decision in _decisions(test_db)])
+    for secret in (STORED_KEY, TASK, DESCRIPTION):
         assert secret not in logged
         assert secret not in rows
+        assert secret not in decisions
+
+
+def test_an_answer_is_recorded_as_a_decision(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    test_db: Session,
+) -> None:
+    _store(client, master_key_header)
+
+    with _mock_decision():
+        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    (decision,) = _decisions(test_db)
+    (row,) = _usage_rows(client, master_key_header, api_key_obj["user_id"])
+    assert response.json()["decision_id"] == str(decision.id) == row["request_group_id"]
+    assert (decision.user_id, decision.api_key_id) == (api_key_obj["user_id"], api_key_obj["id"])
+    assert (decision.harness, decision.agent_type) == ("claude-code", "Explore")
+    assert (decision.requested_model, decision.parent_model) == (None, "claude-opus-5")
+    assert (decision.baseline_model, decision.baseline_source) == ("claude-opus-5", "parent")
+    assert decision.recommended_model == "sonnet"
+    # 800 input tokens at $20 per million, what the usage row was charged.
+    assert decision.router_cost == Decimal("0.016")
+    assert decision.outcome_kind == "none"
+
+
+@pytest.mark.parametrize(
+    ("requested", "baseline", "source"),
+    [("opus", "opus", "requested"), ("inherit", "claude-opus-5", "parent")],
+)
+def test_the_baseline_is_the_model_asked_for_else_the_parents(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_db: Session,
+    requested: str,
+    baseline: str,
+    source: str,
+) -> None:
+    _store(client, master_key_header)
+
+    with _mock_decision():
+        response = client.post(RECOMMEND, json=_spawn(requested_model=requested), headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    (decision,) = _decisions(test_db)
+    assert (decision.baseline_model, decision.baseline_source) == (baseline, source)
+
+
+def test_a_call_that_was_not_answered_records_no_decision(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_db: Session,
+) -> None:
+    _store(client, master_key_header)
+
+    with _mock_decision(side_effect=DecisionProviderError("upstream is down", status_code=500)):
+        assert client.post(RECOMMEND, json=_spawn(), headers=api_key_header).status_code == 502
+
+    assert _decisions(test_db) == []
+
+
+def test_a_decision_that_cannot_be_recorded_is_still_answered(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    test_db: Session,
+) -> None:
+    _store(client, master_key_header)
+    refused = OperationalError("INSERT", {}, Exception("connection lost"))
+
+    with _mock_decision(), patch.object(SubagentDecisionRepository, "insert", AsyncMock(side_effect=refused)):
+        response = client.post(RECOMMEND, json=_spawn(), headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["model"], response.json()["decision_id"]) == ("sonnet", None)
+    assert _decisions(test_db) == []
+    (row,) = _usage_rows(client, master_key_header, api_key_obj["user_id"])
+    assert row["status"] == "success"
+    assert uuid.UUID(row["request_group_id"])

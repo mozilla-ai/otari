@@ -76,22 +76,39 @@ class SearchToolRepository(BaseRepository[SearchToolCredential, BaseModel, BaseM
         return row
 
     async def list_encrypted(self) -> Sequence[SearchToolCredential]:
-        """Every row holding a key, for a key rotation."""
-        stmt = select(SearchToolCredential).where(SearchToolCredential.encrypted_api_key.is_not(None))
+        """Every row holding a stored secret, for a key rotation.
+
+        A keyless backend still holds sealed options, so a row is included on
+        either ciphertext rather than on the key alone.
+        """
+        stmt = select(SearchToolCredential).where(
+            SearchToolCredential.encrypted_api_key.is_not(None) | SearchToolCredential.encrypted_options.is_not(None)
+        )
         return (await self.db.execute(stmt)).scalars().all()
 
-    async def swap_ciphertext(self, name: str, *, expected: str, replacement: str) -> bool:
-        """Replace a row's key ciphertext if it still holds ``expected``.
+    async def swap_ciphertexts(
+        self, name: str, *, expected: tuple[str | None, str | None], replacement: tuple[str | None, str | None]
+    ) -> bool:
+        """Replace a row's key and options ciphertexts if they still hold ``expected``.
 
         A conditional UPDATE, so an edit committed while a rotation ran is not
         overwritten. Returns whether the row was written.
         """
+        key, options = expected
         result = cast(
             CursorResult[Any],
             await self.db.execute(
                 update(SearchToolCredential)
-                .where(SearchToolCredential.name == name, SearchToolCredential.encrypted_api_key == expected)
-                .values(encrypted_api_key=replacement)
+                .where(
+                    SearchToolCredential.name == name,
+                    SearchToolCredential.encrypted_api_key.is_(None)
+                    if key is None
+                    else SearchToolCredential.encrypted_api_key == key,
+                    SearchToolCredential.encrypted_options.is_(None)
+                    if options is None
+                    else SearchToolCredential.encrypted_options == options,
+                )
+                .values(encrypted_api_key=replacement[0], encrypted_options=replacement[1])
                 .execution_options(synchronize_session=False)
             ),
         )

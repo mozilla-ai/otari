@@ -178,6 +178,10 @@ _COUNT_COUNTS_DESC = (
     "imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the "
     "total matches what bulk delete and set-price can reach"
 )
+_PAID_DESC = (
+    "Filter by who paid the provider: true = only rows served on a credential the deployment "
+    "pays for (a hosted provider), false = every other row"
+)
 _WORKSPACE_DESC = "Only usage recorded in this workspace."
 # The three entity filters are repeatable on every usage endpoint, so a chart or a
 # log view can compare a handful of models / users / keys instead of one at a time.
@@ -227,6 +231,7 @@ async def list_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -261,6 +266,7 @@ async def list_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
@@ -350,6 +356,7 @@ async def count_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNT_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -384,6 +391,7 @@ async def count_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
     )
@@ -496,6 +504,7 @@ async def usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
@@ -536,6 +545,7 @@ async def usage_summary(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.summary(filters, usage_scope, bucket=bucket, dimensions=dimensions, group_by_tag=group_by_tag)
@@ -563,6 +573,7 @@ async def usage_series(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    deployment_paid: bool | None = Query(default=None, description=_PAID_DESC),
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
@@ -594,6 +605,7 @@ async def usage_series(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        deployment_paid=deployment_paid,
         workspace_id=workspace_id,
     )
     return await usage.grouped_series(filters, usage_scope, bucket=bucket, group_by=group_by)

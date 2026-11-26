@@ -2,8 +2,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MailReadiness } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import {
+  readSignInReason,
+  rememberSignInReason,
+} from "@/features/auth/signInReason"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -27,27 +32,30 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 function Mounted({
   children,
   signInMethods = ["master_key"],
-  mailReady = false,
+  mail = "none",
   maintenanceMode = false,
   oauthProviders = [],
   openSignup = false,
+  organizationOidcEnabled = true,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
-  mailReady?: boolean
+  mail?: MailReadiness
   maintenanceMode?: boolean
   oauthProviders?: string[]
   openSignup?: boolean
+  organizationOidcEnabled?: boolean
 }) {
   return (
     <AppProviders>
       <DeploymentProvider
         value={bootstrap({
           sign_in_methods: signInMethods,
-          mail_ready: mailReady,
+          mail,
           maintenance_mode: maintenanceMode,
           oauth_providers: oauthProviders,
           open_signup: openSignup,
+          organization_oidc_enabled: organizationOidcEnabled,
         })}
       >
         {children}
@@ -99,6 +107,71 @@ vi.mock("@/features/auth/overlayLoginRefusalHint", () => ({
     </div>
   ),
 }))
+
+// The sign-in reason seam, passed through to the base resolver unless a test
+// stands in for an edition that resolves a reason of its own.
+const editionReason = vi.hoisted(() => ({ current: null as string | null }))
+vi.mock("@/features/auth/overlaySignInReason", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/auth/overlaySignInReason")>()
+  return {
+    useSignInReason: () => {
+      const base = actual.useSignInReason()
+      return editionReason.current ?? base
+    },
+  }
+})
+
+describe("Login, sent here for a reason", () => {
+  afterEach(() => {
+    editionReason.current = null
+  })
+
+  it.each([
+    [["password"], "One account for every model."],
+    [["master_key"], "Sign in with your master key to browse models"],
+  ] as const)(
+    "says the reason in place of the default description (%s)",
+    (signInMethods, defaultText) => {
+      rememberSignInReason("Sign in to join Acme.")
+      render(
+        <Mounted signInMethods={[...signInMethods]}>
+          <Login />
+        </Mounted>,
+      )
+
+      expect(screen.getByText("Sign in to join Acme.")).toBeInTheDocument()
+      expect(screen.queryByText(new RegExp(defaultText))).toBeNull()
+      // Not the extra status line a notice draws.
+      expect(screen.queryByRole("status")).toBeNull()
+      expect(readSignInReason()).toBeNull()
+    },
+  )
+
+  it("keeps the default description when nothing gave a reason", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("One account for every model.")).toBeInTheDocument()
+  })
+
+  it("says the reason an edition's resolver gives", () => {
+    editionReason.current = "Sign in to finish your subscription."
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText("Sign in to finish your subscription."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("One account for every model.")).toBeNull()
+  })
+})
 
 describe("Login", () => {
   it("leaves the edition's region choice to the page's header, not the card", () => {
@@ -169,7 +242,7 @@ describe("Login", () => {
 
   it("links to signup, recovery and a fresh verification link once mail works", async () => {
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -188,7 +261,7 @@ describe("Login", () => {
 
   it("hides recovery on an unclaimed deployment, where no password exists to reset", async () => {
     render(
-      <Mounted mailReady>
+      <Mounted mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -287,7 +360,7 @@ describe("Login", () => {
 
   it("offers recovery to a member holding a password on an unclaimed deployment", () => {
     render(
-      <Mounted mailReady signInMethods={["master_key", "password"]}>
+      <Mounted mail="delivers" signInMethods={["master_key", "password"]}>
         <Harness />
       </Mounted>,
     )
@@ -299,7 +372,7 @@ describe("Login", () => {
 
   it("invites registration rather than a claim where signup is open", () => {
     render(
-      <Mounted mailReady openSignup>
+      <Mounted mail="delivers" openSignup>
         <Harness />
       </Mounted>,
     )
@@ -308,6 +381,28 @@ describe("Login", () => {
       screen.getByRole("link", { name: /Create an account/ }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
+  })
+
+  it("keeps the mail-only ways in where a send reaches no recipient", () => {
+    // Signup, recovery and a verification resend each only send a message, and
+    // the endpoints behind them accept one on this deployment, so taking the
+    // links away would hide a flow that works.
+    render(
+      <Mounted
+        mail="sends_only"
+        openSignup
+        signInMethods={["master_key", "password"]}
+      >
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Create an account/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: /Forgot your password/ }),
+    ).toBeInTheDocument()
   })
 
   it("links to the auth-free welcome page", async () => {
@@ -636,7 +731,7 @@ describe("Login", () => {
       jsonResponse({ detail: "Verify your email before signing in" }, 403),
     )
     const first = render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -698,7 +793,7 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <Mounted signInMethods={["password"]} mailReady>
+      <Mounted signInMethods={["password"]} mail="delivers">
         <Harness />
       </Mounted>,
     )
@@ -723,7 +818,7 @@ describe("Login", () => {
   it("renders the unverified refusal without a link on a gateway that cannot mail one", async () => {
     // The resend page starts by sending a message, so on a mailless gateway
     // the link would lead to a flow that can only 503. The refusal still
-    // renders; hiding the action is the same call `mail_ready` already makes
+    // renders; hiding the action is the same call the mail state already makes
     // for signup and recovery.
     const refusal =
       "Verify your email before signing in; request a new verification email if yours expired"
@@ -1800,5 +1895,31 @@ describe("Login, provider first", () => {
     expect(pressed).not.toBeDisabled()
     expect(pressed).toHaveClass("pointer-events-none")
     expect(pressed.parentElement).toHaveAttribute("aria-busy", "true")
+  })
+  it("offers the company row where the deployment serves organization SSO", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).toBeInTheDocument()
+  })
+
+  it("draws no company row where the deployment has organization SSO off", () => {
+    // The routes behind the row are not mounted there, so pressing it could
+    // only produce a 404. The sign-in screen renders before any surface gate,
+    // which is why it reads `organization_oidc_enabled` rather than the surface list.
+    render(
+      <Mounted signInMethods={["password"]} organizationOidcEnabled={false}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Sign in with your company (SSO)" }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -4,13 +4,15 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
+from gateway.core.address_proof import record_address
 from gateway.exceptions.identity_exceptions import (
     InvalidEmailError,
     OAuthEmailMissingError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
+from gateway.models.tenancy import SignInMeans
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.oauth_service import provider_label, trusts_email_claim
@@ -116,7 +118,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if not await unverified_identity_is_claimable(self._organizations, identity, open_signup=self._open_signup):
             raise OAuthIdentityUnknownError(label)
 
-        first_claim = identity.hashed_password is None and identity.email_verified_at is None
+        first_claim = identity.sign_in_means is SignInMeans.NONE
         if not created and await self._organizations.provision_tenancy_for_claim(
             identity,
             open_signup=self._open_signup,
@@ -130,11 +132,10 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if identity.oauth_provider is None:
             identity.oauth_provider = external.provider
         password_removed = False
-        if identity.email_verified_at is None or identity.email_vouched_at is not None:
+        if identity.email_proven_at is None:
             password_removed = identity.hashed_password is not None
-            identity.email_verified_at = datetime.now(UTC)
-            identity.email_vouched_at = None
-            # The address was unverified, or only vouched for, when these were set, so they may not be this person's.
+            record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
+            # The address was not proved when these were set, so they may not be this person's.
             identity.hashed_password = None
             identity.email_verification_token_hash = None
             identity.email_verification_token_expires_at = None

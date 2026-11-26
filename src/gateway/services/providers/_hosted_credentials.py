@@ -5,7 +5,6 @@ secret box. They are read back here and nowhere else, into a value that never
 crosses the API boundary.
 """
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -25,8 +24,11 @@ from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.url_safety import redact_url_secrets
 
@@ -185,24 +187,15 @@ def encrypt_key(api_key: str | None) -> str | None:
 
 
 def encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
-    """Encrypt the SDK client extras for storage, as one JSON document.
+    """Encrypt the SDK client extras for storage.
 
     Raises:
         SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
     """
-    if client_args is None:
-        return None
     try:
-        return encrypt_secret(json.dumps(client_args, sort_keys=True))
+        return encrypt_mapping(client_args)
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError(STORED) from None
-
-
-def _decrypt_client_args(ciphertext: str | None) -> dict[str, Any] | None:
-    if ciphertext is None:
-        return None
-    decrypted: dict[str, Any] = json.loads(decrypt_secret(ciphertext))
-    return decrypted
 
 
 def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHostedProvider | None:
@@ -213,7 +206,7 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
     """
     try:
         api_key = None if row.encrypted_api_key is None else decrypt_secret(row.encrypted_api_key)
-        client_args = _decrypt_client_args(row.encrypted_client_args)
+        client_args = decrypt_mapping(row.encrypted_client_args)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         if not quiet:
             logger.error(
@@ -253,7 +246,7 @@ def region_credential_of(
     """
     try:
         api_key = None if region.encrypted_api_key is None else decrypt_secret(region.encrypted_api_key)
-        client_args = _decrypt_client_args(region.encrypted_client_args)
+        client_args = decrypt_mapping(region.encrypted_client_args)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         if not quiet:
             logger.error(
@@ -298,25 +291,12 @@ def region_decryptable(region: HostedProviderRegion) -> bool:
     try:
         if region.encrypted_api_key is not None:
             decrypt_secret(region.encrypted_api_key)
-        _decrypt_client_args(region.encrypted_client_args)
+        decrypt_mapping(region.encrypted_client_args)
     except (SecretDecryptionError, SecretBoxUnavailableError):
         return False
     return True
 
 
-def reencrypted(ciphertext: str | None) -> str | None:
-    """``ciphertext`` decrypted and encrypted again under the primary key, or None for None.
-
-    Raises:
-        SecretDecryptionError: no configured key reads it.
-        SecretBoxUnavailableError: no usable ``OTARI_SECRET_KEY``.
-    """
-    return None if ciphertext is None else encrypt_secret(decrypt_secret(ciphertext))
-
-
 def client_args_of(row: HostedProvider | HostedProviderRegion) -> dict[str, Any] | None:
     """The stored SDK client extras, or None when there are none or no configured key reads them."""
-    try:
-        return _decrypt_client_args(row.encrypted_client_args)
-    except (SecretDecryptionError, SecretBoxUnavailableError):
-        return None
+    return readable_mapping(row.encrypted_client_args)

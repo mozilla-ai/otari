@@ -23,6 +23,7 @@ import {
   gatewayEvents,
   guardrailProfile,
   guardrailVerdict,
+  laterCalls,
   mcpServer,
 } from "./gateway"
 import { inSubagentOf, sessionStats } from "./sessionStats"
@@ -99,13 +100,16 @@ const REFUSED_BY: Record<string, string> = {
 function spanLevel(
   span: TraceSpan,
   verdict: GuardrailVerdict | null,
+  siblings: readonly TraceSpan[],
 ): ObservationLevel {
   if (verdict) {
     return gateVerdict(span) ? GATE_LEVEL[verdict] : GUARDRAIL_LEVEL[verdict]
   }
   if (span.outcome === "blocked") return "WARNING"
   if (span.outcome !== "error") return "DEFAULT"
-  return span.recovered ? "WARNING" : "ERROR"
+  if (!span.recovered) return "ERROR"
+  const { answer, next } = laterCalls(span, siblings)
+  return next?.outcome === "error" && !answer ? "ERROR" : "WARNING"
 }
 
 function returnedError(span: TraceSpan): boolean {
@@ -119,6 +123,7 @@ function spanStatus(
   verdict: GuardrailVerdict | null,
   gateMessages: ReadonlyMap<string, string>,
   blockedBy: readonly string[] = [],
+  siblings: readonly TraceSpan[],
 ): string | undefined {
   if (verdict && gateVerdict(span)) {
     const said = GATE_STATUS[verdict]
@@ -153,7 +158,12 @@ function spanStatus(
     return "Connecting to the server or listing its tools failed."
   }
   const error = failureLabel(span.error_class)
-  return span.recovered ? `${error}, recovered by a fallback` : error
+  if (!span.recovered) return error
+  const { answer, next } = laterCalls(span, siblings)
+  if (answer) return `${error}, recovered by a fallback`
+  return next?.outcome === "error"
+    ? `${error}, the fallback also failed`
+    : `${error}, routing tried the next candidate`
 }
 
 // What the span was about, where the deployment keeps content: the one value on
@@ -418,13 +428,14 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
           parentOverride !== undefined,
         startMs,
         endMs: Math.max(startMs, endMs),
-        level: spanLevel(span, verdict),
+        level: spanLevel(span, verdict, detail.spans),
         returnedError: returnedError(span),
         statusMessage: spanStatus(
           span,
           verdict,
           gateMessages,
           blockedBy.get(span.span_id),
+          detail.spans,
         ),
         model: span.model ?? undefined,
         provider: span.provider ?? undefined,

@@ -361,15 +361,16 @@ async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSessio
 _CONFORMS: MembershipAdmission = OrganizationService(None, membership_listener=None)  # type: ignore[arg-type]
 
 
-async def test_admitting_an_identity_only_another_organization_vouched_for_is_refused(
+async def test_admitting_an_identity_only_another_organization_recorded_is_refused(
     async_db: AsyncSession,
 ) -> None:
-    """A vouched identity carries a password the organization that vouched could have chosen."""
-    organization = await create_organization(async_db, slug="admit-vouched")
-    elsewhere = await create_organization(async_db, slug="admit-vouched-other")
+    """An unproved identity carries a password the organization that recorded it could have chosen."""
+    organization = await create_organization(async_db, slug="admit-unproved")
+    elsewhere = await create_organization(async_db, slug="admit-unproved-other")
     await create_member(async_db, organization, role="owner", full_name="Owner")
-    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="vouched@example.com")
-    invitee.email_vouched_at = datetime.now(UTC)
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="unproved@example.com")
+    invitee.email_verified_at = datetime.now(UTC)
+    invitee.email_proven_at = None
     async_db.add(invitee)
     await async_db.flush()
     writes = membership_writes(async_db)
@@ -380,29 +381,30 @@ async def test_admitting_an_identity_only_another_organization_vouched_for_is_re
             await service.admit(organization_id=organization.id, role="member", user_id=invitee.id, workspaces=[])
 
 
-async def test_admitting_sees_a_vouch_committed_after_the_identity_was_resolved(postgres_url: str) -> None:
-    """The guard reads the identity under its own lock, so a vouch committed in between is not missed."""
+async def test_admitting_sees_a_proof_retired_after_the_identity_was_resolved(postgres_url: str) -> None:
+    """The guard reads the identity under its own lock, so a write committed in between is not missed."""
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
         async with sessions() as setup:
-            organization = await create_organization(setup, slug="admit-late-vouch")
-            elsewhere = await create_organization(setup, slug="admit-late-vouch-other")
+            organization = await create_organization(setup, slug="admit-late-write")
+            elsewhere = await create_organization(setup, slug="admit-late-write-other")
             await create_member(setup, organization, role="owner", full_name="Owner")
             invitee = await _invitee(setup, active_organization_id=elsewhere.id, email="late@example.com")
+            invitee.email_verified_at = datetime.now(UTC)
+            invitee.email_proven_at = invitee.email_verified_at
+            setup.add(invitee)
             await setup.commit()
             organization_id, invitee_id = organization.id, invitee.id
 
-        async with sessions() as admitting, sessions() as vouching:
+        async with sessions() as admitting, sessions() as retiring:
             resolved = await UserRepository(admitting).get(invitee_id)
             assert resolved is not None
-            assert resolved.email_vouched_at is None
+            assert resolved.email_proven_at is not None
 
-            await vouching.execute(
-                update(User).where(col(User.id) == invitee_id).values(email_vouched_at=datetime.now(UTC))
-            )
-            await vouching.commit()
+            await retiring.execute(update(User).where(col(User.id) == invitee_id).values(email_proven_at=None))
+            await retiring.commit()
 
             writes = membership_writes(admitting)
             service = OrganizationService(admitting, **writes)
@@ -415,14 +417,15 @@ async def test_admitting_sees_a_vouch_committed_after_the_identity_was_resolved(
         await engine.dispose()
 
 
-async def test_admitting_somebody_already_on_this_roster_is_not_refused_for_being_vouched(
+async def test_admitting_an_existing_member_is_not_refused_for_an_unproved_address(
     async_db: AsyncSession,
 ) -> None:
-    """The rule is about a second organization taking the identity, so its own roster is left alone."""
-    organization = await create_organization(async_db, slug="admit-vouched-member")
+    """The rule is about a second organization taking the identity, so its own members are left alone."""
+    organization = await create_organization(async_db, slug="admit-unproved-member")
     await create_member(async_db, organization, role="owner", full_name="Owner")
     member = await create_member(async_db, organization, role="member", full_name="Suspended")
-    member.email_vouched_at = datetime.now(UTC)
+    member.email_verified_at = datetime.now(UTC)
+    member.email_proven_at = None
     async_db.add(member)
     members = OrganizationMemberRepository(async_db)
     membership = await members.get_by_organization_and_user(organization.id, member.id)

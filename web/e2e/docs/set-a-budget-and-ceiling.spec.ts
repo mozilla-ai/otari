@@ -11,9 +11,9 @@ const BUDGET = "Engineering monthly"
 const CEILING = "Whole organization"
 
 /**
- * Sign in as an organization admin, which is who docs/set-a-budget-and-ceiling.md is written
- * for: the master key signs in as the deployment operator, and an operator's
- * Spend & budgets is the deployment-wide page instead (`BudgetsPage`).
+ * Sign in as an organization admin, which is who docs/set-a-budget-and-ceiling.md
+ * is written for. The master key signs in as the deployment operator, whose
+ * screenshots would show the operator's rail around the same page.
  */
 async function signInAsAdmin(page: Page): Promise<void> {
   const invited = await page.request.post(

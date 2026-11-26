@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useLocation } from "@tanstack/react-router"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -8,7 +9,10 @@ import type {
   OrganizationContext,
   OrganizationSpendCeiling,
 } from "@/client"
-import { OrganizationBudgetsPage } from "@/features/budgets/OrganizationBudgetsPage"
+import {
+  OrganizationBudgetsPage,
+  SpendAndBudgetsPage,
+} from "@/features/budgets/OrganizationBudgetsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -18,6 +22,7 @@ import {
   organizationSpendCeiling as spendCeiling,
   workspace,
 } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 interface RecordedRequest {
   url: string
@@ -199,6 +204,38 @@ describe("OrganizationBudgetsPage", () => {
     expect(within(table).getByText(/250/)).toBeInTheDocument()
     expect(within(table).getByText(/1st at 00:00 UTC/)).toBeInTheDocument()
     expect(within(table).getByText("2 ceilings")).toBeInTheDocument()
+  })
+
+  it("shows each budget's short id and copies the full one, for the end-user API", async () => {
+    mockApi({
+      budgets: [
+        organizationBudget(),
+        organizationBudget({
+          budget_id: "cccccccc-1111-2222-3333-555555555555",
+          name: "Support weekly",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    const table = await screen.findByRole("grid", {
+      name: "Organization budgets",
+    })
+    expect(
+      await within(table).findByRole("columnheader", { name: "ID" }),
+    ).toBeInTheDocument()
+    const first = (await within(table).findByText("bbbbbbbb")).closest("tr")!
+    const second = within(table).getByText("cccccccc").closest("tr")!
+    expect(within(first).getByText("Engineering monthly")).toBeInTheDocument()
+    expect(within(second).getByText("Support weekly")).toBeInTheDocument()
+
+    await user.click(
+      within(second).getByRole("button", { name: "Copy budget id" }),
+    )
+    expect(await navigator.clipboard.readText()).toBe(
+      "cccccccc-1111-2222-3333-555555555555",
+    )
   })
 
   it("shows no spend column on a budget, because that figure is not the tenant's", async () => {
@@ -995,3 +1032,74 @@ describe("OrganizationBudgetsPage", () => {
     expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0)
   })
 })
+
+describe("SpendAndBudgetsPage", () => {
+  function renderRoute(contextResponse: () => Response) {
+    const requests = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+          return contextResponse()
+        }
+        if (url.includes(`${API_ROOT}/organizations/me/`)) {
+          return jsonResponse({ data: [], count: 0 })
+        }
+        return jsonResponse([])
+      })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <SpendAndBudgetsPage />
+        </QueryClientProvider>
+      </DeploymentProvider>,
+      {
+        wrapper: withRouter({
+          url: "/budgets",
+          routes: [{ path: "/", element: <LocationProbe /> }],
+        }),
+      },
+    )
+    return requests
+  }
+
+  it("gives an operator who manages the organization its budgets, not the deployment's", async () => {
+    // otari#2099: an operator who is also an owner or admin.
+    const requests = renderRoute(() =>
+      jsonResponse(organizationContext({ deployment_operator: true })),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Spend & budgets" }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("grid", { name: "Organization budgets" }),
+    ).toBeInTheDocument()
+    // Withheld at the request, not only in the markup: no deployment-wide read.
+    const read = requests.mock.calls.map(([url]) => String(url))
+    expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
+      false,
+    )
+    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
+  })
+
+  it("sends a caller with no organization to the index", async () => {
+    const requests = renderRoute(() =>
+      jsonResponse({ detail: "Organization not found" }, 404),
+    )
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent(/^\/$/)
+    expect(
+      requests.mock.calls.some(([input]) => String(input).includes("/budgets")),
+    ).toBe(false)
+  })
+})
+
+/** Reports where a navigation landed. */
+function LocationProbe() {
+  return <div data-testid="loc">{useLocation().pathname}</div>
+}

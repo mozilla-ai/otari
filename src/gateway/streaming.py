@@ -214,6 +214,7 @@ async def streaming_generator(
     on_first_chunk: Callable[[], None] | None = None,
     error_payload: Callable[[BaseException], str] | None = None,
     completes_stream: Callable[[Any], bool] | None = None,
+    is_external_failure: Callable[[BaseException], bool] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -259,7 +260,9 @@ async def streaming_generator(
             upstream that ends incomplete is failed with
             :class:`IncompleteStreamError` through the error path, so the client
             gets an error event rather than a 200 that silently carried nothing.
-
+        is_external_failure: Says whether the exception that ended the stream
+            came from outside the gateway, which logs it as a warning rather
+            than an error. When omitted, every failure is logged as an error.
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     has_usage = False
@@ -402,8 +405,9 @@ async def streaming_generator(
             await _shielded(on_error, e)
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", _describe_settlement_error(log_err))
+        log = logger.warning if is_external_failure is not None and is_external_failure(e) else logger.error
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.error("Streaming error for %s: %s", label, e)
+        log("Streaming error for %s: %s", label, e)
     finally:
         # A client disconnect cancels the response's anyio scope, which then
         # cancels every await made inside it, these included.

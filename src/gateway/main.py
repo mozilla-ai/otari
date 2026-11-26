@@ -51,6 +51,7 @@ from gateway.core.config import (
     API_ROOT,
     CONVERSATION_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     PRICING_SOURCE_HEADER,
     TAGS_HEADER,
     USAGE_UNIT_HEADER,
@@ -342,21 +343,22 @@ def _start_reservation_sweeper(config: GatewayConfig, _container: Container) -> 
 
 
 def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStoragePort | None:
-    """Build the file store, or start without one where files are off and it cannot be built.
+    """Build the file store, or start without one where the files API is off and it cannot be built.
 
-    A store that cannot be built stops the boot while files are on, because every
-    upload would fail. With files off the same fault only means a stored
-    ``file_id`` no longer resolves, so the deployment starts and says so rather
-    than locking out an operator who turned files off and removed the bucket
-    the settings still point at.
+    A store that cannot be built stops the boot while the API is on, because every
+    upload would fail. With the API off the same fault only means a stored
+    ``file_id`` no longer resolves and the sweep has nothing to reclaim through,
+    so the deployment starts and says so rather than locking out an operator who
+    turned files off and removed the bucket the settings still point at.
     """
     try:
         return container.resolve(FileStoragePort, None)
     except ValueError as exc:
-        if config.files_enabled:
+        if config.files_api_enabled:
             raise
         logger.warning(
-            "Files are disabled and the files backend cannot be built, so stored file references will not resolve: %s",
+            "The files API is off and the files backend cannot be built, so stored file references will not "
+            "resolve and the file sweep cannot reclaim expired or deleted files: %s",
             exc,
         )
         return None
@@ -392,17 +394,46 @@ async def _check_trace_content(content: SpanContent) -> None:
 
 
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
-    """Return the file retention sweep, or None when files or the interval disable it.
+    """Return the file retention sweep, or None when its interval is 0 or there is no store to sweep.
 
-    Sweeps through the same store the request path writes to, since the bytes a
-    request wrote are the bytes this reclaims.
+    The files API setting does not stop it: each stored file still owes the
+    deletion its expiry promised. Sweeps through the same store the request path
+    writes to, since the bytes a request wrote are the bytes this reclaims.
     """
-    if not config.files_enabled or config.files_sweep_interval_sec <= 0:
+    if config.files_sweep_interval_sec <= 0:
         return None
-    backends = FileBackends(
-        storage=container.resolve(FileStoragePort, None), provider_files=container.resolve(ProviderFilePort, None)
-    )
+    try:
+        storage = container.resolve(FileStoragePort, None)
+    except ValueError:
+        # Only reached with the API off, where _resolve_file_store let the boot go on and said so.
+        return None
+    backends = FileBackends(storage=storage, provider_files=container.resolve(ProviderFilePort, None))
     return run_file_sweeper(config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config))
+
+
+async def _warn_about_unreclaimed_files(
+    config: GatewayConfig, storage: FileStoragePort | None, provider_files: ProviderFilePort | None
+) -> None:
+    """Say at boot when expired or deleted files, or stale provider copy rows, are waiting and the sweep is off.
+
+    A deployment without a store skips this, since the store's own warning
+    already says nothing can reclaim them.
+    """
+    if config.files_sweep_interval_sec > 0 or storage is None or provider_files is None:
+        return
+    backends = FileBackends(storage=storage, provider_files=provider_files)
+    try:
+        async with create_unit_of_work() as uow:
+            waiting = await build_file_service(uow, backends, config).has_reclaimable()
+    except DATABASE_ERRORS as exc:
+        # Advisory only: a database that cannot answer leaves the boot to go on.
+        logger.warning("Could not check for files waiting to be reclaimed: %s", describe_database_error(exc))
+        return
+    if waiting:
+        logger.warning(
+            "Expired or deleted files, or stale provider copy rows, are waiting to be reclaimed, but "
+            "files_sweep_interval_sec is 0, so nothing will reclaim them. Set it above 0, or remove them yourself."
+        )
 
 
 def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
@@ -749,11 +780,12 @@ _CORS_ALLOW_HEADERS = (
     "Otari-Region",
     *_SDK_CORS_HEADERS,
 )
-# A speech response carries its cost on headers, which a browser on
-# another origin reads only when they are exposed.
+# A speech response carries its cost on headers, and a completion says who paid
+# for it, which a browser on another origin reads only when they are exposed.
 _CORS_EXPOSE_HEADERS = (
     BILLING_URL_HEADER,
     COST_USD_HEADER,
+    DEPLOYMENT_PAID_HEADER,
     ERROR_CODE_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
@@ -992,7 +1024,7 @@ def _validate_provider_account_pepper(config: GatewayConfig, advisory_level: int
     feature it may never use. A shared value would let a leak of one secret
     expose the other, and tie their rotations together.
     """
-    makes_copies = config.files_enabled and config.files_provider_upload_enabled
+    makes_copies = config.files_api_enabled and config.files_provider_upload_enabled
     if not makes_copies:
         return
     pepper = config.provider_account_pepper
@@ -1235,9 +1267,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # holds one pooled connection at a time.
             await release_session(session)
             async with create_unit_of_work_with_session() as (search_tool_session, uow):
-                stored_tools_loaded = await build_search_tool_service(
-                    uow, search_tool_session, config=config
-                ).load_at_startup()
+                search_tools = build_search_tool_service(uow, search_tool_session, config=config)
+                # A failed start, as a misconfigured entry fails the config load: on a blank
+                # key, a tool whose key is optional searches with no key at all.
+                search_tools.refuse_blank_api_keys()
+                stored_tools_loaded = await search_tools.load_at_startup()
             # Before the first request, so a stored rule never lets a burst through at boot.
             await load_rate_limit_rules_at_startup(config)
             # After the overrides, not at config load: the web-search URL a
@@ -1323,6 +1357,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         app.state.file_store = _resolve_file_store(config, container)
         app.state.trace_content = _resolve_trace_content(config, container)
         app.state.provider_files = container.resolve(ProviderFilePort, None)
+        await _warn_about_unreclaimed_files(config, app.state.file_store, app.state.provider_files)
         workers = _start_lifespan_workers(config, container)
         # Workers of the enabled features. Same supervisor as the registry
         # above: created here, cancelled together in ``finally`` under one

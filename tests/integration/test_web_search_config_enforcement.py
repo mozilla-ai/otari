@@ -101,7 +101,12 @@ def _post_with_search_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         seen.ran = True
         return _text_response("via-search-loop")
@@ -635,7 +640,12 @@ def test_a_streaming_request_gets_the_same_narrowing(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.ran = True
         yield MessageStopEvent(type="message_stop")

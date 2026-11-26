@@ -50,6 +50,21 @@ export const DefaultExpanded: Story = {
 }
 
 /**
+ * `isFlush` drops the content's inset so it starts at the heading's left edge,
+ * for a disclosure that continues a form whose fields set that edge.
+ */
+export const Flush: Story = {
+  render: () => (
+    <div className="flex w-96 flex-col gap-2">
+      <p className="text-body">Name</p>
+      <Disclosure heading="More options" isDefaultExpanded isFlush>
+        <p className="text-body">Starts on the same edge as Name.</p>
+      </Disclosure>
+    </div>
+  ),
+}
+
+/**
  * Stacked, divided by the rules each row draws. Each is independent: this is a
  * disclosure rather than an accordion, so opening one does not close another.
  */

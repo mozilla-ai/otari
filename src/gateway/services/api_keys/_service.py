@@ -255,7 +255,13 @@ class ApiKeyService:
             await self._federation_rules.delete(row)
 
     async def update_owned(
-        self, config: GatewayConfig, key: APIKey, changes: Mapping[str, Any], *, owner_id: str
+        self,
+        config: GatewayConfig,
+        key: APIKey,
+        changes: Mapping[str, Any],
+        *,
+        owner_id: str,
+        organization_id: uuid.UUID | None = None,
     ) -> None:
         """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
 
@@ -277,6 +283,8 @@ class ApiKeyService:
                 AccessLists(changes.get("allowed_models", stored.models), changes.get("allowed_tools", stored.tools)),
                 stored=stored,
                 owner_id=owner_id,
+                workspace_id=key.workspace_id,
+                organization_id=organization_id,
             )
             for column, value in changes.items():
                 setattr(key, column, value)
@@ -284,30 +292,47 @@ class ApiKeyService:
             key.allowed_tools = access.tools
 
     async def check_access_lists(
-        self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None
+        self,
+        config: GatewayConfig,
+        requested: AccessLists,
+        *,
+        stored: AccessLists,
+        owner_id: str | None,
+        workspace_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> AccessLists:
         """The ``allowed_models`` and ``allowed_tools`` to store on a key or a user, each checked only if it changes.
 
         A list sent back unchanged grants nothing new, so it is not checked again: a
         tool deleted since, or an owner narrowed since, would otherwise refuse an
         unrelated edit. A key's changed list must fit its owner's (``owner_id``;
-        ``None`` for a user, or a key with no owner). The owner is read in a block of
-        its own, whose commit would also store what the caller had staged, so a route
-        calls this first.
+        ``None`` for a user, or a key with no owner), and a catalog ID in it stands
+        for the offerings the owner may use. The owner is read in a block of its own,
+        whose commit would also store what the caller had staged, so a route calls
+        this first. ``workspace_id`` or ``organization_id`` names whose catalog a
+        catalog ID in a changed list is read from.
 
         Raises:
             ValueError: a changed list names something unknown, or grants more than the owner's.
         """
         models_changed = requested.models != stored.models
         tools_changed = requested.tools != stored.tools
+        owner = None
+        if owner_id is not None and (models_changed or tools_changed):
+            async with self._uow:
+                owner = await self._users.lists(owner_id)
         checked = AccessLists(
-            validate_allowed_models(config, requested.models) if models_changed else stored.models,
+            validate_allowed_models(
+                config,
+                requested.models,
+                workspace_id=workspace_id,
+                organization_id=organization_id,
+                within=owner.models if owner is not None else None,
+            )
+            if models_changed
+            else stored.models,
             validate_allowed_tools(config, requested.tools) if tools_changed else stored.tools,
         )
-        if owner_id is None or not (models_changed or tools_changed):
-            return checked
-        async with self._uow:
-            owner = await self._users.lists(owner_id)
         if owner is None:
             return checked
         tool_keys = config.legacy_search_tool_keys()

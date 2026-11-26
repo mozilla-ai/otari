@@ -55,8 +55,10 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
     OrgProviderKeyClientArgsRefusedError,
+    OrgProviderKeyClientArgsUnreadableError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyEndpointAuthRefusedError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNameRequiredError,
     OrgProviderKeyNotArchivedError,
@@ -73,11 +75,12 @@ from gateway.models.provider_keys import (
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
-from gateway.models.secret_fields import restore_redacted_values, stored_secrets_survive
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values, stored_secrets_survive
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
     Candidate,
+    KeyCiphertexts,
     OrgProviderKeyRepository,
     WorkspaceProviderKeyOverrideRepository,
     WorkspaceProviderModelRestrictionRepository,
@@ -85,9 +88,11 @@ from gateway.repositories.tenancy import (
     resolve_active_key,
 )
 from gateway.schemas.providers import (
+    EndpointAuthRequest,
     OrgProviderKeyCreateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
+    OrgProviderKeysReencryptPublic,
     OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverridePublic,
     WorkspaceProviderKeyOverrideRequest,
@@ -97,12 +102,22 @@ from gateway.schemas.providers import (
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
+    reencrypted,
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
+from gateway.types.endpoint_auth import (
+    ENDPOINT_AUTH_HEADERS_KEY,
+    EndpointAuth,
+    UnreadableEndpointAuthError,
+    endpoint_auth_columns,
+)
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -137,7 +152,16 @@ _org_slug_providers: dict[tuple[uuid.UUID, str], str] = {}
 
 
 class UnservableEndpointError(ValueError):
-    """A stored key's ``api_base`` is one its provider's client cannot be pinned to."""
+    """A stored key names an endpoint, or a credential for one, that cannot be served as stored."""
+
+
+def client_args_of(key: OrgProviderKey) -> dict[str, Any] | None:
+    """The key's stored SDK client extras, or None when it holds none.
+
+    Raises the errors :func:`decrypt_mapping` does, so a caller that reports on
+    a key rather than serving one decides what an unreadable row means.
+    """
+    return decrypt_mapping(key.encrypted_client_args)
 
 
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
@@ -145,36 +169,65 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
 
     A key stored before the write checks below existed is held to them here:
     ``client_args`` outside the provider's allow-list are dropped, and an
-    ``api_base`` on a provider that cannot be pinned refuses the key.
+    ``api_base`` on a provider that cannot be pinned, or an endpoint credential
+    a key may not carry, refuses the key. The credential's expiry is not read:
+    it is a rotation date, and the endpoint answers for the credential itself.
 
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the
-    key cannot be decrypted, and ``UnservableEndpointError``; the caller
-    decides whether to skip it.
+    key cannot be decrypted, ``UnservableEndpointError`` for a credential the
+    key may not carry, and ``UnreadableEndpointAuthError`` for one this build
+    cannot assemble; the caller decides whether to skip it.
     """
     entry: dict[str, Any] = {}
     if key.api_base:
         if key.provider not in TENANT_ENDPOINT_PROVIDERS:
-            raise UnservableEndpointError(key.provider)
+            raise UnservableEndpointError(f"a {key.provider} key cannot be served on a custom api_base")
         entry["api_base"] = key.api_base
-    if client_args := tenant_client_args(key.provider, key.client_args):
+    if client_args := tenant_client_args(key.provider, client_args_of(key)):
         entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
+    if headers := endpoint_auth_headers(key):
+        entry[ENDPOINT_AUTH_HEADERS_KEY] = headers
     return entry
+
+
+def endpoint_auth_headers(key: OrgProviderKey) -> dict[str, str]:
+    """The headers this key's endpoint credential adds to every request to its address.
+
+    Empty where the key carries no endpoint credential. Every path that reaches
+    the address asks here, so none of them can dial without a credential the
+    key holds.
+
+    Raises:
+        UnservableEndpointError: The key may not carry the credential it holds.
+        UnreadableEndpointAuthError: The row holds one this build cannot
+            assemble into headers.
+        SecretBoxUnavailableError: No secret key is configured.
+        SecretDecryptionError: The stored value will not decrypt under the
+            configured secret key.
+    """
+    if (auth := key.endpoint_auth) is None:
+        return {}
+    if (reason := auth.refused_reason(api_base=key.api_base)) is not None:
+        raise UnservableEndpointError(reason)
+    return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
 
 
 def key_is_usable(key: OrgProviderKey) -> bool:
     """Whether this key can actually supply a credential on this deployment.
 
-    A row whose secret will not decrypt (no ``OTARI_SECRET_KEY``, or the wrong
-    one) is skipped by the dispatch-path cache below, so anything that reports
-    what a tenant may *reach* has to skip it too, or the catalog advertises
-    models every request through that provider then fails on. Single-sourced
-    here so the two answers cannot drift.
+    False where the row cannot be served as stored: its secret will not decrypt
+    (no ``OTARI_SECRET_KEY``, or the wrong one), its provider cannot take a
+    custom address, or its endpoint credential may not be carried or cannot be
+    read. The dispatch-path cache skips every one of those, so anything that
+    reports what a tenant may *reach* has to skip them too, or the catalog
+    advertises models every request through that provider then fails on.
+    Single-sourced here so the two answers cannot drift.
     """
     try:
         _row_to_entry(key)
-    except (SecretBoxUnavailableError, SecretDecryptionError, UnservableEndpointError):
+    except (SecretBoxUnavailableError, SecretDecryptionError, UnservableEndpointError, UnreadableEndpointAuthError):
         return False
     return True
 
@@ -308,14 +361,13 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                 continue
             try:
                 new_cache[(workspace_id, provider)] = _row_to_entry(active)
-            except UnservableEndpointError:
+            except (UnservableEndpointError, UnreadableEndpointAuthError) as exc:
                 logger.warning(
-                    "Skipping organization provider key '%s' (%s) for workspace %s: "
-                    "a %s key cannot be served on a custom api_base.",
+                    "Skipping organization provider key '%s' (%s) for workspace %s: %s.",
                     active.name,
                     provider,
                     workspace_id,
-                    active.provider,
+                    exc,
                 )
                 continue
             except (SecretBoxUnavailableError, SecretDecryptionError):
@@ -397,14 +449,108 @@ async def run_org_provider_refresher(interval: float = ORG_PROVIDER_CACHE_TTL_SE
             logger.warning("Organization provider key refresh failed; retrying in %ss", interval, exc_info=True)
 
 
-def _encrypt_api_key(api_key: str | None) -> tuple[str | None, str | None]:
-    """Encrypt a plaintext key for storage, or clear it. Never logs the plaintext."""
-    if not api_key:
+def _encrypt_secret_for_storage(secret: str | None) -> tuple[str | None, str | None]:
+    """Encrypt a plaintext secret for storage with its last four characters, or clear it.
+
+    NOTE: Callers must not log the plaintext they pass.
+    """
+    if not secret:
         return None, None
     try:
-        return encrypt_secret(api_key), api_key[-4:]
+        return encrypt_secret(secret), secret[-4:]
     except SecretBoxUnavailableError:
         raise SecretBoxUnavailableTenancyError from None
+
+
+def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
+    """Encrypt a key's client extras for storage. Nothing to store stays None."""
+    try:
+        return encrypt_mapping(client_args or None)
+    except SecretBoxUnavailableError:
+        raise SecretBoxUnavailableTenancyError from None
+
+
+def _endpoint_auth_for_storage(sent: EndpointAuthRequest | None, *, stored: EndpointAuth | None) -> EndpointAuth | None:
+    """The endpoint credential to store, or None where the request carries none.
+
+    An editor is only ever shown the last four characters, so a credential
+    resubmitted without its value keeps the value already held.
+
+    Raises:
+        OrgProviderKeyEndpointAuthRefusedError: A credential set for the first
+            time was sent with no value, so there is none held to keep.
+    """
+    if sent is None:
+        return None
+    held = (stored.encrypted_secret, stored.last4) if stored is not None else (None, None)
+    encrypted, last4 = _encrypt_secret_for_storage(sent.secret) if sent.secret else held
+    if encrypted is None or last4 is None:
+        raise OrgProviderKeyEndpointAuthRefusedError("an endpoint credential with no value")
+    return EndpointAuth(
+        method=sent.method,
+        header_name=sent.header_name,
+        encrypted_secret=encrypted,
+        last4=last4,
+        expires_at=sent.expires_at,
+    )
+
+
+def _endpoint_secret_survives(held: bool, submitted: EndpointAuthRequest | None, *, sent: bool) -> bool:
+    """Whether a key's stored endpoint credential would follow it to another base URL.
+
+    A request that removes the credential, or supplies a new value for it,
+    carries nothing across. One that leaves the field out, or sends it without a
+    value, keeps what is stored. ``held`` is whether a value is stored at all,
+    which a row holds whether or not this build can read it.
+    """
+    if not held:
+        return False
+    if not sent:
+        return True
+    return submitted is not None and not submitted.secret
+
+
+def _credentials_that_follow(*, api_key: bool, client_args: bool, endpoint: bool) -> list[str]:
+    """The credentials a key would carry to a new base URL, named for the caller that must resend them."""
+    return [
+        name
+        for name, follows in (
+            ("api_key", api_key),
+            ("any hidden client_args credential", client_args),
+            ("the endpoint credential", endpoint),
+        )
+        if follows
+    ]
+
+
+def _stored_endpoint_auth(key: OrgProviderKey) -> EndpointAuth | None:
+    """The credential this key holds, or None where it holds none.
+
+    Raises:
+        OrgProviderKeyEndpointAuthRefusedError: The key holds a credential this
+            build cannot read. An edit decides what the row holds next, so one
+            that cannot be read is refused rather than cleared or written over.
+    """
+    try:
+        return key.endpoint_auth
+    except UnreadableEndpointAuthError as exc:
+        raise OrgProviderKeyEndpointAuthRefusedError(str(exc)) from exc
+
+
+def _gate_endpoint_auth(auth: EndpointAuth | None, *, api_base: str | None, stored: EndpointAuth | None) -> None:
+    """Refuse an endpoint credential a key may not carry, or a rotation date it may not take.
+
+    The rotation date is held to the future only where the request changes the
+    credential. A date already stored is a state the key reports, so an edit
+    that leaves the credential alone is refused nothing on its account, while
+    one that rotates the value has to say when the new value expires.
+    """
+    if auth is None:
+        return
+    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth != stored else None
+    for reason in (auth.refused_reason(api_base=api_base), expiry):
+        if reason is not None:
+            raise OrgProviderKeyEndpointAuthRefusedError(reason)
 
 
 def _validated_provider(provider: str) -> str:
@@ -522,6 +668,41 @@ class OrgProviderKeyService:
         """Stage clearing these organizations' provider keys and client arguments, for the caller's transaction."""
         await self.keys.forget_secrets(organization_ids, workspace_ids)
 
+    async def reencrypt(self) -> OrgProviderKeysReencryptPublic:
+        """Encrypt every stored credential again under the primary ``OTARI_SECRET_KEY``.
+
+        Covers all three of a key's encrypted values: the provider API key, the
+        stored client arguments and the endpoint credential. A key holding one
+        no configured secret reads is left as it is in full, because a key with
+        one unreadable value serves nothing until it is re-entered whole, and
+        writing the readable part would report the key as rotated. One edited
+        while this ran is skipped, because its writer already encrypted it
+        under the primary secret.
+
+        Deployment-wide rather than scoped to one organization: the secret
+        seals every tenant's rows, so rotating it is the operator's step and
+        there is no organization that owns it.
+
+        Raises:
+            SecretBoxUnavailableTenancyError: No usable ``OTARI_SECRET_KEY``.
+        """
+        rotated = unreadable = skipped = 0
+        for key in await self.keys.list_encrypted():
+            expected = KeyCiphertexts.of(key)
+            try:
+                replacement = expected.mapped(reencrypted)
+            except SecretDecryptionError:
+                unreadable += 1
+                continue
+            except SecretBoxUnavailableError:
+                raise SecretBoxUnavailableTenancyError("organization provider credentials") from None
+            if await self.keys.swap_ciphertexts(key.id, expected=expected, replacement=replacement):
+                rotated += 1
+            else:
+                skipped += 1
+        await self.db.commit()
+        return OrgProviderKeysReencryptPublic(reencrypted=rotated, unreadable=unreadable, skipped=skipped)
+
     async def list_keys_for_user(
         self,
         *,
@@ -550,10 +731,15 @@ class OrgProviderKeyService:
     async def _public_rows(self, rows: Sequence[OrgProviderKey]) -> list[OrgProviderKeyPublic]:
         """The API shape of several keys, with their offered and serving counts read in one query."""
         counts = await OrgProviderKeyModelRepository(self.db).offer_counts_for_keys([row.id for row in rows])
+        # One reading for the whole page, so two rows cannot report their
+        # credentials against different clocks.
+        now = datetime.now(UTC)
         return [
             OrgProviderKeyPublic.from_row(
                 row,
+                client_args=readable_mapping(row.encrypted_client_args),
                 usable=key_is_usable(row),
+                now=now,
                 offered_count=counts.get(row.id, (0, 0))[0],
                 serving_count=counts.get(row.id, (0, 0))[1],
             )
@@ -577,6 +763,8 @@ class OrgProviderKeyService:
         name = _validated_name(request.name)
         await _gate_api_base(provider, request.api_base)
         _check_client_args(provider, request.client_args)
+        endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=None)
+        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, stored=None)
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -587,7 +775,7 @@ class OrgProviderKeyService:
         ):
             raise OrgProviderKeyAlreadyExistsError(provider, name)
 
-        encrypted_api_key, last4 = _encrypt_api_key(request.api_key)
+        encrypted_api_key, last4 = _encrypt_secret_for_storage(request.api_key)
         try:
             key = await self.keys.create_key(
                 organization_id=organization.id,
@@ -597,8 +785,9 @@ class OrgProviderKeyService:
                 encrypted_api_key=encrypted_api_key,
                 last4=last4,
                 api_base=request.api_base,
-                client_args=request.client_args,
+                encrypted_client_args=_encrypt_client_args(request.client_args),
                 zero_data_retention=request.zero_data_retention,
+                endpoint_auth=endpoint_auth,
             )
             await self.db.commit()
         except IntegrityError:
@@ -689,18 +878,52 @@ class OrgProviderKeyService:
             await _gate_api_base(key.provider, update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
                 stored_args_follow = stored_secrets_survive(
-                    key.client_args, update_data.get("client_args"), sent="client_args" in update_data
+                    readable_mapping(key.encrypted_client_args),
+                    update_data.get("client_args"),
+                    sent="client_args" in update_data,
                 )
-                if (key.encrypted_api_key is not None and "api_key" not in update_data) or stored_args_follow:
-                    raise OrgProviderKeyCredentialRequiredError
+                endpoint_secret_follows = _endpoint_secret_survives(
+                    key.encrypted_endpoint_auth_secret is not None,
+                    request.endpoint_auth,
+                    sent="endpoint_auth" in update_data,
+                )
+                following = _credentials_that_follow(
+                    api_key=key.encrypted_api_key is not None and "api_key" not in update_data,
+                    client_args=stored_args_follow,
+                    endpoint=endpoint_secret_follows,
+                )
+                if following:
+                    raise OrgProviderKeyCredentialRequiredError(following)
         if "client_args" in update_data:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was
             # never shown; those keep their stored value.
-            update_data["client_args"] = restore_redacted_values(update_data["client_args"], key.client_args)
-            _check_client_args(key.provider, update_data["client_args"])
+            stored_client_args = readable_mapping(key.encrypted_client_args)
+            if restore_is_unsafe(
+                stored_client_args, update_data["client_args"], sealed=key.encrypted_client_args is not None
+            ):
+                raise OrgProviderKeyClientArgsUnreadableError
+            client_args = restore_redacted_values(update_data.pop("client_args"), stored_client_args)
+            _check_client_args(key.provider, client_args)
+            update_data["encrypted_client_args"] = _encrypt_client_args(client_args)
+        if "endpoint_auth" in update_data:
+            update_data.pop("endpoint_auth")
+            sent = request.endpoint_auth
+            # Read only what the write needs. A credential sent whole replaces
+            # what is held, and one being removed discards it, so neither is
+            # refused because this build cannot read what the row held.
+            keeps_stored_value = sent is not None and not sent.secret
+            stored = _stored_endpoint_auth(key) if keeps_stored_value else None
+            auth = _endpoint_auth_for_storage(sent, stored=stored)
+            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
+            update_data.update(endpoint_auth_columns(auth))
+        elif "api_base" in update_data:
+            # Moving the address re-gates the credential already stored. A
+            # field the request does not name is not written.
+            held = _stored_endpoint_auth(key)
+            _gate_endpoint_auth(held, api_base=update_data["api_base"], stored=held)
         if "api_key" in update_data:
-            encrypted_api_key, last4 = _encrypt_api_key(update_data.pop("api_key"))
+            encrypted_api_key, last4 = _encrypt_secret_for_storage(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key
             update_data["last4"] = last4
 

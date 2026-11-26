@@ -51,6 +51,8 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.source_label) params.set("source_label", filters.source_label)
   if (filters.tool) params.set("tool", filters.tool)
   if (filters.priced !== undefined) params.set("priced", String(filters.priced))
+  if (filters.deployment_paid !== undefined)
+    params.set("deployment_paid", String(filters.deployment_paid))
   return params
 }
 

@@ -181,6 +181,6 @@ class OrganizationGuardrailDefinitionRepository(BaseRepository[OrganizationGuard
         await self.db.execute(
             update(OrganizationGuardrail)
             .where(OrganizationGuardrail.organization_id.in_(list(organization_ids)))
-            .values(encrypted_credential=None)
+            .values(encrypted_credential=None, encrypted_validate_kwargs=None)
             .execution_options(synchronize_session=False)
         )

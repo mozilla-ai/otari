@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, ScopedBudget
@@ -32,7 +33,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.overview.overview_service import OverviewService, judge
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -460,7 +460,7 @@ def _service(db: AsyncSession) -> OverviewService:
     return OverviewService(
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
-        DeploymentAdministrationAccess(db),
+        deployment_administration_access(db),
         WorkspaceService(db, **membership_writes(db)),
     )
 

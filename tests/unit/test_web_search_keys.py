@@ -10,6 +10,7 @@ from typing import Any, cast
 import httpx
 import pytest
 
+import any_search
 from gateway.api.routes._tools import _build_web_retrieval_backend
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import ToolKind
@@ -29,7 +30,7 @@ from gateway.models.tools import (
     WorkspaceWebSearchKeyOverride,
 )
 from gateway.services import search_backend
-from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.services.secret_box import encrypt_mapping, encrypt_secret, generate_secret_key
 from gateway.services.tools import (
     SearchQuery,
     _web_search_keys,
@@ -157,7 +158,7 @@ def test_a_fetch_key_is_a_fetch_credential_with_its_endpoint_and_options(monkeyp
     key = _key("pages", provider="tabstack", kind="fetch")
     key.encrypted_api_key = encrypt_secret("tbs-own")
     key.api_base = "https://tabstack.example/v1"
-    key.options = {"effort": "standard"}
+    key.encrypted_options = encrypt_mapping({"effort": "standard"})
 
     assert _web_search_keys.key_credential(key) == WebFetchCredential(
         provider="tabstack",
@@ -445,6 +446,19 @@ async def test_a_searxng_key_needs_its_own_endpoint_and_no_api_key() -> None:
     await _web_search_keys._check_settings(
         "search", "searxng", has_key=False, api_base="https://1.1.1.1/searx", options={"engines": "wikinews"}
     )
+
+
+@pytest.mark.asyncio
+async def test_a_key_on_a_public_address_needs_an_api_key_its_provider_does_not_require(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider at a public address of its own whose key is optional: the key brings the organization's account."""
+    brave = any_search.AnySearch.get_provider_class("brave")
+    monkeypatch.setattr(brave, "METADATA", brave.METADATA.model_copy(update={"requires_api_key": False}))
+
+    with pytest.raises(WebSearchKeyIncompleteError, match="needs an API key"):
+        await _web_search_keys._check_settings("search", "brave", has_key=False, api_base=None, options=None)
+    await _web_search_keys._check_settings("search", "brave", has_key=True, api_base=None, options=None)
 
 
 @pytest.mark.asyncio

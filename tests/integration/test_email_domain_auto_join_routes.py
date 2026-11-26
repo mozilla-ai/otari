@@ -213,7 +213,7 @@ def test_an_address_claimed_through_an_invitation_link_does_not_auto_join(
     master_key_header: dict[str, str],
     claiming_organization: str,
 ) -> None:
-    """A link claim is the inviting organization vouching for the address, which any organization can do.
+    """A link claim is the inviting organization recording the address, which any organization can do.
 
     Otherwise an admin anywhere could invite ``anyone@acme.example``, choose its
     password through the link they were handed back, and sign in to the

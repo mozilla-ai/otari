@@ -20,15 +20,20 @@ from dataclasses import replace
 
 from gateway.core.config import region_instance
 from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
-from gateway.services.providers import HostedProviderService, ResolvedHostedProvider
+from gateway.services.providers import HostedProviderService, HostedServing, ResolvedHostedProvider
 
 
 class HostedProviderModelProviderAdapter(ModelProviderPort):
     """Serve a candidate on one of the deployment's hosted providers."""
 
     def __init__(self, service: HostedProviderService | None) -> None:
-        """Bind the hosted-providers service, or nothing where the deployment has no database."""
+        """Bind the hosted-providers service, or nothing where the deployment has no database.
+
+        Built per request, so every candidate of a request is resolved on one
+        read of the hosted providers rather than on a read each.
+        """
         self._service = service
+        self._serving: HostedServing | None = None
 
     async def resolve_hosted_credential(
         self,
@@ -62,7 +67,9 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         del workspace_id
         if self._service is None:
             return None
-        regions = await self._service.resolve_regions(provider, model, organization_id=organization_id)
+        if self._serving is None:
+            self._serving = self._service.serving()
+        regions = await self._serving.resolve(provider, model, organization_id=organization_id)
         if not regions:
             return None
         credentials = [_credential(resolved, provider) for resolved in regions]

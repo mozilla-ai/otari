@@ -52,7 +52,7 @@ from gateway.exceptions.tools_exceptions import McpServerDeclarationError
 from gateway.services import mcp_loop as chat_loop_module
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services import mcp_loop_responses as responses_loop_module
-from gateway.services._tool_loop import tool_failure_detail
+from gateway.services._tool_loop import spent_tools_note, tool_failure_detail
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop import mcp_tool_loop, mcp_tool_loop_stream
 from gateway.services.mcp_loop_messages import anthropic_tool_loop, anthropic_tool_loop_stream
@@ -329,7 +329,11 @@ async def test_messages_caps_one_tool_while_the_others_keep_running(monkeypatch:
     )
 
     assert [len(b.calls) for b in (search, sandbox, mcp)] == [1, 2, 2]
-    second = {block["tool_use_id"]: block["content"] for block in sent[2]["messages"][-1]["content"]}
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert {tool["name"] for tool in sent[1]["tools"]} == {CODE_EXECUTION_TOOL_NAME, _MCP_TOOL}
+    # The note naming the used-up search follows the tool results.
+    assert sent[2]["messages"][-1] == {"role": "user", "content": spent_tools_note(frozenset({WEB_SEARCH_TOOL_NAME}))}
+    second = {block["tool_use_id"]: block["content"] for block in sent[2]["messages"][-2]["content"]}
     assert second == {"tu_s": MAX_USES_EXCEEDED_ERROR, "tu_c": "code_execution result", "tu_m": "lookup result"}
     search_results = [cast(Any, b).content for b in result.content if b.type == "web_search_tool_result"]
     assert [getattr(content, "error_code", None) for content in search_results] == [None, "max_uses_exceeded"]
@@ -619,6 +623,8 @@ async def test_chat_runs_every_backend_and_caps_only_the_capped_tool(monkeypatch
 
     assert result.choices[0].message.content == "done"
     assert [len(b.calls) for b in (search, sandbox, mcp)] == [1, 2, 2]
+    # The second round no longer offers the search; a model that calls it anyway is refused.
+    assert WEB_SEARCH_TOOL_NAME not in {tool["function"]["name"] for tool in sent[1]["tools"]}
     second = {m["tool_call_id"]: m["content"] for m in sent[2]["messages"] if m.get("role") == "tool"}
     assert second["c1"] == MAX_USES_EXCEEDED_ERROR
 
