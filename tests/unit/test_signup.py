@@ -617,6 +617,22 @@ def test_open_signup_on_an_already_registered_address_is_enumeration_safe(
         )
 
 
+def test_a_signup_without_mail_answers_alike_whether_the_address_is_taken(tmp_path: Path) -> None:
+    """The refusal cannot depend on the address, or its status code says which addresses exist.
+
+    An address the deployment already holds is refused before anything looks at the mail
+    configuration, so the two refusals have to be the same one.
+    """
+    with _client(tmp_path, mail_ready=False) as client:
+        _add_member(client, email="ada@example.com")
+        _deactivate(tmp_path, email="ada@example.com")
+
+        taken = _signup(client, email="ada@example.com")
+        free = _signup(client, email="nobody@example.com")
+
+        assert (taken.status_code, free.status_code) == (503, 503)
+
+
 def test_open_signup_without_mail_configured_registers_nobody(tmp_path: Path) -> None:
     """The refusal that already guards the claim path guards registration too.
 

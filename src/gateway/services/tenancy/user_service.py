@@ -459,6 +459,8 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
+    # Asked before anything reads the address, so the refusal cannot differ by address.
+    mailer.require_ready()
     password = submission.password
     validate_new_password(password)
     if config.terms_url is not None and not submission.terms_accepted:
@@ -486,9 +488,6 @@ async def create_user_for_signup(
             entitled = submission.invite_token is not None and await invites.allows_an_account(
                 submission.invite_token, claimed_address=address
             )
-            if not entitled:
-                # Refused before anything is written, because the block rolls back on the raise.
-                mailer.require_ready()
             if identity is None:
                 if entitled:
                     # The membership is the invitation's to grant, so this writes the account alone.

@@ -64,19 +64,6 @@ def _config(*, sends_links: bool = True, open_signup: bool = False) -> GatewayCo
     )
 
 
-class _OpensItsOwnBlock:
-    """Answers no, having opened a block on the caller's Unit of Work, as the real reader does."""
-
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
-
-    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
-        del claimed_address
-        async with self._uow:
-            await OrganizationInvitationRepository(self._uow).get_by_token_hash(hash_token(token))
-        return False
-
-
 async def _seed_unclaimed_identity(session: AsyncSession, *, still_wanted: bool = True) -> None:
     """An identity an admin added by address: password-less and unclaimed.
 
@@ -128,19 +115,20 @@ async def test_an_entitled_signup_proves_the_address(async_db: AsyncSession) -> 
     assert claimed.email_proven_at is not None
 
 
-async def test_an_entitled_signup_proceeds_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
-    """The link already reached the mailbox, so no deployment setting gates it."""
-    await _seed_unclaimed_identity(async_db)
-    claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite(), config=_config(sends_links=False))
+@pytest.mark.parametrize(
+    "invites",
+    [lambda _: _EntitlingInvite(), lambda _: NullSignupInviteAdapter()],
+    ids=["an invitation that allows an account", "no invitation"],
+)
+async def test_a_signup_is_refused_where_no_link_can_be_mailed(
+    async_db: AsyncSession, invites: Callable[[UnitOfWork], SignupInvitePort]
+) -> None:
+    """The verification link is the only way out of the unverified state, invitation or not.
 
-    assert claimed is not None
-    assert claimed.email_verified_at is not None
-
-
-async def test_an_unentitled_signup_is_refused_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
-    """Without an invitation the verification link is the only way out of the unverified state."""
+    The refusal is asked before any address is read, so it cannot differ by address either.
+    """
     with pytest.raises(MailNotConfiguredError):
-        await _signup(async_db, invites=lambda _: NullSignupInviteAdapter(), config=_config(sends_links=False))
+        await _signup(async_db, invites=invites, config=_config(sends_links=False))
 
 
 async def test_the_entitlement_is_decided_inside_the_transaction_that_writes_the_account(
@@ -209,15 +197,3 @@ async def test_an_entitled_signup_founds_no_organization_on_an_open_deployment(a
 
     assert claimed is not None
     assert await _organization_count(async_db) == before
-
-
-async def test_a_mail_refusal_after_the_reader_opened_a_block_reaches_the_caller(async_db: AsyncSession) -> None:
-    """A nested block joins the outer one and commits nothing, so the refusal is what the caller sees.
-
-    The readiness check moved inside the block, where a reader may already have opened and
-    closed one of its own.
-    """
-    await _seed_unclaimed_identity(async_db)
-
-    with pytest.raises(MailNotConfiguredError):
-        await _signup(async_db, invites=_OpensItsOwnBlock, config=_config(sends_links=False))
