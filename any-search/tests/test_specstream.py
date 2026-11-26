@@ -154,9 +154,9 @@ async def test_reads_the_answer() -> None:
     result, _ = await _search()
     recorded = _recorded("normal").json()["data"]["sources"]
     assert [hit.url for hit in result.hits] == [item["url"] for item in recorded]
-    undated, dated = result.hits
+    undated, dated = result.hits[0], result.hits[3]
     assert (undated.title, undated.snippet, undated.text) == (recorded[0]["title"], recorded[0]["snippet"], None)
-    assert (undated.published, dated.published) == (None, datetime(2025, 10, 7, tzinfo=UTC))
+    assert (undated.published, dated.published) == (None, datetime(2026, 11, 26, tzinfo=UTC))
     assert undated.raw == recorded[0]
     assert (result.cost, result.cost_source, result.error) == (Decimal("0.005"), "reported", None)
     assert result.raw == _recorded("normal").json()

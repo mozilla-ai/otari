@@ -568,5 +568,6 @@ The first provider that takes the same parameters as a GET's query string or a P
   holding on every result, with an undated result kept, since nothing says it falls outside.
 - Two date fields can mean different precisions: `published_at`, a news item's time, wins over
   `published`, a day; both are checked when sent.
-- Fixture recipes: `error` with a made-up key (`invalid_token`, 401); `normal` and `empty` follow
-  the API reference's `WebSearchPage` until a key records them.
+- Fixture recipes: `error` with a made-up key (`invalid_token`, 401); `normal` recorded with
+  `technology news`; `empty` with a nonsense query and `site:` on a domain that does not exist,
+  since a nonsense query alone still returns loose matches.

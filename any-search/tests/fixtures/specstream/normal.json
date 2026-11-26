@@ -2,37 +2,230 @@
   "status": 200,
   "body": {
     "data": {
-      "id": "req_4c81d2a9e035",
-      "request_id": "req_4c81d2a9e035",
-      "query": "latest stable python release",
-      "kind": "fact",
+      "id": "a5741af528c44350af7214a2dd4187d8",
+      "request_id": "a5741af528c44350af7214a2dd4187d8",
+      "query": "technology news",
+      "kind": "list",
       "columns": [],
-      "answer": {
-        "value": "Python 3.14",
-        "page": "https://www.python.org/downloads/",
-        "seen_at": "2026-11-12"
-      },
-      "rows": [],
-      "sources": [
+      "answer": null,
+      "rows": [
         {
-          "url": "https://www.python.org/downloads/",
-          "title": "Download Python | Python.org",
-          "site": "www.python.org",
-          "snippet": "The official home of the Python Programming Language.",
-          "cited": true
+          "name": "TechCrunch Daily News",
+          "page": "https://techcrunch.com/",
+          "snippet": "Subscribe for the industry’s biggest tech news. TechCrunch Daily News. Every weekday and Sunday, you can get the best of TechCrunch’s coverage. · TechCrunch | Reporting on the business of technology, startups, venture capital funding, and Silicon Valley",
+          "probability": 0.6408,
+          "fields": {},
+          "sources": []
         },
         {
-          "url": "https://docs.python.org/3/whatsnew/3.14.html",
-          "title": "What's new in Python 3.14",
-          "site": "docs.python.org",
-          "snippet": "This article explains the new features in Python 3.14, compared to 3.13.",
-          "cited": false,
-          "published": "2025-10-07"
+          "name": "Indian Tech And Durables Sector Logs",
+          "page": "https://zeenews.india.com/tags/technology-news.html",
+          "snippet": "Advertisement NewsTechnology news Technology news alt Technology news 12 Mar 2025 Indian Tech And Durables Sector Logs 6 Per Cent Growth In Q4 2024- Details In Q4 2024, tier 3 cities outpaced metros and tier 2 cities, growing at 10 per cent",
+          "probability": 0.6219,
+          "fields": {},
+          "sources": [
+            1
+          ]
+        },
+        {
+          "name": "Web3 Gaming Sustainability Will",
+          "page": "https://www.ccn.com/news/technology/",
+          "snippet": "Search Home / News / Technology Technology Latest News Player-driven economies are the key to Web3 gaming sustainability. Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies … Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies, VOYA Games Oliver Löffler Eddie Mitchell Web3 firms targeted by North Korean hackers. … Technology Jul 01, 2025 | 11:32 AM UTC5 days ago MapleStory Universe Players Are Web3 Builders Eddie Mitchell A Web3 dedicated PC is in the works.",
+          "probability": 0.6061,
+          "fields": {},
+          "sources": [
+            5
+          ]
+        },
+        {
+          "name": "TechNewsWorld",
+          "page": "https://www.technewsworld.com/",
+          "snippet": "Technology news, expert analysis, and product reviews covering AI, cybersecurity, computing, emerging technologies, and tech industry developments.",
+          "probability": 0.6004,
+          "fields": {},
+          "sources": []
+        },
+        {
+          "name": "Huawei Watc",
+          "page": "https://www.itnewsafrica.com/tag/african-technology-news/",
+          "snippet": "Saturday, March 22, 2025 No menu items! type here... african technology news Gadgets and Gaming Huawei Watch GT 3 Series Has Been Launched in South Africa Zintle - According to an announcement from Chinese multi-tech Huawei, the Huawei Watc",
+          "probability": 0.5956,
+          "fields": {},
+          "sources": [
+            2
+          ]
+        },
+        {
+          "name": "AI",
+          "page": "https://gisuser.com/tag/technology/",
+          "snippet": "GIS user technology news News, Business, Technology, Mobile, GIS, Crypto Currency, AI, Economics You are here: Home / Archives for Technology AI Art Technology: Navigating Innovation, Ethics, and Human Dignity By The emergence of ai art gen",
+          "probability": 0.5861,
+          "fields": {},
+          "sources": [
+            6
+          ]
+        },
+        {
+          "name": "Technology Technology Latest News Player-driven",
+          "page": "https://www.ccn.com/news/technology/",
+          "snippet": "Search Home / News / Technology Technology Latest News Player-driven economies are the key to Web3 gaming sustainability. Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies … Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies, VOYA Games Oliver Löffler Eddie Mitchell Web3 firms targeted by North Korean hackers. … Technology Jul 01, 2025 | 11:32 AM UTC5 days ago MapleStory Universe Players Are Web3 Builders Eddie Mitchell A Web3 dedicated PC is in the works.",
+          "probability": 0.577,
+          "fields": {},
+          "sources": [
+            5
+          ]
+        },
+        {
+          "name": "Fox News Tech",
+          "page": "https://www.foxnews.com/tech",
+          "snippet": "Dive into the forefront of technology with Fox News Tech. Your source for high-impact tech updates awaits with Fox. See all the breaking updates in the tech world and learn all thing tech.",
+          "probability": 0.5262,
+          "fields": {},
+          "sources": []
+        },
+        {
+          "name": "Innovation",
+          "page": "https://www.nbcnews.com/mach/technology/",
+          "snippet": "IE 11 is not supported. For an optimal experience visit our site on another browser. • News • NBC News NOW • Nightly News • Meet the Press • Dateline • MSNBC • TODAY Mach Logo • Space • Science • Technology • Environment • Innovation • Powe",
+          "probability": 0.5217,
+          "fields": {},
+          "sources": []
+        },
+        {
+          "name": "NBC News",
+          "page": "https://www.nbcnews.com/mach/technology/",
+          "snippet": "IE 11 is not supported. For an optimal experience visit our site on another browser. • News • NBC News NOW • Nightly News • Meet the Press • Dateline • MSNBC • TODAY Mach Logo • Space • Science • Technology • Environment • Innovation • Powe",
+          "probability": 0.5178,
+          "fields": {},
+          "sources": []
         }
       ],
-      "handoff": null,
-      "took_ms": 2210,
-      "price_usd": 0.005
+      "sources": [
+        {
+          "url": "https://www.itnewsafrica.com/tag/top-technology-news/",
+          "title": "Tag: Top Technology news - IT News Africa | Business Technology, Telecoms and Startup News",
+          "site": "itnewsafrica.com",
+          "snippet": "Saturday, March 15, 2025 No menu items! type here... Top Technology news East Africa IT News Africa: Top Stories Of The Week Staff Writer - Yet another week has flown by where all the biggest news stories from across Africa, and indeed the",
+          "cited": false,
+          "read_at": "2025-03-15"
+        },
+        {
+          "url": "https://zeenews.india.com/tags/technology-news.html",
+          "title": "Technology news | Zee News",
+          "site": "zeenews.india.com",
+          "snippet": "Advertisement NewsTechnology news Technology news alt Technology news 12 Mar 2025 Indian Tech And Durables Sector Logs 6 Per Cent Growth In Q4 2024- Details In Q4 2024, tier 3 cities outpaced metros and tier 2 cities, growing at 10 per cent",
+          "cited": true,
+          "file_type": "html",
+          "read_at": "2025-03-17"
+        },
+        {
+          "url": "https://www.itnewsafrica.com/tag/african-technology-news/",
+          "title": "Tag: african technology news - IT News Africa | Business Technology, Telecoms and Startup News",
+          "site": "itnewsafrica.com",
+          "snippet": "Saturday, March 22, 2025 No menu items! type here... african technology news Gadgets and Gaming Huawei Watch GT 3 Series Has Been Launched in South Africa Zintle - According to an announcement from Chinese multi-tech Huawei, the Huawei Watc",
+          "cited": true,
+          "read_at": "2025-03-22"
+        },
+        {
+          "url": "https://www.financialexpress.com/life/technology/",
+          "title": "Technology News - Latest IT Industry News, Gadget Industry News, Top Android News, Information Technology News | The Financial Express",
+          "site": "financialexpress.com",
+          "snippet": "Technology News: Get latest infomation technology news, tech industry news, it industry news and analysis, gadget industry news and much more on financialexpress.com.",
+          "cited": false,
+          "published": "2026-11-26",
+          "meta": {
+            "description": "Technology News, Read the latest technology news, including AI developments, smartphone launches, gadget reviews, Android and iPhone updates, and major tech industry stories.",
+            "keywords": "technology news, latest technology news, AI news, tech news India, smartphone news, gadget news, iPhone news, Android updates, gadget reviews, technology industry news, IT news",
+            "news_keywords": "technology news, latest technology news, AI news, tech news India, smartphone news, gadget news, iPhone news, Android updates, gadget reviews, technology industry news, IT news",
+            "name": "FE Tech Bytes",
+            "mainEntityOfPage": "https://www.financialexpress.com/life/technology/",
+            "url": "https://www.financialexpress.com/life/technology/",
+            "headline": "Technology News, AI, Gadgets, Smartphones, Android, iOS, Reviews & Tech Updates",
+            "width": "1200",
+            "height": "667",
+            "inLanguage": "English",
+            "og:type": "website",
+            "og:site_name": "FE Tech Bytes",
+            "og:title": "Technology News, AI, Gadgets, Smartphones, Android, iOS, Reviews & Tech Updates",
+            "twitter:creator": "@FinancialXpress",
+            "twitter:image:type": "image/jpeg",
+            "og:locale": "en_IN"
+          },
+          "read_at": "2025-05-08"
+        },
+        {
+          "url": "https://www.wionews.com/tags/technology-talent",
+          "title": "technology talent News - Latest technology talent News, Breaking technology talent News, technology talent News Headlines",
+          "site": "wionews.com",
+          "snippet": "Advertisment Advertisment technology talent Zuckerberg's philanthropy project makes first major investment Business & Economy Zuckerberg's philanthropy project makes first major investment By Reuters Advertisment Advertisment",
+          "cited": false,
+          "read_at": "2025-03-16"
+        },
+        {
+          "url": "https://www.ccn.com/news/technology/",
+          "title": "Tech News - Latest Technology News",
+          "site": "ccn.com",
+          "snippet": "Search Home / News / Technology Technology Latest News Player-driven economies are the key to Web3 gaming sustainability. Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies … Technology Jul 06, 2025 | 1:02 PM UTC11 seconds ago Web3 Gaming Sustainability Will be Built On Player-Owned Economies, VOYA Games Oliver Löffler Eddie Mitchell Web3 firms targeted by North Korean hackers. … Technology Jul 01, 2025 | 11:32 AM UTC5 days ago MapleStory Universe Players Are Web3 Builders Eddie Mitchell A Web3 dedicated PC is in the works.",
+          "cited": true,
+          "read_at": "2025-07-08"
+        },
+        {
+          "url": "https://gisuser.com/tag/technology/",
+          "title": "Technology Archives - GIS user technology news",
+          "site": "gisuser.com",
+          "snippet": "GIS user technology news News, Business, Technology, Mobile, GIS, Crypto Currency, AI, Economics You are here: Home / Archives for Technology AI Art Technology: Navigating Innovation, Ethics, and Human Dignity By The emergence of ai art gen",
+          "cited": true,
+          "read_at": "2025-07-19"
+        },
+        {
+          "url": "https://www.livemint.com/technology/tech-news",
+          "title": "Technology News: Latest Tech News, Gadgets News and Reviews, Technology & Science",
+          "site": "livemint.com",
+          "snippet": "Technology/Tech News - Get all the latest news on Technology, Gadgets with reviews, prices, features, highlights and specification on mint.",
+          "cited": false,
+          "read_at": "2025-09-09"
+        },
+        {
+          "url": "https://thehackernews.com/search/label/Technology%20News?updated-max=2016-08-26T01:39:00-07:00&max-results=20&start=39&by-date=false",
+          "title": "Technology News — Latest News, Reports & Analysis | The Hacker News",
+          "site": "thehackernews.com",
+          "snippet": "Explore the latest news, real-world incidents, expert analysis, and trends in Technology News — only on The Hacker News, the leading cybersecurity and IT news platform.",
+          "cited": false,
+          "read_at": "2026-05-28"
+        },
+        {
+          "url": "https://industrytoday.com/technology-news-4/",
+          "title": "Technology News - Industry Today - Leader in Manufacturing & Industry News",
+          "site": "industrytoday.com",
+          "snippet": "The latest news in technology including building cyber resilience, relief for supply chain strain, and the latest transforming manufacturing.",
+          "cited": false,
+          "read_at": "2026-06-28"
+        }
+      ],
+      "handoff": {
+        "line": "Full table: at least 10 rows. Compile this request, then quote it.",
+        "request": "technology news",
+        "rows_estimated": 10,
+        "rows_basis": "seen",
+        "count_page": null,
+        "next": {
+          "tool": "compile",
+          "arguments": {
+            "q": "technology news"
+          },
+          "http": {
+            "method": "POST",
+            "path": "/v1/parse",
+            "body": {
+              "q": "technology news"
+            }
+          }
+        }
+      },
+      "took_ms": 2780,
+      "price_usd": 0.005,
+      "page": 1,
+      "next_page": 2
     }
   }
 }
