@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/7fcabbd7d38976c7efd0f7fbec5578429c368937/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/07ab0be7041063506a99d3631e239c3958de05fb/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -874,7 +874,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/7fcabbd7d38976c7efd0f7fbec5578429c368937/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/07ab0be7041063506a99d3631e239c3958de05fb/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1756,6 +1756,30 @@ smtp_password: ${SMTP_PASSWORD}
 `mail_from_name` sets the name shown beside it.
 With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
 
+For local development, Docker Compose carries a mail sink. It accepts messages and delivers them to
+nobody, holding each one in a web inbox instead:
+
+```bash
+docker compose --profile mail up -d mailpit
+```
+
+Then point `config.yml` at it, and read what arrives at `http://localhost:8025`:
+
+```yaml
+public_base_url: "http://localhost:8000"
+mail_transport: smtp
+smtp_host: "mailpit"
+smtp_port: 1025
+smtp_tls: false
+mail_from_email: "otari@example.com"
+```
+
+The host is `mailpit` for a gateway in the same Compose network, and `localhost` on the mapped port
+for one running beside it, which is what `.env.example` carries as `OTARI_` variables. The sink holds
+every message in a temporary database inside its container, which goes when the container does, and
+it accepts any credential. So it belongs in development and never in a deployment that serves
+anybody.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
@@ -1955,7 +1979,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/7fcabbd7d38976c7efd0f7fbec5578429c368937/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/07ab0be7041063506a99d3631e239c3958de05fb/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
