@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Collection
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import Mock
@@ -26,6 +27,7 @@ from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
     FileNotServedError,
     FileStorageError,
+    ReservedPurposeError,
     UnknownPageCursorError,
     UploadTooLargeError,
     WorkspaceStorageFullError,
@@ -274,6 +276,18 @@ async def test_the_default_allowance_is_five_gigabytes_and_a_thousand_files() ->
 
     assert config.files_workspace_max_bytes == 5 * 1024**3
     assert config.files_workspace_max_files == 1000
+
+
+@pytest.mark.asyncio
+async def test_an_upload_claiming_the_code_execution_output_purpose_is_refused() -> None:
+    store = _MemoryStore()
+    files = _StubFiles()
+
+    with pytest.raises(ReservedPurposeError):
+        await _service(store, files).store(replace(_upload(b"a,b\n"), purpose="code_execution_output"))
+
+    assert files.added == []
+    assert store.blobs == {}
 
 
 @pytest.mark.asyncio

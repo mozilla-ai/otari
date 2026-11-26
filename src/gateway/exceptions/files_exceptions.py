@@ -36,6 +36,13 @@ class EmptyUploadError(TenancyValidationError):
         super().__init__("Uploaded file is empty")
 
 
+class ReservedPurposeError(TenancyValidationError):
+    """The upload named a purpose only the gateway's own code execution stores files under."""
+
+    def __init__(self, purpose: str) -> None:
+        super().__init__(f"The purpose {purpose!r} is reserved for code-execution outputs")
+
+
 class UploadTooLargeError(TenancyError):
     """The upload ran past the deployment's size ceiling."""
 

@@ -128,6 +128,19 @@ def test_a_full_workspace_refuses_uploads_until_a_file_is_deleted(
     assert upload(b"efgh").status_code == 200
 
 
+def test_an_upload_cannot_claim_the_code_execution_output_purpose(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        data={"purpose": "code_execution_output"},
+        files={"file": ("a.txt", b"abcd", "text/plain")},
+    )
+    assert resp.status_code == 400
+    assert "reserved" in resp.json()["detail"]
+
+
 def test_upload_body_over_the_route_limit_is_refused_before_parsing(
     client: TestClient,
     api_key_header: dict[str, str],

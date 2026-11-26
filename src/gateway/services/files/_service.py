@@ -19,6 +19,7 @@ from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
     FileNotServedError,
     FileStorageError,
+    ReservedPurposeError,
     UnknownPageCursorError,
     UploadTooLargeError,
     WorkspaceStorageFullError,
@@ -206,8 +207,13 @@ class FileService:
             UploadTooLargeError: the upload ran past the deployment's ceiling.
             WorkspaceStorageFullError: the upload would take its workspace past its allowance.
             EmptyUploadError: the upload carried no bytes.
+            ReservedPurposeError: the upload named the purpose code-execution outputs are stored under.
             FileStorageError: the file could not be recorded.
         """
+        # The workspace allowance leaves code-execution outputs out, so an upload
+        # claiming their purpose would be stored without counting against it.
+        if upload.purpose == CODE_EXECUTION_OUTPUT_PURPOSE:
+            raise ReservedPurposeError(upload.purpose)
         upload, allowance = await self._allowance(upload)
         chunks = _capped(upload.chunks, self._config.files_max_bytes)
         if allowance is not None:
