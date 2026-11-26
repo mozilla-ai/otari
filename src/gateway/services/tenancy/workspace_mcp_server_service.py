@@ -1993,6 +1993,8 @@ class WorkspaceMcpServerService:
             # it: that request is stored first and answered here, or waits and finds the server. Before any
             # copy is, in the order a grant's write takes a workspace and then its server.
             reaching = await workspaces.lock_in_organization(organization_id)
+            # Read from the row: the membership `_managed` loaded is this session's copy, and would still hold
+            # a role a demotion committed while the lock was awaited.
             still_manages = await self.organizations.members.active_role(organization_id, user.id) in MANAGEMENT_ROLES
         # Asked again under the locks: a removal from the organization that held them has committed by now.
         if not still_manages:
