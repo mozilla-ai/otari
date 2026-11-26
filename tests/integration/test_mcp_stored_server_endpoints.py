@@ -580,3 +580,93 @@ def test_a_configuration_change_after_discovery_is_refused_without_contacting_th
     assert response.status_code == 409, response.text
     assert response.json()["code"] == "mcp_server_changed"
     assert session.calls == []
+
+
+def test_a_second_discovery_is_answered_from_the_kept_listing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+
+    first = client.get(path, headers=api_key_header)
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+    second = client.get(path, headers=api_key_header)
+
+    assert first.status_code == second.status_code == 200, second.text
+    assert first.headers["age"] == "0"
+    assert "age" in second.headers
+    assert second.json() == first.json()
+    assert session.pages == 1
+    assert _EVENTS.count("mcp_session_opened") == 1
+
+
+def test_no_cache_asks_the_server_again(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    client.get(path, headers=api_key_header)
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+
+    refreshed = client.get(path, headers={**api_key_header, "Cache-Control": "no-cache"})
+    after = client.get(path, headers=api_key_header)
+
+    assert [tool["name"] for tool in refreshed.json()["tools"]] == ["create_issue", "added_later"]
+    assert refreshed.headers["age"] == "0"
+    assert after.json() == refreshed.json()
+    assert session.pages == 2
+
+
+def test_an_edit_to_the_server_is_never_answered_from_the_listing_kept_before_it(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    before = client.get(path, headers=api_key_header).json()
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+
+    row.encrypted_token = encrypt_secret("ghp_rotated")
+    test_db.add(row)
+    test_db.commit()
+    after = client.get(path, headers=api_key_header).json()
+
+    assert after["server_revision"] != before["server_revision"]
+    assert [tool["name"] for tool in after["tools"]] == ["create_issue", "added_later"]
+    assert session.pages == 2
+
+
+def test_a_failed_discovery_keeps_nothing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    working = session.list_tools
+
+    async def refuse(*, params: PaginatedRequestParams | None = None) -> ListToolsResult:
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(session, "list_tools", refuse)
+    failed = client.get(path, headers=api_key_header)
+    monkeypatch.setattr(session, "list_tools", working)
+    recovered = client.get(path, headers=api_key_header)
+
+    assert failed.status_code == 502, failed.text
+    assert recovered.status_code == 200, recovered.text
+    assert session.pages == 1

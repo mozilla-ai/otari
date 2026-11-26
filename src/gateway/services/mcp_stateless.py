@@ -17,6 +17,7 @@ each is named in the constant that carries it.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import ssl
 import unicodedata
@@ -39,7 +40,7 @@ from gateway.services.url_safety import mcp_private_hosts
 
 if TYPE_CHECKING:
     import uuid
-    from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator, MutableMapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Iterator, MutableMapping
 
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
@@ -604,11 +605,13 @@ class DiscoveredCatalog:
 
     ``warnings`` pairs a tool name with the code that omitted it, and carries no
     schema fragment or validator text: a warning describes that a descriptor was
-    unusable, never what was in it.
+    unusable, never what was in it. ``age_s`` is how long ago the server was
+    asked, zero unless the listing came from ``ToolListings``.
     """
 
     tools: list[MCPTool]
     warnings: list[tuple[str, str]]
+    age_s: float = 0.0
 
 
 class ContactObserver(Protocol):
@@ -621,11 +624,38 @@ class ContactObserver(Protocol):
         """No session could be opened on the server."""
 
 
+class ToolListings(Protocol):
+    """Keeps a server's raw ``tools/list`` answer under ``listing_key`` for a while, loading it once at a time."""
+
+    async def get_or_load(
+        self,
+        key: str,
+        load: Callable[[], Awaitable[list[MCPTool]]],
+        *,
+        refresh: bool = False,
+    ) -> tuple[list[MCPTool], float]:
+        """The listing and its age in seconds; ``refresh`` asks the server again whatever is kept."""
+        ...
+
+
+def listing_key(server: ResolvedMcpServer) -> str:
+    """What a kept listing is valid for: this server, at this revision, read with this credential.
+
+    The revision covers the URL, the allow-list and a shared credential, but a per-user server's
+    revision is the same for every user, so the token the listing is read with is digested in too.
+    """
+    token = server.authorization_token
+    credential = "" if token is None else hashlib.sha256(token.encode()).hexdigest()
+    return f"{server.id}:{server.revision}:{credential}"
+
+
 async def discover_stored_tools(
     server: ResolvedMcpServer,
     admits: Callable[[str], bool] | None = None,
     *,
     contacts: ContactObserver | None = None,
+    listings: ToolListings | None = None,
+    refresh: bool = False,
 ) -> DiscoveredCatalog:
     """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
@@ -636,14 +666,26 @@ async def discover_stored_tools(
     of them; the limits on pages, bytes read and descriptors examined still
     bound the listing itself. Every failure is ``not_started``: discovery runs
     no tool. ``contacts`` hears whether the server answered, and its catalog where the
-    listing read all of it.
+    listing read all of it. With ``listings``, the server's raw answer is reused
+    while it is kept, unless ``refresh``; the filter and screening run every time.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
+    if listings is None:
+        listed, age_s = await _list_live(server, contacts), 0.0
+    else:
+        listed, age_s = await listings.get_or_load(
+            listing_key(server), lambda: _list_live(server, contacts), refresh=refresh
+        )
+    catalog = _screened(listed, admits)
+    return DiscoveredCatalog(tools=catalog.tools, warnings=catalog.warnings, age_s=age_s)
+
+
+async def _list_live(server: ResolvedMcpServer, contacts: ContactObserver | None) -> list[MCPTool]:
     try:
         async with DISCOVERY_GATE.slot():
-            return await _run_in_owner_task(_discover_once(server, admits, contacts))
+            return await _run_in_owner_task(_list_once(server, contacts))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except McpExecutionError:
@@ -663,9 +705,7 @@ async def discover_stored_tools(
         raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
-async def _discover_once(
-    server: ResolvedMcpServer, admits: Callable[[str], bool] | None, contacts: ContactObserver | None = None
-) -> DiscoveredCatalog:
+async def _list_once(server: ResolvedMcpServer, contacts: ContactObserver | None) -> list[MCPTool]:
     stack = AsyncExitStack()
     try:
         session = await stack.enter_async_context(open_session(server))
@@ -676,25 +716,29 @@ async def _discover_once(
         if contacts is not None:
             # An allow-list stops the listing early, so only a server without one was read in full.
             contacts.reached(server.id, server.url, catalog_of(listed) if server.allowed_tools is None else None)
-        if admits is not None:
-            listed = [tool for tool in listed if admits(tool.name)]
-
-        tools: list[MCPTool] = []
-        warnings: list[tuple[str, str]] = []
-        for tool in listed:
-            code = screen_tool(tool)
-            if code is None:
-                tools.append(tool)
-            else:
-                warnings.append((tool.name, code))
-
-        if len(tools) > DISCOVERY_MAX_TOOLS:
-            raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
-        if _oversized(tools, DISCOVERY_RESPONSE_MAX_BYTES):
-            raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
-        return DiscoveredCatalog(tools=tools, warnings=warnings)
+        return listed
     finally:
         await _close_bounded(stack)
+
+
+def _screened(listed: list[MCPTool], admits: Callable[[str], bool] | None) -> DiscoveredCatalog:
+    if admits is not None:
+        listed = [tool for tool in listed if admits(tool.name)]
+
+    tools: list[MCPTool] = []
+    warnings: list[tuple[str, str]] = []
+    for tool in listed:
+        code = screen_tool(tool)
+        if code is None:
+            tools.append(tool)
+        else:
+            warnings.append((tool.name, code))
+
+    if len(tools) > DISCOVERY_MAX_TOOLS:
+        raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+    if _oversized(tools, DISCOVERY_RESPONSE_MAX_BYTES):
+        raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+    return DiscoveredCatalog(tools=tools, warnings=warnings)
 
 
 async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> list[MCPTool]:
