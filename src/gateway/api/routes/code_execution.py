@@ -395,7 +395,6 @@ async def execute_code(
         image=admitted.session_image,
         allowed_tools=admitted.allowed_tools,
         files=file_bridge,
-        files_base_url=file_bridge.base_url if file_bridge is not None else None,
         container=claimed,
         containers=containers,
     )

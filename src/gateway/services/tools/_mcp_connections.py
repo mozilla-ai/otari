@@ -790,7 +790,6 @@ class McpConnectionService:
     FLOW_LIFETIME: ClassVar[timedelta] = FLOW_LIFETIME
     # What the rest of the gateway asks about sign-ins and connections without holding a service.
     client_metadata = staticmethod(client_metadata)
-    collect_revocations = staticmethod(collect_revocations)
     require_per_user_support = staticmethod(require_per_user_support)
     revocations_for = staticmethod(revocations_for)
     revoke_in_background = staticmethod(revoke_in_background)
