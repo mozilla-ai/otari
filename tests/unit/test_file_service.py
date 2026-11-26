@@ -111,7 +111,8 @@ class _StubFiles:
         self.removed: list[str] = []
         self.discarded: list[str] = []
 
-    async def workspace_usage(self, workspace_id: uuid.UUID) -> tuple[int, int]:
+    async def workspace_usage(self, workspace_id: uuid.UUID, *, excluding_purpose: str) -> tuple[int, int]:
+        assert excluding_purpose == "code_execution_output"
         self.usage_reads.append(workspace_id)
         return self._usage
 

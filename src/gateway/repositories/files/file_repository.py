@@ -149,14 +149,15 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         stmt = stmt.order_by(*_ordering(ascending=query.ascending)).limit(query.limit)
         return list((await self.db.execute(stmt)).scalars().all())
 
-    async def workspace_usage(self, workspace_id: uuid.UUID) -> tuple[int, int]:
-        """Return how many uploads a workspace holds and their total bytes.
+    async def workspace_usage(self, workspace_id: uuid.UUID, *, excluding_purpose: str) -> tuple[int, int]:
+        """Return how many files a workspace holds and their total bytes, leaving out one purpose.
 
         Counts every row not deleted and not expired, pending ones included, so
         uploads in flight count against the allowance they are about to use.
         """
         stmt = select(func.count(FileObject.id), func.coalesce(func.sum(FileObject.bytes), 0)).where(
             FileObject.workspace_id == workspace_id,
+            FileObject.purpose != excluding_purpose,
             FileObject.deleted_at.is_(None),
             or_(FileObject.expires_at.is_(None), FileObject.expires_at >= datetime.now(UTC)),
         )

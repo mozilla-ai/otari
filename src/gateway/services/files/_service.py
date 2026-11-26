@@ -32,7 +32,7 @@ from gateway.services.files._attachment_uploads import upload_attachment, upload
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for
 from gateway.services.files._provider_uploads import ProviderCopies, provider_holds_copies
-from gateway.services.files._staging import StagedFile
+from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
@@ -533,7 +533,11 @@ class FileService:
                 workspace_id = upload.workspace_id
                 if workspace_id is None:
                     workspace_id = await self._default_workspace()
-                count, used = await self._files.workspace_usage(workspace_id)
+                # Code-execution outputs are bounded per call and never refused, so
+                # they must not lock a workspace out of uploading.
+                count, used = await self._files.workspace_usage(
+                    workspace_id, excluding_purpose=CODE_EXECUTION_OUTPUT_PURPOSE
+                )
         except DATABASE_ERRORS as exc:
             logger.error(
                 "Failed to read file usage for workspace %s: %s", upload.workspace_id, describe_database_error(exc)

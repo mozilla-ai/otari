@@ -374,7 +374,7 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
   `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
 - `files_workspace_max_bytes`, `files_workspace_max_files`: the most bytes and
   uploads one workspace may hold at once, counting files not yet deleted or
-  expired: 5 GB and 1000 files by default, and `null` in the config file sets
+  expired (code-execution outputs, bounded per call above, are not counted): 5 GB and 1000 files by default, and `null` in the config file sets
   no limit. An upload past either is refused with 413 and nothing stored is
   deleted, so a workspace makes room by deleting files or waiting for them to
   expire. Usage is read before the bytes flow, so uploads running at the same
