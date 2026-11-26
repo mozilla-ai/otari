@@ -33,6 +33,7 @@ from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey, DisabledReason
+from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as BillingUser
 from gateway.services.api_keys import DEFAULT_ORGANIZATION_MAX_END_USERS
@@ -555,6 +556,48 @@ def test_a_catalog_id_on_a_member_key_stands_for_the_offerings_they_may_use(
     )
     assert code == status.HTTP_400_BAD_REQUEST, refused
     assert "exceeds its user's default" in refused["detail"]
+
+
+def test_a_member_key_may_name_their_organizations_key_by_its_slug(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """On create and on edit; another organization's slug is refused."""
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKey(
+                organization_id=world.alpha,
+                provider="openai",
+                name="OpenAI proxy",
+                slug="alpha-openai",
+                api_base="https://api.openai.com/v1",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, created = _create(
+        client, world, "alpha_member", {"key_name": "slugged", "allowed_models": ["alpha-openai:gpt-4o"]}
+    )
+    assert code == status.HTTP_200_OK, created
+    assert created["allowed_models"] == ["alpha-openai:gpt-4o"]
+
+    code, edited = _request(
+        client,
+        world,
+        "alpha_member",
+        "PATCH",
+        f"{_PREFIX}/{created['id']}",
+        json={"allowed_models": ["alpha-openai:*"]},
+    )
+    assert code == status.HTTP_200_OK, edited
+    assert edited["allowed_models"] == ["alpha-openai:*"]
+
+    code, refused = _create(
+        client, world, "beta_owner", {"key_name": "foreign", "allowed_models": ["alpha-openai:gpt-4o"]}
+    )
+    assert code == status.HTTP_400_BAD_REQUEST, refused
 
 
 def test_a_member_key_cannot_exceed_their_own_tool_default(

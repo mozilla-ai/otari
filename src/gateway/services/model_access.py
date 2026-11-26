@@ -23,7 +23,7 @@ what everyone may call, and grants for single keys and users.
 
 import difflib
 import uuid
-from collections.abc import Container, Mapping, Sequence
+from collections.abc import Collection, Container, Mapping, Sequence
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Literal
@@ -474,14 +474,15 @@ def tool_not_allowed_detail(
     return detail
 
 
-def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
+def _known_prefix(config: GatewayConfig, prefix: str, key_slugs: Collection[str]) -> bool:
     """Whether a prefix names something a model allow-list entry can legitimately gate.
 
-    A configured provider instance or a known any-llm provider. The configured
-    decision providers are accepted because ``/v1/decisions`` checks
+    A configured provider instance, a known any-llm provider, or one of
+    ``key_slugs``, the slugs the organization's own keys are reached by. The
+    configured decision providers are accepted because ``/v1/decisions`` checks
     ``<provider>:<model>``.
     """
-    if prefix in config.providers:
+    if prefix in config.providers or prefix in key_slugs:
         return True
     if prefix in config.decision_providers:
         return True
@@ -520,6 +521,7 @@ def _validate_entry(
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = None,
     within: list[str] | None = None,
+    key_slugs: Collection[str] = (),
 ) -> list[str]:
     """Validate + canonicalize one allow-list entry, or raise ``ValueError``.
 
@@ -543,17 +545,19 @@ def _validate_entry(
         raise ValueError(f"'{entry}': only a single trailing '*' is allowed (openai:* or openai:gpt-4*)")
     if offerings := _catalog_offerings(entry, workspace_id=workspace_id, organization_id=organization_id):
         # No entry can name a hosted provider called otherwise than its
-        # implementation, a hosted region, or a key reached by its slug, so the
-        # model's other offerings stand for those.
-        if storable := [offering for offering in offerings if _known_prefix(config, offering.partition(":")[0])]:
+        # implementation or a hosted region, so the model's other offerings
+        # stand for those.
+        if storable := [
+            offering for offering in offerings if _known_prefix(config, offering.partition(":")[0], key_slugs)
+        ]:
             # Where the owner covers none, all are kept, so the list is refused as exceeding the owner's.
             if within is None:
                 return storable
             return [offering for offering in storable if _covers(within, offering)] or storable
-        if not _known_prefix(config, prefix):
+        if not _known_prefix(config, prefix, key_slugs):
             raise ValueError(f"'{entry}' is served only through providers an allowed_models entry cannot name")
     canonical = f"{prefix}:{model}"
-    if _known_prefix(config, prefix) or canonical in config.legacy_search_tool_keys():
+    if _known_prefix(config, prefix, key_slugs) or canonical in config.legacy_search_tool_keys():
         return [canonical]
     if prefix in config.search_tool_providers():
         raise ValueError(
@@ -570,6 +574,7 @@ def validate_allowed_models(
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = None,
     within: list[str] | None = None,
+    key_slugs: Collection[str] = (),
 ) -> list[str] | None:
     """Validate + canonicalize a write. ``None`` and ``[]`` pass through as-is.
 
@@ -579,6 +584,8 @@ def validate_allowed_models(
     through ``workspace_id``, so the result can be longer than ``entries``. A
     key's write passes its owner's list as ``within``, and a catalog ID then
     stands for the offerings that list covers, since the key may only narrow it.
+    ``key_slugs`` are the slugs the organization's keys are reached by, which an
+    entry may name like a provider.
     """
     if entries is None:
         return None
@@ -589,7 +596,14 @@ def validate_allowed_models(
         if not isinstance(entry, str):
             raise ValueError("allowed_models entries must be strings")
         canonical |= dict.fromkeys(
-            _validate_entry(config, entry, workspace_id=workspace_id, organization_id=organization_id, within=within)
+            _validate_entry(
+                config,
+                entry,
+                workspace_id=workspace_id,
+                organization_id=organization_id,
+                within=within,
+                key_slugs=key_slugs,
+            )
         )
     return list(canonical)
 
