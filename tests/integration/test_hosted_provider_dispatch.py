@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, DEPLOYMENT_PAID_HEADER, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
@@ -151,6 +151,7 @@ def test_a_request_a_hosted_provider_served_is_recorded_as_deployment_paid(
         )
 
     assert response.status_code == 200, response.text
+    assert response.headers[DEPLOYMENT_PAID_HEADER] == "true"
     with db_session_factory() as db:
         flags = list(db.scalars(select(UsageLog.deployment_paid).where(UsageLog.user_id == "u1")))
     assert flags == [True]

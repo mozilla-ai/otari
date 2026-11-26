@@ -246,6 +246,9 @@ class UsageEntry(BaseModel):
     # The request's tags (from its ``metadata``); null when it sent none.
     tags: dict[str, str] | None = None
     counts_toward_budget: bool
+    # True where the request was served on a credential the deployment pays for (a
+    # hosted provider); false where the organization's own key or endpoint served it.
+    deployment_paid: bool = False
     # Whether the bulk operator mutations can reach this row: the fixed scope
     # ``_selection_conditions`` pins them to, which is provenance *and* budget
     # participation. Derived here rather than left to the client, because a client
@@ -258,6 +261,9 @@ class UsageEntry(BaseModel):
     # are excluded from `error_count` and from `request_count`, since the request
     # they belong to is counted once by the attempt that served it.
     policy_name: str | None = None
+    # The model name the caller sent, before an alias or a policy resolved it into
+    # `model`; null on rows written before it was recorded.
+    requested_model: str | None = None
     selection_reason: str | None = None
     attempt_position: int | None = None
     attempt_count: int | None = None
@@ -288,6 +294,8 @@ class UsageEntry(BaseModel):
             source_label=log.source_label,
             tags=log.tags,
             counts_toward_budget=log.counts_toward_budget,
+            # A row not yet flushed holds None until its column default applies.
+            deployment_paid=bool(log.deployment_paid),
             bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
@@ -309,6 +317,7 @@ class UsageEntry(BaseModel):
                 None if log.stream_cut_by else output_tokens_per_second(log.completion_tokens, log.latency_ms)
             ),
             policy_name=log.policy_name,
+            requested_model=log.requested_model,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,
             attempt_count=log.attempt_count,
@@ -379,6 +388,11 @@ class UsageTotals(BaseModel):
     # ``completion_tokens`` residual would drift, even negative, whenever a
     # row's meter and column disagree).
     billed_output_tokens: int = 0
+    # The part of ``cost`` the deployment's account ran (hosted models, and tool
+    # calls it ran whoever paid for the model call); the rest ran on the
+    # organization's own keys and endpoints. A row written before the split was
+    # recorded counts whole where its model call was deployment-paid.
+    deployment_paid_cost: float = 0.0
 
 
 class UsageGroupRow(BaseModel):

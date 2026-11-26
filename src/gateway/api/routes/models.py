@@ -213,7 +213,10 @@ async def list_models(
     request sends as `model` to let the gateway choose the provider: it tries the
     model's offerings best first and falls back down the list. An entry's price,
     token limits and capabilities are those of the offering tried first, at the
-    caller's own rate. A value nobody knows is omitted rather than sent as null.
+    caller's own rate; a token limit that offering does not know is the smallest
+    the model's other offerings report, and an output limit filled that way is
+    capped at the entry's context window. A value nobody knows is omitted rather
+    than sent as null.
 
     Aliases and routing policies are listed beside the models. An
     `instance:model` selector still pins a request to one provider, and

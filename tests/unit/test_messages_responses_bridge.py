@@ -388,6 +388,25 @@ def test_tool_result_with_an_image_keeps_its_parts() -> None:
     ]
 
 
+def test_a_block_with_no_part_of_its_own_is_text_beside_an_image_in_a_tool_result() -> None:
+    """Pins the mixed case the drift test cannot compare: a chat tool message takes no image."""
+    browser = {"type": "browser_state", "tabs": [{"id": 1}], "state_changes": ["clicked"], "screenshot_id": "s1"}
+    image = {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+    content = [browser, image, {"type": "text", "text": "after"}]
+    messages = [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": content}]}]
+    assert _translate(_kwargs(messages=messages))["input_data"] == [
+        {
+            "type": "function_call_output",
+            "call_id": "c",
+            "output": [
+                {"type": "input_text", "text": '{"tabs": [{"id": 1}], "state_changes": ["clicked"]}'},
+                {"type": "input_image", "image_url": "https://example.com/a.png", "detail": "auto"},
+                {"type": "input_text", "text": "\nafter"},
+            ],
+        }
+    ]
+
+
 def test_unknown_user_block_is_refused() -> None:
     messages = [{"role": "user", "content": [{"type": "container_upload", "file_id": "f"}]}]
     with pytest.raises(UnsupportedParameterError, match="container_upload"):

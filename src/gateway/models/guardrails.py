@@ -61,7 +61,10 @@ class GuardrailConfig(BaseModel):
     """Profile name configured on the guardrails service (e.g. ``"alinia"``)."""
 
     url: str | None = Field(default=None, min_length=1)
-    """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``."""
+    """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``.
+
+    The base address of the service: the gateway adds ``/validate`` to it.
+    """
 
     on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
         default_factory=_default_directions, min_length=1
@@ -295,7 +298,9 @@ class OrganizationGuardrail(Base):
     on: Mapped[list[str]] = mapped_column(
         "directions", JSON, default=_default_directions, server_default='["input"]', nullable=False
     )
-    validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # A guardrail class can take a vendor key as a parameter, so these are as
+    # much a credential as ``encrypted_credential`` and are held the same way.
+    encrypted_validate_kwargs: Mapped[str | None] = mapped_column(Text, default=None)
     # The organization's own kill switch. A disabled entry runs nowhere,
     # whatever its scope says, so an organization can stop a guardrail without
     # losing the credential and the workspace list it took to set up.

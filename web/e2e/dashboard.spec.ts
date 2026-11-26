@@ -8,6 +8,7 @@ import {
   MASTER_KEY,
   nav,
   openAccountMenu,
+  openDeployment,
   openNested,
   openOrganization,
   openTab,
@@ -143,10 +144,12 @@ test.describe("dashboard core flows", () => {
     await expect(pageHeading(page, "Inference providers")).toBeVisible()
     await openNested(page, "Providers", "Web search")
     await expect(pageHeading(page, "Web search providers")).toBeVisible()
+    // The organization's own budgets, though this caller also operates the
+    // deployment: those are Deployment budgets, on the deployment rail.
     await nav(page)
       .getByRole("link", { name: "Spend & budgets", exact: true })
       .click()
-    await expect(pageHeading(page, "Budgets")).toBeVisible()
+    await expect(pageHeading(page, "Spend & budgets")).toBeVisible()
 
     // The retired Model pricing path still answers, because bookmarks and links
     // to it outlive the page. `override` named this organization's own rate for
@@ -173,6 +176,10 @@ test.describe("dashboard core flows", () => {
       .getByRole("link", { name: "Hosted providers", exact: true })
       .click()
     await expect(pageHeading(page, "Hosted providers")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Deployment budgets", exact: true })
+      .click()
+    await expect(pageHeading(page, "Deployment budgets")).toBeVisible()
     // The way out names where it goes. Queried on the page rather than inside
     // the Sidebar landmark: the back row is in the scope band above the nav, the
     // same place the workspace switcher sits on the other rail.
@@ -181,8 +188,8 @@ test.describe("dashboard core flows", () => {
 
   test("create a budget", async ({ page }) => {
     await login(page)
-    await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    await openDeployment(page)
+    await nav(page).getByRole("link", { name: "Deployment budgets" }).click()
     await page.getByRole("button", { name: "Create your first budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create
     // budget", so an unscoped press is ambiguous.
@@ -206,7 +213,7 @@ test.describe("dashboard core flows", () => {
     // The seed has to happen before `login(page)`, not after it. Loading the app
     // fetches `GET /v1/users`, and `useUsers` caches it with `staleTime: 60_000`
     // (web/src/shared/api/hooks.ts), so a list fetched before alice exists stays
-    // fresh through `BudgetsPage` mounting: no refetch, no alice in the combobox,
+    // fresh through `DeploymentBudgetsPage` mounting: no refetch, no alice in the combobox,
     // and the option click below waits out the 30s test timeout. Seeding first
     // makes the order deterministic instead of a race with the app's own request.
     const created = await page.request.post(`${API_ROOT}/users`, {
@@ -216,8 +223,8 @@ test.describe("dashboard core flows", () => {
     expect(created.ok() || created.status() === 409).toBeTruthy()
 
     await login(page)
-    await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    await openDeployment(page)
+    await nav(page).getByRole("link", { name: "Deployment budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await pressRowAction(budgetRow, "Edit")
     // The field's visible label is its accessible name now: the picker used to

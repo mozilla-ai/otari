@@ -20,6 +20,7 @@ from gateway.core.settings.tools import (
 from gateway.models.tools import SearchToolCredential
 from gateway.services.secret_box import (
     SecretDecryptionError,
+    encrypt_mapping,
     encrypt_secret,
     generate_secret_key,
 )
@@ -36,6 +37,12 @@ from gateway.services.tools._search_tool_overlay import (
 async def _no_rate(_rate_key: Any, _organization_id: Any) -> None:
     """A price list that prices nothing, for a service whose tests list no tool."""
     return None
+
+
+@pytest.fixture(autouse=True)
+def _a_key_to_seal_with(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row's provider options are sealed, so building one needs a key."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
 @pytest.fixture(autouse=True)
@@ -132,7 +139,6 @@ def test_row_to_entry_decrypts_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
         provider="exa",
         encrypted_api_key=encrypt_secret("exa-live"),
         last4="live",
-        options={},
     )
     assert overlay._row_to_entry(row) == {"provider": "exa", "api_key": "exa-live"}
 
@@ -143,7 +149,7 @@ def test_row_to_entry_carries_base_timeout_and_options() -> None:
         provider="searxng",
         api_base="http://searxng:8080",
         timeout_seconds=12.5,
-        options={"engines": "brave"},
+        encrypted_options=encrypt_mapping({"engines": "brave"}),
     )
     assert overlay._row_to_entry(row) == {
         "provider": "searxng",
@@ -155,7 +161,7 @@ def test_row_to_entry_carries_base_timeout_and_options() -> None:
 
 def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    row = SearchToolCredential(name="exa", provider="exa", encrypted_api_key=encrypt_secret("k"), options={})
+    row = SearchToolCredential(name="exa", provider="exa", encrypted_api_key=encrypt_secret("k"))
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     with pytest.raises(SecretDecryptionError):
         overlay._row_to_entry(row)
@@ -168,8 +174,13 @@ def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.Mo
 _T0 = datetime(2026, 10, 9, tzinfo=UTC)
 
 
-def _row(name: str, kind: str = "search", *, at: datetime = _T0, **fields: Any) -> SearchToolCredential:
-    return SearchToolCredential(name=name, kind=kind, provider="fake", updated_at=at, **{"options": {}, **fields})
+def _row(
+    name: str, kind: str = "search", *, at: datetime = _T0, options: dict[str, Any] | None = None, **fields: Any
+) -> SearchToolCredential:
+    """A stored row, with its provider options sealed as the database holds them."""
+    return SearchToolCredential(
+        name=name, kind=kind, provider="fake", updated_at=at, encrypted_options=encrypt_mapping(options), **fields
+    )
 
 
 def _logged(caplog: pytest.LogCaptureFixture, config: GatewayConfig, rows: list[SearchToolCredential]) -> str:
@@ -475,3 +486,37 @@ async def test_a_startup_load_that_commits_applies_the_rows_and_says_so() -> Non
     assert await service.load_at_startup() is True
     assert set(config.search_tools) == {"from-file", "first", "second"}
     assert overlay._read_settings == {"web_search_default_tool": "first"}
+
+
+def _service(config: GatewayConfig) -> SearchToolService:
+    async def read_settings() -> dict[str, Any]:
+        return {}
+
+    async def stage_setting(_key: str, value: Any) -> Any:
+        return value
+
+    return SearchToolService(
+        _UnitOfWork(),  # type: ignore[arg-type]
+        config=config,
+        tools=_Rows([]),  # type: ignore[arg-type]
+        read_settings=read_settings,
+        stage_setting=stage_setting,
+        read_rate=_no_rate,
+    )
+
+
+def test_a_configured_tool_whose_key_came_out_blank_fails_the_start() -> None:
+    """A variable left empty, such as ${KEENABLE_API_KEY}: the tool would search with no key."""
+    config = GatewayConfig(
+        search_tools={"keenable": {"api_key": " "}, "own": {"provider": "keenable", "api_key": "keen_k"}},
+        fetch_tools={"exa-fetch": {"provider": "exa", "api_key": "  "}},
+    )
+    with pytest.raises(ValueError, match="search_tools.keenable.api_key is blank") as refused:
+        _service(config).refuse_blank_api_keys()
+    assert "fetch_tools.exa-fetch.api_key is blank" in str(refused.value)
+    assert "own" not in str(refused.value)
+
+
+def test_a_configured_tool_without_a_key_starts() -> None:
+    config = GatewayConfig(search_tools={"keenable": {}, "test": {"provider": "fake"}})
+    _service(config).refuse_blank_api_keys()

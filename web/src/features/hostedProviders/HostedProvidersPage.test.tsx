@@ -4,6 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap } from "@/client"
 import { HostedProvidersPage } from "@/features/hostedProviders/HostedProvidersPage"
+import { WelcomeDialog } from "@/features/welcome/WelcomeDialog"
+import {
+  OWN_KEYS,
+  WELCOME_ANSWERED_KEY,
+} from "@/features/welcome/welcomeAnswer"
+import { organizationContext } from "@/tests/fixtures"
 import {
   countriesFileInput,
   EMPTY_SWEEP,
@@ -28,6 +34,7 @@ function renderPage(deployment: Partial<DeploymentBootstrap> = {}) {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe("HostedProvidersPage", () => {
@@ -1193,6 +1200,119 @@ describe("HostedProvidersPage, named providers and the move", () => {
       expect(
         await screen.findByRole("button", { name: "Connect otari.ai" }),
       ).toBeInTheDocument()
+    })
+
+    it("keeps it in the header of the empty page once the welcome was skipped for own keys", async () => {
+      localStorage.setItem(WELCOME_ANSWERED_KEY, OWN_KEYS)
+      mockApi({ providers: [] })
+      const user = userEvent.setup()
+      await renderPage({ platform_connect: true })
+
+      expect(
+        await screen.findByRole("button", { name: "Add your first provider" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("heading", { name: "Bring your own provider" }),
+      ).not.toBeInTheDocument()
+      const connects = screen.getAllByRole("button", {
+        name: "Connect otari.ai",
+      })
+      expect(connects).toHaveLength(1)
+
+      await user.click(connects[0] as HTMLElement)
+      expect(
+        await screen.findByRole("region", { name: "Connect otari.ai" }),
+      ).toBeInTheDocument()
+    })
+
+    it("opens the Overview once a connection started from that header is approved", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        localStorage.setItem(WELCOME_ANSWERED_KEY, OWN_KEYS)
+        mockApi({
+          providers: [],
+          connectStatuses: [
+            {
+              status: "pending",
+              user_code: "WXYZ-1234",
+              verification_uri_complete: "https://otari.test/connect",
+              expires_in: 600,
+            },
+            { status: "connected" },
+          ],
+        })
+        vi.spyOn(window, "open").mockReturnValue(null)
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+        await renderHosted(
+          <HostedProvidersPage />,
+          "/admin/hosted-providers",
+          { platform_connect: true },
+          [{ path: "/", element: <p>OVERVIEW</p> }],
+        )
+
+        await user.click(
+          await screen.findByRole("button", { name: "Connect otari.ai" }),
+        )
+        const card = await screen.findByRole("region", {
+          name: "Connect otari.ai",
+        })
+        await user.click(
+          within(card).getByRole("button", { name: /Connect otari\.ai/ }),
+        )
+        await vi.advanceTimersByTimeAsync(3_000)
+        await vi.advanceTimersByTimeAsync(3_000)
+
+        expect(await screen.findByText("OVERVIEW")).toBeInTheDocument()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("follows a Skip pressed in the welcome over the open empty page", async () => {
+      mockApi({ providers: [] })
+      // The welcome greets only the deployment's operator.
+      const served = vi.mocked(globalThis.fetch).getMockImplementation()
+      vi.mocked(globalThis.fetch).mockImplementation(async (input, init) =>
+        String(input).endsWith("/organizations/me")
+          ? jsonResponse(organizationContext())
+          : ((await served?.(input, init)) ?? jsonResponse({})),
+      )
+      const user = userEvent.setup()
+      await renderHosted(
+        <>
+          <HostedProvidersPage />
+          <WelcomeDialog />
+        </>,
+        "/admin/hosted-providers",
+        { platform_connect: true },
+      )
+
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Skip, I’ll use my own keys",
+        }),
+      )
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("heading", { name: "Bring your own provider" }),
+        ).not.toBeInTheDocument(),
+      )
+      expect(
+        screen.getAllByRole("button", { name: "Connect otari.ai" }),
+      ).toHaveLength(1)
+    })
+
+    it("keeps it out of the header of the empty page while the panel offers it", async () => {
+      mockApi({ providers: [] })
+      await renderPage({ platform_connect: true })
+
+      expect(
+        await screen.findByRole("heading", { name: "Bring your own provider" }),
+      ).toBeInTheDocument()
+      expect(
+        await screen.findAllByRole("button", { name: "Connect otari.ai" }),
+      ).toHaveLength(1)
     })
 
     it("neither offers it nor reads its status where the deployment does not", async () => {

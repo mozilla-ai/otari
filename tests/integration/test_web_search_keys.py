@@ -156,6 +156,21 @@ def test_a_key_is_stored_without_its_secret_and_listed(client: TestClient, maste
     assert "tvly-secret-1234" not in str(listed)
 
 
+def test_a_keenable_key_brings_an_api_key_though_a_keenable_tool_needs_none(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Without one, the organization's searches would run keyless from the deployment's address."""
+    refused = client.post(_KEYS, json={"provider": "keenable", "name": "keyless"}, headers=master_key_header)
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "A key on keenable needs an API key"
+
+    created = client.post(
+        _KEYS, json={"provider": "keenable", "name": "own", "api_key": "keen_own-1234"}, headers=master_key_header
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["last4"] == "1234"
+
+
 def test_a_provider_the_search_tool_cannot_call_is_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

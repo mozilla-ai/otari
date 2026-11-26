@@ -25,8 +25,8 @@ certain, as otari's domain policy, checks the results itself.
 
 1. **Read the provider's documentation**, its OpenAPI spec when it has one, since that is usually
    the source of truth. Fill `METADATA`: the endpoint and method, where the key travels, whether
-   a key or a base URL is required, the default base URL and the variable the provider's SDK
-   reads it from, if any, the limits, and the native options under the provider's own names and
+   a key is required, optional or not taken, whether a base URL is required, the default base URL
+   and the variable the provider's SDK reads each from, if any, the limits, and the native options under the provider's own names and
    enums. Note the pricing, with the date you read it, in the module's docstring. When the
    provider charges a call one of a few prices chosen by an option, mark that option `cost_tier`,
    with the tiers as its `enum` and, as its `default`, the tier a call is billed at when the
@@ -521,3 +521,31 @@ status below 400 as a success; what that cost depended on the provider.
   required, the adapter already raised `unexpected_response`. `self._http.request` raises
   `http_error` for it, so an adapter's own check stays `status >= 400`. The conformance suite
   sends every provider a 302 with a JSON object, through a client set to follow redirects.
+
+### 2026-11-24, Keenable (any-search)
+
+The first provider whose key is optional: with one it calls `/v1/search`, without one
+`/v1/search/public`, limited per IP address.
+
+- An optional key is `requires_api_key=False` with `env_key` still naming the SDK's variable, so a
+  key in the environment is used and a missing one is not an error. The adapter picks the
+  endpoint by whether a key resolved (`self._api_key`). An explicit empty key means none and never
+  falls back to the environment, which is how otari passes a tool without one. Test the keyless
+  path in the provider's own tests: the conformance suite sets every `env_key`, so it covers only
+  the keyed one, and a keyless recording can stand for a keyed answer of the same shape, said
+  beside the scenarios.
+- In otari, a deployment tool on such a provider may run without a key, while an organization key
+  on any provider with an address of its own must carry one, so an organization's calls never run
+  keyless from the gateway's address. Both read the metadata, so the adapter needs nothing for it.
+- A keyless endpoint can require a header naming the calling app, which the provider logs with
+  each query (`X-Keenable-Title`). Send the library's name by default, not the SDK's own
+  (`Keenable SDK`) or the host's, and offer the header as an operator-only option: its value can
+  name the deployment. Send it on keyed calls too when the SDK does.
+- A limit per IP address is shared with every other caller from that address, a CI runner's other
+  jobs included. `EXPECTED`'s `shared_limits` names the tags of such a 429, which skip a live
+  test, and `_require_key` skips a provider only for a key it requires.
+- A field the provider documents as deprecated can still be sent, empty: Keenable's
+  `description` is always `""`, so the snippet reads `snippet` first and falls back to it.
+- Fixture recipes, all keyless but the error: `normal` with `--max-results 3` and
+  `snippet_max_length=180`, since snippets run to thousands of characters; `empty` with `site`
+  set to a domain that does not exist; `error` with a made-up key, a 401 `invalid_api_key`.

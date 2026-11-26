@@ -33,7 +33,10 @@ from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
 from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
+from mcp.shared.exceptions import MCPError
+from mcp.types import INTERNAL_ERROR
 from openai import APITimeoutError as OpenAIAPITimeoutError
+from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes._attempts import get_shared_rejection, provider_failure_http_exc
 from gateway.api.routes._helpers import SHOULD_RETRY_HEADER, with_retry_hint
@@ -41,6 +44,7 @@ from gateway.api.routes._pipeline import with_provider_failure
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.error_details import ProviderDetail
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.services.inference import (
     UpstreamFailure,
     is_provider_credential_rejection,
@@ -713,6 +717,51 @@ def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -
 
     assert rejection is not None
     assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
+def test_attempts_that_all_give_one_reason_share_it() -> None:
+    """#3141: a caller who named one catalog ID could not tell which parameter every candidate refused."""
+    errors = [_openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)) for _ in range(2)]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == f"No model accepted the request (2 attempts): {_OPENAI_TEMPERATURE_MSG}"
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
+def test_attempts_that_give_different_reasons_share_the_generic_400() -> None:
+    errors = [
+        _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)),
+        _openai_status_error(400, _openai_error("Argument not supported on this model: temperature")),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
+
+
+def test_a_reason_only_some_attempts_give_is_not_shared() -> None:
+    errors = [
+        _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)),
+        _openai_status_error(400, _openai_error("")),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
+
+
+def test_attempts_that_all_give_no_reason_share_the_generic_400() -> None:
+    errors = [_openai_status_error(400, _openai_error("")) for _ in range(2)]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
 
 
 def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
@@ -1912,3 +1961,34 @@ def test_a_400_with_another_provider_code_carries_no_structured_output_code() ->
 
     assert UpstreamFailure(exc).mapping == (400, _GROQ_JSON_FAILED_MSG)
     assert UpstreamFailure(exc).headers is None
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(402),
+        _StatusError(503),
+        openai.APIConnectionError(request=httpx2.Request("POST", "https://provider.test")),
+        IncompleteStreamError(0),
+        ProviderError("provider failed", provider_name="mistral"),
+        MCPError(INTERNAL_ERROR, "Server returned an error response"),
+    ],
+)
+def test_a_failure_from_outside_the_gateway_is_external(exc: BaseException) -> None:
+    assert UpstreamFailure(exc).is_external
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        RuntimeError("bug in the gateway"),
+        KeyError("missing"),
+        ValueError("bad"),
+        AnswerRefused({"message": "Answer blocked by guardrail policy."}),
+        HTTPException(status_code=429, detail="Budget exceeded"),
+        TimeoutError(),
+        OperationalError("SELECT 1", {}, Exception("connection refused")),
+    ],
+)
+def test_a_fault_in_the_gateway_is_not_external(exc: BaseException) -> None:
+    assert not UpstreamFailure(exc).is_external

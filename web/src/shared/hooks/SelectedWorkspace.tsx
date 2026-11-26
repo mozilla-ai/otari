@@ -22,6 +22,12 @@ interface SelectedWorkspace {
   /** The selected workspace, or null before the context answers. */
   selected: CallerWorkspaceMembership | null
   select: (workspaceId: string) => void
+  /**
+   * How many times `select` has been called. A pick of the workspace already
+   * selected counts too, so a reader can tell a choice from the selection
+   * settling, which changes `selected` without one.
+   */
+  selections: number
   isLoading: boolean
   /**
    * The context has answered, or its first read failed, so `selected` is final
@@ -95,8 +101,10 @@ export function SelectedWorkspaceProvider({
     }
   }, [selected])
 
+  const [selections, setSelections] = useState(0)
   const select = useCallback((workspaceId: string) => {
     setChosen(workspaceId)
+    setSelections((count) => count + 1)
   }, [])
 
   const isSettled = context.data !== undefined || context.isFetched
@@ -109,11 +117,20 @@ export function SelectedWorkspaceProvider({
       memberships,
       selected,
       select,
+      selections,
       isLoading: context.isLoading,
       isSettled,
       isUnknown,
     }),
-    [memberships, selected, select, context.isLoading, isSettled, isUnknown],
+    [
+      memberships,
+      selected,
+      select,
+      selections,
+      context.isLoading,
+      isSettled,
+      isUnknown,
+    ],
   )
 
   return <Context.Provider value={value}>{children}</Context.Provider>
@@ -128,6 +145,7 @@ const NO_WORKSPACE: SelectedWorkspace = {
   memberships: [],
   selected: null,
   select: () => {},
+  selections: 0,
   isLoading: false,
   isSettled: true,
   isUnknown: false,

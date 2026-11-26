@@ -515,6 +515,41 @@ def test_codex_exec_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> N
     ]
 
 
+def test_pi_p_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: "/fake/bin/pi" if name == "pi" else None)
+    calls = _stub_cli_output(monkeypatch, "[]")
+
+    result = _invoke(monkeypatch, "--cli", "pi", "--model", "otari/fast")
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        [
+            "/fake/bin/pi",
+            "-p",
+            "--mode",
+            "json",
+            "--no-tools",
+            "--no-session",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--offline",
+            "--model",
+            "otari/fast",
+        ]
+    ]
+
+
+def test_pi_p_without_a_model_uses_pis_own_default(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unlike a judge call, generation names no model, so pi's configured one applies, as for claude and codex."""
+    monkeypatch.setattr(shutil, "which", lambda name: "/fake/bin/pi" if name == "pi" else None)
+    calls = _stub_cli_output(monkeypatch, "[]")
+
+    result = _invoke(monkeypatch, "--cli", "pi")
+    assert result.exit_code == 0, result.output
+    assert "--model" not in calls[0]
+    assert "--provider" not in calls[0]
+
+
 def test_cli_option_overrides_the_default_preference_order(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shutil,
@@ -849,9 +884,12 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
 
     # No --guardrail-file for the symlinked set: the default target is what
     # lands outside the lexical directory there, so passing one would test a
-    # different path than the one that broke.
-    extra = [] if spelling == "a-symlinked-set" else ["--guardrail-file", str(target)]
-    result = _invoke(monkeypatch, *extra)
+    # different path than the one that broke. That target resolves outside the
+    # repository, so its "append there?" question is answered first.
+    if spelling == "a-symlinked-set":
+        result = _invoke(monkeypatch, keys="y")
+    else:
+        result = _invoke(monkeypatch, "--guardrail-file", str(target))
     assert result.exit_code != 0, result.output
     assert "stop being enforced" in result.output
     assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()
@@ -902,3 +940,74 @@ def test_a_broken_user_level_file_does_not_stop_generating_for_the_repo(
     assert result.exit_code == 0, result.output
     assert "~/.otari/guardrails.yml does not parse" in result.output
     assert "Add this gate?" in result.output
+
+
+def _fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    raise AssertionError("the model must not be called once the target is declined")
+
+
+@pytest.mark.parametrize("link", ["the-file", "the-directory"])
+def test_a_default_target_a_symlink_takes_out_of_the_repo_is_asked_about_first(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch, link: str
+) -> None:
+    """A cloned repository must not be able to carry accepted gates into the user's own `~/.otari/` unasked."""
+    personal = isolated_home / ".otari"
+    personal.mkdir()
+    if link == "the-directory":
+        (repo / ".otari").symlink_to(personal, target_is_directory=True)
+    else:
+        _guardrail_path(repo).symlink_to(personal / "guardrails.yml")
+    _stub_claude_only(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", _fail_if_called)
+
+    result = _invoke(monkeypatch, keys="n")
+
+    assert result.exit_code != 0
+    assert f"resolves to {personal.resolve() / 'guardrails.yml'}, outside this repository" in result.output
+    assert list(personal.iterdir()) == []
+
+
+def test_enter_at_the_outside_target_question_declines(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path_factory.mktemp("outside")
+    _guardrail_path(repo).symlink_to(outside / "guardrails.yml")
+    _stub_claude_only(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", _fail_if_called)
+
+    result = _invoke(monkeypatch, keys="\r")
+
+    assert result.exit_code != 0
+    assert not (outside / "guardrails.yml").exists()
+
+
+def test_a_shared_rules_directory_still_takes_accepted_gates_once_confirmed(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = tmp_path_factory.mktemp("shared-rules")
+    (repo / ".otari").mkdir()
+    (repo / hook_cli.GUARDRAIL_DIR).symlink_to(shared, target_is_directory=True)
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yyy")
+
+    assert result.exit_code == 0, result.output
+    generated = shared / "generated.yml"
+    spec = parse_policy(generated.read_text(encoding="utf-8"), source=str(generated))
+    assert [gate.id for gate in spec.gates] == ["no-hand-edited-changelog"]
+
+
+def test_an_explicit_guardrail_file_outside_the_repo_is_not_asked_about(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--guardrail-file` is the user's own choice of destination, typed on the command line."""
+    target = tmp_path_factory.mktemp("elsewhere") / "draft.yml"
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(target), keys="yy")
+
+    assert result.exit_code == 0, result.output
+    assert "outside this repository" not in result.output
+    assert target.is_file()

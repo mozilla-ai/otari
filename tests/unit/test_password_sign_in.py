@@ -119,6 +119,23 @@ def test_claiming_sets_the_address_and_retires_master_key_sign_in(tmp_path: Path
         assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["password"]
 
 
+def test_claiming_the_deployment_proves_the_operator_address(tmp_path: Path) -> None:
+    """Deployment authority sits above every organization, so its claim proves the address.
+
+    A handover target is refused while ``email_proven_at`` is NULL, and a deployment with no
+    mail configured has no other way to stamp it, so the operator would never hand the role on.
+    """
+    with _client(tmp_path) as client:
+        _claim(client, email=EMAIL)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        row = connection.execute(text('SELECT email_verified_at, email_proven_at FROM "user"')).one()
+    verified, proven = row
+    assert verified is not None
+    assert proven is not None
+
+
 def test_the_claimed_address_is_normalized(tmp_path: Path) -> None:
     """The unique index is case-sensitive, so the stored form has to be settled here."""
     with _client(tmp_path) as client:

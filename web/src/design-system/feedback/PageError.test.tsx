@@ -40,4 +40,17 @@ describe("PageError", () => {
 
     expect(screen.getByText("Reload to try again.")).toBeInTheDocument()
   })
+
+  it("renders the one control that does it, when there is one", () => {
+    render(
+      <PageError
+        error={new Error("bare")}
+        action={<button type="button">Retry</button>}
+      >
+        Retry to ask again.
+      </PageError>,
+    )
+
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
 })

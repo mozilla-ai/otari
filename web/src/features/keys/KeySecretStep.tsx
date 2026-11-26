@@ -40,7 +40,7 @@ export function KeySecretStep({
         retrieved later. If you lose it, use Regenerate to issue a new secret.
       </p>
       <div className="flex flex-col gap-1">
-        <p className="truncate text-emphasis">{keyLabel(result)}</p>
+        <p className="break-words text-emphasis">{keyLabel(result)}</p>
         <CopyField
           label="Secret key"
           value={secret}

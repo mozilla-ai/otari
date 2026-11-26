@@ -21,7 +21,18 @@ foundations, components with their states, and the page archetypes as artboards.
 ## Runtime contract
 
 `src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
-React. Do not guess a deployment when that request fails.
+React. Do not guess a deployment when that request fails: `app/boot.ts` keeps
+retrying it with backoff, and `app/DeploymentGate.tsx` shows the failure in the
+sign-in shell's frame and mounts `App` once an attempt answers. A redirect is
+followed once, deliberately: one that lands on the bootstrap (a canonical host,
+HTTPS) opens the dashboard, and one that lands on a page that is not JSON is
+something in front of the gateway asking this browser to sign in, which the
+screen says, with a Reload. A followed redirect whose fetch fails is a sign-in
+only if its destination answers a `no-cors` read (it is up and refused to
+share, as a cross-origin sign-in page does); if nothing answers, the gateway is
+unreachable. Either way the loader keeps asking in the background, quietly on
+the sign-in screen, because a host that answered without CORS reads the same
+as a sign-in page from here and only it recovers on its own.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
 type promises, so `App` completes the payload once through
@@ -80,10 +91,9 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
-- `requires`, an organization owner or admin (`manager`), someone who may
-  run things in the selected workspace (`contributor`), or either a manager or
-  the deployment's operator (`manager-or-operator`, Spend & budgets); a row on
-  the organization rail is a manager's without saying so
+- `requires`, an organization owner or admin (`manager`) or someone who may
+  run things in the selected workspace (`contributor`); a row on the
+  organization rail is a manager's without saying so
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
   caller with no organization can use (Home today); every other row,
   overlay rows included, is hidden from that caller, and from every caller
@@ -123,7 +133,9 @@ request snippets show when the API has a host of its own),
 `features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
 pages that post one), `features/auth/overlayAuthShellSlot.tsx` (a control in the
 header of the public auth pages), `features/auth/overlayLoginRefusalHint.tsx` (a
-line under the password field after a refused sign-in), `app/nav/overlayAccountMenuRows.tsx` (extra
+line under the password field after a refused sign-in), `features/auth/overlaySignInReason.ts`
+(the reason the sign-in card gives in place of its default description, such as
+an invitation's organization), `app/nav/overlayAccountMenuRows.tsx` (extra
 rows in the account menu), and `app/nav/overlayAccountBadge.tsx` (the mark on
 the account control, the person's avatar here). Three more carry account state
 into the chrome: `app/overlayShellBanner.tsx` (a band above the header on every
@@ -216,7 +228,8 @@ The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
 prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved
 `base` and rewrites the `index.html` link (#857). Do not add a static manifest
 to `public/pwa/`; only the icons live there. The plugin is a standalone module
-so the otari-ai superset build imports it rather than copying it.
+so the otari-ai superset build imports it rather than copying it, and passes
+its own `description` as an option.
 
 Regenerate the icons with `pnpm --dir web run icons:generate`
 (`web/scripts/generate-pwa-icons.mjs`). It rasterizes the mark through

@@ -82,16 +82,6 @@ class NullGrowthSignalAdapter(GrowthSignalPort):
     ) -> None:
         return None
 
-    async def record_profile_updated(
-        self,
-        *,
-        background_tasks: BackgroundTasks,
-        user_id: uuid.UUID,
-        email: str,
-        full_name: str | None,
-    ) -> None:
-        return None
-
     async def record_account_deleted(
         self,
         *,

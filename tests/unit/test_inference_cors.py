@@ -15,7 +15,7 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, DEPLOYMENT_PAID_HEADER, GatewayConfig
 from gateway.main import _INFERENCE_CORS_PATHS, create_app
 
 MASTER_KEY = "sk-test-master"
@@ -82,6 +82,12 @@ def test_a_refusal_reaches_the_page_so_it_can_show_why(client: TestClient) -> No
     assert refused.status_code == 401
     assert refused.headers["access-control-allow-origin"] == "*"
     assert "access-control-allow-credentials" not in refused.headers
+
+
+def test_a_page_may_read_who_paid_for_a_completion(client: TestClient) -> None:
+    answered = client.post(CHAT, json=BODY, headers={"Origin": PAGE})
+
+    assert DEPLOYMENT_PAID_HEADER.lower() in answered.headers["access-control-expose-headers"].lower()
 
 
 def test_a_page_sending_a_cookie_is_still_not_allowed_credentials(client: TestClient) -> None:

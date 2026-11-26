@@ -27,9 +27,12 @@ from gateway.main import create_app
 from gateway.models.tenancy import DashboardSession
 from gateway.services import dashboard_session_service, master_key_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.services.password_service import hash_password
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 MASTER_KEY = "sk-test-master"
+# The bootstrap operator's password, which a session-authenticated rotation now has to prove.
+OPERATOR_PASSWORD = "hunter2-hunter2"
 
 
 def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
@@ -44,6 +47,26 @@ def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
 def _sign_in(client: TestClient, key: str = MASTER_KEY) -> None:
     response = client.post(f"{API_ROOT}/auth/session", json={"master_key": key})
     assert response.status_code == 200, response.text
+
+
+def _give_the_operator_a_password(config: GatewayConfig, password: str = OPERATOR_PASSWORD) -> None:
+    """Set a password on the bootstrap operator, which a session rotation now has to prove.
+
+    Written outside the app for the reason ``_sessions`` reads outside it: the row the request
+    handler reads is what matters, not the ORM state of a live session.
+    """
+    engine = create_engine(config.database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE user SET hashed_password = :hashed WHERE replace(id, '-', '') = "
+                    "replace((SELECT value FROM runtime_settings WHERE key = :key), '-', '')"
+                ),
+                {"hashed": hash_password(password), "key": BOOTSTRAP_IDENTITY_KEY},
+            )
+    finally:
+        engine.dispose()
 
 
 def test_sign_in_sets_cookie_and_cookie_authenticates_management_reads(tmp_path: Path) -> None:
@@ -228,12 +251,15 @@ def test_sessions_survive_a_restart_but_not_a_configured_key_change(tmp_path: Pa
 
 def test_rotation_then_restart_keeps_the_reminted_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_url = f"sqlite:///{tmp_path / 'rotate-restart.db'}"
+    config = GatewayConfig(database_url=db_url, require_pricing=False)
     monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-first")
 
-    with TestClient(create_app(GatewayConfig(database_url=db_url, require_pricing=False))) as client:
+    with TestClient(create_app(config)) as client:
         _sign_in(client, "otari-mk-first")
+        _give_the_operator_a_password(config)
         monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-second")
-        assert client.post(f"{API_ROOT}/settings/master-key/rotate").status_code == 200
+        rotated = client.post(f"{API_ROOT}/settings/master-key/rotate", json={"current_password": OPERATOR_PASSWORD})
+        assert rotated.status_code == 200, rotated.text
         reminted = client.cookies[SESSION_COOKIE_NAME]
 
     # The startup key-change check must recognize the rotated key as current
@@ -259,11 +285,12 @@ def test_rotation_revokes_other_sessions_and_reminting_keeps_the_caller_signed_i
         _sign_in(client, "otari-mk-first")
         rotating_session = client.cookies[SESSION_COOKIE_NAME]
         assert rotating_session != other_tab_session
+        _give_the_operator_a_password(config)
 
         monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-second")
-        # Rotate via the session cookie alone: the dashboard tab that signed in
-        # with a cookie has no raw key to send.
-        rotated = client.post(f"{API_ROOT}/settings/master-key/rotate")
+        # Rotate via the session cookie: the dashboard tab that signed in with a cookie has no
+        # raw key to send, so it proves the caller's password instead.
+        rotated = client.post(f"{API_ROOT}/settings/master-key/rotate", json={"current_password": OPERATOR_PASSWORD})
         assert rotated.status_code == 200, rotated.text
         assert rotated.json() == {"master_key": "otari-mk-second"}
 
@@ -404,9 +431,11 @@ def test_rotation_re_mints_the_session_for_the_same_identity(tmp_path: Path, mon
         signed_in = client.post(f"{API_ROOT}/auth/session", json={"master_key": "otari-mk-first"})
         assert signed_in.status_code == 200, signed_in.text
         identity = signed_in.json()["user_id"].replace("-", "")
+        _give_the_operator_a_password(config)
 
         monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-second")
-        assert client.post(f"{API_ROOT}/settings/master-key/rotate").status_code == 200
+        rotated = client.post(f"{API_ROOT}/settings/master-key/rotate", json={"current_password": OPERATOR_PASSWORD})
+        assert rotated.status_code == 200, rotated.text
 
         assert [user_id for _, user_id in _sessions(config)] == [identity]
         assert client.get(f"{API_ROOT}/organizations/me").status_code == 200

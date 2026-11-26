@@ -6,6 +6,14 @@ import type {
   CatalogVendorFacet,
 } from "@/client"
 import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
+import {
+  admitsLocation,
+  DATA_LOCATION_OPTIONS,
+  type DataLocationOption,
+  dataLocationLabel,
+  EU,
+  EU_MEMBER_STATES,
+} from "@/features/hostedProviders/dataLocations"
 import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import { formatRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
@@ -169,6 +177,8 @@ export interface CatalogFilters {
   source: string
   /** Only models a provider declared to keep no prompt or completion data offers. */
   zeroDataRetention: boolean
+  /** Data locations (`DATA_LOCATION_OPTIONS` values); empty for any, and a model hosted at any one picked matches. */
+  dataLocations: string[]
   /** Days back from `now` a release must fall within; 0 for any. */
   releasedWithinDays: number
 }
@@ -186,6 +196,7 @@ export const EMPTY_FILTERS: CatalogFilters = {
   pricing: "all",
   source: "all",
   zeroDataRetention: false,
+  dataLocations: [],
   releasedWithinDays: 0,
 }
 
@@ -203,6 +214,7 @@ export function activeFilterCount(filters: CatalogFilters): number {
     (filters.pricing !== "all" ? 1 : 0) +
     (filters.source !== "all" ? 1 : 0) +
     (filters.zeroDataRetention ? 1 : 0) +
+    filters.dataLocations.length +
     (filters.releasedWithinDays > 0 ? 1 : 0)
   )
 }
@@ -298,6 +310,7 @@ export const CATALOG_URL_DEFAULTS = {
   pricing: "all",
   source: "all",
   zdr: "",
+  data_location: "",
   released: "0",
   sort: "newest",
   column: "name",
@@ -311,6 +324,9 @@ export type CatalogUrlKey = keyof typeof CATALOG_URL_DEFAULTS
 // The unknown vendor's facet value is "", which `useUrlState` would drop as a
 // cleared filter.
 const UNKNOWN_VENDOR_PARAM = "-"
+
+/** A data location as the URL may spell it by hand: `de` and ` de ` are `DE`. */
+const dataLocationParam = (value: string) => value.trim().toUpperCase()
 
 /**
  * The list read off its URL. A value the rail does not offer (a hand-edited
@@ -348,6 +364,10 @@ export function catalogListFromUrl(
       pricing: offered(PRICING_OPTIONS, "pricing"),
       source: offered(SOURCE_OPTIONS, "source"),
       zeroDataRetention: url.get("zdr") === "1",
+      dataLocations: url
+        .getAll("data_location")
+        .map(dataLocationParam)
+        .filter(known(DATA_LOCATION_OPTIONS.map((option) => option.value))),
       releasedWithinDays: Number(offered(RELEASE_OPTIONS, "released")),
     },
     sort: offered(SORT_OPTIONS, "sort"),
@@ -383,7 +403,13 @@ export function catalogUrlChanges(
       changes[key] = now
       continue
     }
-    const current = [latest[key] ?? []].flat().filter(Boolean)
+    // Read as the parse reads it, or a hand-typed `de` would look like a change nobody made to `DE`.
+    const current = [latest[key] ?? []]
+      .flat()
+      .filter(Boolean)
+      .map((value) =>
+        key === "data_location" ? dataLocationParam(value) : value,
+      )
     changes[key] = [
       ...current.filter((value) => now.includes(value) || !was.includes(value)),
       ...now.filter(
@@ -412,6 +438,7 @@ export function catalogListToUrl(
     pricing: filters.pricing,
     source: filters.source,
     zdr: filters.zeroDataRetention ? "1" : "",
+    data_location: filters.dataLocations,
     released: filters.releasedWithinDays,
     sort: list.sort,
     column: list.tableSort.column,
@@ -466,6 +493,55 @@ export function providerOptions(providers: string[]) {
     .sort((a, b) => a.label.localeCompare(b.label))
 }
 
+/**
+ * The rail's data-location choices: the locations the catalog has, plus
+ * European Union whenever a member state (or the union itself) is among them,
+ * since picking it matches those, plus anything already picked so a stale
+ * pick can still be cleared. Global first, then the union, then countries by
+ * name.
+ */
+export function dataLocationOptions(
+  facet: readonly string[] | undefined,
+  selected: readonly string[],
+): DataLocationOption[] {
+  const present = new Set([...(facet ?? []), ...selected])
+  if ([...present].some((code) => code === EU || EU_MEMBER_STATES.has(code))) {
+    present.add(EU)
+  }
+  return DATA_LOCATION_OPTIONS.filter((option) => present.has(option.value))
+}
+
+/** How many locations a card names before it says "+N more". */
+const HOSTED_IN_LISTED = 3
+
+/**
+ * Where a model's hosted providers keep data, as a card prints it: "Hosted in
+ * Germany, United States", or the first three and a count. Ordered as the
+ * rail is, except that the locations a location filter picked lead. Null where
+ * the model has none declared.
+ */
+export function hostedInLabel(
+  locations: readonly string[] | undefined,
+  selected: readonly string[],
+): string | null {
+  if (!locations || locations.length === 0) return null
+  const rank = new Map(
+    DATA_LOCATION_OPTIONS.map((option, index) => [option.value, index]),
+  )
+  const order = (code: string) => rank.get(code) ?? DATA_LOCATION_OPTIONS.length
+  const matches = (code: string) =>
+    selected.length > 0 && admitsLocation(selected, code) ? 0 : 1
+  const names = [...locations]
+    .sort(
+      (a, b) =>
+        matches(a) - matches(b) || order(a) - order(b) || a.localeCompare(b),
+    )
+    .map(dataLocationLabel)
+  const shown = names.slice(0, HOSTED_IN_LISTED).join(", ")
+  const more = names.length - HOSTED_IN_LISTED
+  return `Hosted in ${shown}${more > 0 ? ` +${more} more` : ""}`
+}
+
 export function catalogRequest(
   filters: CatalogFilters,
   column: CatalogSortColumn,
@@ -490,6 +566,7 @@ export function catalogRequest(
     pricing: filters.pricing as CatalogQueryParams["pricing"],
     source: filters.source as CatalogQueryParams["source"],
     zero_data_retention: filters.zeroDataRetention || undefined,
+    data_location: [...filters.dataLocations].sort(),
     released_within_days: filters.releasedWithinDays || undefined,
     sort: column,
     direction,

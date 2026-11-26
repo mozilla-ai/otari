@@ -1,3 +1,4 @@
+import { mailCanSend } from "@/shared/helpers/bootstrap"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { CheckEmailPage } from "./CheckEmailPage"
@@ -43,7 +44,7 @@ export function PublicAuthPage({
   path: PublicAuthPath | null
   route: string
 }) {
-  const { mail_ready, oauth_providers } = useDeployment()
+  const { mail, oauth_providers } = useDeployment()
 
   if (path === null) {
     const slug = ssoAuthorizeSlug(route)
@@ -54,7 +55,7 @@ export function PublicAuthPage({
 
   if (
     !isPublicAuthPageAvailable(path, {
-      mailReady: mail_ready,
+      mailCanSend: mailCanSend(mail),
       oauthProviders: oauth_providers,
     })
   ) {

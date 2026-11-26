@@ -29,7 +29,6 @@ from fastapi.routing import iter_route_contexts
 
 import gateway
 from gateway.api.routes import (
-    _passthrough,
     audio,
     batches,
     chat,
@@ -56,7 +55,7 @@ from gateway.main import (
 from gateway.main import (
     _under as _main_under,
 )
-from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
+from gateway.models.usage import DECISIONS_ENDPOINT, PLAYGROUND_USAGE_ENDPOINT
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -259,7 +258,7 @@ FROZEN_LABELS = frozenset(
         batches.USAGE_ENDPOINT_RESULTS,
         chat.USAGE_ENDPOINT,
         code_execution.CODE_EXECUTE_ENDPOINT,
-        _passthrough.DECISIONS_ENDPOINT,
+        DECISIONS_ENDPOINT,
         embeddings.USAGE_ENDPOINT,
         fetch.FETCH_ENDPOINT,
         images.USAGE_ENDPOINT,

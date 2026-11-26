@@ -25,6 +25,7 @@ from gateway.services.catalog import (
     Identities,
     OfferingRow,
     OrganizationSelectors,
+    apply_model_metadata,
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
@@ -168,14 +169,84 @@ def models_by_identity(
             for selector in resolve_catalog_offerings(identity.id, organization_id=organization_id)
             if selector in members
         ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
-        first = offerings[ranked[0]]
+        first = _read_under_slug(config, catalog, offerings[ranked[0]], organization_id, slug_providers)
+        others = [offerings[selector] for selector in sorted(members - {ranked[0]})]
+        reached = [_read_under_slug(config, catalog, obj, organization_id, slug_providers) for obj in others]
         rows[identity.id] = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
+                **_limits_from_others(first, others),
+                **_facts_from_others(first, reached),
             }
         )
     return [rows[model_id] for model_id in sorted(rows)]
+
+
+def _read_under_slug(
+    config: GatewayConfig,
+    catalog: ModelsDevCatalog | None,
+    obj: ModelObject,
+    organization_id: uuid.UUID | None,
+    slug_providers: Mapping[str, str] | None,
+) -> ModelObject:
+    """``obj``, or a copy of it with its metadata read under the provider its key slug stands for.
+
+    An organization's key is addressed by its slug, which no configured instance
+    names, so the metadata pass that built the offering asked models.dev about
+    the slug and got nothing. ``obj`` itself is left as it is, so the shared
+    listing objects stay unchanged and a fold keeps the limits they report.
+    """
+    resolved = (slug_providers or {}).get(obj.id.partition(":")[0])
+    if resolved is None:
+        return obj
+    read = obj.model_copy()
+    apply_model_metadata(config, catalog, read, organization_id=organization_id, provider_type=resolved)
+    return read
+
+
+def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, int]:
+    """The token limits ``first`` leaves unknown, as the smallest the model's other offerings report.
+
+    A self-hosted engine is often the one offering that knows its context
+    length, and rarely the one tried first. The smallest is the one every
+    offering that reports a limit holds, whichever a fallback reaches. A
+    filled output limit is capped at the row's context window; a limit
+    ``first`` knows is kept as it is.
+    """
+    filled: dict[str, int] = {}
+    contexts = [obj.context_window for obj in others if obj.context_window is not None]
+    if first.context_window is None and contexts:
+        filled["context_window"] = min(contexts)
+    outputs = [obj.max_output_tokens for obj in others if obj.max_output_tokens is not None]
+    if first.max_output_tokens is None and outputs:
+        filled["max_output_tokens"] = min(outputs)
+    window = filled.get("context_window", first.context_window)
+    output = filled.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        filled["max_output_tokens"] = window
+    return filled
+
+
+def _facts_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, str]:
+    """The row's release date, description and cutoff, derived across offerings as the catalog's model page does.
+
+    The release date is the earliest any offering gives, so it does not move
+    when routing reorders them. The description and cutoff are ``first``'s,
+    whose name the row shows, else the first another offering gives. Every
+    offering is read, whichever a request tries first, so the row reads the
+    same facts whatever the ranking.
+    """
+    filled: dict[str, str] = {}
+    dates = [obj.release_date for obj in (first, *others) if obj.release_date]
+    if dates:
+        filled["release_date"] = min(dates)
+    for field in ("description", "knowledge_cutoff"):
+        if getattr(first, field) is None:
+            value = next((getattr(obj, field) for obj in others if getattr(obj, field)), None)
+            if value is not None:
+                filled[field] = value
+    return filled
 
 
 def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:

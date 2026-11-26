@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal, get_args
+from typing import Literal, get_args
 
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -149,21 +149,6 @@ class Budget(Base):
     users = relationship("User", back_populates="budget")
     reset_logs = relationship("BudgetResetLog", back_populates="budget")
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        return {
-            "budget_id": self.budget_id,
-            "name": self.name,
-            "max_budget": self.max_budget,
-            "token_limit": self.token_limit,
-            "request_limit": self.request_limit,
-            "budget_duration_sec": self.budget_duration_sec,
-            "reset_alignment": self.reset_alignment,
-            "origin": self.origin,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
 
 class BudgetResetLog(Base):
     """Budget reset log model for tracking budget resets."""
@@ -184,17 +169,6 @@ class BudgetResetLog(Base):
 
     user = relationship("User", back_populates="reset_logs")
     budget = relationship("Budget", back_populates="reset_logs")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary."""
-        return {
-            "id": self.id,
-            "user_id": self.user_id,
-            "budget_id": self.budget_id,
-            "previous_spend": self.previous_spend,
-            "reset_at": self.reset_at.isoformat() if self.reset_at else None,
-            "next_reset_at": self.next_reset_at.isoformat() if self.next_reset_at else None,
-        }
 
 
 class ScopedBudget(Base):

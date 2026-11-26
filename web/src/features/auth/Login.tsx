@@ -15,6 +15,7 @@ import {
   LOGIN_REFUSAL_HINT_ID,
   LoginRefusalHint,
 } from "@/features/auth/overlayLoginRefusalHint"
+import { useSignInReason } from "@/features/auth/overlaySignInReason"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -23,6 +24,7 @@ import {
   startOAuthSignIn,
 } from "@/shared/api/client"
 import { currentRoute } from "@/shared/helpers/appLocation"
+import { mailCanSend } from "@/shared/helpers/bootstrap"
 import {
   PasskeyCancelledError,
   supportsPasskeys,
@@ -55,6 +57,7 @@ import {
   rememberSignInAddress,
 } from "./signInAddress"
 import { forgetSignInNotice, readSignInNotice } from "./signInNotice"
+import { forgetSignInReason } from "./signInReason"
 
 /** Whether the primary pointer is a mouse or a trackpad rather than a finger. */
 function hasFinePointer(): boolean {
@@ -228,7 +231,7 @@ function LabelRow({
  * identity, recovering a forgotten password, and asking for a fresh
  * verification link (otari#650, the pages in `publicAuthPaths.ts`). All three
  * start by sending a message, so all three are hidden on a deployment whose
- * bootstrap reports `mail_ready: false` rather than offered and then refused
+ * bootstrap reports no mail rather than offered and then refused
  * with a 503, the way otari#648 already settled it for the invitation form.
  * The two recovery links need one thing more: `password` in that same list,
  * which is the gateway saying some identity holds one. Nothing has a reset link
@@ -243,10 +246,10 @@ function LabelRow({
  * configured: a provider nobody set up is absent rather than rendered disabled,
  * and a deployment that configured none carries no OAuth affordance at all.
  *
- * A company-connection row sits last. Unlike a passkey or an OAuth provider,
- * it carries no bootstrap flag: whether an address's organization has a
- * connection is resolved per address, so the row is offered on every
- * deployment.
+ * A company-connection row sits last, offered where the bootstrap's
+ * `organization_oidc_enabled` says this deployment serves organization SSO. Which
+ * organization an address belongs to is resolved per address rather than
+ * published, so that flag answers only whether the feature is served at all.
  *
  * Refusals render on the field label, and empty fields remain submittable so
  * validation can explain what to enter.
@@ -256,11 +259,13 @@ export function Login() {
   const { recordEvent } = useTelemetry()
   const {
     sign_in_methods,
-    mail_ready,
+    mail,
     maintenance_mode,
     oauth_providers,
     open_signup,
+    organization_oidc_enabled,
   } = useDeployment()
+  const canSendMail = mailCanSend(mail)
   const offersPasswordForm = sign_in_methods.includes("password")
   const offersMasterKeyForm = sign_in_methods.includes("master_key")
   // Both are published whenever a member holds a password on a deployment its
@@ -288,12 +293,12 @@ export function Login() {
   // reset or a verification to redo before then, and a claimed-but-unverified
   // signup already flips the deployment to `password`, so this is not the
   // caller who needs a resend being left without one.
-  const offersSignup = mail_ready
+  const offersSignup = canSendMail
   // Off the bootstrap rather than off `usesPassword`, which now says which box
   // is showing: whether a password can be reset is a fact about the deployment,
   // and it does not stop being true while somebody is looking at the master-key
   // box.
-  const offersRecovery = mail_ready && offersPasswordForm
+  const offersRecovery = canSendMail && offersPasswordForm
   // Two independent conditions, and both have to hold. The gateway publishes
   // `passkey` only while some credential could actually answer, and a browser
   // that cannot run the ceremony would turn the button into a dead end.
@@ -311,9 +316,12 @@ export function Login() {
   const [prefilledEmail] = useState(readSignInAddress)
   // Why a link landed here instead of where it pointed (the setup page).
   const [notice] = useState(readSignInNotice)
+  // Why a page sent the visitor here (an invitation), said as the description.
+  const reason = useSignInReason()
   useEffect(() => {
     forgetSignInAddress()
     forgetSignInNotice()
+    forgetSignInReason()
   }, [])
   const [email, setEmail] = useState(prefilledEmail)
   const [password, setPassword] = useState("")
@@ -350,7 +358,7 @@ export function Login() {
   // resend page only sends a message, and the refusal itself has already
   // proven a password exists.
   const offersResendVerification =
-    mail_ready && error instanceof EmailUnverifiedRefusal
+    canSendMail && error instanceof EmailUnverifiedRefusal
 
   // The recovery and resend pages each ask for the address again, so the one
   // typed here goes with the visitor.
@@ -710,9 +718,10 @@ export function Login() {
         <div className="flex flex-col gap-1.5 text-center">
           <h1 className={HEADING}>Sign in to Otari</h1>
           <p className="text-sm text-pretty text-muted">
-            {usesPassword
-              ? "One account for every model."
-              : "Sign in with your master key to browse models, set pricing, and manage settings."}
+            {reason ??
+              (usesPassword
+                ? "One account for every model."
+                : "Sign in with your master key to browse models, set pricing, and manage settings.")}
           </p>
         </div>
 
@@ -996,16 +1005,18 @@ export function Login() {
               {usesPassword ? "Sign in with email" : "Sign in with master key"}
             </AuthMethodRow>
           )}
-          <div className="pt-3">
-            <SsoEntry
-              isDisabled={
-                isSubmitting ||
-                isSigningOut ||
-                isPasskeyPending ||
-                pendingProvider !== undefined
-              }
-            />
-          </div>
+          {organization_oidc_enabled && (
+            <div className="pt-3">
+              <SsoEntry
+                isDisabled={
+                  isSubmitting ||
+                  isSigningOut ||
+                  isPasskeyPending ||
+                  pendingProvider !== undefined
+                }
+              />
+            </div>
+          )}
         </div>
         <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
           {offersSignup ? (

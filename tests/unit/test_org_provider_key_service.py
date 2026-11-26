@@ -16,7 +16,12 @@ from gateway.models.provider_keys import (
 )
 from gateway.repositories.tenancy.org_provider_key_repository import resolve_active_key
 from gateway.schemas.providers import OrgProviderKeyPublic
-from gateway.services.secret_box import SecretDecryptionError, encrypt_secret, generate_secret_key
+from gateway.services.secret_box import (
+    SecretDecryptionError,
+    encrypt_mapping,
+    encrypt_secret,
+    generate_secret_key,
+)
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs, reset_org_provider_cache
 
@@ -142,7 +147,7 @@ def test_row_to_entry_carries_base_and_client_args(monkeypatch: pytest.MonkeyPat
         name="home_lab",
         api_base="http://x/v1",
         encrypted_api_key=encrypt_secret("tok"),
-        client_args={"timeout": 30},
+        encrypted_client_args=encrypt_mapping({"timeout": 30}),
     )
     assert store._row_to_entry(key) == {
         "api_base": "http://x/v1",
@@ -173,8 +178,7 @@ def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
     outright; it still must never come back over the API, the same treatment
     `encrypted_api_key` itself already gets. A non-matching field (`region_name`)
     passes through unchanged."""
-    key = _key(name="bedrock-primary")
-    key.client_args = {
+    client_args = {
         "region_name": "us-east-1",
         "aws_access_key_id": "AKIAABCDEFGHIJKLMNOP",
         "aws_secret_access_key": "supersecretvalue",
@@ -182,7 +186,9 @@ def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
         "Authorization": "Bearer xyz",
     }
 
-    public = OrgProviderKeyPublic.from_row(key, usable=True)
+    public = OrgProviderKeyPublic.from_row(
+        _key(name="bedrock-primary"), client_args=client_args, usable=True, now=datetime.now(UTC)
+    )
 
     assert public.client_args == {
         "region_name": "us-east-1",
@@ -194,13 +200,17 @@ def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
 
 
 def test_from_row_with_no_credential_shaped_keys_is_unchanged() -> None:
-    key = _key(name="openai-primary")
-    key.client_args = {"region_name": "us-east-1", "timeout": 30}
+    public = OrgProviderKeyPublic.from_row(
+        _key(name="openai-primary"),
+        client_args={"region_name": "us-east-1", "timeout": 30},
+        usable=True,
+        now=datetime.now(UTC),
+    )
 
-    assert OrgProviderKeyPublic.from_row(key, usable=True).client_args == {"region_name": "us-east-1", "timeout": 30}
+    assert public.client_args == {"region_name": "us-east-1", "timeout": 30}
 
 
 def test_from_row_client_args_none_stays_none() -> None:
     key = _key(name="plain")
-    assert key.client_args is None
-    assert OrgProviderKeyPublic.from_row(key, usable=True).client_args is None
+    assert key.encrypted_client_args is None
+    assert OrgProviderKeyPublic.from_row(key, client_args=None, usable=True, now=datetime.now(UTC)).client_args is None

@@ -6,7 +6,7 @@ behind it is what lets a caller (an invitation today, verification and password
 reset next) be written without knowing how a message travels.
 """
 
-from gateway.services.mail.mailer import Mailer
+from gateway.services.mail.mailer import Mailer, MailReadiness
 from gateway.services.mail.message import (
     MailDelivery,
     MailDeliveryError,
@@ -31,6 +31,7 @@ __all__ = [
     "MailEnvelope",
     "MailMessage",
     "MailNotConfiguredError",
+    "MailReadiness",
     "MailTemplateError",
     "MailTransport",
     "Mailer",

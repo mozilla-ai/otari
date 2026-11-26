@@ -46,7 +46,7 @@ EmptyState: { title, description?, actionLabel?, onAction?, isActionDisabled?,
   children? }
 EmptyMessage: { children, minHeight? }
 PageLoading: { label = "Loading…" }
-PageError: { error: unknown, children? }
+PageError: { error: unknown, children?, action? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
 FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
@@ -60,8 +60,17 @@ ErrorBoundary: { children, resetKey? }
 ```
 
 `PageError` is `PageLoading`'s counterpart, for a failure that took the whole page
-rather than a band inside one: a gateway that never answered, and the two catch
-boundaries below. Its `children` is the sentence about what to do next.
+rather than a band inside one: the two catch boundaries below. Its `children` is
+the sentence about what to do next, and `action` the one control that does it
+where there is one.
+
+A gateway that never answered is not a `PageError`. Before the bootstrap answers
+there is no app to fail inside, so `app/DeploymentGate.tsx` draws the sign-in
+shell's frame (`app/BootFrame.tsx`) with the failure in its card, at the sign-in
+card's exact place, so the gateway answering swaps the card's contents and
+nothing moves. The card's diagnostics update silently after each background
+attempt, and a screen reader is told only of the first failure, a change in
+which failure it is, and a pressed Retry failing.
 
 `ErrorBoundary` is not one a page reaches for: it is the catch above the router in
 `App.tsx`, and the only one the pre-session screens have. Everything inside
@@ -186,7 +195,10 @@ and it earns its place by being literally true: an arc travels the frame's edge
 **only while the product is watching for something that has not arrived**, and
 stops when it has. When it has, the first-run sheet carries itself into its
 payoff in the same frame (see [motion-and-access.md](motion-and-access.md)).
-Anywhere else, motion on an edge is noise.
+The boot screen's card is the one frame outside a dialog that sweeps, in danger
+ink, while the dashboard keeps asking a gateway that has not answered; it stops
+on a failure that waits for the reader instead. Anywhere else, motion on an
+edge is noise.
 
 It is a masked conic gradient on an `::after`, with the angle animated through
 an `@property`, so there is no dependency behind it and at radius 0 there is no

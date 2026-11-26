@@ -23,7 +23,12 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
-import { withRouter } from "@/tests/router"
+import { LocationProbe, withRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  pressRowAction,
+  rowMenuTriggers,
+} from "@/tests/rowMenu"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
@@ -204,6 +209,10 @@ function renderPage(
           {
             path: "/models/$vendor/$model",
             element: <span>opened a model</span>,
+          },
+          {
+            path: "/organization/provider-keys",
+            element: <LocationProbe />,
           },
         ],
       }),
@@ -789,7 +798,8 @@ describe("ModelDetailPage", () => {
     })
   })
 
-  it("offers a deployment operator no rate link on a deployment-supplied offering", async () => {
+  it("offers a deployment operator no rate action on a deployment-supplied offering", async () => {
+    const user = userEvent.setup()
     // Operating the deployment stopped being a pricing authority here when the
     // deployment price editor went away: rates are set per model on Providers,
     // which answers to the organization role, and a model the deployment
@@ -806,23 +816,26 @@ describe("ModelDetailPage", () => {
     expect(
       screen.queryByRole("button", { name: /set price|edit price/i }),
     ).toBeNull()
+    expect(await findRowMenuItem(user, /^Set your rate/)).toBeNull()
   })
 
-  it("gives a deployment operator its organization's own rate link", async () => {
+  it("gives a deployment operator its organization's own rate action", async () => {
     // On a single-tenant deployment the operator *is* the organization's
     // owner, so a gate that excluded them would leave the one caller who can set
-    // a rate without the link to set it.
+    // a rate without the action to set it.
+    const user = userEvent.setup()
     mockApi()
     GLM_DETAIL.offerings[0] = offering({ credential: "organization" })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
-    const links = await screen.findAllByRole("link", { name: "Set your rate" })
-    expect(links.map((link) => link.getAttribute("href"))).toContain(
+    await pressRowAction(user, "Set your rate for Nebius zai-org/GLM-5.3")
+    expect(await screen.findByTestId("location")).toHaveTextContent(
       "/organization/provider-keys?override=nebius%3Azai-org%2FGLM-5.3",
     )
   })
 
   it("points an organization admin at its own rate override, not the deployment's price", async () => {
+    const user = userEvent.setup()
     mockApi({
       context: organizationContext({
         role: "admin",
@@ -834,14 +847,16 @@ describe("ModelDetailPage", () => {
     GLM_DETAIL.offerings[0] = offering({ credential: "organization" })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
-    const links = await screen.findAllByRole("link", { name: "Set your rate" })
-    expect(links.map((link) => link.getAttribute("href"))).toContain(
+    await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
+    await pressRowAction(user, "Set your rate for Nebius zai-org/GLM-5.3")
+    expect(await screen.findByTestId("location")).toHaveTextContent(
       "/organization/provider-keys?override=nebius%3Azai-org%2FGLM-5.3",
     )
-    expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
   })
 
   it("offers no override on an offering the deployment supplies the key for", async () => {
+    const user = userEvent.setup()
     mockApi({
       context: organizationContext({
         role: "admin",
@@ -854,7 +869,7 @@ describe("ModelDetailPage", () => {
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     expect(await screen.findAllByText("Deployment priced")).not.toHaveLength(0)
-    expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
+    expect(await findRowMenuItem(user, /^Set your rate/)).toBeNull()
   })
 
   it("lets a deployment operator set the details of a deployment offering", async () => {
@@ -864,9 +879,7 @@ describe("ModelDetailPage", () => {
     })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit details" }),
-    )
+    await pressRowAction(user, /^Edit details for /)
     await user.type(screen.getByLabelText("Context window"), "1048576")
     await user.click(screen.getByRole("button", { name: "Save details" }))
 
@@ -922,9 +935,11 @@ describe("ModelDetailPage", () => {
     })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
-    const edits = await screen.findAllByRole("button", { name: "Edit details" })
-    expect(edits).toHaveLength(1)
-    await user.click(edits[0])
+    // The deployment's offering has nothing for an admin to do, so only the
+    // organization's own row carries a menu.
+    await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
+    await waitFor(() => expect(rowMenuTriggers()).toHaveLength(1))
+    await pressRowAction(user, /^Edit details for /)
     await user.type(screen.getByLabelText("Max output tokens"), "65536")
     await user.click(screen.getByRole("button", { name: "Save details" }))
 
@@ -1080,7 +1095,7 @@ describe("ModelDetailPage", () => {
 
   it("keeps the page read-only for a member", async () => {
     // A member, stated as one: the fixture's default role is owner, and an owner
-    // now gets the rate link whether or not they operate the deployment, so a
+    // now gets the rate action whether or not they operate the deployment, so a
     // context that only cleared `deployment_operator` would be asserting the
     // opposite of what this test is named for.
     mockApi({

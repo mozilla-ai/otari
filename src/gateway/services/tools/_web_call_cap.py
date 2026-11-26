@@ -24,9 +24,14 @@ class WebToolCallCap:
         """The slots taken so far."""
         return self._used
 
+    @property
+    def reached(self) -> bool:
+        """Whether every slot is taken, so the next call would be refused."""
+        return self._used >= self._limit
+
     def claim(self) -> bool:
         """Take a slot for one call; ``False``, taking none, once every slot is taken."""
-        if self._used >= self._limit:
+        if self.reached:
             return False
         self._used += 1
         return True

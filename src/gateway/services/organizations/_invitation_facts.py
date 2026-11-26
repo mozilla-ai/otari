@@ -83,8 +83,8 @@ class InvitationFactsReader:
         inviter_name = None
         if inviter is not None:
             inviter_name = inviter.full_name or None
-            # An address that an admin vouched for has not been verified by its owner.
-            if inviter.is_active and inviter.email_verified_at is not None and inviter.email_vouched_at is None:
+            # Shown only where the owner proved the address, not where an admin supplied it.
+            if inviter.is_active and inviter.email_proven_at is not None:
                 inviter_email = inviter.email
         claims = await self._domains.for_organization(organization_id)
         workspaces = await self._workspaces.get_by_ids(_workspace_ids(terms.workspace_assignments))
