@@ -1039,7 +1039,7 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         user=owner_row,
         workspace_create=WorkspaceCreate(name="Research"),
     )
-    config = GatewayConfig()
+    config = GatewayConfig(mail_transport="none")
     invited = await OrganizationService(
         async_db, **membership_writes(async_db)
     ).invite_active_organization_member_for_user(
@@ -1106,7 +1106,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
         # No mail for the invite itself, so the link comes back to share.
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
@@ -1182,7 +1182,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
@@ -1503,7 +1503,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
