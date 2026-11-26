@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
-from gateway.core.link_urls import normalize_link_url
+from gateway.core.link_urls import normalize_base_url, normalize_link_url, strip_path_slashes
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
@@ -532,16 +532,6 @@ class ModelCapabilityConfig(BaseModel):
     )
 
 
-def _strip_path_slashes(url: str) -> str:
-    """Drop trailing slashes from a URL's path, leaving any query as written.
-
-    A slash at the end of a query value (``?edge=team/``) is part of that value,
-    and stripping the whole string would hand every link a different one.
-    """
-    location, separator, query = url.partition("?")
-    return f"{location.rstrip('/')}{separator}{query}"
-
-
 def _host_of(url: str | None) -> str:
     """The bare hostname of an absolute URL, or "" if there isn't one.
 
@@ -987,11 +977,12 @@ class GatewayConfig(
     public_base_url: Annotated[str | None, Shown(SettingsGroup.MAIL)] = Field(
         default=None,
         description=(
-            "This deployment's own externally-reachable URL, with no trailing slash "
-            "(e.g. 'https://otari.example.com'). Used to build absolute links in outgoing "
-            "email (an invitation's accept link) and to derive the WebAuthn relying-party "
-            "ID a passkey is bound to; nothing else here needs to describe its own "
-            "address, since every other reference is relative to the request."
+            "This deployment's own externally-reachable URL, for example "
+            "'https://otari.example.com'. It has to be absolute and carry no query string, "
+            "fragment or whitespace, and it is refused at startup otherwise. Write it with no "
+            "trailing slash. Every absolute URL naming this deployment is built from it, which "
+            "covers the links in outgoing email, the redirect URI a provider returns a browser "
+            "to, and the WebAuthn relying-party ID a passkey is bound to."
         ),
     )
     smtp_host: Annotated[str | None, Shown(SettingsGroup.MAIL)] = Field(
@@ -1573,7 +1564,7 @@ class GatewayConfig(
 
         ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
         """
-        return _strip_path_slashes((self.ui_base_url or "").strip()) or _strip_path_slashes(
+        return strip_path_slashes((self.ui_base_url or "").strip()) or strip_path_slashes(
             (self.public_base_url or "").strip()
         )
 
@@ -2339,38 +2330,28 @@ class GatewayConfig(
             msg = f"models_dev_base_url {exc}"
             raise ValueError(msg) from None
 
+    @field_validator("public_base_url")
+    @classmethod
+    def _validate_public_base_url(cls, value: str | None) -> str | None:
+        """Reject an address no absolute URL naming this deployment could be built from.
+
+        A query string is refused, because what is built from this value is joined to it by plain
+        concatenation and a query would then sit in the middle of the result.
+
+        NOTE: A trailing slash is kept, so a caller strips it itself.
+        """
+        return normalize_base_url(value, "public_base_url", allow_query=False, strip_slashes=False)
+
     @field_validator("ui_base_url")
     @classmethod
     def _validate_ui_base_url(cls, value: str | None) -> str | None:
         """Reject an interface address a browser could not be sent to.
 
-        Absolute, so that what this builds is absolute too: the same value has to
-        survive a redirect and an inbox, and a relative reference means nothing
-        in the second. A path-prefixed interface writes the whole URL, the way
-        ``public_base_url`` already does. A query string is kept, since an edge
-        that serves one interface for several deployments may need each link to
-        say which one built it; ``ui_link`` joins it to each link's own query.
+        A query string is kept, because an edge serving one interface for several deployments needs
+        each link to say which one built it, and joining places it ahead of a link's own query.
+        Trailing slashes come off the path, because that joining does not remove them.
         """
-        stripped = (value or "").strip()
-        if not stripped:
-            return None
-        normalized = _strip_path_slashes(stripped)
-        if not normalized:
-            # Slashes alone, which would otherwise strip to empty and read as
-            # unset. Refused rather than silently answered by public_base_url.
-            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if "#" in normalized:
-            msg = "ui_base_url must carry no fragment"
-            raise ValueError(msg)
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.username is not None or parsed.password is not None:
-            msg = "ui_base_url must carry no username or password"
-            raise ValueError(msg)
-        return normalized
+        return normalize_base_url(value, "ui_base_url", allow_query=True, strip_slashes=True)
 
     @field_validator("mail_transport")
     @classmethod
