@@ -50,6 +50,8 @@ _NOW = datetime(2026, 7, 1, 12, tzinfo=UTC)
 # Bounds a whole race, so an actor whose checkpoint is never reached fails the
 # test rather than hanging it. Generous, because a cold connection is slow.
 _RACE_DEADLINE = 10.0
+# Long enough that a read which is not blocked finishes inside it.
+_WRITER_WINDOW = 0.25
 _TOKEN = "an-invitation-token"
 
 
@@ -182,52 +184,41 @@ async def test_two_accepts_of_one_link_give_one_membership(postgres_url: str) ->
     assert len(memberships) == 1
 
 
-async def test_an_entitlement_racing_an_enforcement_being_turned_on_sees_it(
-    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+async def test_an_entitlement_waits_for_a_connection_requirement_still_being_written(
+    postgres_url: str,
 ) -> None:
-    """The read follows the lock, so a connection requirement committed while it waits is seen.
+    """The read takes the settings lock, so it waits for a requirement whose write has not committed.
 
-    Without the lock the reader answers from the settings as they were, and an account is
-    minted for an organization that would refuse whoever holds it.
+    Without the lock the read would miss that write and answer from the settings as they were,
+    and an account would be minted for an organization that refuses whoever holds it.
     """
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     address = "grace@example.com"
-    arrived = asyncio.Event()
-    released = asyncio.Event()
-    real_lock_settings = OrganizationRepository.lock_settings
-
-    async def lock_settings_that_waits(self: OrganizationRepository, organization_id: uuid.UUID) -> None:
-        arrived.set()
-        await released.wait()
-        await real_lock_settings(self, organization_id)
-
-    monkeypatch.setattr(OrganizationRepository, "lock_settings", lock_settings_that_waits)
 
     try:
         async with sessions() as setup:
-            organization = await create_organization(setup, slug="entitlement-vs-enforcement")
+            organization = await create_organization(setup, slug="entitlement-waits")
             await _invite(setup, organization, email=address)
             await setup.commit()
 
-        async with sessions() as asking, sessions() as enforcing:
+        async with sessions() as enforcing, sessions() as asking:
+            asking_task: asyncio.Task[bool] | None = None
+            uow = UnitOfWork(enforcing)
+            async with uow:
+                organizations = OrganizationRepository(uow)
+                # The lock production takes to turn the requirement on, held across the write.
+                await organizations.lock_settings(organization.id)
+                row = await organizations.get(organization.id)
+                assert row is not None
+                row.sso_required = True
+                await enforcing.flush()
 
-            async def entitles() -> bool:
-                return await _link(asking).allows_an_account(_TOKEN, claimed_address=address)
+                asking_task = asyncio.create_task(_link(asking).allows_an_account(_TOKEN, claimed_address=address))
+                finished, _ = await asyncio.wait({asking_task}, timeout=_WRITER_WINDOW)
+                assert not finished, "the read must wait on the settings lock the write holds"
 
-            async def require_the_connection_once_the_read_is_waiting() -> None:
-                await arrived.wait()
-                uow = UnitOfWork(enforcing)
-                async with uow:
-                    row = await OrganizationRepository(uow).get(organization.id)
-                    assert row is not None
-                    row.sso_required = True
-                released.set()
-
-            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
-                asking_task = actors.create_task(entitles())
-                actors.create_task(require_the_connection_once_the_read_is_waiting())
-            entitled = asking_task.result()
+            entitled = await asyncio.wait_for(asking_task, timeout=_RACE_DEADLINE)
     finally:
         await engine.dispose()
 
