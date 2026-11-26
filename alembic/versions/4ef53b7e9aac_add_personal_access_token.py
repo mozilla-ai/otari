@@ -5,7 +5,7 @@ agent or a script. Only the token's SHA-256 hash is stored, unique so a
 presented token resolves on one index lookup.
 
 Revision ID: 4ef53b7e9aac
-Revises: a7c9e1b3d5f8
+Revises: 7c4b45a55970
 Create Date: 2026-11-24
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "4ef53b7e9aac"
-down_revision: str | Sequence[str] | None = "a7c9e1b3d5f8"
+down_revision: str | Sequence[str] | None = "7c4b45a55970"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
