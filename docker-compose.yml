@@ -124,6 +124,33 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Mailpit accepts mail and delivers it to nobody, holding each message in a web
+  # inbox instead. It exists so a deployment that needs to prove a mailbox can do
+  # so without a real mail provider: the links a verification, reset or invitation
+  # message carries are opened from the inbox at the address below.
+  #
+  # Start it with `docker compose --profile mail up -d mailpit`, then point mail at
+  # it. Inside the Docker network that is `smtp_host: mailpit` and `smtp_port: 1025`
+  # with no TLS and no credentials; from a gateway running on the host it is
+  # localhost on the mapped port. config.example.yml carries both.
+  #
+  # NOTE: It stores every message in memory and keeps no credentials, so it is for
+  # development and never for a deployment that serves anybody.
+  mailpit:
+    profiles: ["mail"]
+    image: ${OTARI_MAILPIT_IMAGE:-docker.io/axllent/mailpit:v1.34.0}
+    ports:
+      # Bound to localhost only. Anything that reaches the SMTP port can read
+      # every message in the inbox, and those messages carry sign-in links.
+      - "127.0.0.1:${OTARI_MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${OTARI_MAILPIT_WEB_PORT:-8025}:8025"
+    environment:
+      # Accept mail from anywhere on the Docker network without a credential,
+      # which is the whole point of a sink: a developer configures no secret.
+      - MP_SMTP_AUTH_ACCEPT_ANY=true
+      - MP_SMTP_AUTH_ALLOW_INSECURE=true
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     ports:

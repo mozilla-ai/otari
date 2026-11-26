@@ -1756,6 +1756,29 @@ smtp_password: ${SMTP_PASSWORD}
 `mail_from_name` sets the name shown beside it.
 With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
 
+For local development, Docker Compose carries a mail sink. It accepts messages and delivers them to
+nobody, holding each one in a web inbox instead:
+
+```bash
+docker compose --profile mail up -d mailpit
+```
+
+Then point `config.yml` at it, and read what arrives at `http://localhost:8025`:
+
+```yaml
+public_base_url: "http://localhost:8000"
+mail_transport: smtp
+smtp_host: "mailpit"
+smtp_port: 1025
+smtp_tls: false
+mail_from_email: "otari@localhost"
+```
+
+The host is `mailpit` for a gateway in the same Compose network, and `localhost` on the mapped port
+for one running beside it, which is what `.env.example` carries as `OTARI_` variables. The sink
+keeps every message in memory and accepts any credential, so it belongs in development and never in
+a deployment that serves anybody.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
