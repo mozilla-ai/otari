@@ -140,8 +140,13 @@ export function RoutingPlan({ entry }: { entry: UsageEntry }) {
           only place the plan can account for them. */}
       {dropped.length > 0 ? (
         <div className="flex flex-col gap-1">
-          <span className="text-overline">Left out</span>
-          <ul className="flex flex-col gap-1 text-sm">
+          <span id="routing-plan-left-out" className="text-overline">
+            Left out
+          </span>
+          <ul
+            aria-labelledby="routing-plan-left-out"
+            className="flex flex-col gap-1 text-sm"
+          >
             {dropped.map((item) => (
               <li key={`${item.selector}:${item.reason}`}>
                 <span className="text-foreground">{item.selector}</span>
