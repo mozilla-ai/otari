@@ -1979,7 +1979,9 @@ class WorkspaceMcpServerService:
         await OrganizationRepository(self.db).lock_settings(organization_id)
         if scope.workspace_id is not None:
             await workspaces.lock(scope.workspace_id)
-            workspace = await workspaces.get(scope.workspace_id)
+            # Read as stored: a deletion of the workspace commits before this lock is granted, and `get` would
+            # answer from this session's copy of the row instead of asking the database.
+            workspace = await workspaces.get_as_stored(scope.workspace_id)
             if workspace is None:
                 raise WorkspaceNotFoundError(workspace_id)
             still_manages = await authorization.has_workspace_management_access(
@@ -2504,8 +2506,14 @@ class WorkspaceMcpServerService:
         owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids) if request.user_ids else set()
         workspaces = WorkspaceRepository(self.db)
         await workspaces.lock(resolved_workspace_id)
-        if await workspaces.get_organization_id(resolved_workspace_id) is None:
+        # As `create_server` reads it: the workspace as stored, then the management check asked again under the lock.
+        workspace = await workspaces.get_as_stored(resolved_workspace_id)
+        if workspace is None:
             raise WorkspaceNotFoundError(workspace_id)
+        if not await authorization.has_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        ):
+            raise NotAuthorizedError
         if request.user_ids:
             members = await self._members_by_attribution(
                 resolved_workspace_id, [user_id for user_id in request.user_ids if user_id not in owners]

@@ -66,6 +66,7 @@ from gateway.models.tenancy import (
     User,
 )
 from gateway.repositories.identity.dashboard_session_repository import DashboardSessionRepository
+from gateway.repositories.identity.personal_access_token_repository import PersonalAccessTokenRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.organizations import BootstrapOperatorMarker
 
@@ -180,11 +181,13 @@ class DeploymentUserService(DeploymentAdministrationAccess):
         *,
         uow: UnitOfWork,
         sessions: DashboardSessionRepository,
+        access_tokens: PersonalAccessTokenRepository,
         keys: SelfServiceKeyDeactivationListener,
     ) -> None:
         super().__init__(users, members, bootstrap_operator)
         self.uow, self.keys = uow, keys
         self._sessions = sessions
+        self._access_tokens = access_tokens
 
     async def update_user(
         self,
@@ -246,6 +249,7 @@ class DeploymentUserService(DeploymentAdministrationAccess):
             self.users.stage(target)
             if request.is_active is False:
                 await self._sessions.delete_for_user(target.id)
+                await self._access_tokens.delete_all_for_users({target.id})
                 await self.keys.deactivate_self_service_keys(target.id)
         target = await self.users.reload(target)
         # Operator access opens shared session content and, where enabled, break-glass,

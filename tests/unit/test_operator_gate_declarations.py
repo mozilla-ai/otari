@@ -169,6 +169,9 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
+    "identity_apps.registration_router": (
+        "dynamic client registration is public; a registered client gets nothing until a person approves it"
+    ),
     "identity_apps.public_router": "registered app metadata is public; exchanging a grant requires its S256 PKCE proof",
     "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",

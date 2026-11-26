@@ -10,6 +10,7 @@ from gateway.services.identity._deployment_user_service import (
     DeploymentUserService,
 )
 from gateway.services.identity._oauth_apps import OAuthAppService
+from gateway.services.identity._personal_access_tokens import PersonalAccessTokenService
 from gateway.services.identity._service import EmailBlock, IdentityService, PasswordLink, SignIn, SignInListener
 from gateway.services.identity._sso_exchange import exchange_sso_code
 
@@ -25,6 +26,7 @@ __all__ = [
     "IdentityService",
     "OIDCConnectionService",
     "PasswordLink",
+    "PersonalAccessTokenService",
     "ProviderIdentity",
     "SignIn",
     "SignInListener",
