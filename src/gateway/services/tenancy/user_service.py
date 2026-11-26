@@ -447,9 +447,11 @@ async def create_user_for_signup(
     ``submission.invite_token`` is the invitation the caller named, and None where they named
     none. Where ``invites`` allows an account for it, the address is recorded as proved by the
     mailbox the link reached, no verification email is sent, and the caller can sign in at once.
-    The answer is read inside the transaction that writes the account, so an invitation canceled
-    in the meantime is not honored. Such an account belongs to no organization until the
-    invitation is accepted.
+    That answer is read in the transaction that writes the account, so the two commit together.
+    Such an account belongs to no organization of its own until the invitation is accepted.
+
+    NOTE: The answer is read without locking the invitation, so a cancellation committed between
+    the read and the write is not seen. The window is this transaction's own remaining work.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
