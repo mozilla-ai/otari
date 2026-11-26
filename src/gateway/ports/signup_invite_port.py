@@ -17,6 +17,10 @@ class SignupInvitePort(Protocol):
         An entitled signup is verified as it is created and sends no verification email, so an
         implementation must answer true only for a link that reached the claimed mailbox.
 
+        NOTE: The answer is used inside the transaction that writes the account, so an
+        implementation must read through the request's own Unit of Work. One reading through a
+        session of its own can answer from an invitation that is gone by the time it is written.
+
         NOTE: An implementation must compare addresses by ``gateway.core.addresses.same_address``
         and must not normalize further. Signup picks the account by that same rule, so a looser
         comparison entitles one address and claims another.

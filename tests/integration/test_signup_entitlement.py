@@ -1,12 +1,20 @@
-"""What a signup records about the address it claims."""
+"""What an invitation entitles a signup to, and when that is decided."""
+
+from collections.abc import Callable
 
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
 from gateway.core.config import GatewayConfig
+from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
+from gateway.ports.signup_invite_port import SignupInvitePort
+from gateway.repositories.organizations.organization_invitation_repository import (
+    OrganizationInvitationRepository,
+)
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import OrganizationService
@@ -18,6 +26,31 @@ pytestmark = pytest.mark.asyncio
 
 _EMAIL = "ada@example.com"
 _PASSWORD = "a-str0ng-Passphrase!"
+_TOKEN = "an-invitation-token"
+
+
+class _EntitlingInvite:
+    """Answers that its one token entitles an account."""
+
+    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+        del claimed_address
+        return token == _TOKEN
+
+
+class _ReadsThroughTheUnitOfWork:
+    """Answers by reading through the Unit of Work it was built on, opening no block of its own.
+
+    ``session_for`` raises ``OutsideUnitOfWorkError`` where no block is open, so this answers
+    only while the caller holds one.
+    """
+
+    def __init__(self, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    async def entitles_an_account(self, token: str, *, claimed_address: str) -> bool:
+        del claimed_address
+        await OrganizationInvitationRepository(self._uow).get_by_token_hash(hash_token(token))
+        return True
 
 
 def _config(*, sends_links: bool = True) -> GatewayConfig:
@@ -29,8 +62,14 @@ def _config(*, sends_links: bool = True) -> GatewayConfig:
     )
 
 
-async def _signup(session: AsyncSession, *, entitled: bool, config: GatewayConfig | None = None) -> User | None:
-    organization = await create_organization(session, slug=f"signup-{entitled}")
+async def _signup(
+    session: AsyncSession,
+    *,
+    invites: Callable[[UnitOfWork], SignupInvitePort],
+    config: GatewayConfig | None = None,
+) -> User | None:
+    """Sign up through the service, with ``invites`` built on the same Unit of Work the write uses."""
+    organization = await create_organization(session, slug="signup")
     identity = await UserRepository(session).create_local_identity(
         full_name="Ada", active_organization_id=organization.id, email=_EMAIL
     )
@@ -49,13 +88,14 @@ async def _signup(session: AsyncSession, *, entitled: bool, config: GatewayConfi
         uow=uow,
         organizations=OrganizationService(session, membership_listener=membership_listener_on(uow), uow=uow),
         blocked_addresses=NO_BLOCKED_ADDRESSES,
-        entitled=entitled,
+        invites=invites(uow),
+        invite_token=_TOKEN,
     )
 
 
 async def test_an_entitled_signup_proves_the_address(async_db: AsyncSession) -> None:
     """An invitation entitles an account only where its link reached the mailbox."""
-    claimed = await _signup(async_db, entitled=True)
+    claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite())
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
@@ -64,7 +104,7 @@ async def test_an_entitled_signup_proves_the_address(async_db: AsyncSession) -> 
 
 async def test_an_entitled_signup_proceeds_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
     """The link already reached the mailbox, so no deployment setting gates it."""
-    claimed = await _signup(async_db, entitled=True, config=_config(sends_links=False))
+    claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite(), config=_config(sends_links=False))
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
@@ -73,4 +113,17 @@ async def test_an_entitled_signup_proceeds_where_no_link_can_be_mailed(async_db:
 async def test_an_unentitled_signup_is_refused_where_no_link_can_be_mailed(async_db: AsyncSession) -> None:
     """Without an invitation the verification link is the only way out of the unverified state."""
     with pytest.raises(MailNotConfiguredError):
-        await _signup(async_db, entitled=False, config=_config(sends_links=False))
+        await _signup(async_db, invites=lambda _: NullSignupInviteAdapter(), config=_config(sends_links=False))
+
+
+async def test_the_entitlement_is_decided_inside_the_transaction_that_writes_the_account(
+    async_db: AsyncSession,
+) -> None:
+    """The answer is read where the account is written, so a cancel in between is not honored.
+
+    This reader opens no block of its own, which is what makes the placement observable.
+    """
+    claimed = await _signup(async_db, invites=_ReadsThroughTheUnitOfWork)
+
+    assert claimed is not None
+    assert claimed.email_verified_at is not None

@@ -77,6 +77,7 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.models.identity import AddressAuthority
 from gateway.models.tenancy import CallerIdentityPublic, SignInMeans, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -397,9 +398,10 @@ async def create_user_for_signup(
     uow: UnitOfWork,
     organizations: OrganizationService,
     blocked_addresses: BlockedAddresses,
+    invites: SignupInvitePort,
+    invite_token: str | None,
     full_name: str | None = None,
     terms_accepted: bool = False,
-    entitled: bool = False,
 ) -> User | None:
     """Claim an identity ``organization_service`` already added to an organization, register a new
     one where the deployment allows it, or do nothing.
@@ -434,9 +436,11 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
-    ``entitled`` says an invitation named this address and entitles an account
-    (``SignupInvitePort``): the address is recorded as the mailbox the link reached, no
-    verification email is sent, and the caller can sign in at once.
+    ``invite_token`` is the invitation the caller named, and None where they named none.
+    Where ``invites`` answers that it entitles an account, the address is recorded as the
+    mailbox the link reached, no verification email is sent, and the caller can sign in at
+    once. That answer is taken inside the transaction that writes the account, so an
+    invitation canceled in the meantime is not honored.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -446,8 +450,6 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
-    if not entitled:
-        mailer.require_ready()
     validate_new_password(password)
     if config.terms_url is not None and not terms_accepted:
         raise TermsNotAcceptedError
@@ -471,6 +473,12 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
+            entitled = invite_token is not None and await invites.entitles_an_account(
+                invite_token, claimed_address=address
+            )
+            if not entitled:
+                # Refused before anything is written, because the block rolls back on the raise.
+                mailer.require_ready()
             if identity is not None:
                 # An identity no organization still wants gets what a new address gets, and a lost race rolls it back.
                 await organizations.provision_tenancy_for_claim(

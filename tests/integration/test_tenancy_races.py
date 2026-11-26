@@ -24,6 +24,7 @@ from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
 from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
@@ -1131,6 +1132,8 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     email="iris@example.com",
                     password=f"signup-password-{index}",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
+                    invites=NullSignupInviteAdapter(),
+                    invite_token=None,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1207,6 +1210,8 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
                     email="iris@example.com",
                     password="signup-password",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
+                    invites=NullSignupInviteAdapter(),
+                    invite_token=None,
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1306,6 +1311,8 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             email="nova@example.com",
             password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
+            invites=NullSignupInviteAdapter(),
+            invite_token=None,
             **claim_writes(session),
         )
 
@@ -1402,6 +1409,8 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
             email="nova@example.com",
             password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
+            invites=NullSignupInviteAdapter(),
+            invite_token=None,
             **claim_writes(session),
         )
 

@@ -170,7 +170,6 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    entitled = await invites.entitles_an_account(body.invite, claimed_address=body.email) if body.invite else False
     try:
         claimed = await create_user_for_signup(
             db,
@@ -181,9 +180,10 @@ async def signup(
             uow=uow,
             organizations=organizations,
             blocked_addresses=identities,
+            invites=invites,
+            invite_token=body.invite,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
-            entitled=entitled,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
