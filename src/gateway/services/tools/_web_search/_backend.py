@@ -223,7 +223,7 @@ class WebSearchBackend:
                 span.set_status(trace.StatusCode.ERROR, INTERNAL_ERROR_TAG)
                 if self._tally is not None:
                     self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-                self._spans.record(started, ok=False, arguments=arguments)
+                self._spans.record(started, ok=False, arguments=arguments, error_type=INTERNAL_ERROR_TAG)
                 raise
             if self._last_failure is not None:
                 span.set_status(trace.StatusCode.ERROR, self._last_failure.tag)
@@ -240,7 +240,14 @@ class WebSearchBackend:
                 cost=searched.cost,
                 deployment_paid=not self._search.on_credential,
             )
-        self._spans.record(started, ok=not is_tool_error(searched.text), arguments=arguments, result=searched.text)
+        failure = self._last_failure
+        self._spans.record(
+            started,
+            ok=not is_tool_error(searched.text),
+            arguments=arguments,
+            result=searched.text,
+            **(failure.as_span_error() if failure is not None else {}),
+        )
         return searched.text
 
     async def _call(self, arguments: dict[str, Any]) -> _Searched:

@@ -10,7 +10,7 @@ on it.
 | Token | Family | For |
 | --- | --- | --- |
 | `--font-display` | Mozilla Headline | Page titles and one announcement head. Nothing else |
-| `--font-sans` | Mozilla Text | Everything else. Two weights on the axis: 400 and 550 |
+| `--font-sans` | Inter | Everything else. Two weights on the axis: 400 and 550 |
 | `--font-mono` | Fira Code | Figures, keys, ids, code. Tabular numerals under a counting value |
 
 ## The roles
