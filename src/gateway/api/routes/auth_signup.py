@@ -188,7 +188,7 @@ async def signup(
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
-    if proof is not None and claimed is not None:
+    if claimed is not None and claimed.email_verified_at is not None:
         return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 

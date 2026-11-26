@@ -24,6 +24,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.address_proof import address_values
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.email_domains import email_domain
@@ -59,7 +60,7 @@ from gateway.exceptions.organizations_exceptions import (
     WorkspaceNotFoundError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import is_organization_connection_provider
+from gateway.models.identity import AddressAuthority, is_organization_connection_provider
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ACTIVE_MEMBERSHIP_STATUS,
@@ -2166,9 +2167,8 @@ class OrganizationService:
         stands in for what that link would, since it reached the invitee either
         by email or from an admin who holds it. It is accepted
         only where ``_invitee_is_claimable`` allows, so a link can claim
-        an unclaimed seat and never take over an account. The verification it
-        stamps leaves ``email_proven_at`` null, which domain auto-join does
-        not trust. Where the deployment publishes terms
+        an unclaimed seat and never take over an account. The address is recorded on the
+        organization's authority, which proves nothing about its holder. Where the deployment publishes terms
         (``claims``), a first password needs ``terms_accepted``, as signup and
         a reset claim do.
 
@@ -2210,8 +2210,8 @@ class OrganizationService:
                 raise InvitationPasswordNotAcceptedError("sign in through this organization's own connection")
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
-                "email_verified_at": now,
                 "full_name": invitee.full_name or (full_name or "").strip() or None,
+                **address_values(AddressAuthority.ORGANIZATION, now=now),
             }
             if terms_accepted:
                 values["terms_accepted_at"] = now

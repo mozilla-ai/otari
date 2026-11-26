@@ -53,7 +53,7 @@ from gateway.exceptions.organizations_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -98,7 +98,7 @@ from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
-from gateway.services.tenancy.user_service import AddressAuthority, set_password
+from gateway.services.tenancy.user_service import set_password
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,

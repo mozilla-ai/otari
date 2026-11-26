@@ -4,13 +4,14 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
+from gateway.core.address_proof import record_address
 from gateway.exceptions.identity_exceptions import (
     InvalidEmailError,
     OAuthEmailMissingError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
-from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.identity import AddressAuthority, EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import SignInMeans
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
@@ -133,10 +134,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         password_removed = False
         if identity.email_proven_at is None:
             password_removed = identity.hashed_password is not None
-            now = datetime.now(UTC)
-            if identity.email_verified_at is None:
-                identity.email_verified_at = now
-            identity.email_proven_at = now
+            record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
             # The address was not proved when these were set, so they may not be this person's.
             identity.hashed_password = None
             identity.email_verification_token_hash = None

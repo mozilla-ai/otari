@@ -13,9 +13,9 @@ from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError, MembershipUpdateError
+from gateway.models.identity import AddressAuthority
 from gateway.models.organizations import OrganizationInvitation
 from gateway.models.tenancy import Organization, OrganizationDomain, User, Workspace, WorkspaceMember
-from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
@@ -505,7 +505,7 @@ async def test_signup_is_told_the_address_an_invitation_was_sent_to(async_db: As
     organization = await create_organization(async_db, slug="lookup-live")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).proof_for(_TOKEN, claimed_address="ada@example.com") is AddressProof.MAILBOX
+    assert await _link(async_db).proof_for(_TOKEN, claimed_address="ada@example.com") is AddressAuthority.MAILBOX
 
 
 async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async_db: AsyncSession) -> None:
@@ -577,7 +577,7 @@ async def test_a_link_that_was_emailed_is_not_held_to_another_organization_prove
 
     proof = await _link(async_db, mail_transport="console").proof_for(emailed, claimed_address="ada@example.com")
 
-    assert proof is AddressProof.MAILBOX
+    assert proof is AddressAuthority.MAILBOX
 
 
 async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_deliver(
@@ -622,4 +622,4 @@ async def test_a_shared_link_does_not_prove_the_address_an_emailed_one_proves(
         await lookup.proof_for(emailed, claimed_address="mailed@example.com"),
     )
 
-    assert proofs == (AddressProof.SHARED, AddressProof.MAILBOX)
+    assert proofs == (AddressAuthority.ORGANIZATION, AddressAuthority.MAILBOX)
