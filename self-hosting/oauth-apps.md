@@ -25,7 +25,7 @@ names none, so an app calls models and tools and nothing else unless you say so.
 service key, so it cannot hold the `end-users` scopes.
 
 Restart the gateway after changing registration. Empty `oauth_apps` disables
-these endpoints unless `oauth_open_apps` is on. Removing a registration prevents new approvals and exchanges;
+these endpoints unless `oauth_open_apps` or `mcp_server_enabled` is on. Removing a registration prevents new approvals and exchanges;
 revoke already-issued keys on the API keys page. With `oauth_open_apps` on, a removed
 client ID that is its callback's origin, such as `https://app.example`, still
 connects as an [unregistered app](#let-unregistered-apps-connect), from any path on
@@ -59,6 +59,29 @@ Any site can then ask your users for a key, and a careless approval hands one to
 a site they should not trust. The key is still bound by the person's budgets and
 workspace access, and they can revoke it on the API keys page. Leave this off
 unless your users are expected to connect apps you have not reviewed.
+
+## MCP clients register themselves
+
+An MCP client such as Claude Code connects to Otari's
+[MCP server](https://docs.otari.ai/guides/observe/read-otari-from-your-agent) without any registration here. It
+finds Otari's sign-in from the server's 401 (RFC 9728 and RFC 8414) and
+registers itself at `POST /api/v1/oauth/apps/register` (RFC 7591) with a name
+and its callbacks, which must be HTTPS or loopback HTTP.
+
+What such a client is approved for is never an API key. It signs in as the
+approving person, read-only, in the organization the consent screen names, so
+the screen asks only how long the sign-in lasts (1 to 90 days, whatever the link
+suggests), names the client as unverified, and shows no workspace or spending
+limit. The token endpoint answers with an access token that lasts an hour and
+works only at `/mcp`, and a refresh token. The client renews with
+`grant_type=refresh_token`, which replaces both; a refresh token used twice ends
+the sign-in. `POST /api/v1/oauth/apps/revoke` ends it from either token. The
+sign-in appears on the person's **Account** page as `<client name> (MCP)`. A
+registration nobody approves within a day is removed.
+
+Registration is open whenever the MCP server is, which `mcp_server_enabled`
+switches. Behind a proxy that rewrites the host, set `public_base_url`: the
+addresses the client discovers are built from it.
 
 ## Authorize
 

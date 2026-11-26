@@ -30,6 +30,7 @@
 * [Review usage and requests](review-usage-and-requests.md)
 * [Sessions](sessions.md)
 * [Import usage from outside Otari](external-usage.md)
+* [Read Otari from your agent](read-otari-from-your-agent.md)
 
 ## Control
 

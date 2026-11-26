@@ -8,6 +8,9 @@ Applications send the key as a bearer token. The base URL to use and the other
 accepted headers are in [Base URL](https://docs.otari.ai/reference#base-url) and
 [Authentication](https://docs.otari.ai/reference#authentication).
 
+To read the dashboard's data from an agent or a script rather than call models,
+use an access token instead: see [Read Otari from your agent](read-otari-from-your-agent.md).
+
 ## Create a key
 
 1. Open the **API keys** page and click **Create API key**.
@@ -155,7 +158,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/1039f339e4a40ad668bfc579829c695cfb623ca9/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openapi.json).
 
 ### Model and search tool access
 
@@ -266,7 +269,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/1039f339e4a40ad668bfc579829c695cfb623ca9/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/642399be06025a22fd0e750a18efc504ce766979/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page
