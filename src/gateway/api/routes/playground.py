@@ -320,8 +320,8 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
     responses={
         413: {
             "description": (
-                "The upload exceeds the configured maximum size, or its workspace already holds "
-                "as many files or bytes as the deployment allows."
+                "The upload exceeds the configured maximum size, or would take its workspace past "
+                "the number of files or bytes the deployment allows."
             )
         },
         422: {

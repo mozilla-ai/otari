@@ -12,7 +12,7 @@ from typing import ClassVar
 from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import DATABASE_ERRORS
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.media_types import guess_mime_type
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
@@ -535,7 +535,9 @@ class FileService:
                     workspace_id = await self._default_workspace()
                 count, used = await self._files.workspace_usage(workspace_id)
         except DATABASE_ERRORS as exc:
-            logger.error("Failed to read file usage for workspace %s: %s", upload.workspace_id, exc)
+            logger.error(
+                "Failed to read file usage for workspace %s: %s", upload.workspace_id, describe_database_error(exc)
+            )
             raise FileStorageError("Could not read the workspace's file usage") from exc
         if max_files is not None and count >= max_files:
             raise WorkspaceStorageFullError

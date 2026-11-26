@@ -119,7 +119,9 @@ def test_a_full_workspace_refuses_uploads_until_a_file_is_deleted(
     assert full.status_code == 413
     assert "storage limit" in full.json()["detail"]
     # The refused upload deleted nothing.
-    assert client.get(f"{API_ROOT}/files/{first.json()['id']}", headers=api_key_header).status_code == 200
+    kept = client.get(f"{API_ROOT}/files/{first.json()['id']}/content", headers=api_key_header)
+    assert kept.status_code == 200
+    assert kept.content == b"abcd"
 
     assert client.delete(f"{API_ROOT}/files/{first.json()['id']}", headers=api_key_header).status_code == 200
     assert upload(b"x" * 9).status_code == 413

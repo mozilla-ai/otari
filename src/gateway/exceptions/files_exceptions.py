@@ -51,7 +51,7 @@ class WorkspaceStorageFullError(TenancyError):
     status_code = status.HTTP_413_CONTENT_TOO_LARGE
 
     def __init__(self) -> None:
-        super().__init__("This workspace has reached its file storage limit; delete files to upload more")
+        super().__init__("This upload would exceed the workspace's file storage limit; delete files to upload more")
 
 
 class UnknownPageCursorError(TenancyValidationError):
