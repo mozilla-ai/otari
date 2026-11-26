@@ -68,6 +68,8 @@ class InvitationLink(SignupInvitePort):
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
                 return False
+            # Taken before the enforcement is read, because turning it on takes the same lock.
+            await self._organizations.lock_settings(invitation.organization_id)
             settings = await self._organizations.sso_settings(invitation.organization_id)
         return settings is None or not settings.required
 

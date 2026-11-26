@@ -182,6 +182,58 @@ async def test_two_accepts_of_one_link_give_one_membership(postgres_url: str) ->
     assert len(memberships) == 1
 
 
+async def test_an_entitlement_racing_an_enforcement_being_turned_on_sees_it(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The read follows the lock, so a connection requirement committed while it waits is seen.
+
+    Without the lock the reader answers from the settings as they were, and an account is
+    minted for an organization that would refuse whoever holds it.
+    """
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    address = "grace@example.com"
+    arrived = asyncio.Event()
+    released = asyncio.Event()
+    real_lock_settings = OrganizationRepository.lock_settings
+
+    async def lock_settings_that_waits(self: OrganizationRepository, organization_id: uuid.UUID) -> None:
+        arrived.set()
+        await released.wait()
+        await real_lock_settings(self, organization_id)
+
+    monkeypatch.setattr(OrganizationRepository, "lock_settings", lock_settings_that_waits)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="entitlement-vs-enforcement")
+            await _invite(setup, organization, email=address)
+            await setup.commit()
+
+        async with sessions() as asking, sessions() as enforcing:
+
+            async def entitles() -> bool:
+                return await _link(asking).allows_an_account(_TOKEN, claimed_address=address)
+
+            async def require_the_connection_once_the_read_is_waiting() -> None:
+                await arrived.wait()
+                uow = UnitOfWork(enforcing)
+                async with uow:
+                    row = await OrganizationRepository(uow).get(organization.id)
+                    assert row is not None
+                    row.sso_required = True
+                released.set()
+
+            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
+                asking_task = actors.create_task(entitles())
+                actors.create_task(require_the_connection_once_the_read_is_waiting())
+            entitled = asking_task.result()
+    finally:
+        await engine.dispose()
+
+    assert entitled is False
+
+
 async def test_an_accept_racing_a_cancel_finds_the_link_gone(
     postgres_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
