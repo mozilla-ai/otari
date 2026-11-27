@@ -287,6 +287,7 @@ describe("AppShell responsive layout", () => {
       "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
       "API keys",
@@ -765,6 +766,7 @@ describe("AppShell surface gating", () => {
       "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
       "API keys",
@@ -915,6 +917,7 @@ describe("AppShell entitlement gating", () => {
       "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
       "API keys",
@@ -1714,6 +1717,7 @@ const WORKSPACE_RAIL = [
   "/sessions",
   "/people",
   "/rules",
+  "/routing",
   "/models",
   "/tools",
   "/keys",
@@ -1780,30 +1784,29 @@ describe("the workspace rail, per role", () => {
 
   // The workspace's guardrails open to owners and admins only, so that page is
   // checked as an owner.
-  for (const [path, role] of [
-    ["/routing", "member"],
-    ["/routing/coding", "member"],
-    ["/tools/guardrails", "owner"],
-  ] as const) {
-    it(`selects Rules on ${path}`, async () => {
-      mockMatchMedia(false)
-      await renderShell(bootstrap(), { url: path, ...asRole(role) })
-      const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
-      const rules = await within(sidebar).findByRole("link", { name: "Rules" })
-      expect(rules).toHaveAttribute("aria-current", "page")
-      expect(rules.className).toBe(
-        `${navRowClass({ isActive: true, isCollapsed: false })} w-full`,
-      )
-      const tools = within(sidebar).getByRole("link", { name: "Tools" })
-      expect(tools).not.toHaveAttribute("aria-current")
-      expect(tools.className).toBe(
-        `${navRowClass({ isActive: false, isCollapsed: false })} w-full`,
-      )
+  it("selects Rules on /tools/guardrails", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), {
+      url: "/tools/guardrails",
+      ...asRole("owner"),
     })
-  }
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+    const rules = await within(sidebar).findByRole("link", { name: "Rules" })
+    expect(rules).toHaveAttribute("aria-current", "page")
+    expect(rules.className).toBe(
+      `${navRowClass({ isActive: true, isCollapsed: false })} w-full`,
+    )
+    const tools = within(sidebar).getByRole("link", { name: "Tools" })
+    expect(tools).not.toHaveAttribute("aria-current")
+    expect(tools.className).toBe(
+      `${navRowClass({ isActive: false, isCollapsed: false })} w-full`,
+    )
+  })
 
   for (const [path, row] of [
     ["/members", "People"],
+    ["/routing", "Routing"],
+    ["/routing/coding", "Routing"],
     ["/requests", "Traces"],
     ["/tools/web-search", "Tools"],
   ] as const) {

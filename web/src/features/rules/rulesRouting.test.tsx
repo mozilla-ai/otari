@@ -54,38 +54,35 @@ function tabRow() {
   return within(screen.getByRole("navigation", { name: "Rule types" }))
 }
 
-describe("Routing, under Rules", () => {
+describe("Rules and Routing", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
 
   for (const role of ROLES) {
-    it(`gives a ${role} a Routing tab after the rule types`, async () => {
+    it(`gives a ${role} the rule types and no Routing tab`, async () => {
       await renderAs(role, <RulesPage />, "/rules")
       await screen.findByRole("heading", { name: "Rules" })
       const tabs = tabRow().getAllByRole("link")
-      const routing = tabs.at(-1)
-      expect(routing).toHaveTextContent("Routing")
-      expect(routing).toHaveAttribute("href", "/routing")
       expect(tabs.map((tab) => tab.textContent)).toEqual(
         MANAGERS.includes(role)
-          ? ["All", "Spend", "Access", "Data", "Routing"]
-          : ["All", "Spend", "Access", "Routing"],
+          ? ["All", "Spend", "Access", "Data"]
+          : ["All", "Spend", "Access"],
       )
+      expect(tabRow().queryByRole("link", { name: "Routing" })).toBeNull()
     })
 
-    it(`renders the routing policies under Rules for a ${role}`, async () => {
+    it(`titles the routing policies Routing, with no Rules tabs, for a ${role}`, async () => {
       await renderAs(role, <RoutingPage />, "/routing")
       expect(
-        await screen.findByRole("heading", { name: "Rules" }),
+        await screen.findByRole("heading", { name: "Routing" }),
       ).toBeInTheDocument()
-      expect(tabRow().getByRole("link", { name: "Routing" })).toHaveAttribute(
-        "aria-current",
-        "page",
-      )
-      // The tab names the view, so it has no title of its own.
-      expect(screen.queryByRole("heading", { name: "Routing" })).toBeNull()
+      expect(screen.queryByRole("heading", { name: "Rules" })).toBeNull()
+      expect(
+        screen.queryByRole("navigation", { name: "Rule types" }),
+      ).toBeNull()
+      expect(screen.queryByRole("button", { name: "New rule" })).toBeNull()
       expect(
         await screen.findByText("No routing policies yet"),
       ).toBeInTheDocument()

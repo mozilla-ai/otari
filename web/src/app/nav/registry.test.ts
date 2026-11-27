@@ -54,6 +54,7 @@ describe("nav registry", () => {
       "/sessions",
       "/people",
       "/rules",
+      "/routing",
       "/models",
       "/tools",
       "/keys",
@@ -88,12 +89,12 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Members",
-      "Routing",
       "Guardrails",
       "Activity",
       "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
       "API keys",
@@ -480,6 +481,7 @@ describe("nav registry", () => {
       "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
       "API keys",
@@ -870,15 +872,24 @@ describe("navPageForPath", () => {
   })
 })
 
-describe("destinations with no row", () => {
-  it("selects Rules on the Routing pages and the workspace's guardrails", () => {
-    for (const path of ["/routing", "/routing/coding", "/tools/guardrails"]) {
-      expect(railPathForPath(path)).toBe("/rules")
+describe("Routing", () => {
+  it("is a rail row directly after Rules, selected on its own pages", () => {
+    const index = NAV_SECTIONS.find((section) => section.id === "index")
+    const labels = index?.items.map((item) => item.label) ?? []
+    expect(labels.indexOf("Routing")).toBe(labels.indexOf("Rules") + 1)
+    for (const path of ["/routing", "/routing/coding"]) {
+      expect(railPathForPath(path)).toBe("/routing")
       expect(navContextForPath(path)).toBe("workspace")
+      expect(navItemForPath(path)?.surface).toBe("routing")
     }
-    // Gated as their own entries, not as Rules.
-    expect(navItemForPath("/routing")?.surface).toBe("routing")
-    expect(navItemForPath("/routing/coding")?.surface).toBe("routing")
+  })
+})
+
+describe("destinations with no row", () => {
+  it("selects Rules on the workspace's guardrails", () => {
+    expect(railPathForPath("/tools/guardrails")).toBe("/rules")
+    expect(navContextForPath("/tools/guardrails")).toBe("workspace")
+    // Gated as its own entry, not as Rules.
     expect(navItemForPath("/tools/guardrails")?.surface).toBe("tools")
   })
 
@@ -899,7 +910,7 @@ describe("destinations with no row", () => {
         (item.children ?? []).map((child) => child.to),
       ),
     ])
-    for (const path of ["/routing", "/tools/guardrails", "/members"]) {
+    for (const path of ["/tools/guardrails", "/members"]) {
       expect(rows).not.toContain(path)
     }
   })
@@ -983,11 +994,11 @@ const WORKSPACE = [
   "/router-savings",
   "/people",
   "/rules",
+  "/routing",
   "/models",
   "/tools",
   "/keys",
   "/members",
-  "/routing",
 ]
 const ORGANIZATION = [
   "/workspaces",
@@ -1029,15 +1040,14 @@ describe("the rails, per role", () => {
   }
 
   it("keeps each page with no row within reach of a row the same role is offered", () => {
-    // A tool's page opens from Tools, a routing page and the workspace's
-    // guardrails from Rules, and the roster from People. A role that may open
+    // A tool's page opens from Tools, the workspace's guardrails from Rules,
+    // and the roster from People. A role that may open
     // the page has to be offered the row it opens from, or the page is only
     // reachable by typing its address.
     const OPENED_FROM: Readonly<Record<string, string>> = {
       "/tools/web-search": "/tools",
       "/tools/code-execution": "/tools",
       "/tools/mcp-servers": "/tools",
-      "/routing": "/rules",
       "/tools/guardrails": "/rules",
       "/members": "/people",
     }

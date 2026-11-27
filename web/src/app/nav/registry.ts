@@ -41,9 +41,9 @@ import type {
  * The workspace rail, and the only place its destinations are declared.
  *
  * One section, headingless: every row is a place in the selected workspace,
- * and none of them is a category. Three destinations are registered without a
- * row (`OFF_RAIL_ITEMS`): Routing and the workspace's Guardrails, which open
- * from Rules, and `/members`, the workspace roster, which opens from People.
+ * and none of them is a category. Two destinations are registered without a
+ * row (`OFF_RAIL_ITEMS`): the workspace's Guardrails, which opens from Rules,
+ * and `/members`, the workspace roster, which opens from People.
  *
  * Each thing exists once: Billing, Providers and Email domains are
  * organization pages, reached from the footer's Organization row.
@@ -75,6 +75,9 @@ const BASE_NAV_SECTIONS = [
       },
       { to: "/people", label: "People", icon: FiUsers },
       { to: "/rules", label: "Rules", icon: FiShield },
+      // Not tagged `capability: "routing"`: ARCHITECTURE.md marks the routing
+      // split provisional. `/aliases` redirects onto `/routing`.
+      { to: "/routing", label: "Routing", surface: "routing", icon: FiRepeat },
       // No `operatorOnly` on Models, per the rule the axis carries: a row
       // leaves the list by its page ceasing to refuse anyone (otari-ai#1942).
       // Models reads the catalog any session may read.
@@ -519,22 +522,8 @@ export const PLAYGROUND_NAV_ITEM = {
  */
 export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS
 
-/**
- * The Routing pages, registered without a row. Routing is a tab of Rules
- * (`features/rules/RulesFrame.tsx`), and the workspace's guardrails open from
- * its Data tab, so both select Rules in the rail (`railPathForPath`). Not
- * tagged `capability: "routing"`: ARCHITECTURE.md marks the routing split
- * provisional. `/aliases` redirects onto `/routing`.
- */
-const ROUTING_NAV_ITEM = {
-  to: "/routing",
-  label: "Routing",
-  surface: "routing",
-  icon: FiRepeat,
-} as const satisfies NavItem
-
 // An owner or admin sets the workspace's guardrails; the page has nothing for
-// anyone else to do.
+// anyone else to do. It opens from Rules' Data tab, so it selects Rules.
 const WORKSPACE_GUARDRAILS_NAV_ITEM = {
   to: "/tools/guardrails",
   label: "Guardrails",
@@ -558,7 +547,6 @@ const WORKSPACE_MEMBERS_NAV_ITEM = {
 /** Destinations with no rail row, by the rail row that stands for them. */
 const OFF_RAIL_ITEMS: readonly { item: NavItem; railPath?: NavPath }[] = [
   { item: WORKSPACE_MEMBERS_NAV_ITEM, railPath: "/people" },
-  { item: ROUTING_NAV_ITEM, railPath: "/rules" },
   { item: WORKSPACE_GUARDRAILS_NAV_ITEM, railPath: "/rules" },
 ]
 
@@ -580,7 +568,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 
 /**
  * The rail row to mark selected at this pathname: for a destination with no
- * row, the row that stands for it (Rules for Routing), and otherwise the
+ * row, the row that stands for it (Rules for the workspace guardrails), and otherwise the
  * destination's own entry.
  */
 export function railPathForPath(pathname: string): NavPath | undefined {

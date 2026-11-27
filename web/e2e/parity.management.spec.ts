@@ -9,7 +9,6 @@ import {
   nav,
   openAccountMenu,
   openDeployment,
-  openTab,
   pageHeading,
   pressRowAction,
   rowMenuItem,
@@ -434,9 +433,8 @@ test.describe("budgets", () => {
 test.describe("fallback routing", () => {
   test("grows and shrinks a policy's failure chain", async ({ page }) => {
     await login(page)
-    await openTab(page, "Rules", "Routing")
-    // Routing is a tab of Rules, which titles the page.
-    await expect(pageHeading(page, "Rules")).toBeVisible()
+    await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
+    await expect(pageHeading(page, "Routing")).toBeVisible()
 
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
@@ -508,8 +506,7 @@ test.describe("legacy routes", () => {
     // policies they are; the old path is a bookmark that still has to land.
     await gotoRoute(page, "/aliases")
     await expect(page).toHaveURL(/\/routing$/)
-    // Routing is a tab of Rules, which titles the page.
-    await expect(pageHeading(page, "Rules")).toBeVisible()
+    await expect(pageHeading(page, "Routing")).toBeVisible()
 
     // An unrecognised path is a stale link from a route that has since moved,
     // so it lands on the overview rather than a dead end.

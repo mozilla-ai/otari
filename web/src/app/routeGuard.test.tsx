@@ -355,7 +355,7 @@ describe("the selected rail row", () => {
   for (const [url, row, route] of [
     ["/people/some-person", "People", "/people/$personId"],
     ["/rules/some-rule", "Rules", "/rules/$ruleId"],
-    ["/routing/coding", "Rules", "/routing/$name"],
+    ["/routing/coding", "Routing", "/routing/$name"],
     ["/keys?state=disabled", "API keys", "/keys"],
     ["/sessions?range=30d", "Traces", "/sessions"],
   ] as const) {
