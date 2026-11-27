@@ -11,14 +11,23 @@ import { formatUsd, formatUsdHeadline } from "@/shared/helpers/format"
  * would refuse the read. It opens Home, where the limit is changed and the
  * spend behind it is broken down.
  */
-export function TeamBudget({ onNavigate }: { onNavigate?: () => void }) {
+export function TeamBudget({
+  onNavigate,
+  isDense = false,
+}: {
+  onNavigate?: () => void
+  /** The dense sidebar's 12px gap, which the `-mb` reaches across. */
+  isDense?: boolean
+}) {
   const team = useOrganizationLimit()
   if (!team) return null
   return (
     <Link
       to="/"
       onClick={onNavigate}
-      className="-mx-3 -mb-4 flex shrink-0 flex-col gap-1.5 border-t border-border px-6 py-3 transition-colors hover:bg-surface-alt"
+      // `-mb` is the rail's own gap, which this reaches across to meet the rule
+      // below it.
+      className={`-mx-3 ${isDense ? "-mb-3" : "-mb-4"} flex shrink-0 flex-col gap-1.5 border-t border-border px-6 py-3 transition-colors hover:bg-surface-alt`}
     >
       <span className="text-overline">Team budget</span>
       <span className="flex items-baseline justify-between gap-2 text-shell-label tabular-nums">

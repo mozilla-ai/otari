@@ -167,3 +167,69 @@ describe("navRowClass", () => {
     }
   })
 })
+
+/**
+ * The default rail, pinned as the exact classes it had before the dense sidebar
+ * existed. Every other test in this file compares the helper with itself, so
+ * none of them would notice the default row changing; these strings are why
+ * turning the switch off leaves the rail as it was.
+ */
+describe("navRowClass without the dense sidebar", () => {
+  const BEFORE: Record<string, string> = {
+    default:
+      "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground px-3",
+    selected:
+      "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 bg-surface-subtle text-foreground border-foreground px-3",
+    ancestor:
+      "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 border-transparent text-foreground hover:bg-surface-alt active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground px-3",
+    nested:
+      "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground pl-[3.125rem] px-3",
+    collapsed:
+      "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground min-w-11 justify-center px-0",
+    band: "flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0 border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground h-full w-full! px-6",
+  }
+
+  it("is exactly what the rail drew before", () => {
+    expect(navRowClass()).toBe(BEFORE.default)
+    expect(navRowClass({ isDense: false })).toBe(BEFORE.default)
+    expect(navRowClass({ isActive: true })).toBe(BEFORE.selected)
+    expect(navRowClass({ isAncestor: true })).toBe(BEFORE.ancestor)
+    expect(navRowClass({ isNested: true })).toBe(BEFORE.nested)
+    expect(navRowClass({ isCollapsed: true })).toBe(BEFORE.collapsed)
+    expect(navRowClass({ isBand: true })).toBe(BEFORE.band)
+  })
+})
+
+describe("navRowClass in the dense sidebar", () => {
+  const dense = navRowClass({ isDense: true })
+
+  it("is 32px with a mouse and keeps 44px on touch", () => {
+    expect(dense).toContain("min-h-8")
+    expect(dense).toContain("pointer-coarse:min-h-11")
+    expect(dense).not.toMatch(/(?<![\w:-])min-h-11/)
+  })
+
+  it("sets the label in the rail-row role and closes the glyph gap to 8px", () => {
+    expect(dense).toContain("text-shell-label")
+    expect(dense).not.toContain("text-sm")
+    expect(dense).not.toContain("leading-[1.375rem]")
+    expect(dense).toContain("gap-2")
+    expect(dense).not.toContain("gap-3")
+  })
+
+  it("indents a nested row from the 8px gap: 0.75rem, 1rem, 0.5rem and 0.625rem", () => {
+    expect(navRowClass({ isDense: true, isNested: true })).toContain(
+      "pl-[2.875rem]",
+    )
+    expect(navRowClass({ isNested: true })).toContain("pl-[3.125rem]")
+  })
+
+  it("leaves the states, the edge and the focus ring as they were", () => {
+    const selected = navRowClass({ isDense: true, isActive: true })
+    expect(selected).toContain("bg-surface-subtle")
+    expect(selected).toContain("border-foreground")
+    expect(selected).toContain("border-l-2")
+    expect(dense).toContain("focus-visible:otari-focus-ring")
+    expect(dense).toContain("hover:bg-surface-alt")
+  })
+})

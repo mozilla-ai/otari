@@ -5,6 +5,7 @@ import { useState } from "react"
 import type { IconType } from "react-icons"
 import { FaDiscord } from "react-icons/fa"
 import {
+  FiAlignJustify,
   FiBookOpen,
   FiChevronDown,
   FiChevronRight,
@@ -24,6 +25,7 @@ import {
 } from "@/app/nav/overlayAccountBadge"
 import { AccountMenuRows } from "@/app/nav/overlayAccountMenuRows"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
+import { useDenseSidebarPreference } from "@/app/nav/sidebarDensity"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
@@ -109,6 +111,7 @@ function MenuItem({
   trailingIcon,
   hasTrailingGutter = false,
   ariaLabel,
+  isOn,
   className = "",
 }: {
   label: string
@@ -128,11 +131,15 @@ function MenuItem({
    */
   hasTrailingGutter?: boolean
   ariaLabel?: string
+  /** Makes the row a switch, on or off, instead of an action. */
+  isOn?: boolean
   className?: string
 }) {
   return (
     <button
       type="button"
+      role={isOn === undefined ? undefined : "switch"}
+      aria-checked={isOn}
       disabled={isDisabled}
       title={title}
       // A disabled button takes no focus, so the tooltip is pointer-only. Fold
@@ -262,14 +269,37 @@ function AppearanceControl() {
   )
 }
 
+/**
+ * The dense sidebar, on or off: a comparison switch for the rail's 32px rows
+ * (`nav/sidebarDensity.ts`). A desk setting, so a phone's menu does not offer it.
+ */
+function DenseSidebarControl() {
+  const [isOn, setOn] = useDenseSidebarPreference()
+  return (
+    <MenuItem
+      label="Dense sidebar"
+      icon={FiAlignJustify}
+      trailing={isOn ? "On" : "Off"}
+      hasTrailingGutter
+      ariaLabel="Dense sidebar"
+      isOn={isOn}
+      onPress={() => setOn(!isOn)}
+      className="max-md:hidden"
+    />
+  )
+}
+
 export function AccountMenu({
   isCollapsed,
+  isDense = false,
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
   onOpenFeedback,
 }: {
   isCollapsed: boolean
+  /** The dense sidebar's smaller account name. */
+  isDense?: boolean
   /**
    * Where the Deployment row goes, or nothing when that rail has no rows for
    * this caller. Resolved by the shell rather than here, because it is the
@@ -322,6 +352,7 @@ export function AccountMenu({
         className={navRowClass({
           isCollapsed,
           isBand: true,
+          isDense,
           expandedJustify: "start",
         })}
       >
@@ -358,6 +389,7 @@ export function AccountMenu({
               the page looks. */}
           <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
+          <DenseSidebarControl />
           {/* The deployment's own pages, which used to sit in the organization
               rail's General section. They are the deployment talking about
               itself rather than the tenant, and that rail is where a tenant

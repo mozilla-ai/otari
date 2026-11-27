@@ -146,6 +146,14 @@ const ROW_FOCUS =
 const ROW_BASE = `flex min-h-11 items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
+ * The dense sidebar's row (see `sidebarDensity.ts`): 32px with a mouse or
+ * trackpad and still 44px on touch, a 13px label from the type scale's rail-row
+ * role, and 8px between the glyph and the label. A comparison mode; the default
+ * above is unchanged.
+ */
+const ROW_BASE_DENSE = `flex min-h-8 pointer-coarse:min-h-11 items-center gap-2 rounded-lg border-l-2 font-sans text-shell-label font-medium ${NAV_TRANSITION} ${ROW_FOCUS}`
+
+/**
  * `data-pressed` alongside `active` because a rail row is three different
  * elements: react-aria swallows `:active` on the HeroUI `Button`s (the collapsed
  * group triggers, the account control) and reports the press as that attribute
@@ -232,6 +240,7 @@ export function navRowClass({
   isCollapsed = false,
   isNested = false,
   isBand = false,
+  isDense = false,
   expandedJustify,
 }: {
   isActive?: boolean
@@ -241,6 +250,8 @@ export function navRowClass({
   isNested?: boolean
   /** This row is the whole of a chrome band rather than one row in a list. */
   isBand?: boolean
+  /** The dense sidebar's row: see `sidebarDensity.ts`. */
+  isDense?: boolean
   /**
    * How the row's contents sit along its main axis while the rail is expanded.
    * Collapsed rows are always centered, so the icon column holds whether or not
@@ -257,9 +268,11 @@ export function navRowClass({
   expandedJustify?: "start"
 } = {}): string {
   return [
-    ROW_BASE,
+    isDense ? ROW_BASE_DENSE : ROW_BASE,
     isActive ? ROW_SELECTED : isAncestor ? ROW_ANCESTOR : ROW_RESTING,
-    isNested ? "pl-[3.125rem]" : "",
+    // 0.75rem of padding, the 1rem glyph, the gap and 0.625rem on top: the gap
+    // is 8px when dense, so the indent follows it.
+    isNested ? (isDense ? "pl-[2.875rem]" : "pl-[3.125rem]") : "",
     isCollapsed
       ? "min-w-11 justify-center"
       : expandedJustify === "start"

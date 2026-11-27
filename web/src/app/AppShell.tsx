@@ -49,6 +49,7 @@ import {
   navIndicatorClass,
   navRowClass,
 } from "@/app/nav/rowStyles"
+import { useDenseSidebarPreference } from "@/app/nav/sidebarDensity"
 import { TeamBudget } from "@/app/nav/TeamBudget"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath, NavSection } from "@/app/nav/types"
@@ -94,6 +95,8 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 // while a drag handle on the page's main seam is a thing to catch by accident.
 const SIDEBAR_WIDTH = "w-[16.5rem]"
 const COLLAPSED_SIDEBAR_WIDTH = "w-[4.5rem]"
+// The dense sidebar (`nav/sidebarDensity.ts`): 240px in place of 264.
+const DENSE_SIDEBAR_WIDTH = "w-[15rem]"
 const SIDEBAR_COLLAPSED_KEY = "otari.dashboard.sidebarCollapsed"
 
 // Below this width the sidebar's fixed footprint squashes page content, so it
@@ -234,6 +237,7 @@ function NavRowLink({
   isActive,
   isCollapsed,
   isNested,
+  isDense,
   onNavigate,
 }: {
   to: NavPath
@@ -242,6 +246,7 @@ function NavRowLink({
   isActive: boolean
   isCollapsed?: boolean
   isNested?: boolean
+  isDense?: boolean
   onNavigate: () => void
 }) {
   const recordNavigation = useRecordNavigation()
@@ -256,7 +261,7 @@ function NavRowLink({
         recordNavigation(to, isActive)
         onNavigate()
       }}
-      className={`${navRowClass({ isActive, isCollapsed, isNested })} w-full`}
+      className={`${navRowClass({ isActive, isCollapsed, isNested, isDense })} w-full`}
       // The row drawn selected is the one announced as current. The link's own
       // match is exact on the path and its search, so on a detail page or an
       // address with a query string it said nothing.
@@ -306,12 +311,14 @@ function NavGroup({
   onNavigate,
   isVisible,
   isCollapsed,
+  isDense,
 }: {
   item: NavItem
   currentPath: string
   onNavigate: () => void
   isVisible: (item: NavItem) => boolean
   isCollapsed: boolean
+  isDense: boolean
 }) {
   // A child is gated on the entry `navItemForPath` answers for it, which
   // carries its own surface and capability, so the row and the route cannot
@@ -340,6 +347,7 @@ function NavGroup({
         icon={item.icon}
         isActive={currentPath === only.to}
         isCollapsed={isCollapsed}
+        isDense={isDense}
         onNavigate={onNavigate}
       />
     )
@@ -415,7 +423,7 @@ function NavGroup({
               rail's trigger a few lines up keeps the full selected marker,
               because there no child is on screen to carry it. */}
         <Disclosure.Trigger
-          className={`${navRowClass({ isAncestor: holdsCurrent })} w-full`}
+          className={`${navRowClass({ isAncestor: holdsCurrent, isDense })} w-full`}
         >
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-left">
@@ -453,6 +461,7 @@ function NavGroup({
             icon={child.icon}
             isActive={currentPath === child.to}
             isNested
+            isDense={isDense}
             onNavigate={onNavigate}
           />
         ))}
@@ -818,6 +827,10 @@ function AppShellChrome() {
   // Collapse is a desktop-only affordance; on mobile the drawer always shows
   // the full-width, labeled nav.
   const effectiveCollapsed = isMobile ? false : collapsed
+  // The dense sidebar is a desk preference: the drawer keeps its touch sizes and
+  // the collapsed rail its icon column.
+  const [prefersDense] = useDenseSidebarPreference()
+  const isDense = prefersDense && !isMobile && !effectiveCollapsed
   // While the mobile drawer is open, the page behind it is inert: that is what
   // keeps an AT virtual cursor and Tab out of controls nobody can see. The top
   // bar is deliberately not included, because the control that closes the drawer
@@ -923,7 +936,11 @@ function AppShellChrome() {
                   // 150ms, which is what `otari-ai/frontend`'s shell collapses
                   // its own rail in.
                   "relative shrink-0 transition-[width] duration-150 motion-reduce:transition-none",
-                  collapsed ? COLLAPSED_SIDEBAR_WIDTH : SIDEBAR_WIDTH,
+                  collapsed
+                    ? COLLAPSED_SIDEBAR_WIDTH
+                    : isDense
+                      ? DENSE_SIDEBAR_WIDTH
+                      : SIDEBAR_WIDTH,
                 ),
           )}
         >
@@ -951,6 +968,7 @@ function AppShellChrome() {
                     className={navRowClass({
                       isCollapsed: effectiveCollapsed,
                       isBand: true,
+                      isDense,
                     })}
                     aria-label={effectiveCollapsed ? backLabel : undefined}
                     title={effectiveCollapsed ? backLabel : undefined}
@@ -999,13 +1017,16 @@ function AppShellChrome() {
           </div>
           {/* No bottom padding: the account band closes the rail, so it sits on
               the viewport's edge the way the scope band sits on the top. */}
-          <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pt-3">
+          <div
+            className={`flex min-h-0 flex-1 flex-col ${isDense ? "gap-3" : "gap-4"} px-3 pt-3`}
+          >
             {/* The rail's one action. A key is how every session starts, so it
                 leads the workspace rail; a viewer, who is refused one, is not
                 offered it. */}
             {railContext === "workspace" && canCreateKey ? (
               <CreateKeyRailButton
                 isCollapsed={effectiveCollapsed}
+                isDense={isDense}
                 onPress={() => {
                   closeMobileNav()
                   // Below `md` this closes the drawer it sits in, so the
@@ -1053,6 +1074,7 @@ function AppShellChrome() {
                             onNavigate={closeMobileNav}
                             isVisible={isVisible}
                             isCollapsed={effectiveCollapsed}
+                            isDense={isDense}
                           />
                         ) : (
                           // Highlighted from the registry's own answer rather than
@@ -1071,6 +1093,7 @@ function AppShellChrome() {
                             icon={item.icon}
                             isActive={railPathForPath(pathname) === item.to}
                             isCollapsed={effectiveCollapsed}
+                            isDense={isDense}
                             // Tapping a destination dismisses the mobile drawer so
                             // the page it landed on is visible, not behind it.
                             onNavigate={closeMobileNav}
@@ -1085,7 +1108,7 @@ function AppShellChrome() {
             {/* The organization's limit and how much of it is spent, for the
                 people who can change it. */}
             {effectiveCollapsed ? null : (
-              <TeamBudget onNavigate={closeMobileNav} />
+              <TeamBudget onNavigate={closeMobileNav} isDense={isDense} />
             )}
             {/* The account block, set off by a rule as in the navigation prototype:
               the way onto the organization rail, the documentation, and the
@@ -1151,7 +1174,7 @@ function AppShellChrome() {
                         organizationLanding?.to ?? "/organization/members"
                       recordNavigation(to, pathname === to)
                     }}
-                    className={`${navRowClass({ isCollapsed: effectiveCollapsed })} w-full`}
+                    className={`${navRowClass({ isCollapsed: effectiveCollapsed, isDense })} w-full`}
                     aria-label={effectiveCollapsed ? "Organization" : undefined}
                     title={
                       effectiveCollapsed
@@ -1186,6 +1209,7 @@ function AppShellChrome() {
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
                   isCollapsed={effectiveCollapsed}
+                  isDense={isDense}
                   onOpenFeedback={() => {
                     closeMobileNav()
                     setFeedbackOpen(true)

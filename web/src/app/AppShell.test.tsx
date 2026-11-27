@@ -2045,3 +2045,118 @@ describe("the team budget at the rail's foot", () => {
     expect(screen.queryByText("Team budget")).toBeNull()
   })
 })
+
+describe("the dense sidebar switch", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  const railRow = (name: string) => {
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+    return within(sidebar).findByRole("link", { name })
+  }
+
+  it("is off by default: a 264px rail of 44px rows", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell()
+
+    const aside = container.querySelector("aside")
+    expect(aside?.className).toContain("w-[16.5rem]")
+    expect(aside?.className).not.toContain("w-[15rem]")
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: false })} w-full`,
+    )
+    expect((await railRow("People")).className).toContain("min-h-11")
+  })
+
+  it("draws a 240px rail of 32px rows once it is on", async () => {
+    mockMatchMedia(false)
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    const { container } = await renderShell()
+
+    const aside = container.querySelector("aside")
+    expect(aside?.className).toContain("w-[15rem]")
+    expect(aside?.className).not.toContain("w-[16.5rem]")
+    const row = await railRow("People")
+    expect(row.className).toBe(
+      `${navRowClass({ isCollapsed: false, isDense: true })} w-full`,
+    )
+    expect(row.className).toContain("min-h-8")
+    expect(row.className).toContain("pointer-coarse:min-h-11")
+  })
+
+  it("makes Create API key 32px in place of 36px", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), asRole("owner"))
+    const normal = await screen.findByRole("button", { name: "Create API key" })
+    const normalClass = normal.className
+    cleanup()
+
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    await renderShell(bootstrap(), asRole("owner"))
+    const dense = await screen.findByRole("button", { name: "Create API key" })
+    expect(dense.className).not.toBe(normalClass)
+    expect(dense.className).toMatch(/button--sm/)
+    expect(normalClass).not.toMatch(/button--sm/)
+  })
+
+  it("leaves the collapsed rail and the mobile drawer at their own sizes", async () => {
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
+    mockMatchMedia(false)
+    const collapsed = await renderShell()
+    expect(collapsed.container.querySelector("aside")?.className).toContain(
+      "w-[4.5rem]",
+    )
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: true })} w-full`,
+    )
+    collapsed.unmount()
+    cleanup()
+    window.localStorage.removeItem("otari.dashboard.sidebarCollapsed")
+
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    const drawer = await renderShell()
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    expect(drawer.container.querySelector("aside")?.className).not.toContain(
+      "w-[15rem]",
+    )
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: false })} w-full`,
+    )
+  })
+
+  it("is turned on and off from the account menu, and records nothing", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    const { container } = await renderShell()
+
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    const toggle = await screen.findByRole("switch", { name: "Dense sidebar" })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(toggle).toHaveTextContent("Off")
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    expect(toggle).toHaveTextContent("On")
+    expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
+      "1",
+    )
+    expect(container.querySelector("aside")?.className).toContain("w-[15rem]")
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
+      "0",
+    )
+    expect(container.querySelector("aside")?.className).toContain("w-[16.5rem]")
+    expect(recordEvent).not.toHaveBeenCalled()
+  })
+})

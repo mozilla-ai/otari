@@ -9,14 +9,19 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
  */
 export function CreateKeyRailButton({
   isCollapsed,
+  isDense = false,
   onPress,
 }: {
   isCollapsed: boolean
+  /** The dense sidebar's 32px button in place of the default 36px. */
+  isDense?: boolean
   onPress: () => void
 }) {
   const button = (
     <Button
       variant="primary"
+      // 32px in the dense sidebar; unset, the default 36px.
+      size={isDense ? "sm" : undefined}
       className="w-full shrink-0"
       aria-label={isCollapsed ? "Create API key" : undefined}
       onPress={onPress}
