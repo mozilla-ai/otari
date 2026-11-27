@@ -2714,6 +2714,7 @@ async def resolve_request_context(
             settings=config.automatic_routing,
             costs=costs,
             scope=f"{workspace_id}:{user_id}:{api_key_id}:{adapter.endpoint}",
+            organization=str(organization_id or workspace_id),
             anchor=signal.conversation_id or "",
             region=preferred_region(config.automatic_routing, raw_request.headers),
             mode=f"{adapter.endpoint}:{'stream' if streaming else 'completion'}",

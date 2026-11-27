@@ -3465,6 +3465,7 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
         settings=AutomaticRouting(),
         costs={"openai:m": Decimal(1)},
         scope="workspace",
+        tenant="organization",
         anchor="session",
         region=None,
         mode="stream",

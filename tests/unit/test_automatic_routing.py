@@ -46,6 +46,7 @@ def _rank(router: AutomaticRouter, **changes: Any) -> CompiledPlan:
         "settings": AutomaticRouting.model_validate({"offerings": {"us": {"region": "us"}, "eu": {"region": "eu"}}}),
         "costs": {"us:model": Decimal("0.01"), "eu:model": Decimal("0.01")},
         "scope": "workspace:user:key:chat",
+        "organization": "organization",
         "anchor": "private conversation",
         "region": None,
         "mode": "chat:completion",
@@ -500,6 +501,50 @@ def test_close_releases_outstanding_calls_without_binding(router: AutomaticRoute
     assert all(health.active == 0 for health in router.health.values())
     assert all(health.cooldown == 0 for health in router.health.values())
     assert not router.affinities
+
+
+def test_one_organization_cannot_evict_another_organizations_sessions(
+    router: AutomaticRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past its own share, an organization's new session evicts its own oldest, never another's."""
+    monkeypatch.setattr("gateway.services.routing._automatic._TENANT_AFFINITY_LIMIT", 2)
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 3)
+    victim = _rank(router, organization="victim", scope="victim:user:key:chat")
+    assert victim.automatic is not None
+    victim.automatic.start(victim.attempts[1]).finish(success=True)
+    for anchor in ("a", "b", "c", "d"):
+        plan = _rank(router, organization="attacker", anchor=anchor)
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[1]).finish(success=True)
+    assert len(router.affinities) == 3
+    assert _rank(router, organization="victim", scope="victim:user:key:chat").head.instance == "eu"
+    assert _rank(router, organization="attacker", anchor="a").head.instance == "us"
+    assert _rank(router, organization="attacker", anchor="d").head.instance == "eu"
+
+
+def test_a_full_table_never_evicts_another_organizations_live_session(
+    router: AutomaticRouter, now: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A newcomer to a full table reclaims an expired binding, or else goes unbound; a live one stays."""
+    monkeypatch.setattr("gateway.services.routing._automatic._TENANT_AFFINITY_LIMIT", 2)
+    monkeypatch.setattr("gateway.services.routing._automatic._LIMIT", 2)
+    for tenant in ("first", "second"):
+        plan = _rank(router, organization=tenant, scope=f"{tenant}:user:key:chat")
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[1]).finish(success=True)
+    newcomer = _rank(router, organization="newcomer", scope="newcomer:user:key:chat")
+    assert newcomer.automatic is not None
+    newcomer.automatic.start(newcomer.attempts[1]).finish(success=True)
+    assert _rank(router, organization="first", scope="first:user:key:chat").head.instance == "eu"
+    assert _rank(router, organization="second", scope="second:user:key:chat").head.instance == "eu"
+    assert _rank(router, organization="newcomer", scope="newcomer:user:key:chat").head.instance == "us"
+
+    now[0] += 3601
+    newcomer = _rank(router, organization="newcomer", scope="newcomer:user:key:chat")
+    assert newcomer.automatic is not None
+    newcomer.automatic.start(newcomer.attempts[1]).finish(success=True)
+    assert _rank(router, organization="newcomer", scope="newcomer:user:key:chat").head.instance == "eu"
+    assert len(router.affinities) == 2
 
 
 def _same_account_plan() -> CompiledPlan:
