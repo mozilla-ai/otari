@@ -5,6 +5,7 @@ import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   ApiError,
   apiFetch,
+  apiFetchWithHeaders,
   apiStream,
   createSession,
   defaultQueryRetry,
@@ -90,6 +91,28 @@ describe("apiFetch", () => {
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit
     expect(new Headers(init.headers).has("Content-Type")).toBe(false)
+  })
+
+  it("hands the response headers to the caller that asked for them", async () => {
+    // The body-only fetcher throws headers away; the key hooks read the one
+    // that says an expiry was clamped, so the headers have to survive.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { ok: true },
+        {
+          headers: { "Otari-Key-Lifetime-Capped": "2026-03-01T00:00:00+00:00" },
+        },
+      ),
+    )
+
+    const { body, headers } = await apiFetchWithHeaders("/keys", {
+      method: "POST",
+    })
+
+    expect(body).toEqual({ ok: true })
+    expect(headers.get("otari-key-lifetime-capped")).toBe(
+      "2026-03-01T00:00:00+00:00",
+    )
   })
 
   it("bounds a request that never settles", async () => {

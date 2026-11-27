@@ -77,6 +77,21 @@ class FederationRuleNotFoundError(TenancyNotFoundError):
         super().__init__(f"Federation rule '{rule_id}' not found")
 
 
+class KeyLifetimeCapPassedError(TenancyConflictError):
+    """An expiry write lands on a key older than the deployment's ``max_api_key_lifetime_days``.
+
+    Every expiry the cap allows for such a key is already past, so the write would store
+    an instant that ends the key rather than renew it. The caller cannot fix the ask;
+    the remedy is a new key, or a raised cap.
+    """
+
+    def __init__(self, days: int) -> None:
+        super().__init__(
+            f"This key was created more than {days} days ago, so this deployment's max_api_key_lifetime_days "
+            "cap puts every expiry it may be given in the past. Issue a new key."
+        )
+
+
 class KeyEnableRefusedError(TenancyForbiddenError):
     """The caller cannot enable a key disabled for a reason they cannot clear.
 

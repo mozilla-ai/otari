@@ -45,7 +45,7 @@ exactly as it does on the operator surface.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -67,7 +67,7 @@ from gateway.api.deps import (
     get_db,
     verify_master_key,
 )
-from gateway.api.routes._helpers import database_error
+from gateway.api.routes._helpers import KEY_LIFETIME_CAPPED_HEADERS, database_error
 from gateway.api.routes.keys import (
     CREATE_SCOPES_DESCRIPTION,
     UPDATE_SCOPES_DESCRIPTION,
@@ -78,8 +78,9 @@ from gateway.api.routes.keys import (
 )
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
-from gateway.core.config import GatewayConfig
+from gateway.core.config import KEY_LIFETIME_CAPPED_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.sql import utc_iso
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Organization, Workspace
@@ -92,6 +93,7 @@ from gateway.schemas.budgets import EndUserPublic, KeyEndUsersPublic
 from gateway.services.api_keys import (
     DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
+    ApiKeyService,
     admit_organization_key,
     organization_key_changes,
     refuse_service_key_flag_change,
@@ -133,7 +135,14 @@ class CreateOwnKeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     key_name: str | None = Field(default=None, description="Optional name for the key")
-    expires_at: datetime | None = Field(default=None, description="Optional expiration timestamp")
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later "
+            "expiry is clamped to the key's creation plus that cap, and a key minted without one gets an "
+            "expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header."
+        ),
+    )
     allowed_models: list[str] | None = Field(
         default=None,
         description="Model allow-list: null = any model your user default allows, [] = deny all, "
@@ -211,7 +220,16 @@ class UpdateOwnKeyRequest(BaseModel):
 
     key_name: str | None = None
     is_active: bool | None = None
-    expires_at: datetime | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "New expiration timestamp, or null to clear it. Where the deployment sets "
+            "max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, "
+            "and a clear becomes an expiry at the cap; a clamped change answers with the "
+            "Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that "
+            "would clamp is refused with 409 rather than stored as an expiry already past."
+        ),
+    )
     reject_user_mismatch: bool | None = None
     capture_agent_telemetry: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = clear to
@@ -273,9 +291,10 @@ async def _load_member_key(
     )
 
 
-@router.post("")
+@router.post("", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def create_own_key(
     request: CreateOwnKeyRequest,
+    response: Response,
     identity: CurrentIdentity,
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -292,7 +311,9 @@ async def create_own_key(
     caller's own attribution user, the key is always budget-enforced, and the
     workspace must be visible to the caller (a member of it, or an organization
     owner/admin, who see every workspace). A viewer of the workspace is refused
-    with 403. The secret is returned once.
+    with 403. The secret is returned once. Where the deployment sets
+    ``max_api_key_lifetime_days``, the expiry is clamped to that cap (a mint naming
+    none gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.
 
     A service key is the organization's rather than the caller's: only an
     organization owner or admin may create one, its end-user budgets must be
@@ -413,6 +434,14 @@ async def create_own_key(
         owner = add_service_key_owner(db, alias=request.key_name or "Service key", creator=owner)
 
     api_key = key_format.mint()
+    # The deployment's lifetime cap, if set, binds what is stored, and the answer says
+    # so in ``Otari-Key-Lifetime-Capped``.
+    created_at = datetime.now(UTC)
+    expires_at, capped_to = ApiKeyService.cap_key_expiry(
+        config, request.expires_at, created_at=created_at, now=created_at
+    )
+    if capped_to is not None:
+        response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
     db_key = APIKey(
         id=str(uuid.uuid4()),
         workspace_id=workspace_id,
@@ -421,7 +450,7 @@ async def create_own_key(
         key_suffix=key_suffix(api_key),
         key_name=request.key_name,
         user_id=owner.user_id,
-        expires_at=request.expires_at,
+        expires_at=expires_at,
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
         scopes=scopes,
@@ -506,10 +535,11 @@ async def list_own_keys(
     return [KeyInfo.from_model(key) for key in keys]
 
 
-@router.patch("/{key_id}")
+@router.patch("/{key_id}", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def update_own_key(
     key_id: str,
     request: UpdateOwnKeyRequest,
+    response: Response,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -518,7 +548,13 @@ async def update_own_key(
     budgets: BudgetServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
 ) -> KeyInfo:
-    """Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin."""
+    """Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
+
+    A new ``expires_at`` is capped by the deployment's ``max_api_key_lifetime_days``,
+    measured from the key's creation, and a capped change answers with
+    ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap is refused
+    with 409 rather than stored as an expiry already past.
+    """
     fields = request.model_fields_set
     switching_off = fields == {"is_active"} and request.is_active is False
     organization, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
@@ -530,6 +566,13 @@ async def update_own_key(
     changes = request.model_dump(
         include=fields - {"is_active", "metadata", "is_service_key", "scopes"} - END_USER_SETTINGS
     )
+    if "expires_at" in changes:
+        expires_at, capped_to = ApiKeyService.cap_key_expiry(
+            config, changes["expires_at"], created_at=key.created_at, now=datetime.now(UTC)
+        )
+        changes["expires_at"] = expires_at
+        if capped_to is not None:
+            response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
     if request.is_active is not None:
         changes["is_active"] = request.is_active
     if request.scopes is not None:

@@ -69,7 +69,7 @@ from gateway.repositories.users_repository import (
     is_attribution_user_revoked,
     lock_live_users,
 )
-from gateway.services.api_keys import key_refusal
+from gateway.services.api_keys import ApiKeyService, key_refusal
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
@@ -318,6 +318,10 @@ class WorkspaceActivationService:
         One row per workspace, rotated in place, so a second press or a second
         manager leaves one key on the Keys page rather than two.
 
+        The key obeys the deployment's ``max_api_key_lifetime_days`` like any other
+        mint: it arrives with an expiry at the cap, and a rotation restarts the
+        lifetime from that moment.
+
         Refuses once the workspace has activated or the guide was dismissed: a
         retired flow does not get to keep handing out credentials, and a stale
         browser tab is the caller most likely to try.
@@ -367,6 +371,11 @@ class WorkspaceActivationService:
             user_id=str(user.id),
             alias=user.full_name or user.email,
         )
+        now = datetime.now(UTC)
+        # The deployment's lifetime cap, if set, binds this key like any other mint: the
+        # guide must not hand a workspace manager a key the cap forbids. A rotation
+        # restarts the lifetime, so the ceiling is measured from this presentation.
+        expires_at, _ceiling = ApiKeyService.cap_key_expiry(self.config, None, created_at=now, now=now)
         record = await self._existing_key(state)
         inserted = record is None
         if record is None:
@@ -380,6 +389,8 @@ class WorkspaceActivationService:
                 user_id=owner.user_id,
                 # The guide's one job is a first model call.
                 scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
+                created_at=now,
+                expires_at=expires_at,
             )
             self.db.add(record)
         else:
@@ -393,11 +404,12 @@ class WorkspaceActivationService:
             record.user_id = owner.user_id
             # A key the operator revoked from the Keys page and then asked the
             # guide for again is being asked for deliberately, and a new
-            # plaintext must not be born expired.
+            # plaintext must not be born expired: the rotation restarts the
+            # lifetime, so this is a fresh ceiling, not the old expiry.
+            record.created_at = now
             record.is_active = True
-            record.expires_at = None
+            record.expires_at = expires_at
 
-        now = datetime.now(UTC)
         if state.first_presented_at is None:
             state.first_presented_at = now
         state.last_presented_at = now
@@ -531,6 +543,11 @@ class WorkspaceActivationService:
             alias=user.full_name or user.email,
         )
         record = await self._existing_key(state)
+        now = datetime.now(UTC)
+        # The deployment's lifetime cap, if set, binds this key like any other mint: the
+        # guide must not hand a workspace manager a key the cap forbids. A rotation
+        # restarts the lifetime, so the ceiling is measured from this presentation.
+        expires_at, _ceiling = ApiKeyService.cap_key_expiry(self.config, None, created_at=now, now=now)
         # Rotated only where the member could switch the key back on themselves:
         # theirs, and not disabled for a reason an owner cannot clear (an
         # operator's, or a revocation). Any other row is left as it is and a
@@ -550,6 +567,8 @@ class WorkspaceActivationService:
                 scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
                 exclude_from_budget=False,
                 self_service=True,
+                created_at=now,
+                expires_at=expires_at,
             )
             self.db.add(record)
         else:
@@ -557,7 +576,8 @@ class WorkspaceActivationService:
             record.key_prefix = self.key_format.fingerprint(plaintext)
             record.key_suffix = key_suffix(plaintext)
             record.is_active = True
-            record.expires_at = None
+            record.created_at = now
+            record.expires_at = expires_at
 
         now = datetime.now(UTC)
         if state.first_presented_at is None:

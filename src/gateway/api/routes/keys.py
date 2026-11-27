@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
@@ -18,10 +18,10 @@ from gateway.api.deps import (
     get_db,
     require_deployment_operator,
 )
-from gateway.api.routes._helpers import database_error
+from gateway.api.routes._helpers import KEY_LIFETIME_CAPPED_HEADERS, database_error
 from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
-from gateway.core.config import GatewayConfig
+from gateway.core.config import KEY_LIFETIME_CAPPED_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.sql import utc_iso
 from gateway.core.surface import Surface
@@ -32,6 +32,7 @@ from gateway.repositories.users_repository import get_or_create_default_user, ow
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate, KeyEndUsersPublic
 from gateway.services.api_keys import (
+    ApiKeyService,
     operator_enable_refusal,
     operator_max_end_users,
     operator_set_active,
@@ -128,7 +129,14 @@ class CreateKeyRequest(BaseModel):
 
     key_name: str | None = Field(default=None, description="Optional name for the key")
     user_id: str | None = Field(default=None, description="Optional user ID to associate with this key")
-    expires_at: datetime | None = Field(default=None, description="Optional expiration timestamp")
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Optional expiration timestamp. Where the deployment sets max_api_key_lifetime_days, a later "
+            "expiry is clamped to the key's creation plus that cap, and a key minted without one gets an "
+            "expiry at the cap; a clamped mint answers with the Otari-Key-Lifetime-Capped header."
+        ),
+    )
     allowed_models: list[str] | None = Field(
         default=None,
         description="Model allow-list: null = any model, [] = deny all, or canonical "
@@ -305,7 +313,16 @@ class UpdateKeyRequest(BaseModel):
 
     key_name: str | None = None
     is_active: bool | None = None
-    expires_at: datetime | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "New expiration timestamp, or null to clear it. Where the deployment sets "
+            "max_api_key_lifetime_days, a later expiry is clamped to the key's creation plus that cap, "
+            "and a clear becomes an expiry at the cap; a clamped change answers with the "
+            "Otari-Key-Lifetime-Capped header. On a key older than that cap, a write that "
+            "would clamp is refused with 409 rather than stored as an expiry already past."
+        ),
+    )
     exclude_from_budget: bool | None = None
     # Tri-state via model_fields_set, like allowed_models below: absent =
     # unchanged, null = clear to inheriting the deployment setting, true/false =
@@ -334,9 +351,10 @@ class UpdateKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-@router.post("")
+@router.post("", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def create_key(
     request: CreateKeyRequest,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
@@ -352,6 +370,9 @@ async def create_key(
     If user_id is not provided, the key is associated with the shared "default" user, which is created
     on first use. Keys without an explicit owner therefore share one identity, and so share budget,
     usage, and files.
+
+    Where the deployment sets ``max_api_key_lifetime_days``, the expiry is clamped to that cap
+    (a mint naming none gets one at the cap), and the answer carries ``Otari-Key-Lifetime-Capped``.
 
     ``workspace_id`` names a workspace in the caller's organization, and omitting
     it mints into that organization's default workspace. A key resolves that
@@ -458,6 +479,15 @@ async def create_key(
             )
         workspace_id = resolved
 
+    # The deployment's lifetime cap, if set, binds what is stored: the mint is clamped
+    # before insert and the answer says so in ``Otari-Key-Lifetime-Capped``.
+    created_at = datetime.now(UTC)
+    expires_at, capped_to = ApiKeyService.cap_key_expiry(
+        config, request.expires_at, created_at=created_at, now=created_at
+    )
+    if capped_to is not None:
+        response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
+
     db_key = APIKey(
         id=str(key_id),
         workspace_id=workspace_id,
@@ -466,7 +496,7 @@ async def create_key(
         key_suffix=key_suffix(api_key),
         key_name=request.key_name,
         user_id=user_id,
-        expires_at=request.expires_at,
+        expires_at=expires_at,
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
         scopes=scopes,
@@ -538,10 +568,11 @@ async def get_key(
     return KeyInfo.from_model(key)
 
 
-@router.patch("/{key_id}")
+@router.patch("/{key_id}", responses={200: {"headers": KEY_LIFETIME_CAPPED_HEADERS}})
 async def update_key(
     key_id: str,
     request: UpdateKeyRequest,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
@@ -551,7 +582,10 @@ async def update_key(
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
-    Requires master key authentication.
+    Requires master key authentication. A new ``expires_at`` is capped by the deployment's
+    ``max_api_key_lifetime_days``, measured from the key's creation, and a capped change
+    answers with ``Otari-Key-Lifetime-Capped``. A capped write on a key older than the cap
+    is refused with 409 rather than stored as an expiry already past.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     refuse_service_key_flag_change(key, request.is_service_key)
@@ -605,7 +639,11 @@ async def update_key(
     if request.is_active is not None:
         operator_set_active(key, request.is_active)
     if "expires_at" in request.model_fields_set:
-        key.expires_at = request.expires_at
+        key.expires_at, capped_to = ApiKeyService.cap_key_expiry(
+            config, request.expires_at, created_at=key.created_at, now=datetime.now(UTC)
+        )
+        if capped_to is not None:
+            response.headers[KEY_LIFETIME_CAPPED_HEADER] = utc_iso(capped_to)
     if request.exclude_from_budget is not None:
         key.exclude_from_budget = request.exclude_from_budget
     if "reject_user_mismatch" in request.model_fields_set:

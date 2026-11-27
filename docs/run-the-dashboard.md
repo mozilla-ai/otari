@@ -240,6 +240,10 @@ it offers the key it already issued, named by its last characters, instead of
 a new one: **Use it** keeps that key, and **Replace it** issues a new one and
 the old key stops working.
 
+Where the deployment sets `max_api_key_lifetime_days` (see
+[Configuration](configuration.md)), the guide's key carries an expiry at that
+cap like any other minted key, and **Replace it** restarts its lifetime.
+
 Set `activation_guide: false` to turn off the dashboard's
 setup guide for the deployment.
 

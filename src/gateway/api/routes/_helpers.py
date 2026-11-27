@@ -17,6 +17,7 @@ from gateway.core.config import (
     CONVERSATION_HEADER,
     COST_USD_HEADER,
     END_USER_BUDGET_HEADER,
+    KEY_LIFETIME_CAPPED_HEADER,
     PRICING_SOURCE_HEADER,
     ROUTER_HEADER,
 )
@@ -51,6 +52,19 @@ USER_MISMATCH_END_USER_DETAIL = f"{USER_MISMATCH_DETAIL} To bill each end user s
 USER_MISMATCH_METADATA_DETAIL = (
     f"{USER_MISMATCH_END_USER_DETAIL} To tag a request with a free-form ID, put it in metadata instead."
 )
+
+
+# How the OpenAPI spec describes the expiry a clamped key write answers with.
+KEY_LIFETIME_CAPPED_HEADERS: dict[str, Any] = {
+    KEY_LIFETIME_CAPPED_HEADER: {
+        "description": (
+            "The expiry, in UTC ISO-8601, that the write was clamped to by max_api_key_lifetime_days; "
+            "absent when no clamping happened"
+        ),
+        "schema": {"type": "string"},
+    },
+}
+
 
 # How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.
 DIRECT_TOOL_COST_HEADERS: dict[str, Any] = {

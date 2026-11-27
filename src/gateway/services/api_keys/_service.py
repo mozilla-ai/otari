@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
 from gateway.auth.models import hash_key, key_suffix
@@ -16,6 +16,7 @@ from gateway.exceptions.api_keys_exceptions import (
     FederationRuleLimitError,
     FederationRuleNotFoundError,
     KeyEnableRefusedError,
+    KeyLifetimeCapPassedError,
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
@@ -71,6 +72,50 @@ class ApiKeyService:
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
+
+    @staticmethod
+    def cap_key_expiry(
+        config: GatewayConfig,
+        requested: datetime | None,
+        *,
+        created_at: datetime,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime | None]:
+        """The ``expires_at`` to store on a key created at ``created_at``, and the cap that changed the ask.
+
+        ``max_api_key_lifetime_days`` bounds a minted API key's lifetime: the ceiling is
+        ``created_at`` plus that many days. An ask past the ceiling is clamped to it, an
+        ask naming no expiry gets the ceiling (an unbounded key would outlive every cap),
+        and an ask within it is stored as the instant it names, at UTC, with no ceiling
+        reported back. Unset, the default, nothing moves. The cap governs writes: lowering
+        it leaves already-issued keys on the expiry they were given.
+
+        The second element is the ceiling that was applied, or None: the caller echoes
+        it in the ``Otari-Key-Lifetime-Capped`` response header.
+
+        Raises:
+            KeyLifetimeCapPassedError: the write would become the ceiling and the ceiling
+                is already past at ``now``, so storing it would end the key rather than
+                renew it. An ask already within the ceiling is the caller's own expiry,
+                stands as it arrived, and cannot raise this.
+        """
+        days = config.max_api_key_lifetime_days
+        if days is None:
+            return requested, None
+        # An offset-less timestamp is read as UTC, as the admission check reads one, so the
+        # comparisons are against instants rather than a ``TypeError``.
+        start = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+        ceiling = start + timedelta(days=days)
+        if requested is not None:
+            requested_utc = requested if requested.tzinfo else requested.replace(tzinfo=UTC)
+            if requested_utc <= ceiling:
+                return requested_utc.astimezone(UTC), None
+        # The ask becomes the ceiling; storing a ceiling already past would kill the key
+        # on what reads as a renewal, so a cap the key has outlived refuses the write.
+        now_utc = now if now.tzinfo else now.replace(tzinfo=UTC)
+        if ceiling <= now_utc:
+            raise KeyLifetimeCapPassedError(days)
+        return ceiling, ceiling
 
     async def issue_app_key(
         self,

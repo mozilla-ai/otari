@@ -72,6 +72,11 @@ providers:
 #     end_user_budget_id: per-user-daily
 #     ceiling: service-global
 
+# Longest lifetime a minted API key may be given, in days from the key's creation. A later
+# expiry is clamped to the cap, and a key minted without an expiry gets one at it. Unset
+# is no cap; keys declared above are unaffected.
+# max_api_key_lifetime_days: 90
+
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true

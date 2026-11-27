@@ -105,6 +105,9 @@ COST_USD_HEADER = "Otari-Cost-USD"
 PRICING_SOURCE_HEADER = "Otari-Pricing-Source"
 USAGE_UNIT_HEADER = "Otari-Usage-Unit"
 USAGE_UNITS_HEADER = "Otari-Usage-Units"
+# Response header carrying the expiry a key create or update was clamped to by
+# ``max_api_key_lifetime_days``; absent when no clamping happened.
+KEY_LIFETIME_CAPPED_HEADER = "Otari-Key-Lifetime-Capped"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"

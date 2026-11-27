@@ -53,6 +53,7 @@ from gateway.core.config import (
     CONVERSATION_HEADER,
     COST_USD_HEADER,
     DEPLOYMENT_PAID_HEADER,
+    KEY_LIFETIME_CAPPED_HEADER,
     PRICING_SOURCE_HEADER,
     TAGS_HEADER,
     USAGE_UNIT_HEADER,
@@ -790,6 +791,9 @@ _CORS_EXPOSE_HEADERS = (
     COST_USD_HEADER,
     DEPLOYMENT_PAID_HEADER,
     ERROR_CODE_HEADER,
+    # A clamped key write tells the browser what it was clamped to, and the
+    # dashboard is the client that has to show it.
+    KEY_LIFETIME_CAPPED_HEADER,
     PRICING_SOURCE_HEADER,
     USAGE_UNIT_HEADER,
     USAGE_UNITS_HEADER,

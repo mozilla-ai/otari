@@ -14,10 +14,12 @@ import {
   ceilingLabel,
   draftFor,
   EMPTY_KEY_BUDGET,
+  type KeyBudgetDraft,
   KeyBudgetField,
   keyBudgetIncomplete,
   useKeyBudgets,
 } from "@/features/keys/KeyBudgetField"
+import { KeyLifetimeNote } from "@/features/keys/KeyLifetimeNote"
 import { heldScopes, KeyScopeFields } from "@/features/keys/KeyScopeFields"
 import { OwnerAccessNote } from "@/features/keys/OwnerAccessNote"
 import {
@@ -81,6 +83,15 @@ export function EditKeyForm({
   const users = useUsers(isDeploymentWide)
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "")
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at))
+  // The expiry on record, in the shape the field reads: the seed at open,
+  // and a save's own stored expiry from then on. The PATCH rewrites the
+  // expiry whenever the field is present, so only one that differs from
+  // this is sent.
+  const [savedExpiresAt, setSavedExpiresAt] = useState(() =>
+    toDatetimeLocal(apiKey.expires_at),
+  )
+  // The expiry this save was clamped to, "" for a save that clamped nothing.
+  const [lifetimeCappedTo, setLifetimeCappedTo] = useState("")
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     apiKey.allowed_models ?? undefined,
   )
@@ -164,9 +175,17 @@ export function EditKeyForm({
 
   const submit = () => {
     if (isSaving || isBlocked) return
+    setLifetimeCappedTo("")
     const shared = {
       key_name: keyName.trim() || null,
-      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      // Absent on the PATCH means unchanged, and a present value is rewritten
+      // however it reads: a cap could clamp or refuse a save that only renamed
+      // the key, so an expiry the caller left alone is not sent.
+      ...(expiresAt !== savedExpiresAt
+        ? {
+            expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+          }
+        : null),
       allowed_models: allowedModels ?? null,
       allowed_tools: allowedTools ?? null,
       scopes,
@@ -185,9 +204,38 @@ export function EditKeyForm({
     update.mutate(
       { id: apiKey.id, body },
       {
-        onSuccess: () => {
-          if (!budgetChanged) return onClose()
-          // A refusal stays on the form, reported through `applyError`.
+        onSuccess: (result) => {
+          // The PATCH landed, so show where the expiry landed at once: the
+          // key fields are stored whatever the budget write below answers,
+          // and a refusal's banner would otherwise cover the note saying
+          // the expiry is not what was asked for. The field takes the
+          // stored value and the seed follows, so the form reads as saved.
+          const landed = result.cappedTo
+            ? toDatetimeLocal(result.cappedTo)
+            : expiresAt
+          if (result.cappedTo) {
+            setLifetimeCappedTo(result.cappedTo)
+            setExpiresAt(landed)
+          }
+          setSavedExpiresAt(landed)
+          const saved = (budget: KeyBudgetDraft | undefined) =>
+            reseed({
+              keyName,
+              expiresAt: landed,
+              allowedModels,
+              allowedTools,
+              excludeFromBudget,
+              serviceKey,
+              keyScopes,
+              rejectUserMismatch,
+              scopeValid,
+              toolScopeValid,
+              budgetDraft: budget ?? budgetDraft,
+            })
+          if (!budgetChanged) {
+            if (!result.cappedTo) return onClose()
+            return saved(budgetDraft)
+          }
           keyBudgets
             .change({
               keyId: apiKey.id,
@@ -195,7 +243,19 @@ export function EditKeyForm({
               draft: budgetDraft,
               current: ceiling,
             })
-            .then(onClose, () => {})
+            .then(
+              () => {
+                // The cap this save drafted is the one on record now, so
+                // the next save's comparison runs against it.
+                setInitialBudget(budgetDraft)
+                saved(budgetDraft)
+                if (!result.cappedTo) onClose()
+              },
+              // A refusal leaves the cap change dirty against the cap on
+              // record, its error held on the form, so the next Save
+              // retries just that write.
+              () => saved(initialBudget),
+            )
         },
       },
     )
@@ -229,8 +289,9 @@ export function EditKeyForm({
         label="Expires"
         value={expiresAt}
         onChange={setExpiresAt}
-        description="Blank clears the expiry."
+        description="Blank clears the expiry, or, where the deployment caps key lifetime, sets it at the cap."
       />
+      <KeyLifetimeNote cappedTo={lifetimeCappedTo} />
       {showBudget ? (
         <KeyBudgetField
           value={budgetDraft}
