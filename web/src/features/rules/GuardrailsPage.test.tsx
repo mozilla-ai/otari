@@ -307,6 +307,11 @@ describe("Guardrails", () => {
     const laptop = await within(grid).findByRole("row", {
       name: /Claude Code, laptop/,
     })
+    expect(
+      within(grid)
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent),
+    ).toEqual(["API key", "Models", "Tools"])
     expect(laptop).toHaveTextContent("All Anthropic models")
     expect(laptop).toHaveTextContent("Any tool")
     const ci = within(grid).getByRole("row", { name: /CI pipeline/ })
@@ -529,6 +534,25 @@ describe("Guardrails, when a read fails or is slow", () => {
     const wei = await within(grid).findByRole("row", { name: /Wei Zhang/ })
     expect(wei).toHaveTextContent("Could not be read")
     expect(screen.getAllByRole("alert")).toHaveLength(1)
+  })
+
+  it("keeps the Actions column in place for an owner while the budgets load", async () => {
+    let answer = () => {}
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    await renderAs("owner", <GuardrailsPage />, "/guardrails", {
+      ...FULL,
+      held: { "/organizations/me/spend-ceilings": held },
+    })
+    const grid = await screen.findByRole("grid", { name: "Budget" })
+    expect(
+      within(grid).getByRole("columnheader", { name: "Actions" }),
+    ).toBeInTheDocument()
+    answer()
+    expect(
+      await within(grid).findByRole("row", { name: /Contractor cap/ }),
+    ).toBeInTheDocument()
   })
 
   it("draws no moderation row before the definitions and workspaces land", async () => {

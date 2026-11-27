@@ -19,9 +19,14 @@ export function ModerationBand({ moderation }: { moderation: Moderation }) {
       id: "profile",
       header: "Profile",
       isRowHeader: true,
+      // A broken guardrail says what it does to requests under its profile,
+      // and its row grows to hold the line.
       cell: (row) => (
-        <span className="flex min-w-0 items-center gap-3">
-          <code className="truncate font-mono text-foreground">
+        <span className="flex min-w-0 flex-col">
+          <code
+            className="truncate font-mono text-foreground"
+            title={row.profile}
+          >
             {row.profile}
           </code>
           <MandateConsequenceMark consequence={row.consequence} />
@@ -37,14 +42,18 @@ export function ModerationBand({ moderation }: { moderation: Moderation }) {
       id: "runs_on",
       header: "Runs on",
       cell: (row) => (
-        <span className="block truncate text-muted">{row.runsOn}</span>
+        <span className="block truncate text-muted" title={row.runsOn}>
+          {row.runsOn}
+        </span>
       ),
     },
     {
       id: "checks",
       header: "Checks",
       cell: (row) => (
-        <span className="block truncate text-muted">{row.checks}</span>
+        <span className="block truncate text-muted" title={row.checks}>
+          {row.checks}
+        </span>
       ),
     },
     {

@@ -152,7 +152,7 @@ export function GuardrailsPage() {
           onAction={() => setNewOpen(true)}
         />
       ) : isFailed ? null : (
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-6">
           <RuleBand
             type="spend"
             rules={budgets}
@@ -211,7 +211,11 @@ function RuleBand({
   const shown = sortRules(rules, activeSort)
   const actionsOf = (rule: Rule) =>
     ruleActions(rule, { isManager, canManageWorkspace })
-  const hasActions = rules.some((rule) => actionsOf(rule).length)
+  // Reserved on an owner's or admin's budgets before the rows land, so the
+  // columns do not move when they do. A key's lists have no row menu.
+  const hasActions =
+    (isManager && type === "spend") ||
+    rules.some((rule) => actionsOf(rule).length)
   const empty = emptyCopy(type, isManager, {
     isDeploymentWide: keysScope.isDeploymentWide,
     canCreateKey,

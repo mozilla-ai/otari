@@ -3393,25 +3393,27 @@ body {
 .otari-rules-table .table__content {
   table-layout: fixed;
   width: 100%;
-  min-width: 68.5rem; /* Budget: 54.5rem of lanes */
+  min-width: 68.5rem; /* Budget: 54.25rem of lanes */
 }
 .otari-rules-table.is-access .table__content {
-  min-width: 60rem;
+  min-width: 60rem; /* 47.5rem, the tools taking the rest */
 }
 .otari-rules-table.is-data .table__content {
-  min-width: 68rem; /* 54.25rem */
+  min-width: 68rem; /* 51.25rem */
 }
 .otari-rules-table.is-member.is-spend .table__content {
-  min-width: 61.5rem; /* 47.5rem */
+  min-width: 61.5rem; /* 31.25rem, the name and the limit sharing the rest */
 }
 .otari-rules-table.is-people .table__content {
   min-width: 36rem;
 }
 .otari-rules-table.is-assigned-members .table__content {
-  min-width: 62rem;
+  min-width: 62rem; /* 42.5rem, the moderation taking the rest */
 }
+/* The moderation lane gets at least 22rem, room for two profiles and the
+   workspace they run in. */
 .otari-rules-table.is-assigned-keys .table__content {
-  min-width: 70rem;
+  min-width: 76rem; /* 54rem */
 }
 .otari-rules-table .table__row .table__cell {
   height: 2.75rem;
@@ -3479,9 +3481,11 @@ body {
 .otari-rules-table.is-assigned-members .table__column[data-key="role"] {
   width: 6.875rem;
 }
-.otari-rules-table:is(.is-assigned-members, .is-assigned-keys)
-  .table__column[data-key="budget"] {
+.otari-rules-table.is-assigned-members .table__column[data-key="budget"] {
   width: 20.625rem;
+}
+.otari-rules-table.is-assigned-keys .table__column[data-key="budget"] {
+  width: 13rem;
 }
 .otari-rules-table.is-assigned-keys .table__column[data-key="models"] {
   width: 16rem;
@@ -3504,15 +3508,41 @@ body {
   .otari-rules-table .table__row .table__cell {
     height: 1.75rem;
   }
-  .otari-rules-table .table__column[data-key="name"],
-  .otari-rules-table .table__cell[data-column="name"] {
+  /* Each table's first column, whatever it is keyed: a guardrail's name, a
+     profile, a member or a key. */
+  .otari-rules-table
+    .table__column:is(
+      [data-key="name"],
+      [data-key="profile"],
+      [data-key="member"],
+      [data-key="key"]
+    ),
+  .otari-rules-table
+    .table__cell:is(
+      [data-column="name"],
+      [data-column="profile"],
+      [data-column="member"],
+      [data-column="key"]
+    ) {
     position: sticky;
     left: 0;
     z-index: 1;
     background-color: var(--color-background);
   }
-  .otari-rules-table[data-scrolled="true"] .table__column[data-key="name"],
-  .otari-rules-table[data-scrolled="true"] .table__cell[data-column="name"] {
+  .otari-rules-table[data-scrolled="true"]
+    .table__column:is(
+      [data-key="name"],
+      [data-key="profile"],
+      [data-key="member"],
+      [data-key="key"]
+    ),
+  .otari-rules-table[data-scrolled="true"]
+    .table__cell:is(
+      [data-column="name"],
+      [data-column="profile"],
+      [data-column="member"],
+      [data-column="key"]
+    ) {
     border-right: 1px solid var(--color-control-border);
   }
 }

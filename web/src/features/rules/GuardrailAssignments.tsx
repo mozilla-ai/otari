@@ -9,6 +9,7 @@ import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { MemberAvatar } from "@/features/account/avatar/MemberAvatar"
 import { keyState } from "@/features/keys/keyList"
@@ -169,7 +170,10 @@ export function GuardrailAssignments({
   ) : moderation.rows.length === 0 ? (
     <span className="text-muted">None</span>
   ) : (
-    <span className="flex min-w-0 items-center gap-2">
+    <span
+      className="flex min-w-0 items-center gap-2"
+      title={`${moderation.rows.map((row) => row.profile).join(", ")} via ${moderation.workspace?.name}`}
+    >
       <code className="truncate font-mono text-foreground">
         {moderation.rows.map((row) => row.profile).join(", ")}
       </code>
@@ -201,7 +205,9 @@ export function GuardrailAssignments({
             face={row.member.avatar_face}
             isCompact
           />
-          <span className="truncate">{row.name}</span>
+          <span className="truncate" title={row.name}>
+            {row.name}
+          </span>
         </span>
       ),
     },
@@ -223,7 +229,11 @@ export function GuardrailAssignments({
       id: "key",
       header: "API key",
       isRowHeader: true,
-      cell: (row) => <span className="block truncate">{row.name}</span>,
+      cell: (row) => (
+        <span className="block truncate" title={row.name}>
+          {row.name}
+        </span>
+      ),
     },
     { id: "budget", header: "Budget", cell: (row) => budgetCell(row.budgets) },
     {
@@ -272,7 +282,7 @@ export function GuardrailAssignments({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <Toolbar className="justify-between">
         <Segmented
           label="Assigned to"
           options={BY_OPTIONS}
@@ -286,7 +296,7 @@ export function GuardrailAssignments({
           onChange={(value) => url.patch({ q: value })}
           className="w-72 max-w-full max-sm:w-full"
         />
-      </div>
+      </Toolbar>
       {error ? <ErrorBanner error={error} /> : null}
       {by === "keys" ? (
         <TableScrollFrame className="otari-rules-table is-assigned-keys">
