@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/109103d2b2cd338d968d9ba82e734912ff956abb/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/e579d4a370eadf32dc5a02b93e614d62ba96c997/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
-| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla AI's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -874,7 +874,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/109103d2b2cd338d968d9ba82e734912ff956abb/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/e579d4a370eadf32dc5a02b93e614d62ba96c997/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1094,7 +1094,7 @@ serves, with their history; the cleanup never runs on a schedule.
 An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
 from `models_dev_base_url`. It carries every rate the catalog states, per
 second, image, character and minute as well as per token, so a video, image,
-speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla AI's fork of models.dev,
 which publishes the same documents at the same paths, built from models.dev's
 catalog plus the models it does not list yet; each of those is also offered to
 models.dev, and leaves the fork once it lands there. `https://models.dev` reads
@@ -1980,7 +1980,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/109103d2b2cd338d968d9ba82e734912ff956abb/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/e579d4a370eadf32dc5a02b93e614d62ba96c997/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
