@@ -127,7 +127,7 @@ curl https://api.otari.ai/api/v1/chat/completions \
 
 `profile` is a name you choose; it is sent to your service as given. A `url` in a request must be on a public address, with no redirect followed, so a service on `localhost` or a private network cannot be reached this way. `credential` is sent to the service as `Authorization: Bearer`, which is what `GUARD_TOKEN` checks, and it requires an `https` address. [The `guardrails` request field](guardrails-reference.md#the-guardrails-request-field) lists every rule.
 
-To check every request of an organization without changing client code, mandate the same `url` and `credential` on the **Guardrails** page (choose your own guardrail service) or over the API ([Mandate fields](guardrails-reference.md#mandate-fields)). The credential is stored encrypted and never returned.
+To check every request of an organization without changing client code, mandate the same `url` and `credential` on the organization's **Guardrails** page (choose your own guardrail service) or over the API ([Mandate fields](guardrails-reference.md#mandate-fields)). The credential is stored encrypted and never returned.
 
 Otari reads the result as it does any other guardrail's: a flagged input in `block` mode is refused with `403` and `guardrail_violation`, and the verdict of a served request is on the `Otari-Guardrails` header ([Reading the header](guardrails-reference.md#reading-the-otari-guardrails-header)).
 

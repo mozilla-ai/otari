@@ -141,6 +141,8 @@ export function GuardrailAssignments({
     ]
   })
 
+  memberRows.sort((a, b) => a.name.localeCompare(b.name))
+
   const keyRows: KeyRow[] = (keys.data ?? []).flatMap((key) => {
     if (key.workspace_id !== workspaceId || keyState(key, now) !== "active") {
       return []
@@ -161,6 +163,8 @@ export function GuardrailAssignments({
       },
     ]
   })
+
+  keyRows.sort((a, b) => a.name.localeCompare(b.name))
 
   // Nothing is empty that could not be read.
   const unread = <span className="text-muted">Could not be read</span>

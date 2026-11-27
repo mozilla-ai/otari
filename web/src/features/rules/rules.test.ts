@@ -846,20 +846,32 @@ describe("a key's lists, as a cell shows them", () => {
     expect(
       modelEntries(["anthropic:*", "openai:gpt-5.1-mini", "mistral:*"]),
     ).toEqual([
-      { text: "All Anthropic models", isId: false },
-      { text: "openai:gpt-5.1-mini", isId: true },
-      { text: "All Mistral AI models", isId: false },
+      { id: "anthropic:*", text: "All Anthropic models", isId: false },
+      { id: "openai:gpt-5.1-mini", text: "openai:gpt-5.1-mini", isId: true },
+      { id: "mistral:*", text: "All Mistral AI models", isId: false },
     ])
   })
 
   it("tells no list, an empty list and the star apart", () => {
-    expect(modelEntries(null)).toEqual([{ text: "All models", isId: false }])
-    expect(modelEntries([])).toEqual([{ text: "No models", isId: false }])
-    expect(modelEntries(["*"])).toEqual([{ text: "All models", isId: false }])
-    expect(toolEntries(null)).toEqual([{ text: "Any tool", isId: false }])
-    expect(toolEntries(["*"])).toEqual([{ text: "Any tool", isId: false }])
-    expect(toolEntries([])).toEqual([{ text: "No tools", isId: false }])
-    expect(toolEntries(["tavily"])).toEqual([{ text: "tavily", isId: true }])
+    expect(modelEntries(null)).toEqual([
+      { id: "*", text: "All models", isId: false },
+    ])
+    expect(modelEntries([])).toEqual([
+      { id: "", text: "No models", isId: false },
+    ])
+    expect(modelEntries(["*"])).toEqual([
+      { id: "*", text: "All models", isId: false },
+    ])
+    expect(toolEntries(null)).toEqual([
+      { id: "*", text: "Any tool", isId: false },
+    ])
+    expect(toolEntries(["*"])).toEqual([
+      { id: "*", text: "Any tool", isId: false },
+    ])
+    expect(toolEntries([])).toEqual([{ id: "", text: "No tools", isId: false }])
+    expect(toolEntries(["tavily"])).toEqual([
+      { id: "tavily", text: "tavily", isId: true },
+    ])
   })
 })
 

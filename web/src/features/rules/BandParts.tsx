@@ -11,7 +11,7 @@ export function EntryList({ entries }: { entries: readonly ListEntry[] }) {
       title={entries.map((one) => one.text).join(", ")}
     >
       {entries.map((one, index) => (
-        <Fragment key={one.text}>
+        <Fragment key={one.id}>
           {index > 0 ? ", " : null}
           {one.isId ? (
             <code className="text-mono-caption text-foreground">

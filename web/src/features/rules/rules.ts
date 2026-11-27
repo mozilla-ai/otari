@@ -804,6 +804,8 @@ export function accessWords(access: NonNullable<Rule["access"]>): string {
 
 /** One entry of an allow-list as a cell shows it. */
 export interface ListEntry {
+  /** The stored entry, or what stands for no list or an empty one. */
+  id: string
   text: string
   /** A model or tool id, set in mono; words otherwise. */
   isId: boolean
@@ -815,24 +817,25 @@ export interface ListEntry {
  */
 export function modelEntries(models: readonly string[] | null): ListEntry[] {
   if (models === null || models.includes("*")) {
-    return [{ text: "All models", isId: false }]
+    return [{ id: "*", text: "All models", isId: false }]
   }
-  if (models.length === 0) return [{ text: "No models", isId: false }]
+  if (models.length === 0) return [{ id: "", text: "No models", isId: false }]
   return models.map((id) =>
     id.endsWith(":*")
       ? {
+          id,
           text: `All ${providerDisplayName(id.slice(0, -2))} models`,
           isId: false,
         }
-      : { text: id, isId: true },
+      : { id, text: id, isId: true },
   )
 }
 
 /** A key's search and fetch tools; no list, or the star, allows any. */
 export function toolEntries(tools: readonly string[] | null): ListEntry[] {
   if (tools === null || tools.includes("*")) {
-    return [{ text: "Any tool", isId: false }]
+    return [{ id: "*", text: "Any tool", isId: false }]
   }
-  if (tools.length === 0) return [{ text: "No tools", isId: false }]
-  return tools.map((id) => ({ text: id, isId: true }))
+  if (tools.length === 0) return [{ id: "", text: "No tools", isId: false }]
+  return tools.map((id) => ({ id, text: id, isId: true }))
 }
