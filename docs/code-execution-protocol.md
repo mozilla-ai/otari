@@ -10,7 +10,7 @@ be built against something canonical.
 
 The reference backend is
 [otari-sandbox-container](https://github.com/mozilla-ai/otari-sandbox-container),
-a single container that stands alone with no orchestrator. mozilla.ai operates a
+a single container that stands alone with no orchestrator. Mozilla AI operates a
 second, pool-backed backend for [otari.ai](https://otari.ai). Both implement this
 contract, and Otari cannot tell which one answered.
 

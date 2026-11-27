@@ -22,7 +22,8 @@ import {
 } from "@/features/tools/mcpServerForm"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
-import { useTestWorkspaceMcpServerConnection } from "@/shared/api/tools"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
+import { useTestMcpServerConnection } from "@/shared/api/tools"
 
 // The form that registers a server. Changing one afterwards happens on the
 // server's own page (`McpServerDetailPage`), so this is an add and nothing else.
@@ -48,26 +49,57 @@ export interface McpServerDraft {
 
 type WhoCanUse = "everyone" | "nobody"
 
-const WHO_CAN_USE: RadioOption[] = [
-  {
-    value: "everyone",
-    label: "Allow",
-    description:
-      "Everyone in the workspace can use it, unless an access rule says otherwise.",
+// What the form says differs only in whose server it adds. An organization's
+// default policy is where each workspace starts, and its access rules are each
+// workspace's own.
+const SCOPE_COPY: Record<
+  McpServerScope["kind"],
+  { description: string; nameHelp: string; whoCanUse: RadioOption[] }
+> = {
+  workspace: {
+    description: "Connect a remote MCP server to this workspace.",
+    nameHelp: "Unique in this workspace.",
+    whoCanUse: [
+      {
+        value: "everyone",
+        label: "Allow",
+        description:
+          "Everyone in the workspace can use it, unless an access rule says otherwise.",
+      },
+      {
+        value: "nobody",
+        label: "Deny",
+        description:
+          "Nobody can use it until you add access rules on the server's page.",
+      },
+    ],
   },
-  {
-    value: "nobody",
-    label: "Deny",
+  organization: {
     description:
-      "Nobody can use it until you add access rules on the server's page.",
+      "Connect a remote MCP server every workspace in your organization can use.",
+    nameHelp: "Unique in your organization, its workspaces' servers included.",
+    whoCanUse: [
+      {
+        value: "everyone",
+        label: "Allow",
+        description:
+          "Everyone in each workspace can use it, unless the workspace's access rules say otherwise.",
+      },
+      {
+        value: "nobody",
+        label: "Deny",
+        description:
+          "Nobody can use it until a workspace's admins add access rules.",
+      },
+    ],
   },
-]
+}
 
 export interface McpServerDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** Where Test connection checks the draft, without storing it. */
-  workspaceId: string
+  /** Whose server this adds, and so where Test connection checks the draft, without storing it. */
+  scope: McpServerScope
   isPending: boolean
   error: unknown
   onSubmit: (draft: McpServerDraft) => void
@@ -76,7 +108,7 @@ export interface McpServerDialogProps {
 export function McpServerDialog({
   isOpen,
   onOpenChange,
-  workspaceId,
+  scope,
   isPending,
   error,
   onSubmit,
@@ -121,7 +153,8 @@ export function McpServerDialog({
   // once either changes. The allow-list is left out on purpose: the picker below
   // edits it, and the catalog a test listed does not depend on it.
   const connection = JSON.stringify([url.trim(), tokenField ?? null])
-  const test = useTestWorkspaceMcpServerConnection()
+  const copy = SCOPE_COPY[scope.kind]
+  const test = useTestMcpServerConnection()
   const [testedConnection, setTestedConnection] = useState<string>()
   const testIsCurrent = testedConnection === connection && !test.isPending
   const tested = testIsCurrent ? test.data : undefined
@@ -130,7 +163,7 @@ export function McpServerDialog({
   const runTest = () => {
     setTestedConnection(connection)
     test.mutate({
-      workspaceId,
+      scope,
       body: {
         url: url.trim(),
         authorization_token: tokenField,
@@ -165,7 +198,7 @@ export function McpServerDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title="New MCP server"
-      description="Connect a remote MCP server to this workspace."
+      description={copy.description}
       submitLabel="Add MCP server"
       onSubmit={submit}
       isPending={isPending}
@@ -193,7 +226,7 @@ export function McpServerDialog({
         placeholder="github"
         isRequired
         autoFocus
-        description="Unique in this workspace."
+        description={copy.nameHelp}
       />
       <Field
         label="URL"
@@ -308,7 +341,7 @@ export function McpServerDialog({
         label="Default policy"
         value={whoCanUse}
         onChange={(next) => setWhoCanUse(next as WhoCanUse)}
-        options={WHO_CAN_USE}
+        options={copy.whoCanUse}
       />
     </FormDialog>
   )

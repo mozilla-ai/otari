@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react"
+
+import type { McpConnectionStarted } from "@/client"
 import {
   type McpConnectionNotice,
   rememberMcpConnectionNotice,
@@ -13,6 +15,7 @@ import {
   stateOf,
   subscribeToSignInResult,
 } from "@/features/tools/mcpSignInWindow"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
 import {
   useRefreshAfterMcpSignIn,
   useStartMcpCheckSignIn,
@@ -59,12 +62,13 @@ export function noticeFor(
  * provider instead and the callback page brings it back, as before.
  */
 export function useMcpSignIn({
-  workspaceId,
+  scope,
   returnTo,
   onLeave = leaveFor,
   openWindow = openSignInWindow,
 }: {
-  workspaceId: string
+  /** Whose servers these are. A person connects their own account from a workspace only. */
+  scope: McpServerScope
   /** The dashboard path to come back to after a full-page sign-in. */
   returnTo: string
   /** Sends the whole page to the provider; a test observes it here. */
@@ -108,6 +112,8 @@ export function useMcpSignIn({
   }, [])
 
   const start = (serverId: string, purpose: McpSignInPurpose) => {
+    // An organization's server is connected from a workspace that reaches it.
+    if (purpose === "connect" && scope.kind !== "workspace") return
     setError("")
     unsubscribe.current()
     // Opened now, inside the press, which is what the browser allows.
@@ -115,49 +121,55 @@ export function useMcpSignIn({
     popup.current = opened
     blank.current = opened
     setRunning({ serverId, purpose })
-    const mutation =
-      purpose === "check" ? check : purpose === "shared" ? shared : connect
-    mutation.mutate(
-      { workspaceId, serverId, returnTo },
-      {
-        onSuccess: (started) => {
-          blank.current = undefined
-          const url = started.authorization_url
-          if (opened === undefined) {
-            rememberSignInOrigin(returnTo)
-            onLeave(url)
-            return
-          }
-          // Closed by the person while the start was on its way: they backed out.
-          if (opened.closed) {
-            setRunning(undefined)
-            return
-          }
-          const state = stateOf(url)
-          markSignInWindow(state)
-          unsubscribe.current = subscribeToSignInResult(state, (result) => {
-            setRunning(undefined)
-            refresh(workspaceId, serverId)
-            const notice = noticeFor(result)
-            if (notice) rememberMcpConnectionNotice(notice)
-          })
-          sendSignInWindow(opened, url)
-        },
-        onError: (failure) => {
-          blank.current = undefined
-          opened?.close()
+    const handlers = {
+      onSuccess: (started: McpConnectionStarted) => {
+        blank.current = undefined
+        const url = started.authorization_url
+        if (opened === undefined) {
+          rememberSignInOrigin(returnTo)
+          onLeave(url)
+          return
+        }
+        // Closed by the person while the start was on its way: they backed out.
+        if (opened.closed) {
           setRunning(undefined)
-          setError(
-            mcpErrorMessage(
-              failure,
-              purpose === "check"
-                ? "The check could not start. Try again."
-                : "The sign-in could not start. Try again.",
-            ),
-          )
-        },
+          return
+        }
+        const state = stateOf(url)
+        markSignInWindow(state)
+        unsubscribe.current = subscribeToSignInResult(state, (result) => {
+          setRunning(undefined)
+          refresh(scope, serverId)
+          const notice = noticeFor(result)
+          if (notice) rememberMcpConnectionNotice(notice)
+        })
+        sendSignInWindow(opened, url)
       },
-    )
+      onError: (failure: Error) => {
+        blank.current = undefined
+        opened?.close()
+        setRunning(undefined)
+        setError(
+          mcpErrorMessage(
+            failure,
+            purpose === "check"
+              ? "The check could not start. Try again."
+              : "The sign-in could not start. Try again.",
+          ),
+        )
+      },
+    }
+    if (purpose === "connect") {
+      if (scope.kind === "workspace") {
+        connect.mutate(
+          { workspaceId: scope.workspaceId, serverId, returnTo },
+          handlers,
+        )
+      }
+      return
+    }
+    const mutation = purpose === "check" ? check : shared
+    mutation.mutate({ scope, serverId, returnTo }, handlers)
   }
 
   return {

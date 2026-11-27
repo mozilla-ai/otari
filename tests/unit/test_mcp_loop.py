@@ -29,6 +29,7 @@ from any_llm.types.completion import (
 )
 from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompletionMessageCustomToolCall, Custom
 
+from any_search import SearchHit
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
@@ -44,7 +45,6 @@ from gateway.services._tool_loop import (
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     AnsweredRounds,
-    MaxToolIterationsExceeded,
     _accumulate_tool_call_deltas,
     _finalize_tool_calls,
     inject_purpose_hints,
@@ -328,7 +328,7 @@ async def test_loop_executes_mcp_tool_and_completes(monkeypatch: pytest.MonkeyPa
 class _FakeSearchPool(_FakePool):
     """A pool that owns ``web_search`` and buffers hits like the real search backend.
 
-    ``take_last_results`` is what marks it as the gateway's own search rather than
+    ``take_last_hits`` is what marks it as the gateway's own search rather than
     an MCP server that happens to expose the same tool name.
     """
 
@@ -342,8 +342,8 @@ class _FakeSearchPool(_FakePool):
             raise RuntimeError("backend down")
         return await super().call_tool(name, arguments)
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://a", "title": "A"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://a", title="A", raw={})]
 
 
 def _search_call(call_id: str, query: str) -> tuple[str, str, str]:
@@ -1904,80 +1904,6 @@ async def test_a_failed_round_carries_the_usage_of_the_rounds_answered_before_it
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
-async def test_a_tool_that_ends_the_loop_carries_the_usage_of_the_rounds_answered_before_it(
-    monkeypatch: pytest.MonkeyPatch, stream: bool
-) -> None:
-    """A backend's shared search and fetch limit ends the loop from inside a tool call, after round 1 was billed."""
-    round_one = CompletionUsage(prompt_tokens=100, completion_tokens=20, total_tokens=120)
-
-    async def fake_acompletion(**kwargs: Any) -> Any:
-        if stream:
-            return _async_iter(
-                _chunk(tool_calls=[(0, "c1", "fetch_url", "{}")]), *_round_end("tool_calls", round_one, trailing=True)
-            )
-        return _completion(
-            finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")], prompt=100, completion_tokens=20
-        )
-
-    class _LimitedPool(_FakePool):
-        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise MaxToolIterationsExceeded("web retrieval limit reached")
-
-    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
-    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
-    pool = _LimitedPool(tool_names=["fetch_url"])
-
-    with pytest.raises(MaxToolIterationsExceeded) as failure:
-        if stream:
-            async for _ in mcp_tool_loop_stream(completion_kwargs=completion_kwargs, pool=pool, max_iterations=5):
-                pass
-        else:
-            await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=5)
-
-    answered = AnsweredRounds.of(failure.value)
-    assert answered is not None
-    usage = answered.events[-1].usage if stream else answered.result.usage
-    assert (usage.prompt_tokens, usage.completion_tokens) == (100, 20)
-
-
-@pytest.mark.asyncio
-async def test_a_tool_that_fails_a_mixed_batch_carries_the_usage_of_the_round_that_asked_for_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A mixed batch runs the gateway's tools first, so their failure still bills the round that asked for them."""
-
-    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
-        return _completion(
-            finish="tool_calls",
-            tool_calls=[("mcp_id", "fetch_url", "{}"), ("user_id", "user_tool", "{}")],
-            prompt=100,
-            completion_tokens=20,
-        )
-
-    class _LimitedPool(_FakePool):
-        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise MaxToolIterationsExceeded("web retrieval limit reached")
-
-    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
-
-    with pytest.raises(MaxToolIterationsExceeded) as failure:
-        await mcp_tool_loop(
-            completion_kwargs={
-                "model": "fake",
-                "messages": [{"role": "user", "content": "go"}],
-                "tools": [{"type": "function", "function": {"name": "user_tool", "parameters": {}}}],
-            },
-            pool=_LimitedPool(tool_names=["fetch_url"]),
-            max_iterations=5,
-        )
-
-    answered = AnsweredRounds.of(failure.value)
-    assert answered is not None
-    assert (answered.result.usage.prompt_tokens, answered.result.usage.completion_tokens) == (100, 20)
-
-
-@pytest.mark.asyncio
 async def test_a_streamed_failure_carries_the_usage_of_every_round_answered_before_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2521,37 +2447,6 @@ async def test_the_openai_sdks_stream_helper_reads_a_reported_stream(monkeypatch
         state.handle_chunk(OpenAIChunk.model_validate_json(chunk.model_dump_json()))
 
     assert state.get_final_completion().choices[0].message.content == "done"
-
-
-@pytest.mark.asyncio
-async def test_a_call_the_shared_limit_refuses_ends_its_started_entry_before_the_request_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The backend's own search and fetch limit raises inside the call, after the started entry went out."""
-
-    class _LimitedSearchPool(_FakeSearchPool):
-        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise MaxToolIterationsExceeded("web retrieval limit reached")
-
-    monkeypatch.setattr(
-        mcp_loop_module,
-        "acompletion",
-        _streamed([_chunk(tool_calls=[(0, "c1", "web_search", '{"query": "first"}')]), _chunk(finish="tool_calls")]),
-    )
-    entries: list[dict[str, Any]] = []
-
-    with pytest.raises(MaxToolIterationsExceeded):
-        async for chunk in mcp_tool_loop_stream(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
-            pool=cast(Any, _LimitedSearchPool()),
-            max_iterations=5,
-            native_tools=_REPORTED,
-        ):
-            entries.extend(_reported(chunk))
-
-    assert [entry["status"] for entry in entries] == ["in_progress", "failed"]
-    assert entries[0]["id"] == entries[1]["id"]
-    assert entries[1]["error"]["tag"] == "call_limit"
 
 
 @pytest.mark.asyncio

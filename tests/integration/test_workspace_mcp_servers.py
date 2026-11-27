@@ -21,8 +21,9 @@ from collections.abc import Iterator
 import pytest
 from fastapi import HTTPException, Response
 from pydantic import ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.deps import ToolPorts, get_workspace_search_keys
@@ -42,7 +43,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig, ResolvedMcpServer
-from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.models.users import User as BillingUser
 from gateway.repositories.tenancy import (
@@ -238,6 +239,38 @@ async def test_server_count_is_capped_per_workspace(async_db: AsyncSession, monk
         await service.create_server(user=owner, workspace_id=workspace.id, request=_create(name="server-4"))
 
     assert MAX_MCP_SERVERS_PER_WORKSPACE >= 3, "the shipped cap is not what this test pins"
+
+
+async def test_a_create_that_waited_behind_a_removal_is_refused(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Management is asked again once the locks are held.
+
+    The caller passes the first check; a removal from the organization holding its lock then commits
+    (simulated on a session of its own just before the lock is granted), and the create must see it.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    await async_db.commit()
+    owner_id, workspace_id = owner.id, workspace.id
+    original = OrganizationRepository.lock_settings
+
+    async def removed_while_waiting(self: OrganizationRepository, organization_id: uuid.UUID) -> None:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            await other.execute(delete(WorkspaceMember).where(col(WorkspaceMember.user_id) == owner_id))
+            await other.execute(delete(OrganizationMember).where(col(OrganizationMember.user_id) == owner_id))
+            await other.commit()
+        await original(self, organization_id)
+
+    monkeypatch.setattr(OrganizationRepository, "lock_settings", removed_while_waiting)
+    with pytest.raises(NotAuthorizedError):
+        await WorkspaceMcpServerService(async_db).create_server(
+            user=owner, workspace_id=workspace_id, request=_create(authorization_token="ghp_late")
+        )
+    await async_db.rollback()
+
+    assert (await async_db.execute(select(WorkspaceMcpServer.id))).scalars().all() == [], "nothing stored"
 
 
 async def test_creating_a_server_locks_the_workspace(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1553,9 +1586,15 @@ async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None
 async def _grant(
     db: AsyncSession, server_id: uuid.UUID, tools: list[str], *, key: APIKey | None = None, user_id: str | None = None
 ) -> None:
+    server = await db.get(WorkspaceMcpServer, server_id)
+    assert server is not None and server.workspace_id is not None
     db.add(
         WorkspaceMcpServerGrant(
-            server_id=server_id, api_key_id=key.id if key is not None else None, user_id=user_id, tools=tools
+            server_id=server_id,
+            workspace_id=server.workspace_id,
+            api_key_id=key.id if key is not None else None,
+            user_id=user_id,
+            tools=tools,
         )
     )
     await db.flush()

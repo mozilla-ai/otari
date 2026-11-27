@@ -101,6 +101,7 @@ const DECIDED_BY: Record<string, string> = {
   mcp_user: "the user's rule on this MCP server",
   mcp_everyone: "this MCP server's default policy",
   mcp_server: "this MCP server's tool list",
+  mcp_organization: "the organization's limit for this workspace",
 }
 
 // Claude Code reports a user's decision as user_reject, user_temporary and so on.

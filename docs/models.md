@@ -298,7 +298,7 @@ The models.dev catalog is refreshed as follows:
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
   back. Both give the same limits, capabilities and prices.
-- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+- Both are read from `models_dev_base_url`, by default Mozilla AI's fork of
   models.dev, which serves models.dev's catalog plus the models it does not
   list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
 - When neither can be read, the last good copy stays in use and the gateway
@@ -731,7 +731,11 @@ Selection uses these signals:
   consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
   credential cools every model served on that credential the same way, for the
   workspace that saw it. An offering the deployment refuses to serve a caller on its
-  credential ranks last for that caller for 5 minutes. Each stays available as a last
+  credential ranks last for that caller for 5 minutes, and one whose provider says it
+  does not serve the model on that credential (a 404 not about a file, response or other
+  resource the request named, or a 400 or 403 saying so) ranks
+  last for that workspace, API and credential for an hour, then 3 and 12 hours while it
+  still fails each time that lapses; a success clears it. Each stays available as a last
   resort. Client cancellation and other gateway refusals do not count as outages.
 - **Estimated cost:** known prices come before unknown prices. The estimate
   includes input and output tokens, applicable long-context tiers, and cache-write
@@ -826,10 +830,16 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor. A limit the
-offering tried first does not know, such as the context length of a model a vLLM
-server also serves, is the smallest one the model's other offerings report. An
-output limit filled that way is capped at the entry's context window.
+of the offering tried first, and `owned_by` is the model's vendor. A limit or a
+capability the offering tried first does not know, such as the context length of
+a model a vLLM server also serves, comes from the model's other offerings: the
+smallest limit, or the parameters the first of them reports. An
+output limit filled that way is capped at the entry's context window. A field
+no offering reports is read from models.dev's entry for the model, preferring
+the vendor's own: a model served on an organization's key to an
+OpenAI-compatible endpoint (a LiteLLM proxy, a reseller) is stored under
+`openai`, which models.dev lists none of those models under, so only that entry
+describes it.
 
 The caller's aliases and routing policies are listed beside the models, under
 their own names: the configured ones, and the stored ones of the key's

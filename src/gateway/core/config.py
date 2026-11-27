@@ -1179,7 +1179,7 @@ class GatewayConfig(
     models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
         default=MODELS_DEV_BASE_URL,
         description=(
-            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "Where the models.dev catalog is fetched from. The default is Mozilla AI's fork, which "
             "publishes models.dev's catalog plus the models it does not list yet. Set "
             "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
@@ -1264,6 +1264,24 @@ class GatewayConfig(
         default=512 * 1024 * 1024,
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
+    )
+    files_workspace_max_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=1024 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most bytes of uploads one workspace may hold at once (1 GB by default), counting files not yet "
+            "deleted or expired. An upload that would go past it is refused with 413, and nothing stored is "
+            "deleted. Null in the config file sets no limit."
+        ),
+    )
+    files_workspace_max_files: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Most uploads one workspace may hold at once (500 by default), counting files not yet deleted or "
+            "expired. An upload past it is refused with 413, and nothing stored is deleted. "
+            "Null in the config file sets no limit."
+        ),
     )
     files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=16 * 1024 * 1024,

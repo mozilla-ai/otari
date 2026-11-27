@@ -346,26 +346,20 @@ class AdmittedWebTools:
     ``search_tool_entry`` is the search declaration as the policy narrowed it,
     ``None`` where none was declared, and ``fetch_tool_entry`` the fetch
     declaration. ``in_loop_search`` is what the searches run on through the
-    libraries, ``None`` where the old backend serves them, ``enrichment`` the
+    libraries, ``None`` where none was declared, ``enrichment`` the
     fetch that reads the pages of their hits, ``None`` where no page is read,
     and ``fetch`` the instance the fetch tool runs on, ``None`` where it was
-    not declared. ``search_url`` is the old backend's, which the pipeline sets.
+    not declared.
     """
 
     search_tool_entry: dict[str, Any] | None
     fetch_tool_entry: dict[str, Any] | None
     fetch_policy: DomainPolicy
-    search_url: str | None = None
     # The workspace's own search key, set only where it declared a search.
     search_credential: WebSearchCredential | None = None
     in_loop_search: InLoopSearch | None = None
     enrichment: ResolvedFetch | None = None
     fetch: ResolvedFetch | None = None
-
-    @property
-    def on_old_backend(self) -> bool:
-        """Whether the old backend serves the request: a search declared with nothing on the libraries to run it."""
-        return self.search_tool_entry is not None and self.in_loop_search is None
 
 
 NO_WEB_TOOLS = AdmittedWebTools(search_tool_entry=None, fetch_tool_entry=None, fetch_policy=DomainPolicy())
@@ -374,7 +368,7 @@ NO_WEB_TOOLS = AdmittedWebTools(search_tool_entry=None, fetch_tool_entry=None, f
 def enrichment_for(config: GatewayConfig, in_loop: InLoopSearch | None) -> ResolvedFetch | None:
     """The fetch that reads the pages of ``in_loop``'s hits without text, or ``None`` where no page is read.
 
-    No page is read with enrichment off, and the old backend's pages are its own.
+    No page is read with enrichment off.
     """
     return in_loop.enrichment if in_loop is not None and enrichment_enabled(config) else None
 

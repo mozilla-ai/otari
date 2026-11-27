@@ -8,7 +8,7 @@ Add MCP as a top-level request field, not a `tools` entry.
 Use either or both of:
 
 - `mcp_servers`: inline MCP server configs the gateway should connect to directly
-- `mcp_server_ids`: ids of MCP servers your workspace has configured
+- `mcp_server_ids`: ids of MCP servers your workspace has configured, or your organization added for every workspace
 
 Otari resolves `mcp_server_ids` first and appends the resulting server configs
 to any inline `mcp_servers`, reading the servers the workspace configured on
@@ -483,6 +483,14 @@ with. A request whose own deadline ends before the server answers records
 `timeout`. So `health.checked_at` is
 the last contact, and the manual check is for a server no request uses yet.
 
+An organization's per-user server is the exception, because every workspace of
+the organization reads its `health`. A member's own sign-in to it lists nothing
+and records nothing, so `health` can stay unset after a sign-in that worked. A
+later request through that member's connection records whether the server
+answered, never the tools it listed: the tool list comes from the organization's
+own check. A contact made before the server switched between personal and shared
+accounts is not recorded at all.
+
 `health.last_failure` is the most recent contact that got no answer, with
 `failed_at`, `error` and `http_status`, and stays on record after the server
 answers again. A server that answers within an hour of its last failure reports
@@ -658,7 +666,7 @@ and need an owner or admin of the organization or the workspace:
 | `POST /access/grants` | Give one rule to several `api_key_ids` and `user_ids`. A key or user that has a rule gets this one instead. |
 | `PATCH /access/grants/{grant_id}` | Change one rule's `tools`. |
 | `DELETE /access/grants/{grant_id}` | Delete one rule; its key or user falls back to the next match. |
-| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy) or `server` (disabled, or the tool is not exposed). |
+| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy), `server` (disabled, or the tool is not exposed) or `organization` (the organization's limit for the workspace). |
 
 `GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access`
 answers the other way round: what one key reaches on each of the workspace's
@@ -672,6 +680,24 @@ deleted user is refused. A user's rules on a workspace's servers are deleted whe
 they leave the workspace or its organization, so inviting them again restores
 none. A server holds at most 1000 rules, so write a rule for a user rather than
 one per key.
+
+#### A workspace's settings on an organization's server
+
+An organization's server is read-only from a workspace, apart from the
+workspace's own settings on it. These routes live under the same path and need
+an owner or admin of the organization or the workspace:
+
+| Route | Does |
+|---|---|
+| `PATCH /override` | Change only the fields sent; one left out keeps what is stored. `enabled` is the workspace's switch, `true` or `false`, never `null`. `everyone_tools` and `attach_by_default` take `null` to follow the server's own again. |
+| `DELETE /override` | Take all of the workspace's own settings away, so it follows the server's again. |
+
+Both answer the server as the workspace reads it, with its settings under
+`in_workspace`, and keep the organization's limit for the workspace. Both are a
+`404` for the workspace's own server, which is changed with `PATCH /` instead.
+Sending only what changed is what keeps two admins from undoing each other: an
+admin who turns the server off and another who changes the default policy both
+keep their change.
 
 ## Limits and safety
 

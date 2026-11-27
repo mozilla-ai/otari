@@ -39,8 +39,7 @@ class ChatWebSearchRendering:
 
         A failed search's ``error`` is the failure the search backend kept: the
         provider, its status, the tag and whether a retry may help, or
-        ``internal_error`` for a search that raised. One the old backend answered
-        with only a text carries none: the text is the model's, not the caller's.
+        ``internal_error`` for a search that raised.
         """
         if call.failed:
             return [_entry(call, "failed", error=ran_error(call, pool))]
@@ -69,7 +68,7 @@ def _entry(
     )
 
 
-def _sources(results: Iterable[SearchHit | Mapping[str, Any]]) -> list[OtariToolCallSource]:
+def _sources(results: Iterable[SearchHit]) -> list[OtariToolCallSource]:
     """Each hit's URL, title and date, never its text, within the byte limit of the model-facing result.
 
     The title and date are capped already; the limit is the backstop for the URL,

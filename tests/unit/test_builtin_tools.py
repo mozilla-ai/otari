@@ -21,9 +21,13 @@ from gateway.services.tools import (
     NativeCall,
     Refusal,
     Tool,
+    WebFetchBackend,
+    WebSearchBackend,
+    WebToolCallCap,
+    builtin_fetch_resolved,
     native_rendering,
+    resolve_in_loop_search,
 )
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "tools" / "_registry.py"
@@ -80,9 +84,11 @@ def test_a_listed_tool_can_be_put_in_a_set() -> None:
 def _backend_for(tool: BuiltinTool) -> ToolBackend:
     """The backend that runs ``tool``, built without opening a connection."""
     if tool.name == WEB_SEARCH_TOOL_NAME:
-        return WebRetrievalBackend(base_url="http://search.invalid")
+        search = resolve_in_loop_search(GatewayConfig(web_search_url="http://search.invalid"), None)
+        assert search is not None
+        return WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5)
     if tool.name == WEB_FETCH_TOOL_NAME:
-        return WebRetrievalBackend(enable_search=False, enable_fetch=True)
+        return WebFetchBackend(builtin_fetch_resolved())
     if tool.name == CODE_EXECUTION_TOOL_NAME:
         return SandboxBackend(port=ProtocolCodeExecutionAdapter("http://sandbox.invalid"))
     raise AssertionError(f"no backend case for listed tool {tool.name!r}")

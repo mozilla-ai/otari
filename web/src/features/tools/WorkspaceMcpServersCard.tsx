@@ -9,6 +9,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Chip } from "@/design-system/indicators/Chip"
 import { Dot } from "@/design-system/indicators/Dot"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
@@ -30,8 +31,13 @@ import { toolNoun } from "@/features/tools/mcpAccess"
 import { AVAILABILITY, availabilityOf } from "@/features/tools/mcpAvailability"
 import type { CatalogPick } from "@/features/tools/mcpCatalog"
 import { hasToolListing } from "@/features/tools/mcpServerHealth"
+import {
+  asWorkspaceUses,
+  isOrganizationServer,
+} from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { WorkspaceRequestMcpServers } from "@/features/tools/WorkspaceRequestMcpServers"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateWorkspaceMcpServer,
@@ -66,7 +72,7 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
  * How many tools a server exposes, never their names: the allow-list's length
  * where it has one, else what its last tool listing counted, else "All".
  */
-function toolsLabel(server: WorkspaceMcpServer): string {
+export function toolsLabel(server: WorkspaceMcpServer): string {
   const count =
     server.allowed_tools?.length ??
     (hasToolListing(server.health) ? server.health.tool_count : null)
@@ -75,7 +81,7 @@ function toolsLabel(server: WorkspaceMcpServer): string {
 }
 
 /** Whether a Shared server's one account is set up, in the list's Connections column. */
-function SharedAccountCell({ server }: { server: WorkspaceMcpServer }) {
+export function SharedAccountCell({ server }: { server: WorkspaceMcpServer }) {
   const state = sharedAccountState(server)
   if (state === "not_set_up") {
     return (
@@ -164,7 +170,7 @@ export function WorkspaceMcpServersCard() {
   const create = useCreateWorkspaceMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const check = useMcpServerCheck({
-    workspaceId: selected?.workspace_id ?? "",
+    scope: workspaceMcpScope(selected?.workspace_id ?? ""),
     returnTo: "/tools/mcp-servers",
   })
   const navigate = useNavigate()
@@ -205,7 +211,9 @@ export function WorkspaceMcpServersCard() {
     )
   }
 
-  const rows = query.data?.data ?? []
+  // An organization's server is listed as this workspace uses it, so one the
+  // workspace or the organization turned off here reads Off.
+  const rows = (query.data?.data ?? []).map(asWorkspaceUses)
   const connectedIds = new Set(
     (mine.data?.data ?? []).map((entry) => entry.server_id),
   )
@@ -253,6 +261,7 @@ export function WorkspaceMcpServersCard() {
           />
           <span className="font-medium">{row.name}</span>
           <McpServerStatusDot name={row.name} health={row.health} />
+          {isOrganizationServer(row) ? <Chip>Organization</Chip> : null}
         </span>
       ),
     },
@@ -311,33 +320,45 @@ export function WorkspaceMcpServersCard() {
     columns.push({
       id: "actions",
       header: "",
-      cell: (row) => (
-        <RowActionRow>
-          <RowAction
-            icon={FiActivity}
-            label={
-              row.credential_mode === "per_user"
-                ? "Check this server (opens a sign-in, connects nothing)"
-                : "Check this server"
-            }
-            ariaLabel={`Check ${row.name}`}
-            isDisabled={check.isRunning(row.id)}
-            onPress={() => check.run(row)}
-          />
-          <RowAction
-            icon={FiChevronRight}
-            label="Manage"
-            ariaLabel={`Manage ${row.name}`}
-            onPress={() => openServer(row.id)}
-          />
-          <RowAction
-            icon={FiTrash2}
-            label="Delete…"
-            isDestructive
-            onPress={() => openDelete(row)}
-          />
-        </RowActionRow>
-      ),
+      // An organization's server is checked and deleted by the organization,
+      // so its row only opens its page.
+      cell: (row) =>
+        isOrganizationServer(row) ? (
+          <RowActionRow>
+            <RowAction
+              icon={FiChevronRight}
+              label="Manage"
+              ariaLabel={`Manage ${row.name}`}
+              onPress={() => openServer(row.id)}
+            />
+          </RowActionRow>
+        ) : (
+          <RowActionRow>
+            <RowAction
+              icon={FiActivity}
+              label={
+                row.credential_mode === "per_user"
+                  ? "Check this server (opens a sign-in, connects nothing)"
+                  : "Check this server"
+              }
+              ariaLabel={`Check ${row.name}`}
+              isDisabled={check.isRunning(row.id)}
+              onPress={() => check.run(row)}
+            />
+            <RowAction
+              icon={FiChevronRight}
+              label="Manage"
+              ariaLabel={`Manage ${row.name}`}
+              onPress={() => openServer(row.id)}
+            />
+            <RowAction
+              icon={FiTrash2}
+              label="Delete…"
+              isDestructive
+              onPress={() => openDelete(row)}
+            />
+          </RowActionRow>
+        ),
     })
   }
 
@@ -410,7 +431,7 @@ export function WorkspaceMcpServersCard() {
         key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
-        workspaceId={selected.workspace_id}
+        scope={workspaceMcpScope(selected.workspace_id)}
         isPending={create.isPending}
         error={create.error}
         onSubmit={submit}

@@ -1,6 +1,7 @@
 """Data access for the tools the gateway runs itself."""
 
 from gateway.repositories.tools.mcp_oauth_flow_repository import McpOAuthFlowRepository
+from gateway.repositories.tools.mcp_server_alias_repository import McpServerAliasRepository
 from gateway.repositories.tools.mcp_server_request_repository import (
     McpServerRequestConflict,
     McpServerRequestRepository,
@@ -23,10 +24,14 @@ from gateway.repositories.tools.workspace_mcp_server_logo_repository import (
     WorkspaceMcpServerLogoFacts,
     WorkspaceMcpServerLogoRepository,
 )
+from gateway.repositories.tools.workspace_mcp_server_override_repository import (
+    WorkspaceMcpServerOverrideRepository,
+)
 from gateway.repositories.tools.workspace_mcp_server_repository import WorkspaceMcpServerRepository
 
 __all__ = [
     "McpOAuthFlowRepository",
+    "McpServerAliasRepository",
     "McpServerRequestConflict",
     "McpServerRequestRepository",
     "McpSignInLinkUseRepository",
@@ -41,6 +46,7 @@ __all__ = [
     "WorkspaceMcpServerGrantRepository",
     "WorkspaceMcpServerLogoFacts",
     "WorkspaceMcpServerLogoRepository",
+    "WorkspaceMcpServerOverrideRepository",
     "WorkspaceMcpServerRepository",
     "WorkspaceWebSearchKeyOverrideRepository",
 ]

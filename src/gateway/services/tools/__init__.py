@@ -11,7 +11,10 @@ and ``ToolUseBudget`` is the per-request cap on each tool's gateway-run calls.
 the last into ``AdmittedWebTools``,
 ``declare_code_execution`` its code execution, ``admit_mcp_servers`` its MCP servers,
 ``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
-``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are,
+``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are, ``McpWorkspaceServers`` reads the
+ones a workspace reaches, its organization's included, as ``McpServerInWorkspace``,
+``OrganizationMcpServerWorkspaceService`` shows an organization's server across its workspaces and sets the
+organization's limit in one,
 ``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
 ``McpServerLogoService`` reads each stored server's logo and sets or removes an admin's own,
 ``McpServerRequestService`` takes a member's request for a catalog server and records a manager's answer, within
@@ -145,7 +148,7 @@ from gateway.services.tools._mcp_connections import (
     SignInLinkTarget,
     StoredMcpOAuthClient,
 )
-from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener
+from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener, McpOrganizationReach
 from gateway.services.tools._mcp_server_health import (
     McpServerContact,
     McpServerContacts,
@@ -159,12 +162,19 @@ from gateway.services.tools._mcp_server_requests import (
 from gateway.services.tools._mcp_sign_in import McpSignInBackend, McpSignInNeeded, McpSignInReason
 from gateway.services.tools._mcp_signed_in_servers import McpSignedInServers
 from gateway.services.tools._mcp_tool_listings import McpToolListings
+from gateway.services.tools._mcp_workspace_servers import McpServerInWorkspace, McpWorkspaceServers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
     NativeCall,
     NativeRendering,
     Refusal,
+)
+from gateway.services.tools._organization_mcp_servers import (
+    OrganizationMcpServerLimit,
+    OrganizationMcpServerWorkspace,
+    OrganizationMcpServerWorkspaces,
+    OrganizationMcpServerWorkspaceService,
 )
 from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
@@ -349,6 +359,7 @@ __all__ = [
     "WebSearchKeyService",
     "WorkspaceSearchKeys",
     "McpGrantMembershipListener",
+    "McpOrganizationReach",
     "CompletedConnection",
     "FlowLanding",
     "LinkSignIn",
@@ -357,6 +368,12 @@ __all__ = [
     "McpServerRequestService",
     "McpSignedInServers",
     "McpToolListings",
+    "McpServerInWorkspace",
+    "McpWorkspaceServers",
+    "OrganizationMcpServerLimit",
+    "OrganizationMcpServerWorkspace",
+    "OrganizationMcpServerWorkspaceService",
+    "OrganizationMcpServerWorkspaces",
     "McpServerContact",
     "McpServerContacts",
     "McpServerLogoService",

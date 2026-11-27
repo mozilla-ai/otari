@@ -112,6 +112,30 @@ describe("KeyMcpAccess", () => {
     expect(screen.getByText("matched the rule for its owner")).toBeVisible()
   })
 
+  it("lists the organization's servers with its limit for the workspace", async () => {
+    mockApi({
+      rows: [
+        serverAccess(),
+        serverAccess({
+          server_id: "88888888-8888-8888-8888-888888888888",
+          name: "hub",
+          tools: ["@read"],
+          read_tools: ["get_issue"],
+          organization_tools: ["@read"],
+        }),
+      ],
+    })
+    renderSection()
+
+    expect(await screen.findByRole("link", { name: "hub" })).toHaveAttribute(
+      "href",
+      "/tools/mcp-servers/88888888-8888-8888-8888-888888888888",
+    )
+    expect(screen.getByText("organization limit: Read tools")).toBeVisible()
+    // Only where the organization set one.
+    expect(screen.getAllByText(/^organization limit/)).toHaveLength(1)
+  })
+
   it("stays out of the form when the workspace has no servers", async () => {
     const calls = mockApi({ rows: [] })
     renderSection()

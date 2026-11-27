@@ -48,7 +48,7 @@ services:
       # `brave`; the key stays in this process and is never handed to a caller.
       - OTARI_WEB_SEARCH_PROVIDER=${OTARI_WEB_SEARCH_PROVIDER:-}
       - OTARI_WEB_SEARCH_PROVIDER_API_KEY=${OTARI_WEB_SEARCH_PROVIDER_API_KEY:-}
-      # Optional knobs. Defaults are conservative — see web_retrieval_backend.py.
+      # Optional knobs. Defaults are conservative — see services/tools/.
       - OTARI_WEB_SEARCH_ENGINES=${OTARI_WEB_SEARCH_ENGINES:-}
       - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
       - OTARI_WEB_SEARCH_EXTRACT=${OTARI_WEB_SEARCH_EXTRACT:-}
@@ -103,10 +103,15 @@ services:
       # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
       - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
       # Key that names the provider account a copy of an attached file is in.
-      # Required while provider copies are on, which they are by default, and
-      # it must differ from OTARI_SECRET_KEY. Generate one with
+      # It must differ from OTARI_SECRET_KEY. Generate one with
       # `openssl rand -base64 32`.
-      - OTARI_PROVIDER_ACCOUNT_PEPPER=${OTARI_PROVIDER_ACCOUNT_PEPPER:?set OTARI_PROVIDER_ACCOUNT_PEPPER, for example to the output of openssl rand -base64 32}
+      #
+      # Passed through only where it is set, rather than defaulted or required
+      # here, because the gateway owns what a missing one means: it warns and
+      # turns provider copies off. An empty value fails its length check at
+      # startup, and a required one stops every other service in this file
+      # from starting without it.
+      - OTARI_PROVIDER_ACCOUNT_PEPPER
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.
@@ -122,6 +127,34 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Mailpit accepts mail and delivers it to nobody, holding each message in a web
+  # inbox instead. It exists so a deployment that needs to prove a mailbox can do
+  # so without a real mail provider: the links a verification, reset or invitation
+  # message carries are opened from the inbox at the address below.
+  #
+  # Start it with `docker compose --profile mail up -d mailpit`, then point mail at
+  # it. Inside the Docker network that is `smtp_host: mailpit` and `smtp_port: 1025`
+  # with no TLS and no credentials; from a gateway running on the host it is
+  # localhost on the mapped port. config.example.yml carries both.
+  #
+  # NOTE: It holds every message in a temporary database inside the container, which
+  # goes when the container does, and it accepts any credential. So it is for
+  # development and never for a deployment that serves anybody.
+  mailpit:
+    profiles: ["mail"]
+    image: ${OTARI_MAILPIT_IMAGE:-docker.io/axllent/mailpit:v1.34.0}
+    ports:
+      # Bound to localhost only. Anything that reaches the SMTP port can read
+      # every message in the inbox, and those messages carry sign-in links.
+      - "127.0.0.1:${OTARI_MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${OTARI_MAILPIT_WEB_PORT:-8025}:8025"
+    environment:
+      # Accept mail from anywhere on the Docker network without a credential,
+      # which is the whole point of a sink: a developer configures no secret.
+      - MP_SMTP_AUTH_ACCEPT_ANY=true
+      - MP_SMTP_AUTH_ALLOW_INSECURE=true
     restart: unless-stopped
 
   postgres:

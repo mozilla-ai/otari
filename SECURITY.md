@@ -23,7 +23,7 @@ Please include as much of the following as you can:
 - The impact of the issue, including how an attacker might exploit it.
 
 Test only against your own self-hosted instance. Do not run scans or send
-exploit traffic against any mozilla.ai-operated infrastructure.
+exploit traffic against any Mozilla AI-operated infrastructure.
 
 ## Disclosure Process
 

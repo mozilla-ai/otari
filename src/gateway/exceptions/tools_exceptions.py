@@ -69,6 +69,27 @@ class WorkspaceMcpServerAlreadyExistsError(TenancyConflictError):
         super().__init__(f"Workspace {workspace_id} already has an MCP server named '{name}'")
 
 
+class McpServerNameTakenError(TenancyConflictError):
+    """Another server a workspace of the organization reaches already has this name.
+
+    A workspace reaches its own servers and its organization's under one set of names, since the tool
+    loop labels a server's tools by name.
+    """
+
+    def __init__(self, name: object):
+        super().__init__(f"An MCP server named '{name}' is already available to this organization's workspaces")
+
+
+class McpServerIsOrganizationsError(TenancyConflictError):
+    """A workspace route was asked to change its organization's server, which the organization defines."""
+
+    def __init__(self, name: object):
+        super().__init__(
+            f"MCP server '{name}' is your organization's: its owners and admins change it, and this workspace "
+            "changes only its own settings on it"
+        )
+
+
 class WorkspaceMcpServerUnsafeUrlError(TenancyValidationError):
     """The URL failed the same SSRF and TLS checks a request-body MCP server faces.
 
@@ -227,11 +248,16 @@ class McpOAuthIssuerChangedError(McpConnectionSetupError):
 
     error_code = MCP_OAUTH_ISSUER_CHANGED
 
-    def __init__(self) -> None:
+    def __init__(self, *, organization: bool = False) -> None:
+        who = (
+            "An organization owner or admin must save the OAuth client again, under Settings on the server's "
+            "page in Organization > MCP servers,"
+            if organization
+            else "A workspace admin must save the OAuth client again, under Settings on the server's page,"
+        )
         super().__init__(
             "This server now sends sign-ins to a different authorization server than the one its OAuth client "
-            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
-            "page, to approve the new sign-in server."
+            f"was saved for. {who} to approve the new sign-in server."
         )
 
 
@@ -397,9 +423,8 @@ class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
     The two lists are intersected rather than overridden, so this is the empty
     intersection: every domain the request asked for is one the workspace does
     not permit. Refused rather than run, because an empty effective allow-list
-    is read by ``_build_web_retrieval_backend`` as *no* allow-list (an empty list
-    is falsy), which would turn the narrowest possible policy into no policy at
-    all.
+    is read as *no* allow-list (an empty list is falsy), which would turn the
+    narrowest possible policy into no policy at all.
     """
 
     def __init__(self) -> None:
@@ -619,26 +644,13 @@ class SearchToolSelectionError(TenancyValidationError):
     """
 
 
-class DirectSearchFieldRefusedError(TenancyValidationError):
-    """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
-
-    Such a call runs on the old search client: a key on a provider any-search
-    does not serve, an organization's or the legacy settings'.
-    """
-
-    def __init__(self, provider: str) -> None:
-        super().__init__(
-            f"include_raw and provider_options are not available yet for a {provider} search: leave them unset."
-        )
-
-
 class DirectToolFailedError(TenancyError):
     """The provider failed a direct tool call, or could not be reached.
 
     ``message`` is the provider's own account, for the usage row and the log
-    only: an old client's can quote the upstream body. ``headers`` carry the
-    failure's safe fields for the caller (decision 67), and ``upstream_status``
-    is the provider's HTTP status when it gave one.
+    only, since it can quote the upstream body. ``headers`` carry the failure's
+    safe fields for the caller (decision 67), and ``upstream_status`` is the
+    provider's HTTP status when it gave one.
     """
 
     status_code = status.HTTP_502_BAD_GATEWAY
@@ -730,13 +742,11 @@ class WebSearchOptionRefusedError(TenancyValidationError):
 class WebSearchCredentialRefusedError(TenancyError):
     """A workspace's search or fetch credential its provider cannot be called with as it is.
 
-    One without a key or base URL its provider needs, which the library or the
-    old code would fill from the server's own settings, so the deployment's key
-    or endpoint would serve the tenant; one without the key a provider with an
-    address of its own takes, whose calls would run keyless from the
-    deployment's address; or one naming a base URL the code that
-    serves its provider cannot use, which would send the tenant's key to the
-    provider's public endpoint instead. A 502: the fault is in a stored
+    One without a key or base URL its provider needs, which the library would
+    fill from the server's own settings, so the deployment's key or endpoint
+    would serve the tenant; or one without the key a provider with an address of
+    its own takes, whose calls would run keyless from the deployment's address.
+    A 502: the fault is in a stored
     credential, not in the request.
     """
 
@@ -755,12 +765,13 @@ __all__ = [
     "McpConnectionUnavailableError",
     "McpConnectionUpstreamError",
     "McpSignInRequiredError",
+    "McpServerNameTakenError",
+    "McpServerIsOrganizationsError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",
     "DirectFetchUrlRefusedError",
     "DirectSearchFailedError",
-    "DirectSearchFieldRefusedError",
     "DirectToolCallError",
     "DirectToolFailedError",
     "FundsCheckFailedError",

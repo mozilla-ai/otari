@@ -7,10 +7,11 @@ import {
   useMcpCatalogPopular,
   useMcpCatalogServers,
 } from "@/shared/api/mcpCatalog"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useSwitchOrganization } from "@/shared/api/organizations"
 import { ORGANIZATION_CONTEXT } from "@/shared/api/queryKeys"
 import {
-  useCheckWorkspaceMcpServer,
+  useCheckMcpServer,
   useDisconnectMcp,
   useMcpServerConnections,
   useMcpServerProbes,
@@ -46,7 +47,7 @@ describe("a member's own tools on a server", () => {
     const { result } = renderHook(
       () => ({
         tools: useMyMcpServerTools("w-1", "s-1", true),
-        check: useCheckWorkspaceMcpServer(),
+        check: useCheckMcpServer(),
       }),
       { wrapper },
     )
@@ -54,7 +55,10 @@ describe("a member's own tools on a server", () => {
     expect(toolReads).toHaveLength(1)
 
     await act(() =>
-      result.current.check.mutateAsync({ workspaceId: "w-1", serverId: "s-1" }),
+      result.current.check.mutateAsync({
+        scope: workspaceMcpScope("w-1"),
+        serverId: "s-1",
+      }),
     )
 
     await waitFor(() => expect(toolReads).toHaveLength(2))
@@ -136,7 +140,7 @@ describe("the workspace's server list", () => {
 
     await act(() =>
       result.current.remove.mutateAsync({
-        workspaceId: "w-1",
+        scope: workspaceMcpScope("w-1"),
         serverId: "s-1",
         userId: "alice",
       }),
@@ -169,7 +173,12 @@ describe("a server's connected users", () => {
       createElement(QueryClientProvider, { client }, children)
     const { result, rerender } = renderHook(
       ({ serverId, page }: { serverId: string; page: number }) =>
-        useMcpServerConnections("w-1", serverId, { page, pageSize: 25 }, true),
+        useMcpServerConnections(
+          workspaceMcpScope("w-1"),
+          serverId,
+          { page, pageSize: 25 },
+          true,
+        ),
       { wrapper, initialProps: { serverId: "s-1", page: 0 } },
     )
     await waitFor(() => expect(pending).toHaveLength(1))
@@ -215,7 +224,12 @@ describe("the MCP page's workspace reads", () => {
       () => {
         useMyMcpConnections(LEFT)
         useMyMcpServerTools(LEFT, "s-1", true)
-        useMcpServerConnections(LEFT, "s-1", { page: 0, pageSize: 25 }, true)
+        useMcpServerConnections(
+          workspaceMcpScope(LEFT),
+          "s-1",
+          { page: 0, pageSize: 25 },
+          true,
+        )
         useMcpServerProbes(LEFT, ["https://mcp.example.com/mcp"])
         useMcpCatalogServers({
           query: "x",

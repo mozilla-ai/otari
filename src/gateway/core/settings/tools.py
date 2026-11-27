@@ -40,11 +40,8 @@ from gateway.core.env import otari_env
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 
-# Licensed search APIs the in-loop ``otari_web_search`` backend can call
-# directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
-# service. Declared here so startup validation rejects an unknown
-# ``web_search_provider`` without the config layer importing
-# `gateway.services.web_search_providers`, which imports this name.
+# Licensed search APIs the deprecated ``web_search_provider`` may name, as an
+# alternative to pointing ``web_search_url`` at a SearXNG-shaped service.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # The providers whose search tools inherit the legacy SearXNG settings (contract
 # C8): ``web_search_url`` with no ``api_base``, ``web_search_engines`` with no
@@ -848,7 +845,8 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
 
     In today's order of precedence: the licensed provider with its key, else
     ``web_search_url`` as a SearXNG backend searching ``web_search_engines`` or,
-    when those are unset, the four engines the old backend asks for. Both are
+    when those are unset, the four engines a setup with no setting of its own asks
+    for. Both are
     read with the environment as a fallback, as the in-loop backend reads them.
     An empty value counts as unset.
     """

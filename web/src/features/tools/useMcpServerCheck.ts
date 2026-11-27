@@ -1,7 +1,8 @@
 import type { WorkspaceMcpServer } from "@/client"
 import { mcpErrorMessage } from "@/features/tools/mcpErrors"
 import { useMcpSignIn } from "@/features/tools/useMcpSignIn"
-import { useCheckWorkspaceMcpServer } from "@/shared/api/tools"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
+import { useCheckMcpServer } from "@/shared/api/tools"
 
 /** Said beside a Personal server's Check, so pressing it opens no surprise. */
 export const PERSONAL_CHECK_HELP =
@@ -15,18 +16,18 @@ export const PERSONAL_CHECK_HELP =
  * result is stored, and nothing is connected. Nobody's own connection is used.
  */
 export function useMcpServerCheck({
-  workspaceId,
+  scope,
   returnTo,
   onLeave,
   openWindow,
 }: {
-  workspaceId: string
+  scope: McpServerScope
   returnTo: string
   onLeave?: (url: string) => void
   openWindow?: () => Window | undefined
 }) {
-  const check = useCheckWorkspaceMcpServer()
-  const signIn = useMcpSignIn({ workspaceId, returnTo, onLeave, openWindow })
+  const check = useCheckMcpServer()
+  const signIn = useMcpSignIn({ scope, returnTo, onLeave, openWindow })
 
   const run = (server: Pick<WorkspaceMcpServer, "id" | "credential_mode">) => {
     if (server.credential_mode === "per_user") {
@@ -34,7 +35,7 @@ export function useMcpServerCheck({
       signIn.start(server.id, "check")
       return
     }
-    check.mutate({ workspaceId, serverId: server.id })
+    check.mutate({ scope, serverId: server.id })
   }
 
   const isRunning = (serverId: string) =>

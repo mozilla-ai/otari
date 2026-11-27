@@ -51,10 +51,13 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
+    McpServerAliasRepository,
     McpUserConnectionRepository,
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerOverrideRepository,
+    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.usage_and_telemetry import (
@@ -105,6 +108,8 @@ from gateway.services.tools import (
     DirectToolUsage,
     McpToolListings,
     McpUserTokens,
+    McpWorkspaceServers,
+    OrganizationMcpServerWorkspaceService,
     SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
@@ -259,6 +264,25 @@ def get_web_search_key_service(
 
 
 WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_key_service)]
+
+
+def get_organization_mcp_server_workspaces(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrganizationMcpServerWorkspaceService:
+    """Build the service showing an organization's MCP server across its workspaces, on the request's Unit of Work."""
+    return OrganizationMcpServerWorkspaceService(
+        uow,
+        servers=WorkspaceMcpServerRepository(uow),
+        overrides=WorkspaceMcpServerOverrideRepository(uow),
+        organizations=OrganizationService(db, membership_listener=None),
+        lock_workspace=WorkspaceRepository(db).lock,
+    )
+
+
+OrganizationMcpServerWorkspacesDep = Annotated[
+    OrganizationMcpServerWorkspaceService, Depends(get_organization_mcp_server_workspaces)
+]
 
 
 def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:
@@ -657,3 +681,13 @@ def get_direct_tool_availability(
 
 
 DirectToolAvailabilityDep = Annotated[DirectToolAvailability, Depends(get_direct_tool_availability)]
+
+
+def get_mcp_workspace_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> McpWorkspaceServers:
+    """Build the reader of the MCP servers a workspace reaches, its organization's too, on the request's session."""
+    return McpWorkspaceServers(
+        WorkspaceMcpServerRepository(db), WorkspaceMcpServerOverrideRepository(db), McpServerAliasRepository(db)
+    )
+
+
+McpWorkspaceServersDep = Annotated[McpWorkspaceServers, Depends(get_mcp_workspace_servers)]

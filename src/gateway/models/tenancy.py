@@ -1086,6 +1086,8 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     __tablename__ = "workspace"
     __table_args__ = (
         UniqueConstraint("organization_id", "name", name="uq_workspace_organization_name"),
+        # The target of composite foreign keys that tie a row's organization to its workspace's.
+        Index("uq_workspace_organization_id", "organization_id", "id", unique=True),
         CheckConstraint(
             "activation_classification IN ('eligible', 'internal', 'automated', 'migrated', 'enterprise_assisted')",
             name="check_workspace_activation_classification",
@@ -1348,6 +1350,9 @@ class BulkInvitationFailurePublic(SQLModel):
 
     email: str
     detail: str
+    # The refusal's stable code, where it carries one, so a client maps it rather than matching ``detail``.
+    # The same value the single invite answers as the body's ``code`` and as ``Otari-Error-Code``.
+    code: str | None = None
 
 
 class BulkInviteOrganizationMembersResultPublic(SQLModel):

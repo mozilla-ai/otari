@@ -27,6 +27,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from any_search import SearchHit
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 
@@ -800,8 +801,8 @@ class _WebSearchBackend:
         self.calls.append((name, arguments))
         return "[1] Result\nhttps://example.com"
 
-    def take_last_results(self) -> list[dict[str, Any]]:
-        return [{"url": "https://example.com", "title": "Example"}]
+    def take_last_hits(self) -> list[SearchHit]:
+        return [SearchHit(url="https://example.com", title="Example", raw={})]
 
 
 def test_a_responses_tool_loop_round_that_ends_incomplete_runs_none_of_the_gateway_tools_it_asked_for(

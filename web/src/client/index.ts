@@ -824,6 +824,12 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+// On an organization's server read through a workspace: that workspace's own
+// settings on it and the organization's limit there, and the body that sets
+// them (`PATCH .../override`). A field left out of the body keeps the one stored.
+export type McpServerWorkspaceSettings = Schemas["McpServerWorkspaceSettings"]
+export type SetWorkspaceMcpServerOverrideRequest =
+  Schemas["WorkspaceMcpServerSettingsUpdate"]
 export type McpCredentialMode = Schemas["McpCredentialMode"]
 export type McpConnection = Schemas["McpConnectionPublic"]
 export type McpConnections = Schemas["McpConnectionsPublic"]
@@ -831,6 +837,15 @@ export type McpConnectionStarted = Schemas["McpConnectionStarted"]
 export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
 export type McpServerConnection = Schemas["McpServerConnectionPublic"]
 export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+// The organization's own servers share the shapes above (`scope` says whose a
+// server is). These say how each workspace reaches one, and set the
+// organization's limit for a workspace.
+export type OrganizationMcpServerWorkspace =
+  Schemas["OrganizationMcpServerWorkspace"]
+export type OrganizationMcpServerWorkspaces =
+  Schemas["OrganizationMcpServerWorkspaces"]
+export type OrganizationMcpServerLimitRequest =
+  Schemas["OrganizationMcpServerLimit"]
 
 // The catalog of remote MCP servers a workspace can add, the logos it knows,
 // and the sync that fills it from the MCP Registry.

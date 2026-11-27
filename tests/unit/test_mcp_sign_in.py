@@ -51,8 +51,11 @@ def _ticket(link: str) -> str:
     return link.split("ticket=", 1)[1]
 
 
-def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
-    link = sign_in_link(_config(), server_id=SERVER, user_id="alice")
+@pytest.mark.parametrize("workspace_id", [None, uuid.UUID("44444444-4444-4444-4444-444444444444")])
+def test_a_link_names_its_server_user_and_workspace_and_points_at_this_gateway(
+    workspace_id: uuid.UUID | None,
+) -> None:
+    link = sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=workspace_id)
 
     assert link.startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
     assert "?" not in link, "the ticket stays out of the part of the address a browser sends"
@@ -60,13 +63,13 @@ def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
     assert "=" not in _ticket(link), "no padding for a chat to mangle"
     assert "alice" not in link
     read = read_sign_in_link(_ticket(link))
-    assert read is not None and (read.server_id, read.user_id) == (SERVER, "alice")
+    assert read is not None and (read.server_id, read.user_id, read.workspace_id) == (SERVER, "alice", workspace_id)
 
 
 def test_a_link_is_known_by_its_token_however_its_text_is_spelled() -> None:
     """Base64 decoding skips stray characters, so one link can be written many ways and must be spent once."""
-    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
-    again = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=None))
+    again = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=None))
     respelled = f"{ticket[:10]}....{ticket[10:]}"
 
     first, other, same = read_sign_in_link(ticket), read_sign_in_link(again), read_sign_in_link(respelled)
@@ -79,7 +82,7 @@ def test_a_link_is_known_by_its_token_however_its_text_is_spelled() -> None:
 def test_a_link_is_good_until_the_first_moment_fernet_refuses_it() -> None:
     """A spent link's record is kept until then, so a purge cannot free a link that still opens."""
     minted_from = int(time.time())
-    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=None))
     minted_by = int(time.time())
     read = read_sign_in_link(ticket)
     assert read is not None
@@ -94,7 +97,7 @@ def test_a_link_is_good_until_the_first_moment_fernet_refuses_it() -> None:
 
 
 def test_a_link_is_refused_once_altered_forged_or_old(monkeypatch: pytest.MonkeyPatch) -> None:
-    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=None))
     altered = ticket[:-2] + ("A" if ticket[-2] != "A" else "B") + ticket[-1]
     other_purpose = encrypt_secret('{"p":"x","s":"00000000-0000-0000-0000-0000000000aa","u":"alice"}')
 
@@ -110,9 +113,9 @@ def test_a_link_is_refused_once_altered_forged_or_old(monkeypatch: pytest.Monkey
 
 def test_no_link_without_a_public_address_or_for_the_shared_default_user() -> None:
     with pytest.raises(McpConnectionSetupError):
-        sign_in_link(_config(None), server_id=SERVER, user_id="alice")
+        sign_in_link(_config(None), server_id=SERVER, user_id="alice", workspace_id=None)
     with pytest.raises(McpConnectionSetupError):
-        sign_in_link(_config(), server_id=SERVER, user_id="default")
+        sign_in_link(_config(), server_id=SERVER, user_id="default", workspace_id=None)
     assert sign_in_link_prefix(_config(None)) is None
 
 
@@ -133,7 +136,7 @@ def _backend(*needed: McpSignInNeeded, taken: tuple[str, ...] = ()) -> tuple[Mcp
 
     def mint(server_id: uuid.UUID, user_id: str) -> str:
         minted.append((server_id, user_id))
-        return sign_in_link(_config(), server_id=server_id, user_id=user_id)
+        return sign_in_link(_config(), server_id=server_id, user_id=user_id, workspace_id=None)
 
     return McpSignInBackend(needed, mint=mint, link_prefix=sign_in_link_prefix(_config()), taken=taken), minted
 

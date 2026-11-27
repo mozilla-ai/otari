@@ -37,10 +37,10 @@ class ChatWebFetchRendering:
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The ended entry, ``failed`` or ``completed``.
 
-        A failed fetch's ``error`` is the failure the fetch backend kept, which the
-        old search backend forwards: the provider, its status, the tag and whether
-        a retry may help, or ``internal_error`` for a fetch that raised. A pool that
-        keeps none, such as an MCP server's, gives a failed entry without one.
+        A failed fetch's ``error`` is the failure the fetch backend kept: the
+        provider, its status, the tag and whether a retry may help, or
+        ``internal_error`` for a fetch that raised. A pool that keeps none, such as
+        an MCP server's, gives a failed entry without one.
         """
         error = ran_error(call, pool)
         if not call.failed:

@@ -11,7 +11,8 @@ import { McpNotice } from "@/features/tools/McpNotice"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
-import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
+import { useUpdateMcpServer } from "@/shared/api/tools"
 
 /**
  * Which of a server's tools count as read, the set a "Read tools only" rule
@@ -32,12 +33,13 @@ export function McpReadTools({
   server: WorkspaceMcpServer
   canManage: boolean
 }) {
-  const update = useUpdateWorkspaceMcpServer()
+  const update = useUpdateMcpServer()
+  const scope = workspaceMcpScope(workspaceId)
   const stored = server.read_tools
   const isFromServer = server.read_tools_from_server
   const picker = checkedTools(server, { withinAllowList: true })
   const check = useMcpServerCheck({
-    workspaceId,
+    scope,
     returnTo: `/tools/mcp-servers/${server.id}`,
   })
   const [isEditing, setEditing] = useState(false)
@@ -90,7 +92,7 @@ export function McpReadTools({
                 variant="primary"
                 onPress={() =>
                   update.mutate({
-                    workspaceId,
+                    scope,
                     serverId: server.id,
                     body: { read_tools: picked },
                   })

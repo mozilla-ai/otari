@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from contextlib import AsyncExitStack
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
+from any_search import SearchHit
 from gateway.core.config import GatewayConfig
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
@@ -29,13 +31,17 @@ from gateway.services.tools import (
 from gateway.services.web_retrieval_policy import DomainPolicy
 
 
-class _SearchBackendLike:
-    """The gateway's own retrieval backend, as a rendering reads it."""
+def _hit(url: str, title: str = "", *, published: datetime | None = None, text: str = "") -> SearchHit:
+    return SearchHit(url=url, title=title, published=published, text=text, raw={})
 
-    def __init__(self, results: list[dict[str, Any]] | None = None) -> None:
+
+class _SearchBackendLike:
+    """The gateway's own search backend, as a rendering reads it."""
+
+    def __init__(self, results: list[SearchHit] | None = None) -> None:
         self._results = results or []
 
-    def take_last_results(self) -> list[dict[str, Any]]:
+    def take_last_hits(self) -> list[SearchHit]:
         results, self._results = self._results, []
         return results
 
@@ -80,7 +86,7 @@ def test_every_caller_is_told_a_search_ran_in_the_responses_vocabulary(tool_entr
 
 
 def test_the_anthropic_pair_cites_the_hits_the_backend_kept() -> None:
-    backend = _SearchBackendLike([{"url": "https://example.com/a", "title": "A", "published_date": "2026-01-02"}])
+    backend = _SearchBackendLike([_hit("https://example.com/a", "A", published=datetime(2026, 1, 2, tzinfo=UTC))])
 
     use, result = _rendering(Dialect.MESSAGES).ran(_call(), backend)
 
@@ -91,7 +97,7 @@ def test_the_anthropic_pair_cites_the_hits_the_backend_kept() -> None:
 
 
 def test_a_failed_search_has_nothing_to_cite() -> None:
-    backend = _SearchBackendLike([{"url": "https://example.com/a", "title": "A"}])
+    backend = _SearchBackendLike([_hit("https://example.com/a", "A")])
 
     assert _rendering(Dialect.MESSAGES).ran(_call(failed=True), backend) == []
 
@@ -138,13 +144,13 @@ def test_a_chat_search_is_announced_with_its_query_and_ended_with_its_sources_un
     call = _call()
     backend = _SearchBackendLike(
         [
-            {
-                "url": "https://python.org",
-                "title": "Python",
-                "content": "page text only the model reads",
-                "published_date": "2026-10-01",
-            },
-            {"url": "https://docs.python.org", "title": "", "content": "more page text"},
+            _hit(
+                "https://python.org",
+                "Python",
+                published=datetime(2026, 10, 1, tzinfo=UTC),
+                text="page text only the model reads",
+            ),
+            _hit("https://docs.python.org", "", text="more page text"),
         ]
     )
 
@@ -170,25 +176,23 @@ def test_a_chat_search_is_announced_with_its_query_and_ended_with_its_sources_un
 
 
 def test_a_chat_search_with_no_hits_is_completed_with_no_sources() -> None:
-    [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike([{"url": "", "title": "no url"}]))
+    [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike([_hit("", "no url")]))
 
     assert ended["status"] == "completed"
     assert ended["sources"] == []
 
 
-def test_a_chat_source_bounds_its_title_and_date() -> None:
-    hit = {"url": "https://example.com", "title": "t" * 2000, "published_date": "Mon,\n  " + "1" * 500}
+def test_a_chat_source_bounds_its_title() -> None:
+    hit = _hit("https://example.com", "t" * 2000)
 
     [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike([hit]))
 
     [source] = ended["sources"]
     assert len(source["title"].encode()) <= 512
-    assert source["published_date"].startswith("Mon, 111")
-    assert len(source["published_date"]) == 128
 
 
-def test_a_failed_chat_search_on_the_old_backend_has_no_error() -> None:
-    [ended] = _rendering(Dialect.CHAT).ran(_call(failed=True), _SearchBackendLike([{"url": "https://stale.example"}]))
+def test_a_failed_chat_search_with_no_kept_failure_has_no_error() -> None:
+    [ended] = _rendering(Dialect.CHAT).ran(_call(failed=True), _SearchBackendLike([_hit("https://stale.example")]))
 
     assert ended["status"] == "failed"
     assert "error" not in ended
@@ -214,7 +218,7 @@ def test_the_other_dialects_announce_nothing_when_a_search_starts(dialect: Diale
 def test_chat_sources_stay_within_the_model_facing_results_byte_limit() -> None:
     """Titles and dates are capped, so the URL is what the limit bounds; a source that would cross it is left out."""
     long_url = "https://example.com/" + "a" * (WEB_RETRIEVAL_RESULT_MAX_BYTES // 3)
-    hits = [{"url": f"{long_url}{index}", "title": "t"} for index in range(5)] + [{"url": "https://short.example"}]
+    hits = [_hit(f"{long_url}{index}", "t") for index in range(5)] + [_hit("https://short.example")]
 
     [ended] = _rendering(Dialect.CHAT).ran(_call(), _SearchBackendLike(hits))
 

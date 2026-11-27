@@ -21,7 +21,11 @@ from gateway.services.organizations._invitation_facts import InvitationFactsRead
 from gateway.services.organizations._invitation_link import InvitationLink
 from gateway.services.organizations._invitation_mail_limit import InvitationMailLimit
 from gateway.services.organizations._invitations import InvitationPolicy, Invitations
-from gateway.services.organizations._membership_listener import MembershipListener, MembershipListeners
+from gateway.services.organizations._membership_listener import (
+    MembershipListener,
+    MembershipListeners,
+    OrganizationReach,
+)
 from gateway.services.organizations._sso_enforcement import SsoEnforcement
 from gateway.services.organizations._user_access import UserAccess
 
@@ -47,6 +51,7 @@ __all__ = [
     "MembershipListener",
     "MembershipListeners",
     "OrganizationClaimedDomains",
+    "OrganizationReach",
     "ReleasedOrganizations",
     "SsoEnforcement",
     "UserAccess",

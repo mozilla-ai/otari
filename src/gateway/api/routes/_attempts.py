@@ -52,7 +52,6 @@ from gateway.services.provider_kwargs import (
     no_candidate_configured_detail,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.types.attempt import Attempt
 
 T = TypeVar("T")
@@ -497,7 +496,7 @@ async def walk_attempts(
             if on_terminal is not None:
                 on_terminal(attempt)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        except (SandboxNotReachableError, WebSearchNotReachableError):
+        except SandboxNotReachableError:
             raise
         except asyncio.CancelledError:
             # The catch below is `BaseException` so a provider client raising

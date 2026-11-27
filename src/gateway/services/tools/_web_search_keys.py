@@ -25,7 +25,6 @@ from fastapi import BackgroundTasks
 import any_fetch
 import any_search
 from gateway.core.settings.tools import (
-    WEB_SEARCH_PROVIDERS,
     ToolKind,
     ToolSettings,
     is_test_tier,
@@ -90,10 +89,18 @@ from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tool_settings_service import validate_url
 from gateway.services.tools._web_search import credential_needs_api_key, in_loop_default, resolve_fetch
 from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
-from gateway.services.web_search_providers import is_sendable_api_key
 
 # Takes the workspace's row lock for the rest of the transaction.
 LockWorkspace = Callable[[uuid.UUID], Awaitable[None]]
+
+
+def _is_sendable_api_key(api_key: str) -> bool:
+    """Whether a key can go in a request header as is.
+
+    A key with whitespace or a control character is refused before it is sent, because the
+    HTTP client's own error for an illegal header value quotes the whole header.
+    """
+    return bool(api_key) and api_key.isprintable() and not any(char.isspace() for char in api_key)
 
 
 def key_credential(key: OrgWebSearchKey) -> WebToolCredential | None:
@@ -555,15 +562,12 @@ def _key_providers(kind: ToolKind) -> tuple[str, ...]:
     """The providers a key of ``kind`` may name, sorted.
 
     The libraries' providers for the kind, other than the ones that exist only for
-    tests and, for fetch, ``builtin``; and, for search, those of
-    :data:`WEB_SEARCH_PROVIDERS` any-search does not serve, which run on the old search code.
+    tests and, for fetch, ``builtin``.
     """
-    if kind == "fetch":
-        served: tuple[str, ...] = supported_fetch_providers()
-    else:
-        served = (*any_search.AnySearch.get_supported_providers(), *WEB_SEARCH_PROVIDERS)
-    offered = {provider for provider in served if provider in WEB_SEARCH_PROVIDERS or not is_test_tier(kind, provider)}
-    return tuple(sorted(offered))
+    served: tuple[str, ...] = (
+        supported_fetch_providers() if kind == "fetch" else tuple(any_search.AnySearch.get_supported_providers())
+    )
+    return tuple(sorted(provider for provider in served if not is_test_tier(kind, provider)))
 
 
 def _validated_provider(kind: ToolKind, provider: str) -> str:
@@ -574,23 +578,14 @@ def _validated_provider(kind: ToolKind, provider: str) -> str:
     return candidate
 
 
-def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
-    """Whether the old search code runs the provider, and whether a key on it needs an API key and an endpoint.
-
-    The old search code calls its providers at their public endpoints, with no options of a key's.
-    """
-    if (
-        kind == "search"
-        and provider in WEB_SEARCH_PROVIDERS
-        and provider not in any_search.AnySearch.get_supported_providers()
-    ):
-        return True, True, False
+def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool]:
+    """Whether a key on the provider needs an API key, and whether it needs an endpoint of its own."""
     metadata = (
         any_fetch.AnyFetch.get_provider_metadata(provider)
         if kind == "fetch"
         else any_search.AnySearch.get_provider_metadata(provider)
     )
-    return False, credential_needs_api_key(metadata), metadata.requires_api_base and not metadata.default_api_base
+    return credential_needs_api_key(metadata), metadata.requires_api_base and not metadata.default_api_base
 
 
 async def _check_settings(
@@ -602,7 +597,7 @@ async def _check_settings(
         WebSearchKeyIncompleteError: the key lacks an API key or an endpoint a key on the provider must carry.
         WebSearchKeySettingRefusedError: the endpoint or an option is one the provider or this deployment refuses.
     """
-    _, requires_key, _ = _requirements(kind, provider)
+    requires_key, _ = _requirements(kind, provider)
     if requires_key and not has_key:
         raise WebSearchKeyIncompleteError(provider, "an API key")
     _check_endpoint(kind, provider, api_base, has_key=has_key)
@@ -613,13 +608,11 @@ async def _check_settings(
 
 def _check_endpoint(kind: ToolKind, provider: str, api_base: str | None, *, has_key: bool) -> None:
     """Refuse an endpoint the provider takes none of, that is no web address, or that would send a key in the clear."""
-    on_old_code, _, requires_base = _requirements(kind, provider)
+    _, requires_base = _requirements(kind, provider)
     if api_base is None:
         if requires_base:
             raise WebSearchKeyIncompleteError(provider, "an api_base")
         return
-    if on_old_code:
-        raise WebSearchKeySettingRefusedError("api_base", f"a {provider} key takes neither api_base nor options")
     try:
         validate_url(api_base)
     except ValueError as exc:
@@ -632,8 +625,6 @@ def _check_options(kind: ToolKind, provider: str, options: Mapping[str, Any] | N
     """Refuse options the provider's schema does not know or refuses the value of."""
     if not options:
         return
-    if _requirements(kind, provider)[0]:
-        raise WebSearchKeySettingRefusedError("options", f"a {provider} key takes neither api_base nor options")
     if problems := option_problems(kind, provider, options):
         raise WebSearchKeySettingRefusedError("options", next(iter(problems.values())))
 
@@ -675,7 +666,7 @@ def _encrypted(api_key: str) -> tuple[str, str]:
     Surrounding whitespace from a paste is dropped; whitespace or a control character inside is refused.
     """
     api_key = api_key.strip()
-    if not is_sendable_api_key(api_key):
+    if not _is_sendable_api_key(api_key):
         raise WebSearchKeyMalformedError()
     try:
         return encrypt_secret(api_key), api_key[-4:]

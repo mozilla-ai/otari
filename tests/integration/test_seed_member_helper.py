@@ -25,12 +25,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _roster_support import SeededMember
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import OrganizationMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.users import User as AttributionUser
-
-from .conftest import SeededMember
 
 SEEDED = "seeded@example.com"
 ADDED = "added@example.com"

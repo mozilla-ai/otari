@@ -153,7 +153,9 @@ from gateway.api.deps.tools import (
     DirectToolAvailabilityDep,
     DirectToolServiceDep,
     McpToolListingsDep,
+    McpWorkspaceServersDep,
     OptionalWebProviderClientDep,
+    OrganizationMcpServerWorkspacesDep,
     PlaygroundToolOfferDep,
     SearchCatalogCallerDep,
     SearchToolServiceDep,
@@ -173,7 +175,9 @@ from gateway.api.deps.tools import (
     get_direct_tool_availability,
     get_direct_tool_service,
     get_mcp_tool_listings,
+    get_mcp_workspace_servers,
     get_optional_web_provider_client,
+    get_organization_mcp_server_workspaces,
     get_playground_tool_offer,
     get_search_catalog_caller,
     get_search_tool_service,
@@ -262,10 +266,12 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpServerAliasRepository,
     McpServerRequestRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerLogoRepository,
+    WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
 from gateway.repositories.update_check import UpdateCheckStateRepository
@@ -335,6 +341,7 @@ from gateway.services.tools import (
     McpServerLogoService,
     McpServerRequestService,
     McpSignedInServers,
+    McpWorkspaceServers,
     WorkspaceMcpServerUrls,
 )
 from gateway.services.update_check import UpdateCheckService
@@ -578,6 +585,9 @@ def get_mcp_connection_service(
             UserRepository(uow),
         ),
         users=get_user_access(uow),
+        views=McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
     )
 
 
@@ -1276,6 +1286,9 @@ __all__ = [
     "VisibleWorkspacesDep",
     "WebProviderClientDep",
     "WebSearchKeyServiceDep",
+    "OrganizationMcpServerWorkspacesDep",
+    "McpWorkspaceServersDep",
+    "get_mcp_workspace_servers",
     "WorkspaceAccessDep",
     "WorkspaceActivationServiceDep",
     "WorkspaceCodeExecutionPoliciesDep",
@@ -1368,6 +1381,7 @@ __all__ = [
     "get_mcp_tool_listings",
     "get_web_provider_client",
     "get_web_search_key_service",
+    "get_organization_mcp_server_workspaces",
     "get_workspace_access",
     "get_workspace_activation_service",
     "get_workspace_code_execution_policies",

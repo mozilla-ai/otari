@@ -21,10 +21,10 @@ from starlette.types import Receive, Send
 from gateway.api.trace_capture import TRACE_SCOPE_KEY, TraceCaptureMiddleware
 from gateway.models.usage import UsageLog
 from gateway.services.log_writer import TracingLogWriter, _llm_call
+from gateway.services.tools import WEB_FETCH_TOOL_NAME, WebFetchBackend, builtin_fetch_resolved
 from gateway.services.traces import RequestTrace, RequestTraces, TraceWriter
 from gateway.services.traces._writer import SPANS_DROPPED
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WebRetrievalBackend
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_web_url
 from gateway.types.traces import SpanRecord, TraceWrite, WriteResult
 
@@ -750,8 +750,7 @@ async def test_a_web_fetch_records_a_timed_tool_span() -> None:
         redirect_count=0,
     )
     trace = _trace()
-    # The old backend hands the fetch to the fetch backend, which records the span; it records none itself.
-    backend = WebRetrievalBackend(enable_search=False, enable_fetch=True, fetch_policy=DomainPolicy(), trace=trace)
+    backend = WebFetchBackend(builtin_fetch_resolved(), policy=DomainPolicy(), trace=trace)
     with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=page)):
         async with backend:
             await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})
