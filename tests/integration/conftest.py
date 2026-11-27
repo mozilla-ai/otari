@@ -35,6 +35,7 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
+from _roster_support import SeededMember, operator_organization_id, write_member_rows
 from gateway.api.deps import (
     build_hosted_provider_service,
     build_unavailable_model_reporter,
@@ -54,8 +55,6 @@ from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
 from gateway.types.key_scope import END_USER_SCOPES, KeyScope, KeyScopeSet
-
-from _roster_support import SeededMember, operator_organization_id, write_member_rows
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 # Every scope a key that is not a service key may hold, for a test of something other than scopes.
