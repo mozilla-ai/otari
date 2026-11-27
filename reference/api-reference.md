@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/b899883f8fe3cedf933c88594d6aabcf9c633a6e/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/109103d2b2cd338d968d9ba82e734912ff956abb/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -720,7 +720,7 @@ for it works against Otari with its base URL changed. `include_raw` and
   a call that names it runs on it in any case; any other name is a 400 listing
   it. The deployment pays: it is priced under `otari:web_search`, and an
   `allowed_tools` grants it by that name. Once any search tool exists, the
-  legacy backend is neither served nor listed here.
+  search the legacy settings describe is neither served nor listed here.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search
