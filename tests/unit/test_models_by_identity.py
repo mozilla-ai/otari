@@ -395,6 +395,29 @@ def test_an_override_of_the_vendors_own_selector_does_not_describe_the_row(
     assert row.context_window == 1048576
 
 
+def test_a_capability_another_offering_reports_wins_over_the_identitys_entry(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """An offering's own report wins over models.dev's entry, as its price and limits do."""
+    own = ModelsDevModel(id="deepseek-flash", name="DeepSeek V4.1 Flash 1017")
+    resold = ModelsDevModel(id="deepseek-ai/DeepSeek-V4.1-Flash-1017", name="DeepSeek V4.1 Flash 1017", tool_call=True)
+    catalog = ModelsDevCatalog(
+        providers={
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={own.id: own}),
+            "deepinfra": ModelsDevProvider(id="deepinfra", name="DeepInfra", doc=None, models={resold.id: resold}),
+        }
+    )
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    engine = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.5)
+    selectors.apply_model_metadata(config, catalog, engine)
+    assert (org.supported_parameters, engine.supported_parameters) == (None, ["tools", "tool_choice"])
+
+    (row,) = models_by_identity(config, catalog, [org, engine], slug_providers={"chat-proxy": "openai"})
+
+    assert row.supported_parameters == ["tools", "tool_choice"]
+
+
 def test_a_model_models_dev_does_not_list_stays_undescribed(config: GatewayConfig, no_index: None) -> None:
     catalog = _deepseek_catalog()
     org = _offering("chat-proxy:house-model-7b", 0.3)

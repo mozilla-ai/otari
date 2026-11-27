@@ -187,6 +187,7 @@ def models_by_identity(
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
                 **_limits_from_others(first, others),
                 **_facts_from_others(first, reached),
+                **_capabilities_from_others(first, reached),
             }
         )
         if any(getattr(row, field) is None for field in _DESCRIBED_FIELDS):
@@ -347,6 +348,20 @@ def _facts_from_others(first: ModelObject, others: list[ModelObject]) -> dict[st
             if value is not None:
                 filled[field] = value
     return filled
+
+
+def _capabilities_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, list[str]]:
+    """The request parameters ``first`` leaves unknown, as the first other offering reports them.
+
+    ``None`` means nothing described the offering at all, while an empty list is
+    a report that it supports none of the parameters. An offering's own report
+    wins over models.dev's entry for the model, as its price and limits do, so a
+    row that borrowed a sibling's list is not described again from that entry.
+    """
+    if first.supported_parameters is not None:
+        return {}
+    reported = next((obj.supported_parameters for obj in others if obj.supported_parameters is not None), None)
+    return {} if reported is None else {"supported_parameters": reported}
 
 
 def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:
