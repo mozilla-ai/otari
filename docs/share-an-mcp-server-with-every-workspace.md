@@ -7,7 +7,7 @@ icon: server
 An organization can add an MCP server once for all of its workspaces, instead of
 adding a copy to each one. Every workspace reaches it, each person signs in to it
 once for all of them, and the organization decides how far each workspace may use
-it. A server one workspace adds under **Tools** → **MCP servers** stays that
+it. A server one workspace adds under **MCP servers** stays that
 workspace's own, as described in [MCP servers](mcp-servers.md).
 
 Only the organization's owners and admins add and change these servers.
@@ -54,7 +54,7 @@ allows.
 
 ## What a workspace sees
 
-A workspace's **Tools** → **MCP servers** lists the organization's servers beside
+A workspace's **MCP servers** lists the organization's servers beside
 its own, marked as the organization's. Their definition is read-only there: the
 organization's owners and admins change it.
 

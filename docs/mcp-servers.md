@@ -9,7 +9,7 @@ An organization can also add a server once for every workspace. Its owners and a
 There are two ways in: add a server by its URL, or pick servers from the catalog. The steps below add one by URL.
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools** → **MCP servers**.
+2. Go to **MCP servers**.
 3. Click **Add MCP server**.
 4. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
 5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
@@ -31,7 +31,7 @@ can be changed there at any time.
 
 A key reaches the workspace's servers only if it holds the `mcp:execute` scope,
 and lists them only with `mcp:read`. A new key holds neither. While a key you
-can see in the workspace lacks `mcp:execute`, **Tools** → **MCP servers** says
+can see in the workspace lacks `mcp:execute`, **MCP servers** says
 how many do, with a link to **API keys**, where you change a key under
 **Access** → **Advanced scopes**. See [Scopes](api-keys.md#scopes).
 
@@ -166,7 +166,7 @@ tools** and **Read tools** take whole tool names only.
 The catalog lists remote MCP servers from the official MCP Registry, so you do not have to find a URL. Being listed permits nothing, and does not mean anyone checked the server: it is available to a workspace only once it is added there.
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools** → **MCP servers**.
+2. Go to **MCP servers**.
 3. Click **Browse catalog**. If the catalog is empty, click **Load catalog** and wait a couple of minutes while it fills in.
 4. Pick from **Popular**, or type in **Search the catalog** to find any server by its name or description. Each server shows its logo. An **Official** label marks a server its maker runs on the domain the registry verified for it; hover it to see the host. [What you see](mcp-catalog.md#what-you-see) gives the rule. Servers the workspace already has are not listed. If the server you want is not listed, click **Add it by URL**.
 5. Select each server you want. It moves to **Selected** at the top and stays there when you change the search; untick it to put it back.
@@ -199,7 +199,7 @@ may run. The rules are described in [Server access](mcp.md#server-access).
 
 You need to be an owner or admin of the workspace or of the organization. Start
 from the server's page: select the workspace in the top-left corner, go to
-**Tools**, then **MCP servers**, and click the server.
+**MCP servers**, and click the server.
 
 ### Choose the default policy
 

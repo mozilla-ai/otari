@@ -16,7 +16,7 @@ Use your default workspace for the first request.
 
 1. Log in to [otari.ai](https://otari.ai).
 2. Open your default workspace in the top-left corner.
-3. You will use the **API keys**, Models, and **Sessions** pages in this guide.
+3. You will use the **API keys**, Models, and **Traces** pages in this guide.
 
 ## 2. Generate an API token
 
@@ -72,7 +72,7 @@ print(response.choices[0].message.content)
 
 ## 4. Confirm it worked
 
-1. Open **Sessions** and its **Requests** view.
+1. Open **Traces** and its **Requests** view.
 2. Look for the request you just sent.
 3. If it does not appear, double-check the provider key and workspace token first.
 

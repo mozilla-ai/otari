@@ -21,7 +21,7 @@ describes how it works.
 You need to be an owner or admin of the workspace or of the organization.
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools**, then **MCP servers**, and click **Add MCP server**.
+2. Go to **MCP servers**, and click **Add MCP server**.
 3. Enter a **Name** and the server's **URL**.
 4. Under **Sign-in mode**, choose **Personal accounts**.
 5. Leave **OAuth client ID** blank. Otari registers itself with the server on
@@ -94,7 +94,7 @@ members signs in again when their sign-in expires.
 
 Anyone who can see the workspace can do this.
 
-1. Go to **Tools**, then **MCP servers**. Click **Connect a server** and pick
+1. Go to **MCP servers**. Click **Connect a server** and pick
    the server. An owner or admin can also open the server's page and click
    **Connect your account** at the top. Once you are connected, the server's
    page offers **Reconnect** and **Disconnect**: under **Your account** for a
@@ -214,7 +214,7 @@ key belongs to nobody. Create the key for a user instead.
 connected yet, leaving out any that are switched off. For one the workspace
 does not have, ask its admins:
 
-1. Go to **Tools**, then **MCP servers**. Click **Connect a server**, then
+1. Go to **MCP servers**. Click **Connect a server**, then
    **Request a server**. With no servers yet, **Request a server** is on the
    page itself.
 2. Pick from **Popular**, or type in **Search the catalog**. Servers the

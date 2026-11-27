@@ -1897,7 +1897,7 @@ each policy covers.
 
 ## Documentation links
 
-By default the dashboard's Documentation link opens
+By default the dashboard's Docs link opens
 [docs.otari.ai](https://docs.otari.ai/). Set `docs_url` or `OTARI_DOCS_URL` to
 point it at another absolute HTTP or HTTPS URL.
 
