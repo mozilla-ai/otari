@@ -381,12 +381,17 @@ def test_an_unverified_signup_is_not_sent_to_a_verification_link_no_mailbox_rece
     monkeypatch: pytest.MonkeyPatch,
     recorded_mail: RecordingTransport,
 ) -> None:
-    """The console transport shows the signup's link to the operator, so naming it would strand the invitee."""
+    """A verification link nobody can receive is no way in, so naming it would strand the invitee.
+
+    The signup happens while mail delivers and the deployment stops delivering afterwards, which is
+    the state an operator reaches by changing a setting rather than one signup can create itself.
+    """
     result = _invite(client, master_key_header, email="hedy@example.com")
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_up.status_code == 200, signed_up.text
+    monkeypatch.setattr(test_config, "mail_transport", "none")
 
     token = _token_from(result["accept_link"])
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
@@ -1271,9 +1276,7 @@ def test_an_organization_name_with_a_control_character_is_refused(
 def _mail_on(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
     """Configure a deployment whose email reaches the invitee, and collect what it delivers.
 
-    Not the console transport, which shows a message to the deployment operator and
-    delivers it to nobody, so a link it carries is still hand-carried. Only the socket
-    is replaced, so readiness, rendering and the off-loaded send all run.
+    Only the socket is replaced, so readiness, rendering and the off-loaded send all run.
     """
     delivered: list[MailEnvelope] = []
     monkeypatch.setattr(test_config, "mail_transport", "smtp")
@@ -1468,32 +1471,29 @@ def test_a_deactivated_invitee_cannot_use_a_link_issued_before_the_deactivation(
     assert _roster_row(client, master_key_header, "dee@example.com")["status"] == "invited"
 
 
-def test_a_console_transport_hands_the_invite_link_back_rather_than_claiming_a_send(
+def test_a_deployment_that_cannot_deliver_hands_the_invite_link_back_rather_than_claiming_a_send(
     client: TestClient,
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The console transport shows a message to the deployment operator and reaches no mailbox.
-
-    So an invitation it carries is hand-carried, exactly as one on a deployment with no mail.
-    """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    """An invitation it carries reached no mailbox, so it is hand-carried."""
+    monkeypatch.setattr(test_config, "mail_transport", "none")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
-    result = _invite(client, master_key_header, email="console@example.com")
+    result = _invite(client, master_key_header, email="undelivered@example.com")
 
     assert result["mail_sent"] is False
     assert result["accept_link"] is not None
 
 
-def test_a_console_transport_offers_no_password_reset_as_a_way_in(
+def test_a_deployment_that_cannot_deliver_offers_no_password_reset_as_a_way_in(
     client: TestClient,
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A reset link the console transport logs reaches no mailbox, so the page must not offer one."""
+    """A reset link that reaches no mailbox is no way in, so the page must not offer one."""
     _invite(client, master_key_header, email="new@example.com")
     created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
     _switch(client, master_key_header, created.json()["id"])
@@ -1501,7 +1501,7 @@ def test_a_console_transport_offers_no_password_reset_as_a_way_in(
 
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "mail_transport", "none")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()

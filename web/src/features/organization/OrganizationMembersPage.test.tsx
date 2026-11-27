@@ -911,23 +911,6 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("says how the invitee joins when the email reaches nobody", async () => {
-    // A transport that delivers to nobody hands the inviter a link, exactly as
-    // no transport does, so the dialog must not promise an email either.
-    mockApi({ members: [OWNER] })
-    const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail: "sends_only" })
-
-    await user.click(
-      await screen.findByRole("button", { name: "Invite member" }),
-    )
-    expect(
-      screen.getByText(
-        /an accept link to share, or accepting once they sign in/,
-      ),
-    ).toBeInTheDocument()
-  })
-
   it("says the email will be sent when mail is configured", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()

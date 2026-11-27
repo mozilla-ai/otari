@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { MailReadiness } from "@/client"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
-import {
-  mailCanSend,
-  mailDelivers,
-  normalizeBootstrap,
-} from "@/shared/helpers/bootstrap"
+import { mailDelivers, normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { bootstrap } from "@/tests/fixtures"
 
 // A payload from a gateway that predates a field: the key is absent, not null.
@@ -106,19 +102,10 @@ describe("normalizeBootstrap", () => {
   })
 })
 
-describe("mail predicates", () => {
-  it("answers both questions from one published value", () => {
-    const states: MailReadiness[] = ["none", "sends_only", "delivers"]
+describe("the mail predicate", () => {
+  it("answers for every published value", () => {
+    const states: MailReadiness[] = ["none", "delivers"]
 
-    expect(states.map((state) => mailCanSend(state))).toEqual([
-      false,
-      true,
-      true,
-    ])
-    expect(states.map((state) => mailDelivers(state))).toEqual([
-      false,
-      false,
-      true,
-    ])
+    expect(states.map((state) => mailDelivers(state))).toEqual([false, true])
   })
 })

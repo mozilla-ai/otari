@@ -2,8 +2,8 @@
 
 No real SMTP server is exercised. The transports are covered for the two things
 that must never happen (a send that raises into the request that triggered it,
-and a deployment discovering at send time that it has no mail), and the console
-transport is what proves a *templated message actually sends* without one.
+and a deployment discovering at send time that it has no mail). A recording
+transport proves a *templated message actually sends* with no SMTP server.
 """
 
 import ast
@@ -20,13 +20,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from _mail_support import RecordingTransport
 from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH, stored_address
 from gateway.core.config import MAIL_TRANSPORT_SETTINGS, GatewayConfig
-from gateway.log_config import CredentialMaskingFilter
 from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
-    ConsoleTransport,
     MailDelivery,
     MailDeliveryError,
     MailEnvelope,
@@ -149,7 +148,7 @@ def test_readiness_never_depends_on_a_validator_having_run() -> None:
     assert half_configured.mail_enabled is False
     assert half_configured.mail_ready is False
     assert select_transport(half_configured) is None
-    assert Mailer(half_configured).can_send_links is False
+    assert Mailer(half_configured).can_deliver_links is False
     # And it still names what is missing rather than reporting nothing to fix.
     assert half_configured.missing_mail_settings == ("mail_from_email", "public_base_url")
 
@@ -175,7 +174,7 @@ def test_config_and_transport_never_disagree_about_whether_mail_exists() -> None
                     )
                     state = (transport, host, sender, url)
                     assert config.mail_enabled == (select_transport(config) is not None), state
-                    assert config.mail_ready == Mailer(config).can_send_links, state
+                    assert config.mail_ready == Mailer(config).can_deliver_links, state
                     # "Empty exactly when ready" is the contract GET /api/v1/settings/mail
                     # publishes, so it holds for every state and not just the tidy ones.
                     assert (config.missing_mail_settings == ()) == config.mail_ready, state
@@ -190,27 +189,6 @@ def test_asking_for_smtp_without_smtp_settings_fails_at_startup_not_at_send_time
     config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com")
     with pytest.raises(ValueError, match="mail_from_email"):
         config.validate_mail_transport()
-
-
-def test_selecting_console_warns_that_it_writes_tokens_to_the_log(
-    gateway_logs: pytest.LogCaptureFixture,
-) -> None:
-    """The one sanctioned exception to never-log-a-token, so it says so out loud.
-
-    A console "delivery" writes the message body, and an invitation body carries
-    the accept token. The transport is opt-in per deployment and useless without
-    the link, so the trade is announced at startup rather than redacted away.
-    """
-    GatewayConfig(mail_transport="console").validate_mail_transport()
-
-    assert "token-bearing" in gateway_logs.text
-
-
-def test_a_real_transport_warns_about_nothing(gateway_logs: pytest.LogCaptureFixture) -> None:
-    GatewayConfig(**SMTP_CONFIGURED).validate_mail_transport()  # type: ignore[arg-type]
-    GatewayConfig().validate_mail_transport()
-
-    assert gateway_logs.text == ""
 
 
 @pytest.mark.parametrize(
@@ -253,17 +231,6 @@ def test_no_transport_is_an_absent_object_not_a_disabled_one() -> None:
     """A surface asks whether mail exists; it never has to interpret a flag on a sender."""
     assert select_transport(GatewayConfig()) is None
     assert isinstance(select_transport(GatewayConfig(**SMTP_CONFIGURED)), SmtpTransport)  # type: ignore[arg-type]
-    assert isinstance(select_transport(GatewayConfig(mail_transport="console")), ConsoleTransport)
-
-
-def test_console_is_a_transport_without_any_smtp_settings() -> None:
-    mailer = Mailer(GatewayConfig(mail_transport="console", public_base_url="https://otari.example.com"))
-    assert mailer.transport_name == "console"
-    assert mailer.is_configured is True
-    assert mailer.can_send_links is True
-
-
-# --- The mailer -------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -582,73 +549,44 @@ async def test_send_survives_a_crlf_in_the_configured_from_name() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_templated_message_sends_over_a_configured_transport(
-    gateway_logs: pytest.LogCaptureFixture,
-) -> None:
+async def test_a_templated_message_sends_over_a_configured_transport(recorded_mail: RecordingTransport) -> None:
     """The definition of done, end to end, with no SMTP server to stand up."""
-    mailer = Mailer(GatewayConfig(mail_transport="console", public_base_url="https://otari.example.com"))
-    delivery = await mailer.send_template(
+    delivery = await Mailer(_ready()).send_template(
         "mail_test",
         to="ada@example.com",
         subject="Otari test message",
-        values={"UI_BASE_URL": "https://otari.example.com", "TRANSPORT": "console"},
+        values={"UI_BASE_URL": "https://otari.example.com", "TRANSPORT": "smtp"},
     )
     assert delivery.delivered is True
-    assert delivery.transport == "console"
-    assert "Your Otari mail settings work" in gateway_logs.text
-    # The recipient is redacted here too: these lines land in the same stream.
-    assert "ada@example.com" not in gateway_logs.text
+    assert delivery.transport == "smtp"
+    assert "Your Otari mail settings work" in recorded_mail.last.message.text
+    assert recorded_mail.last.to == "ada@example.com"
 
 
-def test_the_console_transport_keeps_its_link_past_the_credential_mask(
-    gateway_logs: pytest.LogCaptureFixture,
-) -> None:
-    """The handler masks credentials in every record; this record's link is the point of it."""
-    gateway_logs.handler.addFilter(mask := CredentialMaskingFilter())
-    try:
-        ConsoleTransport().deliver(
-            MailEnvelope(
-                to="ada@example.com",
-                sender_email="otari@example.com",
-                sender_name="Otari",
-                message=MailMessage(
-                    subject="Join",
-                    html="<p>Join</p>",
-                    text="Accept: https://otari.example.com/accept-invitation#token=abc123",
-                ),
-            )
-        )
-    finally:
-        gateway_logs.handler.removeFilter(mask)
-
-    assert "accept-invitation#token=abc123" in gateway_logs.text
-
-
-def test_require_ready_refuses_and_names_what_is_missing() -> None:
+def test_requiring_delivery_refuses_and_names_what_is_missing() -> None:
     """What a surface with no non-mail fallback (password reset) raises."""
     with pytest.raises(MailNotConfiguredError) as excinfo:
-        Mailer(GatewayConfig()).require_ready()
+        Mailer(GatewayConfig()).require_can_deliver()
     assert excinfo.value.missing == ("smtp_host", "mail_from_email", "public_base_url")
     assert "smtp_host" in str(excinfo.value)
 
 
-def test_require_ready_passes_once_a_linked_message_can_be_sent() -> None:
-    Mailer(_ready()).require_ready()
+def test_requiring_delivery_passes_once_a_link_reaches_a_mailbox() -> None:
+    Mailer(_ready()).require_can_deliver()
 
 
-def test_a_configured_transport_without_a_public_url_still_cannot_send_links() -> None:
+def test_a_configured_transport_without_a_public_url_still_cannot_deliver_links() -> None:
     mailer = Mailer(GatewayConfig(**SMTP_CONFIGURED))  # type: ignore[arg-type]
     assert mailer.is_configured is True
-    assert mailer.can_send_links is False
+    assert mailer.can_deliver_links is False
     with pytest.raises(MailNotConfiguredError):
-        mailer.require_ready()
+        mailer.require_can_deliver()
 
 
 @pytest.mark.parametrize(
     ("settings", "expected"),
     [
         pytest.param({"mail_transport": "none"}, False, id="no transport"),
-        pytest.param({"mail_transport": "console"}, False, id="console transport"),
         pytest.param({"public_base_url": None}, False, id="SMTP with no base URL"),
         pytest.param({"public_base_url": "   "}, False, id="SMTP with a whitespace-only base URL"),
         pytest.param(
@@ -671,7 +609,6 @@ def test_links_are_delivered_only_through_a_transport_that_delivers_and_with_an_
     [
         pytest.param({"mail_transport": "none"}, MailReadiness.NONE, id="no transport"),
         pytest.param({"public_base_url": None}, MailReadiness.NONE, id="SMTP with no base URL"),
-        pytest.param({"mail_transport": "console"}, MailReadiness.SENDS_ONLY, id="console transport"),
         pytest.param({}, MailReadiness.DELIVERS, id="SMTP with a base URL"),
     ],
 )
@@ -679,27 +616,17 @@ def test_readiness_names_how_far_a_message_gets(settings: dict[str, object], exp
     assert Mailer(_ready(**settings)).readiness is expected
 
 
-def test_readiness_never_disagrees_with_the_two_predicates_it_stands_for() -> None:
-    """One value published in place of two flags has to answer as both of them.
+def test_readiness_never_disagrees_with_the_predicate_it_publishes() -> None:
+    """The published value has to answer as the predicate a surface gates on.
 
     Exhaustive over the settings that decide it, because a reader that derived
-    the pair separately is what this value exists to prevent.
+    the answer separately is what this value exists to prevent.
     """
     for transport in MAIL_TRANSPORT_SETTINGS:
         for url in (None, "https://otari.example.com"):
             mailer = Mailer(GatewayConfig(**{**SMTP_CONFIGURED, "mail_transport": transport, "public_base_url": url}))  # type: ignore[arg-type]
             state = (transport, url)
-            assert (mailer.readiness is not MailReadiness.NONE) == mailer.can_send_links, state
             assert (mailer.readiness is MailReadiness.DELIVERS) == mailer.can_deliver_links, state
-
-
-def test_each_transport_states_whether_it_delivers_to_recipients() -> None:
-    smtp = select_transport(_ready())
-    console = select_transport(_ready(mail_transport="console"))
-
-    assert smtp is not None
-    assert console is not None
-    assert (smtp.delivers_to_recipients, console.delivers_to_recipients) == (True, False)
 
 
 def test_link_is_absolute_when_the_deployment_knows_its_address_and_relative_otherwise() -> None:
@@ -717,13 +644,13 @@ def test_link_names_the_interface_when_an_edge_serves_it_elsewhere() -> None:
     assert mailer.link("/verify-email#token=abc") == "https://app.example.com/ui/verify-email#token=abc"
 
 
-def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
-    # ``can_send_links`` gates the send, so it has to still imply an absolute
+def test_whatever_can_deliver_links_permits_is_followable_from_an_inbox() -> None:
+    # ``can_deliver_links`` gates the send, so it has to still imply an absolute
     # link now that links are built from the interface address rather than from
     # the one that flag reads.
     mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
 
-    assert mailer.can_send_links is True
+    assert mailer.can_deliver_links is True
     assert mailer.link("/verify-email#token=t") == "https://app.example.com/ui/verify-email#token=t"
 
 
@@ -898,9 +825,9 @@ def test_a_value_is_never_rescanned_as_a_placeholder() -> None:
     message = render_email(
         "mail_test",
         subject="{{TRANSPORT}}",
-        values={"UI_BASE_URL": "{{TRANSPORT}}", "TRANSPORT": "console"},
+        values={"UI_BASE_URL": "{{TRANSPORT}}", "TRANSPORT": "smtp"},
     )
-    assert message.subject == "console"
+    assert message.subject == "smtp"
     assert "{{TRANSPORT}}" in message.text
 
 

@@ -1,7 +1,7 @@
 """How a rendered message reaches (or does not reach) a recipient.
 
-One protocol with two implementations, selected from configuration by
-:func:`select_transport`, and a third state that is deliberately not a
+One protocol with one implementation, selected from configuration by
+:func:`select_transport`, and a second state that is deliberately not a
 transport: ``None``, which is what a deployment with no mail configured gets.
 Modeling "no transport" as the absence of one, rather than as a flag checked
 inside the sender, is what lets a surface ask whether mail exists *before* it
@@ -25,7 +25,6 @@ from typing import Protocol
 
 from gateway.core.addresses import normalized_address
 from gateway.core.config import GatewayConfig
-from gateway.log_config import CARRIES_CREDENTIAL, logger
 from gateway.services.mail.message import MailDeliveryError, MailEnvelope
 
 # Every SMTP step (connect, STARTTLS, login, sendmail) is bounded by this, so a
@@ -82,8 +81,7 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     """Assemble the multipart/alternative message a transport puts on the wire.
 
     Shared rather than per-transport: what a message *is* does not depend on how
-    it travels, and the console transport rendering a different shape from the
-    one SMTP would send is precisely the bug a local preview exists to catch.
+    it travels.
     """
     message = MIMEMultipart("alternative")
     subject = sanitize_header_value(envelope.message.subject)
@@ -146,8 +144,6 @@ class MailTransport(Protocol):
     """
 
     name: str
-    # False for a transport that shows an email to the deployment operator and delivers it to nobody.
-    delivers_to_recipients: bool
 
     def deliver(self, envelope: MailEnvelope) -> None: ...
 
@@ -156,7 +152,6 @@ class SmtpTransport:
     """Delivers through an SMTP server."""
 
     name = "smtp"
-    delivers_to_recipients = True
 
     def __init__(self, *, host: str, port: int, use_tls: bool, user: str | None, password: str | None) -> None:
         self._host = host
@@ -199,33 +194,6 @@ class SmtpTransport:
             raise MailDeliveryError(_failure_reason(exc)) from exc
 
 
-class ConsoleTransport:
-    """Logs each message instead of delivering it, for local development.
-
-    A real transport rather than a mock, so every mail-dependent surface is
-    available and every message is inspectable without standing up an SMTP
-    server. Logs the plain-text alternative only: it is the variant a human
-    reads in a terminal, and both are rendered from the same values.
-
-    **The logged body carries a bearer credential** (an invitation's accept
-    token), which is why this is a development transport. That trade, and why
-    it is not redacted, is in ``src/gateway/AGENTS.md``.
-    """
-
-    name = "console"
-    delivers_to_recipients = False
-
-    def deliver(self, envelope: MailEnvelope) -> None:
-        logger.info(
-            "[mail:console] to=%s from=%s subject=%s\n%s",
-            redact_email(envelope.to),
-            envelope.sender_email,
-            envelope.message.subject,
-            envelope.message.text,
-            extra=CARRIES_CREDENTIAL,
-        )
-
-
 def select_transport(config: GatewayConfig) -> MailTransport | None:
     """Build the transport this configuration selects, or ``None`` for no mail.
 
@@ -234,10 +202,7 @@ def select_transport(config: GatewayConfig) -> MailTransport | None:
     is validated at load, so an explicit ``smtp`` cannot reach here without the
     settings it needs.
     """
-    transport = config.effective_mail_transport
-    if transport == "console":
-        return ConsoleTransport()
-    if transport == "smtp" and config.smtp_host and config.mail_from_email:
+    if config.effective_mail_transport == "smtp" and config.smtp_host and config.mail_from_email:
         return SmtpTransport(
             host=config.smtp_host,
             port=config.smtp_port,
@@ -250,7 +215,6 @@ def select_transport(config: GatewayConfig) -> MailTransport | None:
 
 __all__ = [
     "SMTP_TIMEOUT_SECONDS",
-    "ConsoleTransport",
     "MailTransport",
     "SmtpTransport",
     "build_mime",

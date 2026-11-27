@@ -1,8 +1,7 @@
 """The one interface a mail-dependent feature calls.
 
-A caller asks one of two questions before a send, and one after it.
-Before: *can this deployment send mail that links back to itself* (:attr:`Mailer.can_send_links`),
-or, for a send that no person watches, *does such an email reach its recipient*
+A caller asks one question before a send and one after it.
+Before: *does an email carrying a link back to this deployment reach its recipient*
 (:attr:`Mailer.can_deliver_links`).
 After: *did this message go out* (:meth:`Mailer.send`).
 Which shape a given surface takes, and why, is in ``src/gateway/AGENTS.md``.
@@ -23,23 +22,21 @@ from gateway.services.mail.message import (
 from gateway.services.mail.templates import render_email
 from gateway.services.mail.transports import redact_email, select_transport
 
-# What a console-only deployment sends from when no address is configured. Never
-# reached by SMTP, which requires mail_from_email before its transport is built.
-_FALLBACK_SENDER = "otari@localhost"
-
 
 class MailReadiness(StrEnum):
-    """How far an email carrying a link back to this deployment gets.
+    """Whether this deployment is configured to put a link into somebody's inbox.
 
     The members are exclusive and cover every deployment.
     ``none`` means no message is sent at all.
-    ``sends_only`` means a message is sent and no link the recipient can open reaches them.
-    ``delivers`` means the recipient's mailbox receives it.
+    ``delivers`` means a message is sent to the address it names, which is what the
+    configuration permits rather than what a mail server went on to do with it.
+    Whether a send succeeds is :meth:`Mailer.send`'s answer, once.
+
+    NOTE: An operator confirms a real end-to-end delivery through the mail test
+    surface. This value never stands for a send that has been tried.
     """
 
-    # Ordered by how far a message gets, not A-Z, so the published enum reads as the ladder it is.
     NONE = "none"
-    SENDS_ONLY = "sends_only"
     DELIVERS = "delivers"
 
 
@@ -58,25 +55,26 @@ class Mailer:
 
     @property
     def transport_name(self) -> str:
-        """``smtp``, ``console``, or ``none`` when this deployment sends no mail."""
+        """``smtp``, or ``none`` when this deployment sends no mail."""
         return self._transport.name if self._transport else "none"
 
     @property
     def is_configured(self) -> bool:
         """Whether a transport exists at all.
 
-        Delegated rather than recomputed from ``self._transport``. The dashboard
-        reads the config property through ``/v1/bootstrap`` while the invitation
-        path asks the mailer, and two readers deriving one answer separately can
-        drift; one delegating to the other cannot. ``select_transport`` is still
-        held to the same answer by a test, since it is the third place the
-        question could be decided.
+        Whether a transport exists, and nothing about whether a link reaches
+        anybody. ``can_deliver_links`` is what a surface gates on.
+
+        Delegated rather than recomputed from ``self._transport``, because two
+        readers deriving one answer separately can drift and one delegating to the
+        other cannot. ``select_transport`` is held to the same answer by a test,
+        since it is the third place the question could be decided.
         """
         return self._config.mail_enabled
 
     @property
-    def can_send_links(self) -> bool:
-        """Whether a message carrying a link back to this deployment can be sent.
+    def can_deliver_links(self) -> bool:
+        """Whether an email carrying a link back to this deployment reaches its recipient.
 
         The readiness every control-plane message actually needs: each one puts
         an absolute URL into someone's inbox, and a relative link there means
@@ -85,40 +83,28 @@ class Mailer:
         return self._config.mail_ready
 
     @property
-    def can_deliver_links(self) -> bool:
-        """Whether an email that carries a link back to this deployment reaches its recipient.
-
-        True when a link can be sent at all and the configured transport delivers to recipients,
-        rather than showing the message to the deployment operator.
-        """
-        return self.can_send_links and self._transport is not None and self._transport.delivers_to_recipients
-
-    @property
     def readiness(self) -> MailReadiness:
-        """How far a message carrying a link back to this deployment gets.
+        """Whether an email carrying a link back to this deployment reaches its recipient.
 
-        Derived here rather than by pairing the two predicates above, so one
-        answer cannot drift from the other.
+        Delegates to the predicate above rather than deciding again, so the
+        published answer and the one a surface gates on cannot drift.
         """
-        if not self.can_send_links:
-            return MailReadiness.NONE
-        return MailReadiness.DELIVERS if self.can_deliver_links else MailReadiness.SENDS_ONLY
+        return MailReadiness.DELIVERS if self.can_deliver_links else MailReadiness.NONE
 
     @property
     def missing_settings(self) -> tuple[str, ...]:
         """Which settings stand between this deployment and a delivered link."""
         return self._config.missing_mail_settings
 
-    def require_ready(self) -> None:
-        """Raise :class:`MailNotConfiguredError` unless a linked message can be sent.
+    def require_can_deliver(self) -> None:
+        """Raise :class:`MailNotConfiguredError` unless a linked message reaches its recipient.
 
-        Satisfied wherever :attr:`readiness` is above ``none``, so a deployment
-        that sends without delivering passes this. For the surfaces with no
-        fallback. A surface that can degrade (an invitation) must not call this:
-        refusing there would take away a flow that works perfectly well without
-        mail.
+        For the surfaces with no fallback. Creating an invitation must not call
+        this, because that flow hands its link back instead and works without
+        mail. Signup does call it, ahead of reading the address, so that its
+        refusal cannot differ by address.
         """
-        if not self.can_send_links:
+        if not self.can_deliver_links:
             raise MailNotConfiguredError(self.missing_settings)
 
     def link(self, path: str) -> str:
@@ -128,8 +114,8 @@ class Mailer:
         what follows a link is a browser.
 
         A relative link is still a valid thing to hand an operator to share; it
-        is only worthless *in an email*, which is why ``can_send_links`` and not
-        this is what gates a send.
+        is only worthless *in an email*, which is why ``can_deliver_links`` and
+        not this is what gates a send.
         """
         return self._config.ui_link(path)
 
@@ -154,13 +140,16 @@ class Mailer:
         reads ``delivered``.
         """
         transport = self._transport
-        if transport is None:
+        # Tested together because a transport is only built where the sender is set,
+        # so one of the two being absent is not a state this can be reached in.
+        sender_email = self._config.mail_from_email
+        if transport is None or sender_email is None:
             logger.info("Mail is not configured; skipping send to %s", redact_email(to))
             return MailDelivery(delivered=False, transport="none", reason="Mail is not configured on this deployment.")
 
         envelope = MailEnvelope(
             to=to,
-            sender_email=self._config.mail_from_email or _FALLBACK_SENDER,
+            sender_email=sender_email,
             sender_name=sender_name or self._config.mail_from_name,
             message=message,
             reply_to=reply_to,

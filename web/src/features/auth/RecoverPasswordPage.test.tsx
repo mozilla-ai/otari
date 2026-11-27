@@ -117,7 +117,7 @@ describe("RecoverPasswordPage", () => {
 
   it("promises no inbox where this deployment cannot email a working link", async () => {
     vi.mocked(apiFetch).mockResolvedValue(undefined)
-    renderPage("sends_only")
+    renderPage("none")
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText("Email"), "ada@example.com")

@@ -68,12 +68,9 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     // had no way to turn organization SSO off, so reading absence as off would
     // hide the option from a deployment that serves it.
     organization_oidc_enabled: wire.organization_oidc_enabled ?? true,
-    // Not "sends_only", though that is the narrower reading of the retired
-    // flag. A deployment old enough to omit `mail` gated both questions on that
-    // one flag, so this is the mapping under which it behaves exactly as it did
-    // before `mail` existed. Reading it as the weaker state would tell everyone
-    // on a delivering deployment to go and ask for a link already in their
-    // inbox, which is a worse answer than the one being replaced.
+    // A gateway old enough to omit `mail` gated every mail question on
+    // `mail_ready`, so this is the mapping under which it behaves as it did
+    // before `mail` existed.
     mail: wire.mail ?? (wire.mail_ready === true ? "delivers" : "none"),
     feedback_enabled: wire.feedback_enabled ?? false,
     platform_connect: wire.platform_connect ?? false,
@@ -83,11 +80,6 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     public_catalog: wire.public_catalog ?? false,
     open_signup: wire.open_signup ?? false,
   }
-}
-
-/** Whether a flow that only sends a message can run on this deployment. */
-export function mailCanSend(mail: MailReadiness): boolean {
-  return mail !== "none"
 }
 
 /** Whether a recipient's mailbox receives what this deployment sends. */

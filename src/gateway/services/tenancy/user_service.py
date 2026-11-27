@@ -465,7 +465,7 @@ async def create_user_for_signup(
     """
     mailer = Mailer(config)
     # Asked before anything reads the address, so the refusal cannot differ by address.
-    mailer.require_ready()
+    mailer.require_can_deliver()
     password = submission.password
     validate_new_password(password)
     if config.terms_url is not None and not submission.terms_accepted:
@@ -673,7 +673,7 @@ async def resend_verification_email(
     reason: awaiting it would reopen that gap.
     """
     mailer = Mailer(config)
-    mailer.require_ready()
+    mailer.require_can_deliver()
 
     address = validated_email(email)
     identity = (
@@ -736,7 +736,7 @@ async def request_password_reset(
     no-op, rather than a refusal that would confirm which address that is.
     """
     mailer = Mailer(config)
-    mailer.require_ready()
+    mailer.require_can_deliver()
 
     address = validated_email(email)
     identity = (

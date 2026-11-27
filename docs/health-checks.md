@@ -87,10 +87,10 @@ switches the model off itself and leaves it out of the run's alert.
 
 Alerts need outgoing mail that reaches a recipient: the `smtp_*` settings,
 `mail_from_email` and `public_base_url` (see [Mail](configuration.md#mail)).
-`mail_transport: console` writes each alert to the log rather than sending it,
-so nobody on the list hears about a failure, and the Health page says so. When a
-send fails and no address receives an alert, the next run sends it again. An
-address added later hears about the next change, not earlier history.
+Where a deployment cannot deliver a link, nobody on the list hears about a
+failure, and the Health page says so. When a send fails and no address receives
+an alert, the next run sends it again. An address added later hears about the
+next change, not earlier history.
 
 ## API
 

@@ -16660,15 +16660,19 @@ export interface components {
         };
         /**
          * MailReadiness
-         * @description How far an email carrying a link back to this deployment gets.
+         * @description Whether this deployment is configured to put a link into somebody's inbox.
          *
          *     The members are exclusive and cover every deployment.
          *     ``none`` means no message is sent at all.
-         *     ``sends_only`` means a message is sent and no link the recipient can open reaches them.
-         *     ``delivers`` means the recipient's mailbox receives it.
+         *     ``delivers`` means a message is sent to the address it names, which is what the
+         *     configuration permits rather than what a mail server went on to do with it.
+         *     Whether a send succeeds is :meth:`Mailer.send`'s answer, once.
+         *
+         *     NOTE: An operator confirms a real end-to-end delivery through the mail test
+         *     surface. This value never stands for a send that has been tried.
          * @enum {string}
          */
-        MailReadiness: "none" | "sends_only" | "delivers";
+        MailReadiness: "none" | "delivers";
         /**
          * MailSettings
          * @description What this deployment can send, and what stands in the way if it cannot.
@@ -16701,12 +16705,12 @@ export interface components {
             public_base_url: string | null;
             /**
              * Ready
-             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.
+             * @description Whether an email carrying a link back to this deployment reaches its recipient, which is what every message the control plane sends needs.
              */
             ready: boolean;
             /**
              * Transport
-             * @description The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.
+             * @description The transport a send would use: 'smtp' or 'none'.
              */
             transport: string;
         };

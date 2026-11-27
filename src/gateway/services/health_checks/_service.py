@@ -338,7 +338,7 @@ class HealthCheckService:
         if not recipients:
             return
         mailer = Mailer(self._config)
-        if not mailer.can_send_links:
+        if not mailer.can_deliver_links:
             logger.warning(
                 "Unavailable model alert not sent: this deployment cannot send mail (missing %s)",
                 ", ".join(mailer.missing_settings),
@@ -398,7 +398,7 @@ class HealthCheckService:
             )
         if change and recipients:
             mailer = Mailer(self._config)
-            if mailer.can_send_links:
+            if mailer.can_deliver_links:
                 message = render_health_alert(
                     change,
                     outcomes,

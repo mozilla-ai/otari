@@ -256,7 +256,6 @@ async def test_nothing_is_sent_when_no_email_is_due(store: _Store) -> None:
     [
         pytest.param({"public_base_url": ""}, id="no address for links"),
         pytest.param({"public_base_url": "   "}, id="a blank address for links"),
-        pytest.param({"mail_transport": "console"}, id="console transport"),
         pytest.param({"mail_transport": "none"}, id="no transport"),
     ],
 )

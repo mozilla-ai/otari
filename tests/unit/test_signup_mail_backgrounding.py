@@ -76,9 +76,6 @@ def _assert_mail_scheduled(
     *,
     to: str,
 ) -> None:
-    assert not any("[mail:console]" in record.message for record in caplog.records), (
-        "mail was logged during the request instead of being scheduled for after it"
-    )
     assert len(scheduled) == 1, scheduled
     func, _args, kwargs = scheduled[0]
     assert func.__func__ is Mailer.send  # type: ignore[attr-defined]

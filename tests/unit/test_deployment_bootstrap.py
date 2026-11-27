@@ -224,7 +224,7 @@ def test_member_federation_rules_are_published_when_the_setting_is_on(
         assert client.get(f"{API_ROOT}/bootstrap").json()["federation_member_rules"] is True
 
 
-def test_mail_sends_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
+def test_mail_needs_a_public_url_as_well_as_a_transport(tmp_path: Path) -> None:
     """What the dashboard gates a mail-dependent affordance on.
 
     A transport alone is not enough: every message the deployment sends
@@ -247,20 +247,6 @@ def test_mail_sends_only_with_a_transport_and_a_public_url(tmp_path: Path) -> No
 
     with TestClient(create_app(ready)) as client:
         assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "delivers"
-
-
-def test_mail_separates_a_send_nobody_receives_from_a_delivered_one(tmp_path: Path) -> None:
-    """A console deployment sends every message and no recipient gets one.
-
-    One flag for both questions is what let the dashboard promise an inbox it
-    never reached, so the two states are told apart here rather than merged.
-    """
-    logged = _gateway_config(tmp_path)
-    logged.mail_transport = "console"
-    logged.public_base_url = "https://otari.example.com"
-
-    with TestClient(create_app(logged)) as client:
-        assert client.get(f"{API_ROOT}/bootstrap").json()["mail"] == "sends_only"
 
 
 def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_path: Path) -> None:

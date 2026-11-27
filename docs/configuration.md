@@ -1781,19 +1781,17 @@ every message in a temporary database inside its container, which goes when the 
 it accepts any credential. So it belongs in development and never in a deployment that serves
 anybody.
 
-`mail_transport: console` writes complete messages to logs for local testing.
-Those messages can contain invitation or password-reset tokens, so never use it
-where logs are shared. Test delivery from Settings or
-`POST /api/v1/settings/mail/test`.
+No transport writes a message to the log, because a verification or invitation
+link is a bearer credential and a log is read by people the message was never
+addressed to. Use the development mail sink above instead. Test delivery from
+Settings or `POST /api/v1/settings/mail/test`.
 
-Nothing reaches a recipient on that transport, so anything whose outcome depends
-on somebody receiving the message behaves as it does with no mail at all. An
-invitation hands its accept link back, a password link is shown instead of
-emailed, and health check alerts tell nobody. Signing up without an invitation,
-a verification resend and a password reset need `public_base_url` as well, and
-are refused without it. With it set they are accepted, because their message is
-written to the log for an operator to pass on, and the page that follows says to
-ask for the link rather than to watch an inbox. Signing up from an invitation is
+Every outcome that depends on somebody receiving a message is decided by one
+question: whether a link reaches a mailbox. Where it does not, an invitation
+hands its accept link back, a password link is shown instead of emailed, and
+health check alerts tell nobody. Signing up without an invitation, a
+verification resend and a password reset are refused outright, because each one
+exists to put a link in somebody's inbox. Signing up from an invitation is
 accepted either way, because the invitation names the address and the account
 needs no verification link.
 

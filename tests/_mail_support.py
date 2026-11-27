@@ -19,10 +19,14 @@ MAIL_CONFIGURED = {
     "smtp_host": "smtp.example.com",
     "mail_from_email": "otari@example.com",
 }
-"""The settings a deployment needs before a send is attempted at all.
+"""The transport settings a deployment needs before a send is attempted at all.
 
-Spread into a test's own config. Paired with ``recorded_mail``, which is what
-keeps the send off a socket.
+Spread into a test's own config. Paired with ``recorded_mail``, which is what keeps
+the send off a socket.
+
+NOTE: ``public_base_url`` is not here, and a deployment without one cannot deliver a
+link whatever its transport. A test that needs delivery sets it alongside these,
+which is also what lets a test set the transport and withhold the address.
 """
 
 
@@ -68,7 +72,8 @@ class RecordingTransport:
 def configure_mail(monkeypatch: pytest.MonkeyPatch, config: object) -> None:
     """Point a shared test config at a transport, for a suite that cannot build its own.
 
-    NOTE: The caller must also use the ``recorded_mail`` fixture, or the send is attempted for real.
+    NOTE: The caller must also use the ``recorded_mail`` fixture, or the send is attempted for real,
+    and must have a ``public_base_url`` for a link to be deliverable at all.
     """
     for name, value in MAIL_CONFIGURED.items():
         monkeypatch.setattr(config, name, value)
