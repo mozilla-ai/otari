@@ -829,7 +829,12 @@ offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, 
 of the offering tried first, and `owned_by` is the model's vendor. A limit the
 offering tried first does not know, such as the context length of a model a vLLM
 server also serves, is the smallest one the model's other offerings report. An
-output limit filled that way is capped at the entry's context window.
+output limit filled that way is capped at the entry's context window. A field
+no offering reports is read from models.dev's entry for the model, preferring
+the vendor's own: a model served on an organization's key to an
+OpenAI-compatible endpoint (a LiteLLM proxy, a reseller) is stored under
+`openai`, which models.dev lists none of those models under, so only that entry
+describes it.
 
 The caller's aliases and routing policies are listed beside the models, under
 their own names: the configured ones, and the stored ones of the key's
