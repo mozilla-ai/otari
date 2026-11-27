@@ -1,6 +1,8 @@
 # MCP servers
 
-MCP servers allow requests from a workspace to connect to external tools and services. Each server is configured at the **workspace level**, so you can control which MCP tools are available to requests within that workspace. How requests use MCP servers is described in [MCP](https://docs.otari.ai/reference/gateway/mcp).
+MCP servers allow requests from a workspace to connect to external tools and services. A server added here belongs to the workspace, so you can control which MCP tools are available to requests within it. How requests use MCP servers is described in [MCP](https://docs.otari.ai/reference/gateway/mcp).
+
+An organization can also add a server once for every workspace. Its owners and admins do that under **Organization** → **MCP servers**, as described in [Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
 
 ## Connect a server
 

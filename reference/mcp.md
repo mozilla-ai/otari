@@ -8,7 +8,7 @@ Add MCP as a top-level request field, not a `tools` entry.
 Use either or both of:
 
 - `mcp_servers`: inline MCP server configs the gateway should connect to directly
-- `mcp_server_ids`: ids of MCP servers your workspace has configured
+- `mcp_server_ids`: ids of MCP servers your workspace has configured, or your organization added for every workspace
 
 Otari resolves `mcp_server_ids` first and appends the resulting server configs
 to any inline `mcp_servers`, reading the servers the workspace configured on
