@@ -126,12 +126,11 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         *,
         email: str | None,
         full_name: str | None,
-        active_organization_id: uuid.UUID | None,
+        active_organization_id: uuid.UUID,
     ) -> User | None:
         """Stage an identity for this address, or return None if an identity already holds it.
 
-        A taken address leaves the transaction usable. An identity staged with no organization
-        acts in none until something sets one.
+        A taken address leaves the transaction usable.
 
         NOTE: A NULL address never conflicts in the unique index, so passing none always succeeds.
         """
