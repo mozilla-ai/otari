@@ -116,6 +116,7 @@ def _credentials(tmp_path: Path, *, email: str) -> tuple[str | None, str | None]
 
 def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestClient, **kwargs: object) -> str:
     """Sign up, expecting success, and pull the emailed link's token out of the console log."""
+    caplog.clear()
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
@@ -126,6 +127,22 @@ def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestCl
     match = _TOKEN_IN_LINK.search(caplog.text)
     assert match, caplog.text
     return match.group(1)
+
+
+def test_a_captured_link_is_the_token_of_the_signup_that_was_just_made(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A second capture in one test answers for its own signup, not the first one's.
+
+    ``caplog.text`` accumulates across a test and the search takes the first match, so a
+    capture that does not clear it first answers with a stale token once anything has
+    logged a link.
+    """
+    with _client(tmp_path, open_signup=True) as client:
+        first = _captured_verification_link(caplog, client, email="ada@example.com")
+        second = _captured_verification_link(caplog, client, email="grace@example.com")
+
+        assert second != first
 
 
 def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
@@ -598,6 +615,22 @@ def test_open_signup_on_an_already_registered_address_is_enumeration_safe(
             ).status_code
             == 401
         )
+
+
+def test_a_signup_without_mail_answers_alike_whether_the_address_is_taken(tmp_path: Path) -> None:
+    """The refusal cannot depend on the address, or its status code says which addresses exist.
+
+    An address the deployment already holds is refused before anything looks at the mail
+    configuration, so the two refusals have to be the same one.
+    """
+    with _client(tmp_path, mail_ready=False) as client:
+        _add_member(client, email="ada@example.com")
+        _deactivate(tmp_path, email="ada@example.com")
+
+        taken = _signup(client, email="ada@example.com")
+        free = _signup(client, email="nobody@example.com")
+
+        assert (taken.status_code, free.status_code) == (503, 503)
 
 
 def test_open_signup_without_mail_configured_registers_nobody(tmp_path: Path) -> None:
