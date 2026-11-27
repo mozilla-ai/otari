@@ -192,8 +192,6 @@ async def _execute_tool_uses(
         owner = owning_backend(pool, block.name)
         try:
             text = await owner.call_tool(block.name, arguments)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, block.name)
             log_tool_failure(block.name, detail, exc)
@@ -410,8 +408,6 @@ async def _call_stream_tool(
             )
         text = await pool.call_tool(name, arguments)
         return text, text, is_tool_error(text), False
-    except MaxToolIterationsExceeded:
-        raise
     except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
         detail = tool_failure_detail(pool, name)
         log_tool_failure(name, detail, exc)
@@ -944,8 +940,8 @@ def _strategy_for(
 ) -> _MessagesToolLoopStrategy:
     """The shared strategy, or a per-request one when any of the options is set.
 
-    A capped request carries a per-request search budget, so it never reuses the
-    module-level instance; a request wanting neither native emission nor a cap
+    A request with a budget carries it per request, so it never reuses the
+    module-level instance; a request wanting neither native emission nor a budget
     nor a container has nothing per-request to hold and keeps reusing it.
     """
     if not native_tools and not emit_native_mcp and budget is None and container is None:
@@ -1000,6 +996,7 @@ async def anthropic_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -1057,6 +1054,7 @@ async def anthropic_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

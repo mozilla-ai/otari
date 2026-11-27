@@ -5,13 +5,20 @@ from gateway.services.identity._account_deletion import AccountDeletionService, 
 from gateway.services.identity._blocklist import EmailBlocklist
 from gateway.services.identity._connection_service import OIDCConnectionService
 from gateway.services.identity._deactivation import SelfServiceKeyDeactivationListener
+from gateway.services.identity._deployment_user_service import (
+    DeploymentAdministrationAccess,
+    DeploymentUserService,
+)
 from gateway.services.identity._oauth_apps import OAuthAppService
+from gateway.services.identity._personal_access_tokens import PersonalAccessTokenService
 from gateway.services.identity._service import EmailBlock, IdentityService, PasswordLink, SignIn, SignInListener
 from gateway.services.identity._sso_exchange import exchange_sso_code
 
 __all__ = [
     "AccountDeletionService",
     "DeletedAccount",
+    "DeploymentAdministrationAccess",
+    "DeploymentUserService",
     "EmailBlock",
     "EmailBlocklist",
     "SelfServiceKeyDeactivationListener",
@@ -19,6 +26,7 @@ __all__ = [
     "IdentityService",
     "OIDCConnectionService",
     "PasswordLink",
+    "PersonalAccessTokenService",
     "ProviderIdentity",
     "SignIn",
     "SignInListener",

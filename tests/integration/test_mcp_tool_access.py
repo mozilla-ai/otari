@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER
+from gateway.core.error_codes import ERROR_CODE_HEADER, REQUEST_MCP_SERVERS_DISALLOWED
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
@@ -119,7 +120,10 @@ def _store(
     labeled: bool = True,
 ) -> WorkspaceMcpServer:
     """Store a server. ``labeled=False`` leaves its read labels unset, so they follow the server's own."""
+    workspace = test_db.get(Workspace, workspace_id)
+    assert workspace is not None
     row = WorkspaceMcpServer(
+        organization_id=workspace.organization_id,
         workspace_id=workspace_id,
         name=name,
         url=PUBLIC_URL,
@@ -147,7 +151,8 @@ def _new_key(client: TestClient, master: dict[str, str], **body: Any) -> dict[st
     return created
 
 
-def _servers(workspace: uuid.UUID) -> str:
+def _servers(workspace: uuid.UUID | None) -> str:
+    assert workspace is not None, "a workspace server"
     return f"{API_ROOT}/workspaces/{workspace}/mcp-servers"
 
 
@@ -1131,7 +1136,10 @@ async def test_a_request_reads_only_its_own_workspace_s_grants(
     mine = _store(test_db, here, "github", everyone=[])
     theirs = _store(test_db, elsewhere.id, "jira", everyone=[])
     test_db.add_all(
-        [WorkspaceMcpServerGrant(server_id=server.id, user_id="shared", tools=["*"]) for server in (mine, theirs)]
+        [
+            WorkspaceMcpServerGrant(server_id=server.id, workspace_id=workspace, user_id="shared", tools=["*"])
+            for server, workspace in ((mine, here), (theirs, elsewhere.id))
+        ]
     )
     test_db.commit()
 
@@ -1178,6 +1186,8 @@ def test_a_workspace_can_refuse_servers_a_request_names_itself(
     assert switched.json()["request_mcp_servers_allowed"] is False
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
 
 
 def test_a_new_workspace_refuses_servers_a_request_names_until_turned_on(
@@ -1216,6 +1226,8 @@ def test_the_switch_also_refuses_an_mcp_server_the_provider_would_dial(
 
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
     provider.assert_not_called()
 
 
@@ -1245,6 +1257,8 @@ def test_the_switch_also_refuses_mcp_servers_handed_to_gemini(
 
     assert refused.status_code == 400, refused.text
     assert "does not let a request name MCP servers" in refused.text
+    assert refused.headers[ERROR_CODE_HEADER] == REQUEST_MCP_SERVERS_DISALLOWED
+    assert refused.json()["code"] == REQUEST_MCP_SERVERS_DISALLOWED
     provider.assert_not_called()
 
 

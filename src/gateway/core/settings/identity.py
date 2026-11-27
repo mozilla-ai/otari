@@ -53,11 +53,30 @@ class IdentitySettings(BaseModel):
         ),
     )
 
+    mcp_server_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Serve Otari's own MCP server at /mcp, where an agent holding a person's access token reads "
+            "what that person sees on the dashboard. Read only. Asked once at startup."
+        ),
+    )
+
     oidc_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
             "Let an organization's own OIDC issuer be discovered at a private, loopback or link-local "
             "address, for an identity provider on the deployment's own network. Off by default, because "
             "an organization administrator types the issuer in rather than the operator choosing it."
+        ),
+    )
+
+    organization_oidc_enabled: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=True,
+        description=(
+            "Offer organizations their own OIDC sign-in connection: the Single sign-on page, and sign-in "
+            "through a connection an organization saved. Off removes the page and those routes, so no "
+            "organization can configure a connection or sign in through one. A member whose only credential "
+            "is such a connection then cannot sign in at all. Stored connections are kept and work again "
+            "when it is back on. Requires restart. Also settable via OTARI_ORGANIZATION_OIDC_ENABLED."
         ),
     )

@@ -1,6 +1,6 @@
 {
   "name": "otari-router",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Asks an Otari gateway which model each Claude Code subagent should run on, and starts it there.",
   "author": {
     "name": "Mozilla AI",

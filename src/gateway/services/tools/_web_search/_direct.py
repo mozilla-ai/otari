@@ -19,8 +19,7 @@ its own allowlist, budget and usage steps.
   :func:`resolve_organization_key_search` does the same for the stand-in.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
-- :func:`run_direct_search` calls the provider through any-search, or through
-  the old search client for a provider any-search does not serve.
+- :func:`run_direct_search` calls the provider through any-search.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -37,7 +36,6 @@ from gateway.core.config import API_ROOT
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     NO_SEARCH_DEFAULT,
-    WEB_SEARCH_PROVIDERS,
     ToolInstance,
     ToolKind,
     ToolSettings,
@@ -46,12 +44,11 @@ from gateway.core.settings.tools import (
 )
 from gateway.exceptions.tools_exceptions import (
     DirectSearchFailedError,
-    DirectSearchFieldRefusedError,
     SearchToolMisconfiguredError,
     SearchToolSelectionError,
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
-from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
 from gateway.services.tools._web_search._default import direct_search_fallback
@@ -212,10 +209,8 @@ def resolve_direct_search(
     ``named`` says the caller named the instance, in the path or the body; such
     a call runs on the instance's own key, never the organization's. Raises
     :class:`WebSearchOptionRefusedError` for a request option the provider
-    serving the call does not take, :class:`DirectSearchFieldRefusedError` for
-    ``include_raw`` or ``provider_options`` on a call that does not run on
-    any-search, and :class:`WebSearchCredentialRefusedError` for an
-    organization key its provider cannot be called with.
+    serving the call does not take, and :class:`WebSearchCredentialRefusedError`
+    for an organization key its provider cannot be called with.
     """
     organization_key = policy.credential if policy is not None and not named else None
     resolved = resolve_search(
@@ -243,7 +238,7 @@ def organization_key_search_instance(policy: ResolvedWebSearchConfig | None) -> 
     if credential is None:
         return None
     library_backed = credential.provider in any_search.AnySearch.get_supported_providers()
-    if not library_backed and credential.provider not in WEB_SEARCH_PROVIDERS:
+    if not library_backed:
         return None
     return ToolInstance(
         name=WEB_SEARCH_TOOL_NAME, kind="search", provider=credential.provider, library_backed=library_backed
@@ -273,13 +268,7 @@ def _direct_search(
     request: SearchRequest,
     organization_key: WebSearchCredential | None,
 ) -> DirectSearch:
-    """The search ``resolved`` runs, with its count capped by the workspace's ``max_results``.
-
-    Raises :class:`DirectSearchFieldRefusedError` for ``include_raw`` or
-    ``provider_options`` on a call that does not run on any-search.
-    """
-    if resolved.runner != "library" and (request.include_raw or request.provider_options):
-        raise DirectSearchFieldRefusedError(resolved.provider)
+    """The search ``resolved`` runs, with its count capped by the workspace's ``max_results``."""
     asked = SearchQuery(
         query=request.query,
         max_results=request.max_results,
@@ -354,24 +343,15 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, gate
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search, or on the old search client for a key on a
-    provider any-search does not serve: an organization's, or the legacy
-    settings'. Raises :class:`DirectSearchFailedError` when the provider fails
-    the call, an error inside a successful answer included. Its message, for
-    the usage row and the log, holds only the failure's safe fields, since the
-    old client's own text can quote the upstream body.
+    The call runs on any-search. Raises :class:`DirectSearchFailedError` when
+    the provider fails the call, an error inside a successful answer included.
+    Its message, for the usage row and the log, holds only the failure's safe
+    fields.
     """
-    # Imported here: the old clients' module imports this package's root.
-    from gateway.services.search_backend import SearchProviderError
-
     try:
-        if search.resolved.runner == "library":
-            return await _on_any_search(search, client)
-        return await _on_old_client(search, client)
+        return await _on_any_search(search, client)
     except any_search.ProviderError as exc:
         failure = WebToolFailure.from_provider_error(exc)
-    except SearchProviderError as exc:
-        failure = WebToolFailure.of(search.resolved.provider, exc.status, exc.tag)
     raise DirectSearchFailedError(
         failed_text(failure.provider, "search", failure.tag, failure.status),
         headers=failure.as_headers(),
@@ -400,28 +380,4 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
             raw=result.raw if search.include_raw else None,
         ),
         cost=result.cost,
-    )
-
-
-async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
-    # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search, run_provider_search
-
-    resolved = search.resolved
-    if search.credential is not None:
-        outcome = await run_keyed_search(search.credential, search.query, timeout_s=resolved.timeout, client=client)
-    else:
-        # The legacy settings' key, which the deployment pays for.
-        outcome = await run_provider_search(
-            resolved.provider, resolved.api_key, search.query, timeout_s=resolved.timeout, client=client
-        )
-    return DirectSearchResult(
-        response=SearchResponse(
-            search_tool=search.instance.name,
-            results=[
-                SearchResultItem(title=hit.title or "", url=hit.url, snippet=hit.snippet or "", date=hit.date)
-                for hit in outcome.results
-            ],
-        ),
-        cost=Decimal(str(outcome.cost_usd)) if outcome.cost_usd is not None else None,
     )

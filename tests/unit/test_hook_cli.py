@@ -698,6 +698,28 @@ def test_stop_event_submits_no_commands_when_aggregate_evidence_is_oversize(
     assert "submitting no command evidence" in result.output
 
 
+@pytest.mark.parametrize(
+    ("raw_lines", "expected"),
+    [
+        pytest.param(["  {line}", "{line}\t "], ["ls", "ls"], id="surrounding-whitespace"),
+        pytest.param(["", "   ", "\t", "{line}"], ["ls"], id="blank-lines"),
+        pytest.param(["{line} garbage", "{line}{line}", "{line}\x00"], [], id="trailing-garbage"),
+        pytest.param(["{line}, {line}", "{line} {line}"], [], id="two-values"),
+        pytest.param(["[1, 2]", "42", '"str"', "null", "true", "[{{}}]"], [], id="non-object-values"),
+        pytest.param(["{{not json", "{{", "\ufeff{line}", "{line}", "nan"], ["ls"], id="invalid-json"),
+        pytest.param(['{{"message": {{"content": [{{"type": "text"}}]}}}}', "{line}"], ["ls"], id="no-commands"),
+    ],
+)
+def test_collect_transcript_commands_parses_the_same_lines(
+    tmp_path: Path, raw_lines: list[str], expected: list[str]
+) -> None:
+    """Which lines parse and which are skipped is part of the collector's contract."""
+    line = _transcript_line(command="ls")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("\n".join(raw.format(line=line) for raw in raw_lines) + "\n", encoding="utf-8")
+    assert hook_cli._hook_collect_transcript_commands(transcript) == expected
+
+
 def test_stop_event_submits_no_commands_when_there_are_too_many(
     monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
 ) -> None:

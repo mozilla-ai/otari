@@ -17,11 +17,12 @@ from gateway.models.identity import OAuthAppGrant
 from gateway.models.tenancy import User
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.repositories.identity.oauth_dynamic_client_repository import OAuthDynamicClientRepository
 from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
-from gateway.services.identity import OAuthAppService
+from gateway.services.identity import OAuthAppService, PersonalAccessTokenService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
 
@@ -41,6 +42,8 @@ def _service(
         AsyncMock(spec=OrganizationService),
         cast(WorkspaceService, Mock()),
         AsyncMock(spec=BudgetService),
+        AsyncMock(spec=PersonalAccessTokenService),
+        AsyncMock(spec=OAuthDynamicClientRepository),
         apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
         open_apps=open_apps,
         spend_limits=spend_limits,
@@ -72,19 +75,21 @@ async def test_an_unregistered_client_id_is_refused_without_reaching_the_log(
     grants.find_bound.assert_not_called()
 
 
-def test_open_apps_admit_a_site_by_its_origin_and_mark_it_unverified() -> None:
+@pytest.mark.asyncio
+async def test_open_apps_admit_a_site_by_its_origin_and_mark_it_unverified() -> None:
     service = _service(AsyncMock(spec=OAuthAppGrantRepository), open_apps=True)
-    details = service.details("https://someone.github.io", "https://someone.github.io/pizza/")
+    details = await service.details("https://someone.github.io", "https://someone.github.io/pizza/")
     assert details.name == "someone.github.io"
     assert not details.verified
     assert details.scopes == list(DEFAULT_KEY_SCOPES)
-    assert service.details("app", "https://app.example/callback").verified
+    assert (await service.details("app", "https://app.example/callback")).verified
 
 
-def test_an_open_app_may_be_a_site_with_a_name_longer_than_a_registration_allows() -> None:
+@pytest.mark.asyncio
+async def test_an_open_app_may_be_a_site_with_a_name_longer_than_a_registration_allows() -> None:
     site = f"{'a' * 50}.{'b' * 50}.example"
     service = _service(AsyncMock(spec=OAuthAppGrantRepository), open_apps=True)
-    assert service.details(f"https://{site}", f"https://{site}/").name == site
+    assert (await service.details(f"https://{site}", f"https://{site}/")).name == site
 
 
 def test_the_manage_url_is_absolute_when_the_dashboard_has_no_address_of_its_own() -> None:
@@ -99,7 +104,7 @@ async def test_no_spending_limit_is_offered_or_kept_where_budgets_are_not_enforc
     grants = AsyncMock(spec=OAuthAppGrantRepository)
     service = _service(grants, spend_limits=False)
     service.workspaces = AsyncMock(spec=WorkspaceService)
-    assert not service.details("app", "https://app.example/callback").spend_limits
+    assert not (await service.details("app", "https://app.example/callback")).spend_limits
     await service.authorize(
         cast(User, Mock(id="user")),
         AppAuthorizationRequest(
@@ -117,6 +122,7 @@ async def test_no_spending_limit_is_offered_or_kept_where_budgets_are_not_enforc
     assert grants.issue.await_args.kwargs["spend_limit"] is None
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "client_id,redirect_uri",
     [
@@ -125,16 +131,18 @@ async def test_no_spending_limit_is_offered_or_kept_where_budgets_are_not_enforc
         ("https://someone.github.io", "https://other.github.io/"),
     ],
 )
-def test_open_apps_admit_no_callback_off_the_apps_own(client_id: str, redirect_uri: str) -> None:
+@pytest.mark.asyncio
+async def test_open_apps_admit_no_callback_off_the_apps_own(client_id: str, redirect_uri: str) -> None:
     service = _service(AsyncMock(spec=OAuthAppGrantRepository), open_apps=True)
     with pytest.raises(OAuthAppGrantError):
-        service.details(client_id, redirect_uri)
+        await service.details(client_id, redirect_uri)
 
 
-def test_without_open_apps_a_site_is_unknown() -> None:
+@pytest.mark.asyncio
+async def test_without_open_apps_a_site_is_unknown() -> None:
     service = _service(AsyncMock(spec=OAuthAppGrantRepository))
     with pytest.raises(OAuthAppGrantError):
-        service.details("https://someone.github.io", "https://someone.github.io/")
+        await service.details("https://someone.github.io", "https://someone.github.io/")
 
 
 @pytest.mark.asyncio
@@ -162,6 +170,8 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         organizations,
         cast(WorkspaceService, Mock()),
         AsyncMock(spec=BudgetService),
+        AsyncMock(spec=PersonalAccessTokenService),
+        AsyncMock(spec=OAuthDynamicClientRepository),
         apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
         ui_link=lambda path: path,
         issuer="https://otari.example",
@@ -174,7 +184,8 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         code="c" * 43,
         code_verifier="v" * 43,
     )
-    assert await service.exchange(request) == (
+    issued = await service.exchange(request)
+    assert (issued.token, issued.scopes) == (
         "issued-token",
         KeyScopeSet.checked(["inference:run"], is_service_key=False),
     )

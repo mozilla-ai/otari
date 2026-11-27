@@ -31,6 +31,8 @@ const ACTIVATION_POLL_MS = 4_000
 export function useWorkspaceActivation(
   workspaceId: string | null,
   enabled = true,
+  /** False for a reader beside the guide, so the guide's own poll is the only one. */
+  { poll = true }: { poll?: boolean } = {},
 ) {
   return useQuery({
     queryKey: [ACTIVATION, workspaceId],
@@ -41,7 +43,9 @@ export function useWorkspaceActivation(
       ),
     enabled: enabled && workspaceId !== null,
     refetchInterval: (query) =>
-      query.state.data?.experience_eligible ? ACTIVATION_POLL_MS : false,
+      poll && query.state.data?.experience_eligible
+        ? ACTIVATION_POLL_MS
+        : false,
     // A failed check is reported on the card, which offers "Check now": retrying
     // twice behind the operator's back would only delay that by a poll interval.
     ...NO_RETRY,

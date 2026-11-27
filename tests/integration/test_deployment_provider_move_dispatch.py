@@ -103,7 +103,6 @@ def upgraded(test_config: GatewayConfig, db_session_factory: Callable[[], Sessio
                         api_base=fields.get("api_base"),
                         encrypted_api_key=encrypt_secret(api_key) if api_key else None,
                         last4=api_key[-4:] if api_key else None,
-                        client_args={},
                         updated_at=datetime.now(UTC),
                     )
                 )

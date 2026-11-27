@@ -24,6 +24,9 @@ interface FieldProps {
   /** Holds a caption line open under the field so a message does not move the
       form. Off for a field in a table row or a toolbar, which never speaks. */
   shouldReserveMessage?: boolean
+  /** The id of text outside the field that explains it, such as an error a
+      control row says once under all of its controls. */
+  describedBy?: string
 }
 
 // A labeled single-line text input built from HeroUI's TextField primitives.
@@ -41,6 +44,7 @@ export function Field({
   isInvalid,
   errorMessage,
   shouldReserveMessage,
+  describedBy,
 }: FieldProps) {
   return (
     <TextField
@@ -61,6 +65,7 @@ export function Field({
         type={type}
         inputMode={inputMode}
         placeholder={placeholder}
+        aria-describedby={describedBy}
         autoFocus={autoFocus && allowsFieldAutoFocus()}
       />
       <FieldMessages shouldReserve={shouldReserveMessage}>

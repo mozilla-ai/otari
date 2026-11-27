@@ -8,6 +8,8 @@ from typing import Protocol, cast
 
 import idna
 
+from gateway.core.address_proof import record_address
+from gateway.core.addresses import same_address
 from gateway.core.email_domains import blocklist_entry, blocklist_keys
 from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -19,6 +21,7 @@ from gateway.exceptions.identity_exceptions import (
     DeploymentUserNotFoundError,
     DeploymentUserSelfChangeError,
     InvalidBlockedEmailEntryError,
+    MasterKeyRotationRefusedError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
@@ -30,6 +33,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.identity import (
+    AddressAuthority,
     BlockedEmail,
     EmailAssertion,
     MailedLinkStatus,
@@ -37,7 +41,7 @@ from gateway.models.identity import (
     ProviderIdentity,
     is_organization_connection_provider,
 )
-from gateway.models.tenancy import Organization, OrganizationDomainRole, User
+from gateway.models.tenancy import Organization, OrganizationDomainRole, SignInMeans, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
@@ -48,7 +52,7 @@ from gateway.services.identity._enforcement import (
 )
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
-from gateway.services.oauth_service import provider_label
+from gateway.services.oauth_service import provider_label, trusts_email_claim
 from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import (
@@ -144,6 +148,7 @@ class IdentityService:
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
+        self._access_tokens = repositories.access_tokens
         self._users = repositories.users
         self._identity_provider = identity_provider
         self._domain_claims = domain_claims
@@ -160,7 +165,8 @@ class IdentityService:
         """Sign in the account that an identity a provider has proven belongs to.
 
         An identity linked to an account signs in as that account, and its password and verification stay as they are,
-        unless its address is only vouched for: the sign-in then proves it, as a first sign-in does.
+        unless a provider whose word no tenant can set asserts that same address as verified: the sign-in then
+        proves it, as a first sign-in does. An organization's own connection never does, whatever it asserts.
         An identity with no link signs in as the account the identity provider policy returns, and is linked to it,
         except an identity from one organization's own OIDC connection, which instead signs in to the one account
         that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
@@ -321,6 +327,7 @@ class IdentityService:
                 pattern=pattern, reason=(reason or "").strip() or None, created_by_user_id=actor.id
             )
             await self._sessions.delete_for_users(matched)
+            await self._access_tokens.delete_all_for_users(matched)
         logger.warning(
             "Email blocklist entry added by operator: actor=%s entry=%s matched_accounts=%s",
             actor.id,
@@ -435,6 +442,36 @@ class IdentityService:
             "master_key" if by_master_key else "session",
         )
 
+    async def confirm_master_key_rotation(self, *, actor: User, current_password: str | None) -> None:
+        """Refuse a session-authenticated master-key rotation that did not re-prove the password.
+
+        Rotation hands the caller the deployment credential itself, which is what
+        ``hand_over_bootstrap_operator`` and ``_refuse_bootstrap_password_link`` assume a session
+        cannot hold. From a session it is therefore held to the same proof as the handover: only
+        the identity the master key acts as may do it, and only after re-proving its password, so
+        a stolen cookie cannot mint the master key and reach those two operations. A request
+        carrying the master key is that credential already and needs no further proof.
+
+        Raises:
+            MasterKeyRotationRefusedError: If the caller is not the bootstrap operator, or its
+                account has no password to prove.
+            CurrentPasswordIncorrectError: If the current password given does not match.
+        """
+        async with self._uow:
+            bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id != actor.id:
+            raise MasterKeyRotationRefusedError(
+                "Only the bootstrap operator, or a request carrying the master key, can rotate the master key"
+            )
+        if actor.hashed_password is None:
+            raise MasterKeyRotationRefusedError(
+                "Set a password for your account first, or rotate the key with the master key"
+            )
+        if not current_password:
+            raise MasterKeyRotationRefusedError("Enter your current password to rotate the master key")
+        if not await verify_password_async(current_password, actor.hashed_password):
+            raise CurrentPasswordIncorrectError
+
     async def _require_handover_target(self, target: User) -> None:
         if not target.is_active:
             raise BootstrapHandoverRefusedError("Reactivate this account before handing it the role")
@@ -446,10 +483,11 @@ class IdentityService:
             raise BootstrapHandoverRefusedError("This account has no password; its owner sets one first")
         if target.email_verified_at is None:
             raise BootstrapHandoverRefusedError("This account's email address is not verified yet")
-        if target.email_vouched_at is not None:
+        if target.email_proven_at is None:
             # Its first provider sign-in would remove the password that keeps master-key sign-in retired.
             raise BootstrapHandoverRefusedError(
-                "This account's email address is only vouched for; its owner proves it by email first"
+                "This account's email address was recorded by an organization, not proved by its owner; "
+                "its owner proves it by email first"
             )
         if await self.blocked_among([target.email]):
             raise BootstrapHandoverRefusedError("This account's address is blocked")
@@ -459,7 +497,7 @@ class IdentityService:
 
         Where this deployment can mail links, the link is mailed to the account's address and not returned.
         Otherwise, or when the send fails, a shared link is returned for the caller to pass on; redeeming it
-        records the address as vouched for rather than proven, since the mailbox never saw it.
+        leaves the address verified rather than proved, since the mailbox never saw it.
         A new link replaces any earlier reset link.
 
         Raises:
@@ -518,7 +556,7 @@ class IdentityService:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
         if await self.blocked_among([account.email]):
             raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
-        if account.hashed_password is None and account.email_verified_at is not None:
+        if account.sign_in_means is SignInMeans.WITHOUT_PASSWORD:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "
                 "Once signed in, its owner can add a password from Account settings."
@@ -560,7 +598,7 @@ class IdentityService:
             if is_organization_connection_provider(external.provider):
                 await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
-            password_removed = await self._prove_vouched_address(account)
+            password_removed = await self._prove_unproved_address(account, external)
             self._take_display_name_from_sso(account, external)
             self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
@@ -587,8 +625,8 @@ class IdentityService:
         """Resolve a first sign-in from one organization's own OIDC connection, bypassing the identity provider port.
 
         What makes the claimed address usable here is the organization's DNS proof of its domain, not the
-        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so the
-        assertion is not read, and ``trust_email_verified`` stays off for every connection.
+        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so no
+        assertion of its own is evidence about an address.
 
         Raises:
             SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
@@ -636,17 +674,24 @@ class IdentityService:
         account.full_name = external.full_name
         self._users.stage(account)
 
-    async def _prove_vouched_address(self, account: User) -> bool:
-        """Treat a sign-in through a provider link as proof of a vouched address, and say if a password went.
+    async def _prove_unproved_address(self, account: User, external: ProviderIdentity) -> bool:
+        """Prove the account's address where this sign-in asserts it, and say whether a password went with it.
 
-        The link was made when the provider verified this account's address, so its holder owns the account.
-        A vouched address had a password chosen through a link its mailbox never saw, so that password, the
-        reset and verification links, the sessions and the passkeys set up since go, as on a first sign-in.
+        A proof means the holder of the address authenticated, so the password chosen through a link
+        its mailbox never saw, the reset and verification links, the sessions, the passkeys and the
+        access tokens set up since all go, as on a first sign-in.
+
+        What a provider asserts is evidence only about the address it named, and only where no tenant
+        can set what it says. An address the account holds for another reason is left alone.
+
+        NOTE: An unverified address is left alone. A first sign-in handles that case instead.
         """
-        if account.email_vouched_at is None:
+        if account.email_verified_at is None or account.email_proven_at is not None:
+            return False
+        if not _asserts_this_address(account, external):
             return False
         password_removed = account.hashed_password is not None
-        account.email_vouched_at = None
+        record_address(account, now=datetime.now(UTC), authority=AddressAuthority.TRUSTED_PROVIDER)
         account.hashed_password = None
         account.email_verification_token_hash = None
         account.email_verification_token_expires_at = None
@@ -655,6 +700,7 @@ class IdentityService:
         self._users.stage(account)
         await self._sessions.delete_for_user(account.id)
         await self._passkeys.delete_for_user(account.id)
+        await self._access_tokens.delete_all_for_users({account.id})
         return password_removed
 
     def _record_terms(self, account: User, *, terms_accepted: bool) -> None:
@@ -675,6 +721,19 @@ class IdentityService:
         if account is None or not account.is_active:
             raise OAuthIdentityUnknownError(label)
         return account
+
+
+def _asserts_this_address(account: User, external: ProviderIdentity) -> bool:
+    """Whether this sign-in is evidence that the holder of the account's address authenticated.
+
+    A provider whose claim a tenant can set is not evidence, whatever it reports. One that
+    reports no verified address, or reports a different one, says nothing about this address.
+    """
+    if not trusts_email_claim(external.provider):
+        return False
+    if external.email_verified is not EmailAssertion.VERIFIED or external.email is None:
+        return False
+    return account.email is not None and same_address(external.email, account.email)
 
 
 def _reset_path(token: str) -> str:

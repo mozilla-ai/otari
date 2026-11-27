@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final, Literal
 
 from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,6 +18,13 @@ MAX_EMAIL_LENGTH = 255
 MAX_PROVIDER_LENGTH = 255
 MAX_SUBJECT_LENGTH = 255
 MAX_BLOCK_REASON_LENGTH = 500
+MAX_ACCESS_TOKEN_NAME_LENGTH = 100
+MAX_DYNAMIC_CLIENT_NAME_LENGTH = 100
+
+# What an OAuth app approval redeems to.
+AppCredential = Literal["api_key", "access_token"]
+APP_CREDENTIAL_API_KEY: Final = "api_key"
+APP_CREDENTIAL_ACCESS_TOKEN: Final = "access_token"
 
 OIDC_PROVIDER_PREFIX = "oidc:"
 # An issuer is named as a provider by prefixing it, so the room for one is what the provider column
@@ -42,6 +49,41 @@ class EmailAssertion(StrEnum):
         if email_verified is None:
             return cls.UNASSERTED
         return cls.VERIFIED if email_verified else cls.UNVERIFIED
+
+
+class AddressAuthority(StrEnum):
+    """What established an identity's sign-in address.
+
+    ``proves_the_holder`` is what ``email_proven_at`` records. An authority that could assert
+    any address answers false, because its word is not evidence that the holder controls it.
+    """
+
+    MAILBOX = ("mailbox", True)
+    """A link that reached the inbox, so whoever opened it receives mail at the address."""
+
+    OPERATOR = ("operator", True)
+    """Deployment authority supplied it, which sits above every organization here."""
+
+    ORGANIZATION = ("organization", False)
+    """One organization's word for an address any organization could have claimed."""
+
+    SESSION = ("session", False)
+    """A dashboard session, which says who is calling and nothing about who receives mail at the address."""
+
+    TRUSTED_PROVIDER = ("trusted_provider", True)
+    """A provider no tenant can configure, reporting this address verified.
+
+    NOTE: An organization's own connection is a provider too and is never this. A caller
+    must establish that no tenant sets what the provider says before naming this member.
+    """
+
+    proves_the_holder: bool
+
+    def __new__(cls, value: str, proves_the_holder: bool) -> "AddressAuthority":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.proves_the_holder = proves_the_holder
+        return member
 
 
 class MailedLinkStatus(StrEnum):
@@ -237,12 +279,19 @@ class OIDCConnection(Base):
 
 
 __all__ = [
+    "APP_CREDENTIAL_ACCESS_TOKEN",
+    "APP_CREDENTIAL_API_KEY",
+    "AppCredential",
+    "MAX_ACCESS_TOKEN_NAME_LENGTH",
+    "MAX_DYNAMIC_CLIENT_NAME_LENGTH",
     "MAX_BLOCK_REASON_LENGTH",
     "BlockedEmail",
     "EmailAssertion",
     "MailedLinkStatus",
+    "OAuthDynamicClient",
     "OAuthIdentityLink",
     "OIDCConnection",
+    "PersonalAccessToken",
     "ProviderIdentity",
     "is_organization_connection_provider",
     "oidc_flow_provider",
@@ -259,7 +308,16 @@ class OAuthAppGrant(Base):
     redirect_uri: Mapped[str] = mapped_column(String(2048))
     challenge: Mapped[str] = mapped_column(String(43))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    # Null for an access token, which reads as the person rather than billing a workspace.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True
+    )
+    # What the approval redeems to: an API key, or an access token for an MCP client.
+    credential: Mapped[str] = mapped_column(String(16), default=APP_CREDENTIAL_API_KEY, server_default="api_key")
+    # The organization an access token reads, picked on the consent screen. Null for an API key.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), default=None
+    )
     # The scopes the app's registration held when the person approved it. No
     # default, so a grant cannot be written without them and redeem to a key
     # that reaches nothing.
@@ -269,3 +327,53 @@ class OAuthAppGrant(Base):
     # how long it lives from the moment it is minted. Null is no limit, no expiry.
     spend_limit: Mapped[Decimal | None] = mapped_column(UsdCost(), default=None)
     key_lifetime_sec: Mapped[int | None] = mapped_column(default=None)
+
+
+class PersonalAccessToken(Base):
+    """A person's own credential for reading one organization as them, from an agent or a script.
+
+    It authenticates what a dashboard session does, for safe methods only, so it never writes,
+    and in the organization it was created for whatever the dashboard has switched to since.
+    A row is either a token the person created, or an MCP client's sign-in: a short-lived
+    access token, accepted only through ``/mcp``, renewed by a refresh token that rotates on
+    each use. Only SHA-256 hashes are stored. CASCADE on the identity and the organization.
+    """
+
+    __tablename__ = "personal_access_token"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(MAX_ACCESS_TOKEN_NAME_LENGTH))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # The token's last characters, so a person can tell two of theirs apart.
+    token_suffix: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # When the token, or an MCP client's sign-in with every renewal, ends.
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+    )
+    # The MCP client a sign-in belongs to; null for a token the person created.
+    client_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    # A sign-in's current access token ends here, well before ``expires_at``.
+    access_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, default=None)
+    # The refresh token just rotated out. Presented again, it ends the sign-in, since only a
+    # copy someone else kept would still be in use.
+    previous_refresh_token_hash: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
+
+
+class OAuthDynamicClient(Base):
+    """An OAuth client that registered itself (RFC 7591), such as an MCP client on someone's laptop.
+
+    Nobody vouches for it, so an approval it is given only ever redeems to the approving person's
+    read-only access token, and the consent screen says it is unverified.
+    """
+
+    __tablename__ = "oauth_dynamic_client"
+    client_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    client_name: Mapped[str] = mapped_column(String(MAX_DYNAMIC_CLIENT_NAME_LENGTH))
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    # When someone first approved it. A registration nobody approves is pruned.
+    authorized_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None, index=True)

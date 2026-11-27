@@ -11,9 +11,15 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import WorkspaceIds
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
-from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy import (
+    UserRepository,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+    ids_in_organization,
+)
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -123,6 +129,36 @@ class WorkspaceAccess:
         return await resolve_visible_workspace(
             self._db, user=user, workspace_id=workspace_id, organizations=self._organizations
         )
+
+    async def readable_workspaces(self, *, user: User, workspace_id: uuid.UUID | None) -> WorkspaceIds:
+        """The workspaces a tenant-scoped read of this caller's active organization may cover.
+
+        ``workspace_id`` narrows the scope and cannot widen it: a workspace the
+        caller may not see raises ``WorkspaceNotFoundError``, whether it is in
+        another organization or in this one. A caller in no workspace gets an
+        empty scope rather than a refusal.
+
+        Resolved per call rather than cached: a membership can be suspended or a
+        role changed between two requests, and a cached scope goes stale in the
+        unsafe direction.
+        """
+        if workspace_id is not None:
+            # The full scope would also build the caller's unpaged workspace-id set,
+            # which this branch discards, on every read the Activity page issues.
+            organization = await self._organizations.get_active_organization_for_user(user)
+            await resolve_workspace_in_organization(
+                self._db,
+                user=user,
+                workspace_id=workspace_id,
+                organization=organization,
+                organizations=self._organizations,
+            )
+            return [workspace_id]
+
+        scope = await resolve_visible_workspace_scope(self._db, user=user, organizations=self._organizations)
+        if scope.sees_every_workspace:
+            return ids_in_organization(scope.organization.id)
+        return scope.workspace_ids or []
 
     async def require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
         """See :func:`require_workspace_management_access`."""

@@ -13,6 +13,7 @@ import type {
   HostedProviderRegion,
   HostedProviderTestResult,
   HostedVendor,
+  PlatformConnectStatus,
   ProviderHealth,
   ProviderInfo,
 } from "@/client"
@@ -237,6 +238,11 @@ export function mockApi(
     pricing?: { require_pricing: boolean; default_pricing: boolean }
     /** Pricing keys a DELETE /pricing answers 404 for, as nothing stored there. */
     missingPrices?: string[]
+    /**
+     * Answers each connect status read after a connect is started, in turn, the
+     * last one repeating. Idle before one is started, and idle throughout otherwise.
+     */
+    connectStatuses?: PlatformConnectStatus[]
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -244,6 +250,8 @@ export function mockApi(
   const models = opts.models ?? [hostedModel()]
   const sweep = opts.sweep ?? EMPTY_SWEEP
   const previews = [...(opts.previews ?? [])]
+  const connectStatuses = [...(opts.connectStatuses ?? [{ status: "idle" }])]
+  let connectStarted = false
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -340,7 +348,20 @@ export function mockApi(
       })
     }
     if (url.includes(`${API_ROOT}/platform/connect`)) {
-      return jsonResponse({ status: "idle" })
+      if (method === "POST") {
+        connectStarted = true
+        return jsonResponse({
+          user_code: "WXYZ-1234",
+          verification_uri_complete: "https://otari.test/connect",
+          expires_in: 600,
+        })
+      }
+      if (!connectStarted) return jsonResponse({ status: "idle" })
+      return jsonResponse(
+        connectStatuses.length > 1
+          ? connectStatuses.shift()
+          : connectStatuses[0],
+      )
     }
     if (url.includes(`${hosted}/`) && url.includes("/vendors")) {
       const sent = body as { vendor: string; enabled: boolean }

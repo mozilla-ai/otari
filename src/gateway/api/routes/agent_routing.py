@@ -13,14 +13,20 @@ in usage like a ``POST /api/v1/decisions`` call: priced from this deployment's
 own rows, or held and charged at the price the recommender quotes. Nothing
 else is dispatched here, which is why any active API key may ask rather than
 only an operator. See ``docs/claude-code.md``.
+
+Each answer is also recorded as a subagent decision, whose id the answer carries.
+``PUT /api/v1/routing/decisions/{decision_id}/outcome`` is how the harness says
+what the subagent then consumed.
 """
 
+import uuid
 from collections.abc import Mapping
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from gateway.api.deps import AgentModelRecommenderPortDep, get_config, verify_api_key_or_master_key
+from gateway.api.deps.routing import SubagentDecisionServiceDep
 from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import (
     ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
@@ -42,7 +48,12 @@ from gateway.exceptions.routing_exceptions import (
 )
 from gateway.models.api_keys import APIKey
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort, ModelRecommendation, SubagentSpawn
-from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest, RecommendationRefusal
+from gateway.schemas.routing import (
+    AgentModelRecommendation,
+    AgentModelRecommendationRequest,
+    RecommendationRefusal,
+    SubagentOutcomeReport,
+)
 from gateway.services.routing import ROUTER_LABEL, build_decision_request, candidates_for
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 from gateway.types.key_scope import KeyScope
@@ -108,6 +119,7 @@ async def recommend_model_for_agent(
     config: Annotated[GatewayConfig, Depends(get_config)],
     recommender: AgentModelRecommenderPortDep,
     scaffold: Annotated[DecisionScaffold, Depends(get_decision_scaffold)],
+    decisions: SubagentDecisionServiceDep,
 ) -> AgentModelRecommendation:
     """Recommend the model a subagent about to start should run on.
 
@@ -120,7 +132,8 @@ async def recommend_model_for_agent(
     among the request's own `candidates` for pi; a bootstrap may bind a
     recommender of its own, which the caller never configures. Where
     the recommender reports them, the answer also carries a one-line reason
-    and its probability for each candidate.
+    and its probability for each candidate. `decision_id` names the record of
+    this answer, and is absent where the record could not be kept.
 
     Authentication modes:
     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -145,7 +158,7 @@ async def recommend_model_for_agent(
     # The hold is sized from the question the core would put, description and
     # candidates included, which is also the best guess at what a bound recommender reads.
     question = build_decision_request(spawn, decision_model=ROUTER_LABEL, candidates=candidates)
-    recommendation = await scaffold.run_call(
+    settled = await scaffold.run_call(
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,
@@ -155,8 +168,60 @@ async def recommend_model_for_agent(
         default_output_tokens=ESTIMATED_OUTPUT_TOKENS_PER_QUESTION,
         call=_RecommenderCall(recommender, spawn, candidates),
     )
+    recommendation = settled.result
+    api_key, _ = auth_result
+    decision_id = await decisions.record(
+        decision_id=uuid.UUID(settled.request_id),
+        workspace_id=settled.workspace_id,
+        user_id=settled.user_id,
+        api_key_id=api_key.id if api_key else None,
+        spawn=spawn,
+        recommended_model=recommendation.model,
+        router_cost=settled.cost,
+    )
     return AgentModelRecommendation(
         model=recommendation.model,
         reason=recommendation.reason,
         probabilities=dict(recommendation.probabilities) if recommendation.probabilities is not None else None,
+        decision_id=decision_id,
+    )
+
+
+@router.put(
+    "/decisions/{decision_id}/outcome",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": RecommendationRefusal,
+            "description": "No decision of the caller's has this id.",
+        },
+    },
+    openapi_extra=key_scope(KeyScope.AGENTS_WRITE),
+)
+async def report_subagent_outcome(
+    decision_id: uuid.UUID,
+    report: SubagentOutcomeReport,
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    decisions: SubagentDecisionServiceDep,
+) -> None:
+    """Report what the subagent a recommendation started has consumed.
+
+    The harness sends the token counts it holds for the subagent, one line per
+    model it ran on, as running totals: each report replaces the one before
+    it. The gateway prices those tokens twice, at the models named and at the
+    model the subagent would have started on without the recommendation, and
+    keeps both amounts as an estimate. No content is sent, nothing is charged
+    and no usage row is written.
+
+    Authentication modes:
+    - Master key: any decision.
+    - API key: a decision made for the key's own user in the key's workspace.
+    """
+    api_key, _ = auth_result
+    await decisions.report_outcome(
+        decision_id,
+        user_id=api_key.user_id if api_key else None,
+        workspace_id=api_key.workspace_id if api_key else None,
+        api_key_id=api_key.id if api_key is not None and api_key.user_id is None else None,
+        lines=report.usage,
     )

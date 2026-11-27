@@ -4,6 +4,8 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
+import httpx2
+import openai
 import pytest
 from any_llm import LLMProvider
 from pydantic import ValidationError
@@ -498,3 +500,337 @@ def test_close_releases_outstanding_calls_without_binding(router: AutomaticRoute
     assert all(health.active == 0 for health in router.health.values())
     assert all(health.cooldown == 0 for health in router.health.values())
     assert not router.affinities
+
+
+def _same_account_plan() -> CompiledPlan:
+    """Build two models on one credential, then a second credential, so account-wide cooldown can be told apart."""
+    return CompiledPlan(
+        policy_name="acme/model",
+        attempts=[
+            Attempt(1, "us", LLMProvider.OPENAI, "model", {"api_key": "us-secret"}),
+            Attempt(2, "us", LLMProvider.OPENAI, "model-b", {"api_key": "us-secret"}),
+            Attempt(3, "eu", LLMProvider.OPENAI, "model", {"api_key": "eu-secret"}),
+        ],
+    )
+
+
+def test_repeated_failures_back_off_and_success_resets(router: AutomaticRouter, now: list[float]) -> None:
+    """Each consecutive failure doubles the cooldown, and a success returns it to the first step."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    now[0] += 16
+    retry = _rank(router)
+    assert retry.automatic is not None and retry.head.instance == "us"
+    retry.automatic.start(retry.head).finish(unhealthy=True)
+    now[0] += 16
+    assert _rank(router).head.instance == "eu"
+    now[0] += 15
+    recovered = _rank(router)
+    assert recovered.automatic is not None and recovered.head.instance == "us"
+    recovered.automatic.start(recovered.head).finish(success=True)
+    recovered.automatic.start(recovered.head).finish(unhealthy=True)
+    now[0] += 16
+    assert _rank(router).head.instance == "us"
+
+
+def test_cooldown_backoff_is_capped(router: AutomaticRouter, now: list[float]) -> None:
+    """A credential that keeps failing is retried at least every ten minutes."""
+    for _ in range(12):
+        plan = _rank(router)
+        assert plan.automatic is not None
+        plan.automatic.start(plan.attempts[0] if plan.head.instance == "us" else plan.attempts[1]).finish(
+            unhealthy=True
+        )
+        now[0] += 601
+    assert _rank(router).head.instance == "us"
+
+
+def test_account_failure_cools_every_model_on_the_credential(router: AutomaticRouter, now: list[float]) -> None:
+    """Exhausted quota on one model moves traffic off the credential, not onto its next model."""
+    plan = _rank(
+        router,
+        plan=_same_account_plan(),
+        costs={"us:model": Decimal("0.01"), "us:model-b": Decimal("0.01"), "eu:model": Decimal("0.05")},
+    )
+    assert plan.automatic is not None
+    assert [(a.instance, a.model) for a in plan.attempts] == [("us", "model"), ("us", "model-b"), ("eu", "model")]
+    plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.01"), "eu:model": Decimal("0.05")}
+    assert _rank(router, plan=_same_account_plan(), costs=costs).head.instance == "eu"
+    now[0] += 16
+    assert _rank(router, plan=_same_account_plan(), costs=costs).head.instance == "us"
+
+
+def test_success_clears_an_account_cooldown(router: AutomaticRouter) -> None:
+    """A model served on the credential shows the account works again."""
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.01"), "eu:model": Decimal("0.05")}
+    plan = _rank(router, plan=_same_account_plan(), costs=costs)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.attempts[1]).finish(unhealthy=True, account=True)
+    plan.automatic.start(plan.head).finish(success=True)
+    assert not router.accounts
+
+
+def test_refused_offering_ranks_last_for_its_scope_until_expiry(router: AutomaticRouter, now: list[float]) -> None:
+    """An offering that refused a caller is tried last for that caller only, and again after five minutes."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.refuse(plan.head)
+    assert _rank(router).head.instance == "eu"
+    assert _rank(router, scope="other:user:key:chat").head.instance == "us"
+    now[0] += 301
+    assert _rank(router).head.instance == "us"
+
+
+def test_refusal_drops_the_session_binding(router: AutomaticRouter) -> None:
+    """A conversation bound to an offering that now refuses it does not stay on it."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(success=True)
+    assert router.affinities
+    plan.automatic.refuse(plan.head)
+    assert not router.affinities
+
+
+@pytest.mark.parametrize(
+    ("status", "unhealthy", "account"),
+    [(402, True, True), (401, True, True), (429, True, False), (503, True, False), (400, False, False)],
+)
+def test_upstream_failures_classify_for_cooldown(status: int, unhealthy: bool, account: bool) -> None:
+    """Exhausted quota cools the offering and its credential; a rejected request cools neither."""
+    from gateway.api.routes._pipeline import _automatic_unhealthy
+
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.test/v1/chat/completions"))
+    exc = openai.APIStatusError("upstream refused", response=response, body=None)
+    assert _automatic_unhealthy(exc) is unhealthy
+    assert AutomaticRouter.is_account_failure(exc) is account
+
+
+def test_a_long_outage_does_not_overflow_the_backoff(router: AutomaticRouter) -> None:
+    """Thousands of consecutive failures keep the ten-minute cap instead of raising."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    for _ in range(1100):
+        plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
+    assert next(iter(router.accounts.values()))[0] == pytest.approx(100 + 600)
+    for _ in range(1100):
+        plan.automatic.start(plan.head).finish(unhealthy=True)
+    assert router.health[router.candidate_key(plan.head)].cooldown == pytest.approx(100 + 600)
+
+
+def test_an_old_failure_does_not_lengthen_a_new_cooldown(router: AutomaticRouter, now: list[float]) -> None:
+    """Failures far apart restart the count, so an occasional failure always cools for 15 seconds."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    now[0] += 30 + 601
+    plan.automatic.start(plan.head).finish(unhealthy=True)
+    now[0] += 16
+    assert _rank(router).head.instance == "us"
+
+
+def test_hosted_dispatch_feeds_the_offering_it_was_ranked_as(router: AutomaticRouter) -> None:
+    """A failure on a credential resolved at dispatch cools the offering ranking sees, and a success binds it."""
+    plan = _rank(router)
+    assert plan.automatic is not None
+    served = replace(plan.head, instance="hosted", kwargs={"api_key": "hosted-secret"}, deployment_paid=True)
+    plan.automatic.dispatched_as(plan.head, served)
+    plan.automatic.start(served).finish(unhealthy=True)
+    assert _rank(router).head.instance == "eu"
+
+    bound = _rank(AutomaticRouter())
+    assert bound.automatic is not None
+    served = replace(bound.head, instance="hosted", kwargs={"api_key": "hosted-secret"}, deployment_paid=True)
+    bound.automatic.dispatched_as(bound.head, served)
+    bound.automatic.start(served).finish(success=True)
+    assert bound.automatic.router.affinities
+
+
+def test_a_gateway_refusal_does_not_cool_the_credential(router: AutomaticRouter) -> None:
+    """A 403 the gateway raised itself, such as a guardrail refusal, leaves a shared credential alone."""
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.01"), "eu:model": Decimal("0.05")}
+    plan = _rank(router, plan=_same_account_plan(), costs=costs)
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(account=True)
+    assert not router.accounts
+    assert _rank(router, plan=_same_account_plan(), costs=costs).head.instance == "us"
+
+
+def _hosted_plan() -> CompiledPlan:
+    """Build two offerings that name no credential, so dispatch resolves one for each organization."""
+    return CompiledPlan(
+        policy_name="acme/model",
+        attempts=[
+            Attempt(1, "us", LLMProvider.OPENAI, "model", {}),
+            Attempt(2, "eu", LLMProvider.OPENAI, "model", {}),
+        ],
+    )
+
+
+def test_a_credential_resolved_at_dispatch_fails_only_for_its_tenant(router: AutomaticRouter) -> None:
+    """One organization's exhausted hosted credential does not move another organization off the offering."""
+    plan = _rank(router, plan=_hosted_plan(), tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True, account=True)
+    assert _rank(router, plan=_hosted_plan(), tenant="workspace-a").head.instance == "eu"
+    assert _rank(router, plan=_hosted_plan(), tenant="workspace-b").head.instance == "us"
+
+
+def test_a_refused_offering_ranks_after_an_unpriced_one(router: AutomaticRouter) -> None:
+    """An unpriced offering may still serve; one that refused this caller will not."""
+    costs = {"us:model": Decimal("0.01"), "eu:model": None}
+    plan = _rank(router, costs=costs)
+    assert plan.automatic is not None and plan.head.instance == "us"
+    plan.automatic.refuse(plan.head)
+    assert _rank(router, costs=costs).head.instance == "eu"
+
+
+def test_a_credential_failure_with_transport_settings_stays_with_its_tenant(router: AutomaticRouter) -> None:
+    """Planned client settings that carry no credential do not share a cooldown, or its reset, across tenants."""
+    plan = CompiledPlan(
+        policy_name="acme/model",
+        attempts=[
+            Attempt(1, "us", LLMProvider.BEDROCK, "model", {"client_args": {"region_name": "us-east-1"}}),
+            Attempt(2, "eu", LLMProvider.BEDROCK, "model", {"client_args": {"region_name": "eu-west-1"}}),
+        ],
+    )
+    costs = {"us:model": Decimal("0.01"), "eu:model": Decimal("0.02")}
+    failing = _rank(router, plan=plan, costs=costs, tenant="workspace-a")
+    assert failing.automatic is not None
+    failing.automatic.start(failing.head).finish(unhealthy=True, account=True)
+    serving = _rank(router, plan=plan, costs=costs, tenant="workspace-b")
+    assert serving.automatic is not None and serving.head.instance == "us"
+    serving.automatic.start(serving.head).finish(success=True)
+    assert _rank(router, plan=plan, costs=costs, tenant="workspace-a").head.instance == "eu"
+
+
+def test_a_model_the_credential_does_not_serve_ranks_last_for_its_tenant_for_an_hour(
+    router: AutomaticRouter, now: list[float]
+) -> None:
+    """A missing model is tried last by the workspace that met it, without cooling the credential's other models."""
+    costs = {"us:model": Decimal("0.01"), "us:model-b": Decimal("0.02"), "eu:model": Decimal("0.05")}
+    plan = _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(unhealthy=True, account=True, missing=True)
+    assert not router.accounts
+    assert router.health[router.candidate_key(plan.head)].cooldown == 0
+    ranked = _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a")
+    assert [(a.instance, a.model) for a in ranked.attempts] == [("us", "model-b"), ("eu", "model"), ("us", "model")]
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-b").head.model == "model"
+    now[0] += 3599
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a").head.model == "model-b"
+    now[0] += 2
+    assert _rank(router, plan=_same_account_plan(), costs=costs, tenant="workspace-a").head.model == "model"
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "missing"),
+    [
+        (404, "Error code: 404", True),
+        (400, "The model or service ID deepseek-v4-flash-0731 does not exist. Please check it.", True),
+        (403, "You do not have access to model `deepseek-ai/DeepSeek-V4-Flash-0731`.", True),
+        (404, "Model not found, inaccessible, and/or not deployed", True),
+        (403, "Model example is not accessible on this account", True),
+        (404, "model: claude-example", True),
+        (404, "Previous response with id 'resp_123' not found.", False),
+        (404, "No such File object: file-abc123", False),
+        (400, "max_tokens is too large for this model", False),
+        (403, "Invalid API key", False),
+        (503, "The model is overloaded", False),
+    ],
+)
+def test_a_missing_model_is_recognized(status: int, message: str, missing: bool) -> None:
+    """A 404, or a 400 or 403 saying the model is not served, is a missing model; other refusals are not."""
+    from gateway.api.routes._pipeline import _finish_failed
+
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.test/v1/chat/completions"))
+    exc = openai.APIStatusError(message, response=response, body=None)
+    assert AutomaticRouter.is_missing_model(exc) is missing
+
+    router = AutomaticRouter()
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    _finish_failed(plan.automatic.start(plan.head), exc)
+    assert bool(router.missing) is missing
+
+
+def test_a_gateway_404_is_not_a_missing_model(router: AutomaticRouter) -> None:
+    """A 404 the gateway raised itself leaves the offering's ranking alone."""
+    from fastapi import HTTPException
+
+    from gateway.api.routes._pipeline import _finish_failed
+
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    _finish_failed(plan.automatic.start(plan.head), HTTPException(404, "Model not found"))
+    assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_rotated_key_does_not_inherit_a_missing_model(router: AutomaticRouter) -> None:
+    """A missing model is remembered for the credential that reported it, not for the next key."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    rotated = CompiledPlan(
+        policy_name="acme/model",
+        attempts=[replace(a, kwargs={"api_key": "rotated"}) if a.instance == "us" else a for a in _plan().attempts],
+    )
+    assert _rank(router, plan=rotated, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_still_missing_is_refused_for_longer(router: AutomaticRouter, now: list[float]) -> None:
+    """A model still missing when its refusal lapses is refused for three hours, then twelve; a success clears it."""
+
+    def fail() -> None:
+        plan = _rank(router, tenant="workspace-a")
+        assert plan.automatic is not None
+        attempt = next(a for a in plan.attempts if a.instance == "us")
+        plan.automatic.start(attempt).finish(missing=True)
+
+    def refused_for() -> float:
+        return next(iter(router.missing.values()))[0] - now[0]
+
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 600
+    fail()
+    assert refused_for() == pytest.approx(3600)
+    now[0] += 3601
+    fail()
+    assert refused_for() == pytest.approx(3 * 3600)
+    now[0] += 3 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+    now[0] += 12 * 3600 + 1
+    fail()
+    assert refused_for() == pytest.approx(12 * 3600)
+
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.attempts[-1]).finish(success=True)
+    assert not router.missing
+    assert _rank(router, tenant="workspace-a").head.instance == "us"
+
+
+def test_a_model_missing_again_long_after_starts_over(router: AutomaticRouter, now: list[float]) -> None:
+    """A failure more than twelve hours after a refusal lapsed is refused for an hour again."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    now[0] += 3600 + 12 * 3600 + 1
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert next(iter(router.missing.values()))[0] - now[0] == pytest.approx(3600)
+
+
+def test_a_missing_model_is_remembered_per_endpoint(router: AutomaticRouter) -> None:
+    """A model one API lacks is not ranked last for another API the offering still serves."""
+    plan = _rank(router, tenant="workspace-a")
+    assert plan.automatic is not None
+    plan.automatic.start(plan.head).finish(missing=True)
+    assert _rank(router, tenant="workspace-a").head.instance == "eu"
+    assert _rank(router, tenant="workspace-a", mode="responses:completion").head.instance == "us"

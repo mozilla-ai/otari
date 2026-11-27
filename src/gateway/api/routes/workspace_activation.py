@@ -65,12 +65,13 @@ async def create_workspace_activation_key(
     growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
 ) -> ActivationApiKeyPublic:
-    """Issue the workspace's setup API key, rotating the one the guide already issued.
+    """Issue the setup API key, rotating the one the guide already issued.
 
-    Workspace owners and admins only, like every other action that changes a
-    workspace. The plaintext is returned once and never stored, so a reopened
-    guide rotates the same key row rather than collecting a second one, and
-    answers 409 once the workspace has activated or the guide was dismissed.
+    The workspace's for its owners and admins, the caller's own for a member who
+    does not manage it; a viewer is refused. The plaintext is returned once and
+    never stored, so a reopened guide rotates the same key row rather than
+    collecting a second one, and answers 409 once the guide is finished or was
+    dismissed.
     """
     return await service.issue_api_key(
         user=current_identity, workspace_id=workspace_id, growth=growth, background_tasks=background_tasks
@@ -85,10 +86,10 @@ async def dismiss_workspace_activation(
 ) -> Message:
     """Retire the guide for this workspace. Permanent, and idempotent.
 
-    Workspace owners and admins only. It retires the card and nothing else: the
-    key the guide issued keeps working, because the operator asked for it and
-    may well have pasted it somewhere already. Revoking one is the Keys page's
-    job.
+    For a member who does not manage the workspace, for them alone; a viewer is
+    refused. It retires the card and nothing else: the key the guide issued
+    keeps working, because the operator asked for it and may well have pasted it
+    somewhere already. Revoking one is the Keys page's job.
     """
     await service.dismiss(user=current_identity, workspace_id=workspace_id)
     return Message(message="Setup guide dismissed")

@@ -14,6 +14,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +24,10 @@ from gateway.log_config import logger
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import (
     Identities,
+    ModelArchitecture,
     OfferingRow,
     OrganizationSelectors,
+    apply_model_metadata,
     build_organization_selectors,
     build_selector_index,
     metadata_entry,
@@ -38,7 +41,14 @@ from gateway.services.merged_catalog_service import (
     build_merged_catalog,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
-from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings, vendor_slug
+from gateway.services.model_identity import (
+    ModelIdentity,
+    OfferingSeed,
+    group_offerings,
+    identity_key,
+    own_providers_for_vendor_slug,
+    vendor_slug,
+)
 from gateway.services.pricing_service import (
     OverridePeriod,
     default_model_pricing,
@@ -168,14 +178,190 @@ def models_by_identity(
             for selector in resolve_catalog_offerings(identity.id, organization_id=organization_id)
             if selector in members
         ] or sorted(members, key=lambda selector: _cheapest_first(offerings[selector]))
-        first = offerings[ranked[0]]
-        rows[identity.id] = first.model_copy(
+        first = _read_under_slug(config, catalog, offerings[ranked[0]], organization_id, slug_providers)
+        others = [offerings[selector] for selector in sorted(members - {ranked[0]})]
+        reached = [_read_under_slug(config, catalog, obj, organization_id, slug_providers) for obj in others]
+        row = first.model_copy(
             update={
                 "id": identity.id,
                 "owned_by": vendor_slug(identity.vendor) if identity.vendor else first.owned_by,
+                **_limits_from_others(first, others),
+                **_facts_from_others(first, reached),
+                **_capabilities_from_others(first, reached),
             }
         )
+        if any(getattr(row, field) is None for field in _DESCRIBED_FIELDS):
+            row = _described_as_identity(catalog, row, identity)
+        rows[identity.id] = row
     return [rows[model_id] for model_id in sorted(rows)]
+
+
+# What a row may still leave unknown once its own offerings are read.
+_DESCRIBED_FIELDS = (
+    "name",
+    "type",
+    "context_window",
+    "max_output_tokens",
+    "supported_parameters",
+    "architecture",
+    "description",
+    "release_date",
+    "knowledge_cutoff",
+)
+
+_entries_cache: tuple[ModelsDevCatalog, dict[str, list[tuple[str, str]]]] | None = None
+
+
+def _entries_by_identity(catalog: ModelsDevCatalog) -> dict[str, list[tuple[str, str]]]:
+    """Every models.dev ``(provider, model id)`` grouped by :func:`identity_key`, built once per catalog snapshot."""
+    global _entries_cache
+    if _entries_cache is not None and _entries_cache[0] is catalog:
+        return _entries_cache[1]
+    entries: dict[str, list[tuple[str, str]]] = {}
+    for provider_type in sorted(catalog.providers):
+        for model_id, model in catalog.providers[provider_type].models.items():
+            entries.setdefault(identity_key(provider_type, model_id, model.name), []).append((provider_type, model_id))
+    _entries_cache = (catalog, entries)
+    return entries
+
+
+def _described_as_identity(
+    catalog: ModelsDevCatalog | None,
+    row: ModelObject,
+    identity: ModelIdentity,
+) -> ModelObject:
+    """``row`` with what it leaves unknown read from models.dev's entry for the model it was grouped as.
+
+    An offering that finds no models.dev entry leaves the row undescribed: a key
+    on an OpenAI-compatible endpoint (a proxy, a reseller) is stored under
+    ``openai``, which models.dev lists none of its models under, so no offering
+    read finds the model. The identity still names it, and models.dev lists it
+    under its vendor or its resellers; the vendor's own entry is preferred. A
+    field an offering does report is kept, and a filled output limit is capped
+    at the row's context window, as :func:`_limits_from_others` caps one.
+
+    Only the entry is read. The row's own offerings were already read under the
+    selectors they are served by, so an override or served fact recorded for the
+    vendor's own selector would describe an endpoint this row does not reach.
+    """
+    entries = _entries_by_identity(catalog).get(identity.key) if catalog is not None else None
+    if not entries:
+        return row
+    own = own_providers_for_vendor_slug(vendor_slug(identity.vendor)) if identity.vendor else frozenset()
+    provider_type, model_id = next((entry for entry in entries if entry[0] in own), entries[0])
+    entry = metadata_entry(catalog, provider_type, model_id)
+    if entry is None:
+        return row
+    described = _entry_fields(entry)
+    update = {field: described[field] for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
+    window = row.context_window if row.context_window is not None else update.get("context_window")
+    output = update.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        update["max_output_tokens"] = window
+    return row.model_copy(update=update)
+
+
+def _entry_fields(entry: ModelCatalogEntry) -> dict[str, Any]:
+    """What models.dev's entry for a model says, in the listing's own field names."""
+    flags = (
+        (entry.tool_call, ("tools", "tool_choice")),
+        (entry.structured_output, ("response_format",)),
+        (entry.reasoning, ("reasoning",)),
+        (entry.temperature, ("temperature",)),
+    )
+    return {
+        "name": entry.name,
+        "type": entry.type,
+        "context_window": entry.context_window,
+        "max_output_tokens": entry.max_output_tokens,
+        "supported_parameters": [parameter for flag, parameters in flags if flag for parameter in parameters],
+        "architecture": ModelArchitecture(
+            input_modalities=list(entry.input_modalities), output_modalities=list(entry.output_modalities)
+        ),
+        "description": entry.description,
+        "release_date": entry.release_date,
+        "knowledge_cutoff": entry.knowledge_cutoff,
+    }
+
+
+def _read_under_slug(
+    config: GatewayConfig,
+    catalog: ModelsDevCatalog | None,
+    obj: ModelObject,
+    organization_id: uuid.UUID | None,
+    slug_providers: Mapping[str, str] | None,
+) -> ModelObject:
+    """``obj``, or a copy of it with its metadata read under the provider its key slug stands for.
+
+    An organization's key is addressed by its slug, which no configured instance
+    names, so the metadata pass that built the offering asked models.dev about
+    the slug and got nothing. ``obj`` itself is left as it is, so the shared
+    listing objects stay unchanged and a fold keeps the limits they report.
+    """
+    resolved = (slug_providers or {}).get(obj.id.partition(":")[0])
+    if resolved is None:
+        return obj
+    read = obj.model_copy()
+    apply_model_metadata(config, catalog, read, organization_id=organization_id, provider_type=resolved)
+    return read
+
+
+def _limits_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, int]:
+    """The token limits ``first`` leaves unknown, as the smallest the model's other offerings report.
+
+    A self-hosted engine is often the one offering that knows its context
+    length, and rarely the one tried first. The smallest is the one every
+    offering that reports a limit holds, whichever a fallback reaches. A
+    filled output limit is capped at the row's context window; a limit
+    ``first`` knows is kept as it is.
+    """
+    filled: dict[str, int] = {}
+    contexts = [obj.context_window for obj in others if obj.context_window is not None]
+    if first.context_window is None and contexts:
+        filled["context_window"] = min(contexts)
+    outputs = [obj.max_output_tokens for obj in others if obj.max_output_tokens is not None]
+    if first.max_output_tokens is None and outputs:
+        filled["max_output_tokens"] = min(outputs)
+    window = filled.get("context_window", first.context_window)
+    output = filled.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        filled["max_output_tokens"] = window
+    return filled
+
+
+def _facts_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, str]:
+    """The row's release date, description and cutoff, derived across offerings as the catalog's model page does.
+
+    The release date is the earliest any offering gives, so it does not move
+    when routing reorders them. The description and cutoff are ``first``'s,
+    whose name the row shows, else the first another offering gives. Every
+    offering is read, whichever a request tries first, so the row reads the
+    same facts whatever the ranking.
+    """
+    filled: dict[str, str] = {}
+    dates = [obj.release_date for obj in (first, *others) if obj.release_date]
+    if dates:
+        filled["release_date"] = min(dates)
+    for field in ("description", "knowledge_cutoff"):
+        if getattr(first, field) is None:
+            value = next((getattr(obj, field) for obj in others if getattr(obj, field)), None)
+            if value is not None:
+                filled[field] = value
+    return filled
+
+
+def _capabilities_from_others(first: ModelObject, others: list[ModelObject]) -> dict[str, list[str]]:
+    """The request parameters ``first`` leaves unknown, as the first other offering reports them.
+
+    ``None`` means nothing described the offering at all, while an empty list is
+    a report that it supports none of the parameters. An offering's own report
+    wins over models.dev's entry for the model, as its price and limits do, so a
+    row that borrowed a sibling's list is not described again from that entry.
+    """
+    if first.supported_parameters is not None:
+        return {}
+    reported = next((obj.supported_parameters for obj in others if obj.supported_parameters is not None), None)
+    return {} if reported is None else {"supported_parameters": reported}
 
 
 def _cheapest_first(obj: ModelObject) -> tuple[bool, float, str]:

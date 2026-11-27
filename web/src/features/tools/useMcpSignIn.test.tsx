@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { useMcpSignIn } from "@/features/tools/useMcpSignIn"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -19,7 +20,7 @@ it("closes the blank popup when the page goes before the sign-in starts", () => 
   const { result, unmount } = renderHook(
     () =>
       useMcpSignIn({
-        workspaceId: "w-1",
+        scope: workspaceMcpScope("w-1"),
         returnTo: "/tools/mcp-servers/s-1",
         openWindow: () => popup as unknown as Window,
       }),

@@ -126,9 +126,6 @@ class RecordingGrowthAdapter:
     async def record_onboarding_completed(self, **kwargs: Any) -> None:
         self.calls.append(("onboarding", kwargs))
 
-    async def record_profile_updated(self, **kwargs: Any) -> None:
-        self.calls.append(("profile_updated", kwargs))
-
     async def record_account_deleted(self, **kwargs: Any) -> None:
         self.calls.append(("account_deleted", kwargs))
 

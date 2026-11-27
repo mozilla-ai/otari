@@ -14,6 +14,7 @@ import {
   FiLogIn,
   FiMessageSquare,
   FiRepeat,
+  FiServer,
   FiShield,
   FiShuffle,
   FiSliders,
@@ -70,7 +71,7 @@ const BASE_NAV_SECTIONS = [
         to: "/sessions",
         label: "Sessions",
         icon: FiList,
-        views: ["/requests"],
+        views: ["/requests", "/router-savings"],
       },
       { to: "/people", label: "People", icon: FiUsers },
       { to: "/rules", label: "Rules", icon: FiShield },
@@ -165,7 +166,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       {
         to: "/organization/sso",
         label: "Single sign-on",
-        surface: "organizations",
+        surface: "organization_sso",
         icon: FiLogIn,
       },
     ],
@@ -174,21 +175,18 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-money",
     label: "Cost & billing",
     items: [
-      // No `operatorOnly`, because the destination is two pages now: an
-      // operator gets the deployment's budgets and an organization owner or
-      // admin gets their own organization's (otari-ai#1943). The roles matrix
-      // has this row at Edit for an admin, and `/organizations/me/budgets`
-      // plus `/organizations/me/spend-ceilings` are what it edits. A plain
-      // member is not offered it, because the organization rail opens only to a
-      // caller who manages the organization.
+      // The organization's own budgets and spend ceilings (otari-ai#1943),
+      // for whoever opens it, operator or not: the deployment's budgets are
+      // Deployment budgets on the deployment rail (otari#2099). The roles
+      // matrix has this row at Edit for an admin, and
+      // `/organizations/me/budgets` plus `/organizations/me/spend-ceilings` are
+      // what it edits. A plain member is not offered it, because the
+      // organization rail opens only to a caller who manages the organization.
       {
         to: "/budgets",
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
-        // The operator opens it for the deployment's budgets whatever their
-        // role in the organization (`BudgetsPage`).
-        requires: "manager-or-operator",
       },
     ],
   },
@@ -217,6 +215,17 @@ const ORGANIZATION_NAV_SECTIONS = [
             icon: FiGlobe,
           },
         ],
+      },
+      // The organization's own MCP servers, which every workspace of it
+      // reaches. Beside Providers and gated as they are: like the provider
+      // keys, these are the organization's own connections to an outside
+      // service, which its workspaces use. Not the workspace rail's
+      // `/tools/mcp-servers`, which lists one workspace's own.
+      {
+        to: "/organization/mcp-servers",
+        label: "MCP servers",
+        surface: "organization_providers",
+        icon: FiServer,
       },
       // The organization's own guardrails and where each one runs. Not the
       // workspace rail's `/tools/guardrails`, which sets the deployment's own
@@ -292,6 +301,16 @@ const DEPLOYMENT_SECTIONS = [
         surface: "agent_recommenders",
         operatorOnly: "unlisted",
         icon: FiShuffle,
+      },
+      // Every budget on the deployment, a tenant's included, and who is on
+      // each. Not the organization rail's Spend & budgets, which is the
+      // organization's own whoever opens it (otari#2099).
+      {
+        to: "/admin/budgets",
+        label: "Deployment budgets",
+        surface: "budgets",
+        operatorOnly: "refused",
+        icon: FiDollarSign,
       },
       // The search and fetch tools the deployment runs for every workspace, and
       // their prices.

@@ -55,6 +55,7 @@ from gateway.api.routes import (
     maintenance_mode,
     mcp_catalog,
     models,
+    org_provider_keys,
     pricing,
     providers,
     routing,
@@ -80,6 +81,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("mail", mail.router),
     ("maintenance_mode", maintenance_mode.router),
     ("models", models.operator_router),
+    ("org_provider_keys", org_provider_keys.operator_router),
     ("pricing", pricing.operator_router),
     ("providers", providers.router),
     ("routing", routing.router),
@@ -167,6 +169,9 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
+    "identity_apps.registration_router": (
+        "dynamic client registration is public; a registered client gets nothing until a person approves it"
+    ),
     "identity_apps.public_router": "registered app metadata is public; exchanging a grant requires its S256 PKCE proof",
     "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",

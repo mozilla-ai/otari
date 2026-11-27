@@ -55,28 +55,39 @@ workspace that owns them is gone.
 
 import uuid
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, false, text, true
 from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
+from gateway.types.endpoint_auth import EndpointAuth
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
-# the classic AWS IAM shape genuinely requires
-# ``aws_access_key_id`` and ``aws_secret_access_key`` inside ``client_args``
-# (any-llm-sdk's ``BedrockProvider`` never forwards ``api_key`` into the boto3
-# client it builds), so those are real
-# credentials this field is *supposed* to carry, not smuggled duplicates of
-# ``encrypted_api_key``. They still must never round-trip over the API, the same
-# treatment ``encrypted_api_key`` already gets (only ``last4`` comes back);
-# ``redact_secret_like_values`` is that treatment applied by key name rather
-# than by field.
+# the classic AWS IAM shape genuinely requires ``aws_access_key_id`` and
+# ``aws_secret_access_key`` inside ``client_args`` (any-llm-sdk's
+# ``BedrockProvider`` never forwards ``api_key`` into the boto3 client it
+# builds), so those are real credentials the field is supposed to carry rather
+# than smuggled duplicates of ``encrypted_api_key``. It is therefore held
+# encrypted, as ``encrypted_api_key`` is, and masked by entry name on the way
+# back out so a credential never round-trips over the API.
 
 # ==============================================================================
 # Org provider keys
 # ==============================================================================
+
+_ENDPOINT_AUTH_ALL_OR_NONE = (
+    "(endpoint_auth_method IS NULL"
+    " AND endpoint_auth_header_name IS NULL"
+    " AND encrypted_endpoint_auth_secret IS NULL"
+    " AND endpoint_auth_last4 IS NULL"
+    " AND endpoint_auth_expires_at IS NULL)"
+    " OR (endpoint_auth_method IS NOT NULL"
+    " AND endpoint_auth_header_name IS NOT NULL"
+    " AND encrypted_endpoint_auth_secret IS NOT NULL"
+    " AND endpoint_auth_last4 IS NOT NULL"
+    " AND endpoint_auth_expires_at IS NOT NULL)"
+)
 
 
 class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -112,6 +123,10 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         # composite FK to it, pinning each link row to *its own* organization
         # rather than trusting every write path to keep that invariant.
         UniqueConstraint("organization_id", "id", name="uq_org_provider_keys_org_id"),
+        # The endpoint credential occupies five columns and means nothing unless
+        # every one of them holds a value. Enforced here so a write that sets
+        # some of them is refused rather than stored.
+        CheckConstraint(_ENDPOINT_AUTH_ALL_OR_NONE, name="ck_org_provider_keys_endpoint_auth_all_or_none"),
     )
 
     organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
@@ -122,9 +137,19 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # reached as ``provider:<model>``.
     slug: str | None = Field(default=None, max_length=64)
     api_base: str | None = Field(default=None, max_length=1024)
-    client_args: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # Fernet ciphertext of the settings mapping, so unbounded: its length
+    # follows the mapping and the format's framing, not anything to bet on.
+    encrypted_client_args: str | None = Field(default=None)
     encrypted_api_key: str | None = Field(default=None)
     last4: str | None = Field(default=None, max_length=8)
+    # The credential an edge proxy in front of ``api_base`` requires, as request
+    # headers. TLS client authentication would be a sibling field rather than a
+    # method here, because connection pools carry no credential identity.
+    endpoint_auth_method: str | None = Field(default=None, max_length=32)
+    endpoint_auth_header_name: str | None = Field(default=None, max_length=64)
+    encrypted_endpoint_auth_secret: str | None = Field(default=None)
+    endpoint_auth_last4: str | None = Field(default=None, max_length=8)
+    endpoint_auth_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # _timestamp_field, not a bare Field(default=None): PostgreSQL renders a
     # plain ``datetime`` column as TIMESTAMP WITHOUT TIME ZONE, which asyncpg
     # then refuses a timezone-aware value against (the same trap
@@ -134,6 +159,23 @@ class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # The organization's declaration that this key's upstream account keeps no
     # prompt or completion data. Shown in the catalog; nothing is enforced on it.
     zero_data_retention: bool = Field(default=False, nullable=False, sa_column_kwargs={"server_default": false()})
+
+    @property
+    def endpoint_auth(self) -> EndpointAuth | None:
+        """The endpoint credential this key carries, or None where it carries none.
+
+        Raises:
+            UnreadableEndpointAuthError: The columns hold a credential this
+                build cannot assemble, which is a different state from holding
+                none.
+        """
+        return EndpointAuth.from_columns(
+            method=self.endpoint_auth_method,
+            header_name=self.endpoint_auth_header_name,
+            encrypted_secret=self.encrypted_endpoint_auth_secret,
+            last4=self.endpoint_auth_last4,
+            expires_at=self.endpoint_auth_expires_at,
+        )
 
     @property
     def selector_prefix(self) -> str:

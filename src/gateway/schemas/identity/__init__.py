@@ -52,8 +52,8 @@ class PasswordLinkPublic(BaseModel):
         default=None,
         description=(
             "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a "
-            "password through it records the address as vouched for rather than proven, since the mailbox never "
-            "saw the link."
+            "password through it leaves the address verified rather than proved, since the mailbox never saw "
+            "the link."
         ),
     )
     expires_at: datetime = Field(description="When the link stops working.")
@@ -435,7 +435,14 @@ class AppAuthorizationRequest(BaseModel):
     code_challenge: PKCECodeChallenge
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID | None = Field(
+        default=None, description="The workspace the key bills. Required unless the app is given an access token."
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="The organization an access token reads: the one the consent screen showed. Required when "
+        "the app is given an access token, and refused unless the person is acting in it.",
+    )
     scopes: list[KeyScope] = Field(
         description="The scopes the consent screen showed. The key holds these and what the registration "
         "still names, so one added since the screen was drawn is left out and one removed since takes effect."

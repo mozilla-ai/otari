@@ -118,7 +118,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // The selected workspace's roster, which is not the organization one below:
   // this page is on the workspace rail and stops at the workspace it names.
   { route: "/members", name: "members", heading: /members/i },
-  { route: "/budgets", name: "budgets", heading: /budgets/i },
+  { route: "/budgets", name: "budgets", heading: /spend & budgets/i },
   // The member roster now carries what the users page used to: model access,
   // blocking, and per-person spend. It is on the organization rail, which this
   // matrix reaches by URL like every other route here.
@@ -142,6 +142,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // first): they share the heading and the tab row, and differ below it.
   { route: "/requests", name: "requests", heading: /overview/i },
   { route: "/sessions", name: "sessions", heading: /overview/i },
+  {
+    route: "/router-savings",
+    name: "router-savings",
+    heading: /overview/i,
+  },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
   // hidden: it heads with the tool's own status row, and its group titles drop
@@ -159,6 +164,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   {
     route: "/tools/mcp-servers",
     name: "tools-mcp-servers",
+    heading: /mcp servers/i,
+  },
+  // The organization's own servers, on the organization rail. Captured at
+  // rest, an empty table on a fresh gateway; a server's own page and its
+  // Workspaces table need a stored server, which the seed does not hold.
+  {
+    route: "/organization/mcp-servers",
+    name: "organization-mcp-servers",
     heading: /mcp servers/i,
   },
   // The deployment's own pages, reached from the account menu rather than
@@ -188,6 +201,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     route: "/admin/recommender",
     name: "admin-subagent-router",
     heading: /subagent router/i,
+  },
+  {
+    route: "/admin/budgets",
+    name: "admin-budgets",
+    heading: /deployment budgets/i,
   },
   {
     route: "/admin/web-search",
@@ -361,11 +379,11 @@ test.describe("organization rail", () => {
 /**
  * The organization-admin view of Spend & budgets.
  *
- * `/budgets` above captures the deployment-operator page, because `login`
- * exchanges the master key and that session is the bootstrap operator, so
- * `deployment_operator` is true and the route resolves to the other page every
- * time. Nothing else in this suite renders the admin page, which the frontend
- * standards owe a screenshot for.
+ * `/budgets` above captures the same page for the bootstrap operator, because
+ * `login` exchanges the master key, and against whatever that organization
+ * happens to hold. This one is the view the frontend standards owe a
+ * screenshot for: an admin who does not operate the deployment, with both
+ * sections populated.
  *
  * A seeded admin identity with a password would be the faithful way in, and this
  * harness has no password login: `login` is the only auth path and it is
@@ -661,9 +679,9 @@ test.describe("a routing policy's page", () => {
 test.describe("the budget dialog", () => {
   test("the create dialog", async ({ page }) => {
     await login(page)
-    await gotoRoute(page, "/budgets")
+    await gotoRoute(page, "/admin/budgets")
     await expect(
-      page.getByRole("heading", { name: /budgets/i }).first(),
+      page.getByRole("heading", { name: /deployment budgets/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Create budget" }).first().click()
     const dialog = page.getByRole("dialog")

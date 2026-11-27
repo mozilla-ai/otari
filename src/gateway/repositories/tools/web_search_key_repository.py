@@ -2,7 +2,6 @@
 
 import uuid
 from collections.abc import Collection, Sequence
-from typing import Any
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -93,7 +92,7 @@ class OrgWebSearchKeyRepository(
         encrypted_api_key: str | None,
         last4: str | None,
         api_base: str | None,
-        options: dict[str, Any] | None,
+        encrypted_options: str | None,
     ) -> OrgWebSearchKey:
         """Stage a new key.
 
@@ -108,7 +107,7 @@ class OrgWebSearchKeyRepository(
             encrypted_api_key=encrypted_api_key,
             last4=last4,
             api_base=api_base,
-            options=options,
+            encrypted_options=encrypted_options,
         )
         self.db.add(key)
         await self._flush_or_conflict()
@@ -165,13 +164,13 @@ class OrgWebSearchKeyRepository(
     async def forget_secrets(
         self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
     ) -> None:
-        """Stage clearing the API key of every key these organizations hold."""
+        """Stage clearing the API key and provider options of every key these organizations hold."""
         if not organization_ids:
             return
         await self.db.execute(
             update(OrgWebSearchKey)
             .where(OrgWebSearchKey.organization_id.in_(list(organization_ids)))
-            .values(encrypted_api_key=None, last4=None)
+            .values(encrypted_api_key=None, last4=None, encrypted_options=None)
             .execution_options(synchronize_session=False)
         )
 

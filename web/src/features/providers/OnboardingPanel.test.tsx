@@ -2,6 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { DeploymentBootstrap } from "@/client"
+import {
+  OWN_KEYS,
+  WELCOME_ANSWERED_KEY,
+} from "@/features/welcome/welcomeAnswer"
 import * as apiClient from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
@@ -28,6 +32,7 @@ function renderPanel(
 
 afterEach(() => {
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 it("offers otari.ai beside a provider of your own, as the same kind of button", async () => {
@@ -54,6 +59,31 @@ it("mentions otari.ai nowhere and reads no connect status where the deployment d
   expect(screen.queryByText(/otari\.ai/)).not.toBeInTheDocument()
   expect(apiFetch).not.toHaveBeenCalled()
 })
+
+it("offers only a provider of your own once the welcome was skipped for own keys", () => {
+  localStorage.setItem(WELCOME_ANSWERED_KEY, OWN_KEYS)
+  const apiFetch = vi.spyOn(apiClient, "apiFetch")
+  renderPanel({ platform_connect: true })
+
+  expect(
+    screen.getByRole("button", { name: "Add your first provider" }),
+  ).toBeInTheDocument()
+  expect(screen.queryByText(/otari\.ai/)).not.toBeInTheDocument()
+  expect(apiFetch).not.toHaveBeenCalled()
+})
+
+it.each(["2026-11-13T00:00:00Z", "e2e"])(
+  "still offers otari.ai after the welcome was answered %s",
+  async (answer) => {
+    localStorage.setItem(WELCOME_ANSWERED_KEY, answer)
+    vi.spyOn(apiClient, "apiFetch").mockResolvedValue({ status: "idle" })
+    renderPanel({ platform_connect: true })
+
+    expect(
+      await screen.findByRole("button", { name: "Connect otari.ai" }),
+    ).toBeInTheDocument()
+  },
+)
 
 it("says why otari.ai cannot be connected while the server has no secret key", () => {
   const apiFetch = vi.spyOn(apiClient, "apiFetch")

@@ -37,9 +37,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes import _pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
+from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.container import build_container
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, PROVIDER_NOT_CONFIGURED
+from gateway.core.settings.routing import AutomaticRouting
 from gateway.log_config import logger as gateway_logger
 from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError, ToolUse
 from gateway.ports.model_provider_port import (
@@ -56,6 +58,7 @@ from gateway.services.provider_kwargs import (
     reaches_organization_key,
     resolve_provider_selector,
 )
+from gateway.services.routing import AutomaticRouter, CompiledPlan
 from gateway.types.attempt import Attempt
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -507,7 +510,27 @@ async def test_a_walk_asks_for_each_candidate_only_when_it_reaches_it(candidate_
 
     class _Plan:
         attempts = (_uncredentialed(),) * candidate_count
-        automatic = object() if candidate_count == 1 else None
+        automatic = (
+            AutomaticRouter()
+            .rank(
+                CompiledPlan(
+                    policy_name="p",
+                    attempts=[
+                        Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4o", {}),
+                        Attempt(2, "together", LLMProvider.TOGETHER, "gpt-4o", {}),
+                    ],
+                ),
+                settings=AutomaticRouting(),
+                costs={},
+                scope="",
+                anchor="",
+                region=None,
+                mode="chat:completion",
+            )
+            .automatic
+            if candidate_count == 1
+            else None
+        )
 
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
@@ -654,6 +677,34 @@ async def test_access_denied_becomes_a_403_that_names_no_adapter(monkeypatch: py
     assert [row["status_code"] for row in rejections] == [403]
     assert rejections[0]["provider"] == "openai"
     assert rejections[0]["detail"] == detail
+
+
+@pytest.mark.asyncio
+async def test_a_refused_catalog_offering_ranks_last_for_that_caller() -> None:
+    """Automatic routing stops leading with an offering the port refuses this caller."""
+    router = AutomaticRouter()
+    refused = Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4o", {})
+    other = Attempt(2, "together", LLMProvider.TOGETHER, "gpt-4o", {"api_key": "together-key"})
+    ranking: dict[str, Any] = {
+        "settings": AutomaticRouting(),
+        "costs": {"openai:gpt-4o": Decimal("0.01"), "together:gpt-4o": Decimal("0.02")},
+        "scope": "workspace:user:key:chat",
+        "anchor": "",
+        "region": None,
+        "mode": "chat:completion",
+    }
+    plan = router.rank(CompiledPlan(policy_name="acme/gpt-4o", attempts=[refused, other]), **ranking)
+    assert plan.head.instance == "openai"
+    port = RecordingPort(error=HostedAccessDeniedError("AcmeHostedAdapter: not entitled", workspace_id=WORKSPACE_ID))
+    serve = pipeline._hosted_candidate(
+        _ctx(resolved_provider=None, plan=plan), port=port, billing=_plain_build_billing()
+    )
+
+    with pytest.raises(CandidateCannotServe):
+        await serve(plan.head)
+
+    again = router.rank(CompiledPlan(policy_name="acme/gpt-4o", attempts=[refused, other]), **ranking)
+    assert again.head.instance == "together"
 
 
 @pytest.mark.asyncio
@@ -829,9 +880,6 @@ class RecordingBilling:
         self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
     ) -> int | None:
         return None
-
-    async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
-        raise AssertionError("the completion path places no holds")
 
     async def hold(self, *, organization_id: uuid.UUID, amount: Decimal) -> None:
         raise AssertionError("the completion path places no holds")

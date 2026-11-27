@@ -16,7 +16,7 @@ from typing import Any, Literal, cast
 import httpx
 import pytest
 from any_llm import LLMProvider
-from any_llm.exceptions import ContextLengthExceededError
+from any_llm.exceptions import ContextLengthExceededError, UnsupportedParameterError
 from fastapi import HTTPException
 
 from _unavailable_model_support import reporter_with_null_listener
@@ -471,9 +471,68 @@ async def test_single_attempt_exhaustion_keeps_the_classified_status() -> None:
 @pytest.mark.asyncio
 async def test_timeout_exhaustion_is_504() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        await _walk([_attempt(1, "a"), _attempt(2, "b")], [_http_error(503), asyncio.TimeoutError()])
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [asyncio.TimeoutError(), asyncio.TimeoutError()])
     assert exc_info.value.status_code == 504
     assert exc_info.value.detail == ALL_ATTEMPTS_TIMED_OUT_DETAIL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first", "detail"),
+    [
+        (
+            _Rejection(400, "no seed argument"),
+            "The last candidate timed out; the 1 earlier candidate refused the request.",
+        ),
+        (
+            UnsupportedParameterError("response_format", "bedrock"),
+            "The last candidate timed out; the 1 earlier candidate refused the request.",
+        ),
+        (_http_error(503), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+        (
+            _StructuredOutputFailure(),
+            "The last candidate timed out; the 1 earlier candidate failed for another reason.",
+        ),
+        (_http_error(401), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+        (_http_error(404), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+    ],
+    ids=["400", "unsupported-parameter", "503", "structured-output", "credential-401", "unknown-model-404"],
+)
+async def test_a_timeout_after_another_failure_does_not_claim_every_candidate_timed_out(
+    first: Exception, detail: str
+) -> None:
+    """#2983: a caller read "all timed out" and retried a request the first candidate refused."""
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [first, asyncio.TimeoutError()])
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == detail
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_after_several_mixed_failures_counts_each_kind() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c")],
+            [_Rejection(400, "bad"), _http_error(503), asyncio.TimeoutError()],
+        )
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == (
+        "The last candidate timed out; of the 2 earlier candidates, "
+        "1 refused the request and 1 failed for another reason."
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_timeout_in_a_mixed_plan_is_counted_as_a_timeout() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c"), _attempt(4, "d")],
+            [asyncio.TimeoutError(), _Rejection(400, "bad"), _http_error(503), asyncio.TimeoutError()],
+        )
+    assert exc_info.value.detail == (
+        "The last candidate timed out; of the 3 earlier candidates, "
+        "1 refused the request, 1 timed out and 1 failed for another reason."
+    )
 
 
 @pytest.mark.asyncio
@@ -1148,3 +1207,27 @@ async def test_a_failed_attempt_never_logs_echoed_request_text(
     [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
     assert "confidential" not in line
     assert line.endswith(f"cause={cause}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failures", "expected_level"),
+    [
+        ([_http_error(402), _http_error(402)], logging.WARNING),
+        ([_http_error(503), httpx.ConnectError("refused")], logging.WARNING),
+        ([_http_error(503), RuntimeError("unclassified")], logging.ERROR),
+    ],
+)
+async def test_exhaustion_is_logged_as_an_error_only_when_a_failure_is_unclassified(
+    caplog: pytest.LogCaptureFixture, failures: list[Exception], expected_level: int
+) -> None:
+    """Providers that all failed are a warning; a failure nobody could classify may be the gateway's and is an error."""
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=gateway_logger.name), pytest.raises(HTTPException):
+            await _walk([_attempt(1, "a"), _attempt(2, "b")], failures)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [record] = [r for r in caplog.records if r.getMessage().startswith("All attempts failed")]
+    assert record.levelno == expected_level

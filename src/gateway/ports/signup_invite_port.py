@@ -1,35 +1,33 @@
-"""Invitations a deployment sends that prove which address they reached.
+"""Whether an invitation allows an account for the address somebody claims."""
 
-A link emailed to somebody already proves the mailbox answers, so signup can take it instead of
-sending a verification email of its own. A link handed over proves less, and says so.
-"""
-
-from enum import StrEnum
 from typing import Protocol
 
 
-class AddressProof(StrEnum):
-    """How a signup proved the address it claims, where it proved one at all."""
+class SignupInvitePort(Protocol):
+    """Whether an invitation token allows an account for the address somebody claims.
 
-    MAILBOX = "mailbox"
-    """An invitation emailed to the address, so its holder receives mail there."""
-
-    VOUCHED = "vouched"
-    """An invitation handed over as a link, so an organization vouches for the address and nobody else does.
-
-    Answering ``MAILBOX`` for such a link lets domain auto-join take the account, which is the cost
-    of getting this answer wrong.
+    NOTE: One implementation answers for the whole deployment. A build that sends invitations from
+    more than one place recognizes all of them here, because binding replaces rather than adds.
     """
 
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
+        """Whether an invitation named by ``token`` allows an account for ``claimed_address``.
 
-class SignupInvitePort(Protocol):
-    """What an invitation token proves about the address somebody claims."""
+        NOTE: An implementation must answer true only for a link that reached the claimed
+        mailbox. A true answer records the address as proved by that mailbox. That is the
+        strongest thing an address can carry and nothing here can verify it. A false proof puts
+        the account within reach of any organization that has proved the address's domain.
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
-        """Which proof of ``claimed_address`` this token carries, or None where it carries none.
+        NOTE: There is no weaker answer to give. A link that reached no mailbox allows no
+        account, so an implementation that cannot say a link was delivered answers false.
+
+        NOTE: An implementation must read through the request's own Unit of Work, and must hold
+        the invitation it answers true for until that transaction ends. The answer is used in the
+        transaction that writes the account, and an unlocked read lets a cancellation commit
+        before the write it admitted.
 
         NOTE: An implementation must compare addresses by ``gateway.core.addresses.same_address``
-        and must not normalize further. Signup picks the account by that same rule, so a looser
-        comparison proves one address and claims another.
+        and must not normalize further. A looser comparison allows one address and records
+        another.
         """
         ...

@@ -40,9 +40,10 @@ from gateway.api.deps import (
     verify_api_key_or_master_key_for_upload,
 )
 from gateway.api.key_scopes import key_scope
-from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._helpers import USER_MISMATCH_END_USER_DETAIL, bounded_body
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import USER_MISMATCH, error_headers
 from gateway.exceptions.budget_exceptions import EndUserNotFoundError
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
@@ -84,7 +85,7 @@ async def _require_files_enabled(config: Annotated[GatewayConfig, Depends(get_co
     feature answer like an unmounted one instead of leaking, through the
     refusal it picks, that the paths are there at all.
     """
-    if not config.files_enabled:
+    if not config.files_api_enabled:
         raise FilesDisabledError
 
 
@@ -178,7 +179,8 @@ def _resolve_user(
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
+            detail=USER_MISMATCH_END_USER_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=config.reject_user_mismatch,
     )
@@ -240,7 +242,12 @@ def _content_disposition(filename: str) -> str:
 @router.post(
     "/files",
     responses={
-        413: {"description": "The upload exceeds the configured maximum size."},
+        413: {
+            "description": (
+                "The upload exceeds the configured maximum size, or would take its workspace past "
+                "the number of files or bytes the deployment allows."
+            )
+        },
         422: {
             "description": "Validation Error",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},

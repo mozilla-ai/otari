@@ -58,6 +58,7 @@ from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
     McpSignedInServersDep,
+    McpWorkspaceServersDep,
     PlaygroundToolOfferDep,
     RequestSessionBillingPortDep,
     RequestSessionModelProviderPortDep,
@@ -247,6 +248,7 @@ async def read_playground_tools(
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     web_policies: WorkspaceWebSearchPoliciesDep,
     signed_in: McpSignedInServersDep,
+    mcp_servers: McpWorkspaceServersDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -266,6 +268,7 @@ async def read_playground_tools(
         code_execution_policies=code_execution_policies,
         web_policies=web_policies,
         signed_in=signed_in,
+        mcp_servers=mcp_servers,
         workspace_id=resolved,
         user_id=str(identity.id),
     )
@@ -318,7 +321,12 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
     "/files",
     dependencies=_PLAYGROUND_FILES,
     responses={
-        413: {"description": "The upload exceeds the configured maximum size."},
+        413: {
+            "description": (
+                "The upload exceeds the configured maximum size, or would take its workspace past "
+                "the number of files or bytes the deployment allows."
+            )
+        },
         422: {
             "description": "Validation Error",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},

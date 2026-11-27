@@ -28,7 +28,7 @@ import {
   workspaceMcpServer,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { pressRowAction } from "@/tests/rowMenu"
+import { findRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -1423,5 +1423,42 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       screen.queryByRole("button", { name: "Request a server" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("lists the organization's servers beside the workspace's own, labeled, with no actions the organization keeps", async () => {
+    const own = workspaceMcpServer({ name: "github" })
+    const shared = workspaceMcpServer({
+      id: "99999999-9999-9999-9999-999999999999",
+      workspace_id: null,
+      scope: "organization",
+      name: "hub",
+      url: "https://mcp.example.com/***",
+      in_workspace: {
+        // An admin still sees one the workspace turned off.
+        reached: false,
+        enabled: false,
+        everyone_tools: null,
+        attach_by_default: null,
+        organization_tools: null,
+      },
+    })
+    mockApi({ servers: [own, shared] })
+    const user = userEvent.setup()
+    await renderLoaded([own, shared])
+
+    const row = screen.getByText("hub").closest("[role='row']") as HTMLElement
+    expect(within(row).getByText("Organization")).toBeVisible()
+    // As this workspace uses it, which is off.
+    expect(within(row).getByText("OFF")).toBeVisible()
+    expect(
+      screen
+        .getByText("github")
+        .closest("[role='row']")
+        ?.textContent?.includes("Organization"),
+    ).toBe(false)
+
+    expect(await findRowMenuItem(user, "Delete…", row)).toBeNull()
+    expect(await findRowMenuItem(user, "Check hub", row)).toBeNull()
+    expect(await findRowMenuItem(user, "Manage hub", row)).not.toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import { vi } from "vitest"
 import type {
   ApiKey,
   McpServerConnection,
+  McpServerWorkspaceSettings,
   OrganizationContext,
   OrganizationMember,
   WorkspaceMcpServer,
@@ -37,6 +38,7 @@ export interface McpCall {
 
 export function mockMcpServerApi({
   server = workspaceMcpServer(),
+  row = server,
   access = { everyone_tools: ["*"], grants: [] },
   written,
   check,
@@ -52,6 +54,12 @@ export function mockMcpServerApi({
   myTools,
 }: {
   server?: WorkspaceMcpServer
+  /**
+   * What a read of the server answers with; `server` when left out. Apart from
+   * it so a test can answer with a row that names no workspace, while the
+   * server is still found only in `server`'s.
+   */
+  row?: WorkspaceMcpServer
   access?: WorkspaceMcpServerAccess
   /** What a grant write answers with. */
   written?: WorkspaceMcpServerAccess
@@ -74,6 +82,8 @@ export function mockMcpServerApi({
   myTools?: WorkspaceMcpServerMyTools
 } = {}): McpCall[] {
   const calls: McpCall[] = []
+  // A read after a write of the workspace's own settings answers with them.
+  let saved = row
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
@@ -129,8 +139,34 @@ export function mockMcpServerApi({
           { status: 404 },
         )
       }
+      // A workspace's own settings on its organization's server, as the
+      // gateway keeps them: a PATCH changes only the fields it sends, and a
+      // DELETE takes them all away. The organization's limit is never touched.
+      if (url.endsWith("/override") && saved.in_workspace) {
+        const own: McpServerWorkspaceSettings =
+          method === "PATCH"
+            ? ({ ...saved.in_workspace, ...body } as McpServerWorkspaceSettings)
+            : {
+                ...saved.in_workspace,
+                enabled: true,
+                everyone_tools: null,
+                attach_by_default: null,
+              }
+        const limit = own.organization_tools
+        saved = {
+          ...saved,
+          in_workspace: {
+            ...own,
+            reached:
+              saved.enabled &&
+              own.enabled &&
+              (limit === null || limit.length > 0),
+          },
+        }
+        return Response.json(saved)
+      }
       if (method === "DELETE") return new Response(null, { status: 204 })
-      return Response.json(method === "PATCH" ? { ...server, ...body } : server)
+      return Response.json(method === "PATCH" ? { ...row, ...body } : saved)
     }
     if (url.includes("/members")) {
       if (url.includes("/organizations/me/members")) {
@@ -179,7 +215,7 @@ export function renderMcpServerPage(
     defaultOptions: { queries: { retry: false } },
   })
   const url = `/tools/mcp-servers/${serverId}${search}`
-  return render(
+  const rendered = render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <SelectedWorkspaceProvider>
@@ -194,4 +230,6 @@ export function renderMcpServerPage(
       }),
     },
   )
+  // The query client too, so a test can move what the page reads while it is open.
+  return { ...rendered, client }
 }

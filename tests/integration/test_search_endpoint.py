@@ -40,6 +40,7 @@ from gateway.core.config import (
     GatewayConfig,
     RateLimitRule,
 )
+from gateway.core.error_codes import ERROR_CODE_HEADER, USER_MISMATCH
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import (
     SearchToolNotFoundError,
@@ -134,6 +135,20 @@ def test_search_requires_auth(client: TestClient) -> None:
     """POST /api/v1/search requires authentication."""
     resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"})
     assert resp.status_code == 401
+
+
+def test_a_search_naming_another_user_is_refused_with_its_code(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/search",
+        json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search", "user": "someone-else"},
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.headers[ERROR_CODE_HEADER] == USER_MISMATCH
+    assert resp.json()["code"] == USER_MISMATCH
 
 
 def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str]) -> None:

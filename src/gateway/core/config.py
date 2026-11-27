@@ -6,9 +6,9 @@ import re
 import secrets
 import types
 import typing
-from collections.abc import Callable, Container
+from collections.abc import Callable, Container, Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple, Self
 from urllib.parse import urlsplit
 
 import yaml
@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
-from gateway.core.link_urls import normalize_link_url
+from gateway.core.link_urls import normalize_base_url, normalize_link_url, strip_path_slashes
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
@@ -86,12 +86,14 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # Response headers describing how a completion was served: the
 # provider instance that answered (its name, never its base URL), the model it
 # was sent, how many candidates were sent the request, whether a candidate other
-# than the plan's first served it, and how long the gateway took to answer. See
+# than the plan's first served it, whether the deployment paid for the provider
+# call, and how long the gateway took to answer. See
 # docs/routing.md#what-is-billed-and-what-the-caller-sees.
 PROVIDER_HEADER = "Otari-Provider"
 MODEL_HEADER = "Otari-Model"
 ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
 FALLBACK_HEADER = "Otari-Fallback"
+DEPLOYMENT_PAID_HEADER = "Otari-Deployment-Paid"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # The same duration split into the gateway's own time and the provider's (W3C Server Timing).
 SERVER_TIMING_HEADER = "Server-Timing"
@@ -528,16 +530,6 @@ class ModelCapabilityConfig(BaseModel):
         default=False,
         description="Model can natively understand PDF/document content blocks.",
     )
-
-
-def _strip_path_slashes(url: str) -> str:
-    """Drop trailing slashes from a URL's path, leaving any query as written.
-
-    A slash at the end of a query value (``?edge=team/``) is part of that value,
-    and stripping the whole string would hand every link a different one.
-    """
-    location, separator, query = url.partition("?")
-    return f"{location.rstrip('/')}{separator}{query}"
 
 
 def _host_of(url: str | None) -> str:
@@ -985,11 +977,12 @@ class GatewayConfig(
     public_base_url: Annotated[str | None, Shown(SettingsGroup.MAIL)] = Field(
         default=None,
         description=(
-            "This deployment's own externally-reachable URL, with no trailing slash "
-            "(e.g. 'https://otari.example.com'). Used to build absolute links in outgoing "
-            "email (an invitation's accept link) and to derive the WebAuthn relying-party "
-            "ID a passkey is bound to; nothing else here needs to describe its own "
-            "address, since every other reference is relative to the request."
+            "This deployment's own externally-reachable URL, for example "
+            "'https://otari.example.com'. It has to be absolute and carry no query string, "
+            "fragment or whitespace, and it is refused at startup otherwise. Write it with no "
+            "trailing slash. Every absolute URL naming this deployment is built from it, which "
+            "covers the links in outgoing email, the redirect URI a provider returns a browser "
+            "to, and the WebAuthn relying-party ID a passkey is bound to."
         ),
     )
     smtp_host: Annotated[str | None, Shown(SettingsGroup.MAIL)] = Field(
@@ -1186,7 +1179,7 @@ class GatewayConfig(
     models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
         default=MODELS_DEV_BASE_URL,
         description=(
-            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "Where the models.dev catalog is fetched from. The default is Mozilla AI's fork, which "
             "publishes models.dev's catalog plus the models it does not list yet. Set "
             "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
@@ -1210,9 +1203,13 @@ class GatewayConfig(
             "from the deployment list and the defaults, and nothing tenant-specific. Off by default."
         ),
     )
-    files_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
+    files_api_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
         default=True,
-        description="Enable the /api/v1/files upload/storage endpoints.",
+        description=(
+            "Serve the /api/v1/files upload and storage endpoints. This gates the API only: with it off, "
+            "the file sweep still reclaims expired and deleted files, which only files_sweep_interval_sec: 0 "
+            "stops. Formerly files_enabled, which is still read as a deprecated name."
+        ),
     )
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
@@ -1267,6 +1264,24 @@ class GatewayConfig(
         default=512 * 1024 * 1024,
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
+    )
+    files_workspace_max_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=1024 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most bytes of uploads one workspace may hold at once (1 GB by default), counting files not yet "
+            "deleted or expired. An upload that would go past it is refused with 413, and nothing stored is "
+            "deleted. Null in the config file sets no limit."
+        ),
+    )
+    files_workspace_max_files: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Most uploads one workspace may hold at once (500 by default), counting files not yet deleted or "
+            "expired. An upload past it is refused with 413, and nothing stored is deleted. "
+            "Null in the config file sets no limit."
+        ),
     )
     files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=16 * 1024 * 1024,
@@ -1567,7 +1582,7 @@ class GatewayConfig(
 
         ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
         """
-        return _strip_path_slashes((self.ui_base_url or "").strip()) or _strip_path_slashes(
+        return strip_path_slashes((self.ui_base_url or "").strip()) or strip_path_slashes(
             (self.public_base_url or "").strip()
         )
 
@@ -1906,12 +1921,6 @@ class GatewayConfig(
         """Validate the ``aliases`` map at startup so misconfig fails fast."""
         for name, target in self.aliases.items():
             self.validate_alias(name, target)
-
-    def policy_names(self) -> set[str]:
-        """Every configured routing-policy name. Empty when routing is disabled."""
-        if not self.routing.enabled:
-            return set()
-        return set(self.routing.policies)
 
     def validate_routing_policies(self) -> None:
         """Validate the ``routing:`` block at startup so misconfig fails fast.
@@ -2261,6 +2270,22 @@ class GatewayConfig(
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_old_setting_names(cls, data: Any) -> Any:
+        """Read a renamed setting's old name when the config is built directly rather than by ``load_config``."""
+        if isinstance(data, dict):
+            data = dict(data)
+            _read_old_names(data, read_env=True)
+        return data
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        """Copy the config, reading a renamed setting's old name in ``update``, which pydantic does not validate."""
+        if update:
+            update = dict(update)
+            _read_old_names(update, read_env=False)
+        return super().model_copy(update=update, deep=deep)
+
     @field_validator("master_key")
     @classmethod
     def _blank_master_key_is_unset(cls, value: str | None) -> str | None:
@@ -2323,38 +2348,28 @@ class GatewayConfig(
             msg = f"models_dev_base_url {exc}"
             raise ValueError(msg) from None
 
+    @field_validator("public_base_url")
+    @classmethod
+    def _validate_public_base_url(cls, value: str | None) -> str | None:
+        """Reject an address no absolute URL naming this deployment could be built from.
+
+        A query string is refused, because what is built from this value is joined to it by plain
+        concatenation and a query would then sit in the middle of the result.
+
+        NOTE: A trailing slash is kept, so a caller strips it itself.
+        """
+        return normalize_base_url(value, "public_base_url", allow_query=False, strip_slashes=False)
+
     @field_validator("ui_base_url")
     @classmethod
     def _validate_ui_base_url(cls, value: str | None) -> str | None:
         """Reject an interface address a browser could not be sent to.
 
-        Absolute, so that what this builds is absolute too: the same value has to
-        survive a redirect and an inbox, and a relative reference means nothing
-        in the second. A path-prefixed interface writes the whole URL, the way
-        ``public_base_url`` already does. A query string is kept, since an edge
-        that serves one interface for several deployments may need each link to
-        say which one built it; ``ui_link`` joins it to each link's own query.
+        A query string is kept, because an edge serving one interface for several deployments needs
+        each link to say which one built it, and joining places it ahead of a link's own query.
+        Trailing slashes come off the path, because that joining does not remove them.
         """
-        stripped = (value or "").strip()
-        if not stripped:
-            return None
-        normalized = _strip_path_slashes(stripped)
-        if not normalized:
-            # Slashes alone, which would otherwise strip to empty and read as
-            # unset. Refused rather than silently answered by public_base_url.
-            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if "#" in normalized:
-            msg = "ui_base_url must carry no fragment"
-            raise ValueError(msg)
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.username is not None or parsed.password is not None:
-            msg = "ui_base_url must carry no username or password"
-            raise ValueError(msg)
-        return normalized
+        return normalize_base_url(value, "ui_base_url", allow_query=True, strip_slashes=True)
 
     @field_validator("mail_transport")
     @classmethod
@@ -2616,10 +2631,14 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
             if yaml_config:
                 config_dict = _resolve_env_vars(yaml_config)
 
+    renamed_keys = _rename_old_keys(config_dict)
     structured_env_config = _load_structured_env_config()
     if structured_env_config:
+        # Within each source before they merge, so the environment's old name still beats the file's new one.
+        renamed_keys += _rename_old_keys(structured_env_config)
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _apply_renamed_settings(config_dict, renamed_keys)
     _warn_about_unknown_keys(config_dict)
     _warn_about_retired_mcp_settings(config_dict)
 
@@ -2668,6 +2687,64 @@ def _warn_about_retired_mcp_settings(config: dict[str, Any]) -> None:
             "single-tenant or trusted deployment.",
             ", ".join(found),
         )
+
+
+# Settings renamed in place, old name to new. The old name still configures the
+# setting, in the config file or as its OTARI_ variable, and saying which one a
+# deployment used is how it learns the new name before the old one goes.
+_RENAMED_SETTINGS = (("files_enabled", "files_api_enabled"),)
+
+
+def _rename_old_keys(source: dict[str, Any]) -> list[str]:
+    """Move each old key in one config source onto its new name, where that source does not set the new one too."""
+    found: list[str] = []
+    for old, new in _RENAMED_SETTINGS:
+        if old in source:
+            found.append(old)
+            source.setdefault(new, source.pop(old))
+    return found
+
+
+def _apply_renamed_settings(config: dict[str, Any], renamed_keys: list[str]) -> None:
+    """Read each old OTARI_ variable into its new name, and name every old spelling still in use.
+
+    ``renamed_keys`` are the old keys ``_rename_old_keys`` already moved out of the
+    config file and the structured environment.
+    """
+    for old, new in _RENAMED_SETTINGS:
+        used = [old] if old in renamed_keys else []
+        old_env = f"{OTARI_ENV_PREFIX}{old.upper()}"
+        raw = os.getenv(old_env)
+        if raw:
+            used.append(old_env)
+            # The new variable overrides it, so the old value is only parsed without one.
+            if not os.getenv(f"{OTARI_ENV_PREFIX}{new.upper()}"):
+                config[new] = _coerce_scalar_env(raw, GatewayConfig.model_fields[new].annotation)
+        if used:
+            _warn_about_old_name(" and ".join(used), new)
+
+
+def _read_old_names(data: dict[str, Any], *, read_env: bool) -> None:
+    """Move each old name in input given to ``GatewayConfig`` itself onto its new one.
+
+    ``load_config`` has already done this for its own input, so there it finds
+    nothing. With ``read_env``, an old ``OTARI_`` variable is read where the input
+    does not set the new name, which pydantic's own environment source would have.
+    """
+    for old, new in _RENAMED_SETTINGS:
+        old_env = f"{OTARI_ENV_PREFIX}{old.upper()}"
+        if old in data:
+            data.setdefault(new, data.pop(old))
+            _warn_about_old_name(old, new)
+        elif read_env and new not in data and (raw := os.getenv(old_env)):
+            data[new] = raw
+            _warn_about_old_name(old_env, new)
+
+
+def _warn_about_old_name(used: str, new: str) -> None:
+    logger.warning(
+        "%s is a deprecated name for %s (%s%s); set the new name instead.", used, new, OTARI_ENV_PREFIX, new.upper()
+    )
 
 
 def _warn_about_unknown_keys(config: dict[str, Any]) -> None:

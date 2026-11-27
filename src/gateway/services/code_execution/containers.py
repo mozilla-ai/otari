@@ -230,10 +230,6 @@ class SandboxContainerRegistry:
         """Whether this caller could re-enter a container held for them, so holding one is worth it."""
         return self._may_read_stored_files
 
-    @property
-    def idle_ttl_s(self) -> int:
-        return self._idle_ttl_s
-
     def keep_alive_s(self, resumed: ContainerLease | None) -> float:
         # Never past the hard clock, and never so short the provider reclaims
         # the sandbox before the row saying so is written.

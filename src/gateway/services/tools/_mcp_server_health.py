@@ -11,7 +11,7 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Any, ClassVar, Literal
@@ -193,6 +193,9 @@ class McpServerContact:
     listing: ServerCheck | None = None
     failure: CheckFailure | None = None
     http_status: int | None = None
+    # Whose credential the request sent ("shared" or "per_user"), where it knows: a contact made under the other
+    # mode than the server holds now describes a server that has since changed.
+    credential_mode: str | None = None
 
 
 # One user's rejected token says nothing about the server: everyone else's may still work.
@@ -264,8 +267,9 @@ def _is_recent(checked_at: str, interval_s: float) -> bool:
     return datetime.now(UTC) - at < timedelta(seconds=interval_s)
 
 
-# A server's throttle entry: its id and the URL a contact reached, so an edited URL starts afresh.
-_Key = tuple[uuid.UUID, str]
+# A server's throttle entry: its id, the URL a contact reached and the credential mode it used, so an edited URL
+# or a switch between personal and shared accounts starts afresh rather than folding into the old one.
+_Key = tuple[uuid.UUID, str, str | None]
 
 
 class McpServerContacts:
@@ -302,13 +306,22 @@ class McpServerContacts:
         # Held so a running write is not collected before it finishes.
         self._tasks: set[asyncio.Task[None]] = set()
 
-    def reached(self, server_id: uuid.UUID | str | None, url: str, listing: ServerCheck | None = None) -> None:
+    def reached(
+        self,
+        server_id: uuid.UUID | str | None,
+        url: str,
+        listing: ServerCheck | None = None,
+        *,
+        credential_mode: str | None = None,
+    ) -> None:
         """A request got an answer from the server; ``listing`` is its whole tool catalog, when it read one."""
         parsed = _server_id(server_id)
         if parsed is not None:
-            self._record(McpServerContact(server_id=parsed, url=url, listing=listing))
+            self._record(McpServerContact(server_id=parsed, url=url, listing=listing, credential_mode=credential_mode))
 
-    def failed(self, server_id: uuid.UUID | str | None, url: str, failure: BaseException) -> None:
+    def failed(
+        self, server_id: uuid.UUID | str | None, url: str, failure: BaseException, *, credential_mode: str | None = None
+    ) -> None:
         """A request could not open a session on the server.
 
         A failure that is about the caller and not the server is ignored: a sign-in that is
@@ -320,19 +333,31 @@ class McpServerContacts:
         ):
             return
         cause, http_status = classify_check_failure(failure)
-        self._record(McpServerContact(server_id=parsed, url=url, failure=cause, http_status=http_status))
+        self._record(
+            McpServerContact(
+                server_id=parsed, url=url, failure=cause, http_status=http_status, credential_mode=credential_mode
+            )
+        )
 
-    def observed(self, server_id: uuid.UUID, url: str, check: ServerCheck) -> None:
+    def observed(
+        self, server_id: uuid.UUID, url: str, check: ServerCheck, *, credential_mode: str | None = None
+    ) -> None:
         """A request listed the server's whole catalog the way a check does, and this is what it found."""
         if check.failure is None:
-            self.reached(server_id, url, check)
+            self.reached(server_id, url, check, credential_mode=credential_mode)
         elif check.failure not in _DECIDED_BEFORE_CONNECTING:
             self._record(
-                McpServerContact(server_id=server_id, url=url, failure=check.failure, http_status=check.http_status)
+                McpServerContact(
+                    server_id=server_id,
+                    url=url,
+                    failure=check.failure,
+                    http_status=check.http_status,
+                    credential_mode=credential_mode,
+                )
             )
 
     def _record(self, contact: McpServerContact) -> None:
-        key = (contact.server_id, contact.url)
+        key = (contact.server_id, contact.url, contact.credential_mode)
         ok = contact.failure is None
         listed = contact.listing is not None
         now = self._clock()
@@ -369,7 +394,7 @@ class McpServerContacts:
 
     async def _write(self, contact: McpServerContact, handed: tuple[CheckFailure | None, bool]) -> None:
         """Hand ``contact`` to :meth:`_store`, and set the throttle from what it decided."""
-        key = (contact.server_id, contact.url)
+        key = (contact.server_id, contact.url, contact.credential_mode)
         try:
             outcome = await self._store(contact)
         except DATABASE_ERRORS as exc:
@@ -392,16 +417,22 @@ class McpServerContacts:
         """Write what ``contact`` says to the server's row, when it says something new.
 
         ``decided``: the row now says what the contact says. ``discarded``: one user's refusal on a
-        per-user server, never stored. ``stale``: the server is gone or no longer at the contact's URL.
+        per-user server, never stored. ``stale``: the server is gone, no longer at the contact's URL, or
+        no longer in the credential mode the contact used.
         """
         async with self._unit_of_work() as uow, uow:
             server = await WorkspaceMcpServerRepository(uow).find(contact.server_id, lock=True)
-            # A request that resolved the server before its URL was edited describes the old one.
+            # A request that resolved the server before its URL or its credential mode changed describes the old one.
             if server is None or server.url != contact.url:
+                return "stale"
+            if contact.credential_mode is not None and contact.credential_mode != server.credential_mode:
                 return "stale"
             per_user = server.credential_mode == McpCredentialMode.PER_USER
             if per_user and contact.failure in _ONE_USERS_REFUSAL:
                 return "discarded"
+            if per_user and server.workspace_id is None:
+                # One person's account listed it, and an organization's health is read in every workspace.
+                contact = replace(contact, listing=None)
             health = health_after_contact(
                 server.health,
                 allowed_tools=server.allowed_tools,

@@ -270,6 +270,33 @@ recommendation. The model the caller asked for is left out of the question, and
 only the task's first 32,000 characters are sent. The call is charged at the
 router's own rates.
 
+Otari keeps a record of each recommendation it answers: the harness, the
+subagent type, the parent's model, the model the caller asked for, the model
+recommended and what the call cost. The task and its description are not kept.
+The answer names the record in `decision_id`.
+
+A harness can then say what the subagent consumed, through
+`PUT /api/v1/routing/decisions/{decision_id}/outcome`: the token counts it
+holds, one line per model. Otari prices those tokens twice from its own rates,
+at the models the subagent ran on and at the model it would have started on
+without the recommendation (the model the caller asked for, else the
+parent's), and keeps both amounts with the record. They are an estimate: the
+counts are the harness's own, a long-context price tier is not applied, and a
+different model would not have used exactly the same tokens.
+
+The **Router savings** tab of the dashboard's Sessions page adds these up for a
+window: what the routed subagents would have cost, what they did cost, and the
+difference less what the recommendations themselves cost. It reads the
+workspace selected in the dashboard, or the one Home showed when opened from
+Home's **See router savings**, which for an owner or admin is any
+workspace of the organization and for anyone else one they belong to, and
+**Just me** narrows it to the reader's own subagents. Three things keep the figure
+honest. Every recommendation's cost comes off, also one whose subagent never
+reported or could not be priced, so a saving can be negative. An outcome with
+no price on either side is shown as not priced and left out of the money. And
+the baseline assumes a subagent with no model asked for would have run on the
+parent's, which reads high for a subagent type that sets a model of its own.
+
 The harness that asks picks the candidates: Claude Code chooses among
 `agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
 default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
@@ -359,7 +386,8 @@ request schemas.
 ## What is billed and what the caller sees
 
 Pricing, budgets, and usage use the resolved model. Completion responses use the
-policy name.
+policy name. Every usage row the request writes, absorbed attempts and
+failures included, keeps the name the caller sent as `requested_model`.
 
 Each failed attempt before a successful fallback gets an `absorbed` usage row.
 All attempts share a `request_group_id`, which is the request's `Otari-Request-ID`.
@@ -375,6 +403,7 @@ not, carries these headers:
 | `Otari-Model` | The model the serving provider was sent, as that provider names it (`gpt-5-mini`, `claude-haiku-4-5`), without the instance prefix. A routing policy, an alias, or a catalog ID keeps its own name in the body's `model`, so this is where a caller sees which model answered. A request naming a model reports that model. Left out when the name is not printable ASCII. |
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
+| `Otari-Deployment-Paid` | `true` when the provider call ran on a credential the deployment pays for (a hosted provider), so the deployment bills the model's cost; `false` when your own key or endpoint served it. |
 | `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
 | `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. Durations are milliseconds to a tenth. |
 
@@ -444,6 +473,8 @@ that model directly would.
 | refused the request as too large (413) | `413 request_too_large`. Shrink the request; sending it again unchanged does not help. |
 | refused a parameter the request carries (such as `response_format` on a model with no JSON mode), as named by Otari's provider library | `unsupported_parameter`, with `detail` naming the parameters. A parameter a provider refuses with its own 400 counts as an ordinary rejection. |
 | did not know the model (404) | `502` |
+| timed out | `504`, `All upstream providers timed out` |
+| failed, the last by timing out and an earlier one in another way | `504`, `detail` saying the last candidate timed out and how many earlier ones refused the request, timed out, or failed for another reason. A refusal is a failure that would answer `400` or `413` again, so `structured_output_failed` and a provider rejecting Otari's own credential are counted as failing for another reason. |
 | was removed by caller restrictions | `403`, without revealing the hidden targets |
 
 ## In the dashboard

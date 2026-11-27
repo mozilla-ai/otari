@@ -96,8 +96,12 @@ class OrgWebSearchKeyPublic(SQLModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, key: OrgWebSearchKey, *, usable: bool) -> OrgWebSearchKeyPublic:
-        """Read one row for the API; ``usable`` comes from the service, which owns decryption."""
+    def from_row(cls, key: OrgWebSearchKey, *, options: dict[str, Any] | None, usable: bool) -> OrgWebSearchKeyPublic:
+        """Read one row for the API.
+
+        ``options`` is passed in decrypted and ``usable`` comes from the service,
+        which owns decryption.
+        """
         return cls(
             id=key.id,
             organization_id=key.organization_id,
@@ -106,7 +110,7 @@ class OrgWebSearchKeyPublic(SQLModel):
             name=key.name,
             last4=key.last4,
             api_base=key.api_base,
-            options=redact_secret_like_values(key.options),
+            options=redact_secret_like_values(options),
             is_org_default=key.is_org_default,
             usable=usable,
             archived_at=key.archived_at,
@@ -309,15 +313,18 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         cls,
         row: SearchToolCredential,
         *,
+        options: dict[str, Any] | None,
         decryptable: bool = True,
         shadows_config: bool = False,
         **fields: Any,
     ) -> Self:
         """The public view of a stored row: never the key, only its last four characters.
 
-        ``fields`` sets those a subclass adds.
+        ``options`` is passed in decrypted, because the row holds it encrypted
+        and the service is what reads it back. ``fields`` sets those a subclass
+        adds.
         """
-        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config, **fields)
+        return cls(**row.to_public_dict(options), decryptable=decryptable, shadows_config=shadows_config, **fields)
 
 
 # Where a listed tool's price comes from: its own price row, that row while its
@@ -922,8 +929,15 @@ class McpConnectionCompleted(pydantic.BaseModel):
     """A finished sign-in: which server it connected, and where to land."""
 
     server_id: uuid.UUID
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID | None = pydantic.Field(
+        description="The workspace the sign-in started from; null for an owner's sign-in to an organization's server"
+    )
     server_name: str
+    server_scope: Literal["workspace", "organization"] = pydantic.Field(
+        default="workspace",
+        description="Whose the server is: one workspace's own, or its organization's, which a member signs in to "
+        "from a workspace that reaches it",
+    )
     return_to: str | None = pydantic.Field(description="The dashboard path the sign-in was started with, if any")
     checked: bool = pydantic.Field(
         default=False,

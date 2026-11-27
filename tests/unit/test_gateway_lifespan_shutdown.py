@@ -20,14 +20,16 @@ land and is not reproducible on demand.
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from gateway import main as gateway_main
 from gateway.container import build_container
@@ -41,6 +43,8 @@ from gateway.main import (
     _start_lifespan_workers,
     _stop_refreshers,
 )
+from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.services.organizations import ExpiredInvitationCleanup, InvitationDelivery
 from gateway.services.tools import AttachedMcpServerIndex
 
@@ -308,21 +312,128 @@ async def test_the_reservation_sweeper_is_the_one_worker_a_setting_turns_off(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "config",
-    [
-        _full_config(files_sweep_interval_sec=0),
-        _full_config(files_enabled=False),
-    ],
-)
-async def test_the_file_sweeper_stops_with_files_or_its_interval(
-    monkeypatch: pytest.MonkeyPatch, config: GatewayConfig
-) -> None:
-    """Disabling files, or the sweep alone, drops that one worker and no other."""
-    names, _called = await _started_worker_names(config, monkeypatch)
+async def test_the_file_sweeper_stops_with_its_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An interval of 0 drops that one worker and no other."""
+    names, _called = await _started_worker_names(_full_config(files_sweep_interval_sec=0), monkeypatch)
 
     assert "file retention sweep" not in names
     assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "file retention sweep"]
+
+
+@pytest.mark.asyncio
+async def test_the_file_sweeper_keeps_running_with_the_files_api_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turning the API off leaves the sweep, since every stored file still owes the deletion its expiry promised."""
+    names, _called = await _started_worker_names(_full_config(files_api_enabled=False), monkeypatch)
+
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS]
+
+
+@pytest.mark.asyncio
+async def test_the_file_sweeper_skips_a_store_it_cannot_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the API off a broken backend does not stop the boot, so the sweep that needs it stays off."""
+    config = _full_config(files_api_enabled=False, files_backend="s3", files_s3_bucket=None)
+
+    names, _called = await _started_worker_names(config, monkeypatch)
+
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "file retention sweep"]
+
+
+class _WaitingFiles:
+    """Stands in for the file service the boot check asks."""
+
+    def __init__(self, *, waiting: bool, fails: Exception | None = None) -> None:
+        self.waiting = waiting
+        self.fails = fails
+        self.asked = False
+
+    async def has_reclaimable(self) -> bool:
+        self.asked = True
+        if self.fails is not None:
+            raise self.fails
+        return self.waiting
+
+
+async def _unreclaimed_file_warnings(
+    config: GatewayConfig,
+    files: _WaitingFiles,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    storage: FileStoragePort | None,
+) -> list[str]:
+    """Run the boot check against ``files`` and return the warnings it logged about reclaiming."""
+
+    @asynccontextmanager
+    async def _unit_of_work() -> AsyncIterator[object]:
+        yield object()
+
+    monkeypatch.setattr(gateway_main, "create_unit_of_work", _unit_of_work)
+    monkeypatch.setattr(gateway_main, "build_file_service", lambda _uow, _backends, _config: files)
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=gateway_logger.name):
+            await gateway_main._warn_about_unreclaimed_files(config, storage, cast(ProviderFilePort, object()))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    return [record.getMessage() for record in caplog.records if "reclaim" in record.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_sweep_with_files_waiting_says_so_at_boot(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    files = _WaitingFiles(waiting=True)
+
+    warnings = await _unreclaimed_file_warnings(
+        _full_config(files_sweep_interval_sec=0),
+        files,
+        monkeypatch,
+        caplog,
+        storage=cast(FileStoragePort, object()),
+    )
+
+    assert len(warnings) == 1
+    assert "files_sweep_interval_sec" in warnings[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("interval", "waiting", "asked"),
+    [
+        (0, False, True),
+        (3600, True, False),
+    ],
+)
+async def test_the_boot_check_stays_quiet_when_the_sweep_runs_or_nothing_waits(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, interval: int, waiting: bool, asked: bool
+) -> None:
+    files = _WaitingFiles(waiting=waiting)
+
+    warnings = await _unreclaimed_file_warnings(
+        _full_config(files_sweep_interval_sec=interval),
+        files,
+        monkeypatch,
+        caplog,
+        storage=cast(FileStoragePort, object()),
+    )
+
+    assert warnings == []
+    assert files.asked is asked
+
+
+@pytest.mark.asyncio
+async def test_the_boot_check_leaves_a_missing_store_to_its_own_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Without a store the sweep cannot run at all, which the store's own warning already says."""
+    files = _WaitingFiles(waiting=True)
+
+    warnings = await _unreclaimed_file_warnings(
+        _full_config(files_sweep_interval_sec=0), files, monkeypatch, caplog, storage=None
+    )
+
+    assert warnings == []
+    assert files.asked is False
 
 
 @pytest.mark.asyncio
@@ -354,3 +465,37 @@ async def test_the_idempotency_sweep_runs_while_the_header_is_ignored(monkeypatc
 def test_the_idempotency_sweep_cannot_be_turned_off() -> None:
     with pytest.raises(ValidationError):
         GatewayConfig(idempotency_sweep_interval_sec=0)
+
+
+@pytest.mark.asyncio
+async def test_the_boot_check_lets_the_boot_go_on_when_the_database_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    files = _WaitingFiles(waiting=True, fails=SQLAlchemyError("connection refused"))
+
+    warnings = await _unreclaimed_file_warnings(
+        _full_config(files_sweep_interval_sec=0),
+        files,
+        monkeypatch,
+        caplog,
+        storage=cast(FileStoragePort, object()),
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Could not check for files waiting to be reclaimed")
+
+
+@pytest.mark.asyncio
+async def test_the_boot_check_does_not_hide_an_error_that_is_not_the_database(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    files = _WaitingFiles(waiting=True, fails=RuntimeError("a bug in the check"))
+
+    with pytest.raises(RuntimeError, match="a bug in the check"):
+        await _unreclaimed_file_warnings(
+            _full_config(files_sweep_interval_sec=0),
+            files,
+            monkeypatch,
+            caplog,
+            storage=cast(FileStoragePort, object()),
+        )

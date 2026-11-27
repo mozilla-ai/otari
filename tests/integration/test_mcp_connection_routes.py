@@ -176,6 +176,7 @@ def test_a_member_signs_in_lists_their_connection_and_disconnects(
         "server_id": server_id,
         "workspace_id": str(workspace),
         "server_name": "drive",
+        "server_scope": "workspace",
         "return_to": "/tools/mcp-servers",
         "checked": False,
         "shared": False,
@@ -249,6 +250,17 @@ def test_the_callback_lands_on_the_dashboard_whatever_came_back(
     assert _landing(client.get(callback, params={"state": state, "code": "c"}, follow_redirects=False)) == {
         "error": "unknown_state"
     }
+
+    started = client.post(
+        f"{API_ROOT}/workspaces/{workspace}/mcp-connections/{server_id}",
+        json={"return_to": "/playground"},
+        headers=master_key_header,
+    )
+    state = parse_qs(urlsplit(started.json()["authorization_url"]).query)["state"][0]
+    denied = client.get(callback, params={"state": state, "error": "access_denied"}, follow_redirects=False)
+    assert _landing(denied) == {"error": "access_denied", "state": state, "return_to": "/playground"}, (
+        "a cancel goes back to the page the sign-in started from"
+    )
 
 
 def test_starting_a_sign_in_is_refused_where_it_cannot_work(

@@ -6,8 +6,8 @@
  *
  * - **The page a sign-in started from** outlives the full-page trip to the
  *   provider, so it is kept in session storage. The gateway hands the page back
- *   on success (`return_to`), but not when the person cancels, and that is the
- *   case this exists for.
+ *   (`return_to`) on success and on a cancel, but not on a cancel that arrives
+ *   after the sign-in expired, and that is the case this exists for.
  * - **The notice** is said once by the page the callback lands on, so it is
  *   kept in memory, as `features/auth/signInNotice.ts` does for the sign-in
  *   screen. A sign-in that ran in a popup comes back to a page that is already
@@ -49,11 +49,33 @@ export function forgetMcpConnectionNotice(): void {
   notice = undefined
 }
 
-/** A dashboard path, and nothing that could leave the dashboard. */
+const CALLBACK_PATH = "/mcp-connections/callback"
+const DASHBOARD_ORIGIN = "http://dashboard.invalid"
+
+/**
+ * A dashboard path to land on after a sign-in, and nothing that could leave the
+ * dashboard. The callback page itself is refused: landing there again finishes
+ * nothing and shows it was opened without a sign-in.
+ */
 export function pickDashboardPath(
   path: string | null | undefined,
 ): string | undefined {
-  return path?.startsWith("/") && !path.startsWith("//") ? path : undefined
+  // A backslash reads as a slash in a URL, so "/\\host" would leave the dashboard.
+  if (!path?.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return undefined
+  }
+  // Resolved as the router would read it: dot segments, case, a trailing slash.
+  let resolved: URL
+  try {
+    resolved = new URL(path, DASHBOARD_ORIGIN)
+  } catch {
+    return undefined
+  }
+  if (resolved.origin !== DASHBOARD_ORIGIN) return undefined
+  const { pathname } = resolved
+  const isCallback =
+    pathname.replace(/\/+$/, "").toLowerCase() === CALLBACK_PATH
+  return isCallback ? undefined : path
 }
 
 /** Notes the page a sign-in is leaving from. Storage can be refused; then there is none. */

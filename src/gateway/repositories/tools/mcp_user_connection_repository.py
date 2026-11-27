@@ -106,28 +106,35 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         *,
         server_ids: Collection[uuid.UUID] | None = None,
         user_id: str | None = None,
+        user_ids: Collection[str] | None = None,
         limit: int | None = None,
     ) -> tuple[list[McpUserConnection], int]:
         """Up to ``limit`` connections whose authorization server can be asked to end them, and how many there are.
 
-        Narrowed to these servers, to this user, or both. A removal that ends more than ``limit``
-        revokes the first ``limit`` and counts the rest, rather than holding them all in memory.
+        Narrowed to these servers, to this user or these users, or both. A removal that ends more than ``limit``
+        revokes the first ``limit`` and counts the rest, rather than holding them all in memory. A ``limit``
+        of 0 only counts.
         """
-        if server_ids is not None and not server_ids:
+        if (server_ids is not None and not server_ids) or (user_ids is not None and not user_ids):
             return [], 0
-        limit = limit or REVOCABLE_PAGE
+        if limit is None:
+            limit = REVOCABLE_PAGE
         conditions: list[ColumnElement[bool]] = [McpUserConnection.revocation_endpoint.is_not(None)]
         if server_ids is not None:
             conditions.append(McpUserConnection.server_id.in_(list(server_ids)))
         if user_id is not None:
             conditions.append(McpUserConnection.user_id == user_id)
-        rows = await self.db.execute(
-            select(McpUserConnection)
-            .where(*conditions)
-            .order_by(McpUserConnection.created_at, McpUserConnection.id)
-            .limit(limit)
-        )
-        found = list(rows.scalars().all())
+        if user_ids is not None:
+            conditions.append(McpUserConnection.user_id.in_(list(user_ids)))
+        found: list[McpUserConnection] = []
+        if limit > 0:
+            rows = await self.db.execute(
+                select(McpUserConnection)
+                .where(*conditions)
+                .order_by(McpUserConnection.created_at, McpUserConnection.id)
+                .limit(limit)
+            )
+            found = list(rows.scalars().all())
         if len(found) < limit:
             return found, len(found)
         total = (
@@ -332,11 +339,15 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
 
     async def remove_for_user_on_servers(self, user_id: str, server_ids: Collection[uuid.UUID]) -> None:
         """Stage the removal of a user's connections to these servers."""
-        if not server_ids:
+        await self.remove_for_users_on_servers([user_id], server_ids)
+
+    async def remove_for_users_on_servers(self, user_ids: Collection[str], server_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of these users' connections to these servers, in one statement."""
+        if not user_ids or not server_ids:
             return
         await self.db.execute(
             delete(McpUserConnection).where(
-                McpUserConnection.user_id == user_id, McpUserConnection.server_id.in_(list(server_ids))
+                McpUserConnection.user_id.in_(list(user_ids)), McpUserConnection.server_id.in_(list(server_ids))
             )
         )
 

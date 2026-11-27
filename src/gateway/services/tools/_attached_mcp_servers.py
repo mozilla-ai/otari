@@ -1,5 +1,10 @@
 """Which workspaces have an MCP server attached to every request, as the request path reads it.
 
+A workspace attaches one of its own servers, or one of its organization's: through the server's own
+``attach_by_default``, or through the workspace's settings on it. The sets held here are a superset: an
+organization's attached server counts for every workspace of it, and a workspace's setting counts whether
+or not the server is on, since the request goes on to read the servers themselves.
+
 Every request made with a key holding ``mcp:execute`` asks this, and nearly
 every workspace has no such server, so the answer is held in a process-wide
 set rather than read per request. It is refreshed on a TTL and right after a
@@ -22,27 +27,34 @@ from typing import ClassVar
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.log_config import logger
-from gateway.repositories.tools import WorkspaceMcpServerRepository
+from gateway.repositories.tools import WorkspaceMcpServerOverrideRepository, WorkspaceMcpServerRepository
 
 ATTACHED_MCP_SERVERS_CACHE_TTL_SECONDS = 30.0
 
 
 class AttachedMcpServerIndex:
-    """The workspaces with an enabled server marked ``attach_by_default``, as this worker last read them."""
+    """The workspaces and organizations with a server attached to every request, as this worker last read them."""
 
     _workspaces: ClassVar[frozenset[uuid.UUID]] = frozenset()
+    _organizations: ClassVar[frozenset[uuid.UUID]] = frozenset()
     # Refreshes started, and the number of the newest one applied.
     _refresh_count: ClassVar[int] = 0
     _applied_refresh: ClassVar[int] = 0
 
     @classmethod
-    def has_attached(cls, workspace_id: uuid.UUID | None) -> bool:
-        """Whether the workspace has an enabled server attached to every request."""
-        return workspace_id is not None and workspace_id in cls._workspaces
+    def has_attached(cls, workspace_id: uuid.UUID | None, organization_id: uuid.UUID | None = None) -> bool:
+        """Whether the workspace, of ``organization_id``, may have an enabled server attached to every request."""
+        if workspace_id is None:
+            return False
+        return workspace_id in cls._workspaces or (
+            organization_id is not None and organization_id in cls._organizations
+        )
 
     @classmethod
-    async def refresh(cls, servers: WorkspaceMcpServerRepository) -> None:
-        """Reload the set in one query and swap it in one step.
+    async def refresh(
+        cls, servers: WorkspaceMcpServerRepository, overrides: WorkspaceMcpServerOverrideRepository
+    ) -> None:
+        """Reload the sets, three reads, and swap them in one step.
 
         Numbered before the read, so a refresh whose read began earlier never
         replaces what a later one already applied: a write refreshes after it
@@ -50,10 +62,11 @@ class AttachedMcpServerIndex:
         """
         cls._refresh_count += 1
         number = cls._refresh_count
-        workspaces = await servers.attached_workspace_ids()
+        workspaces = await servers.attached_workspace_ids() | await overrides.attaching_workspace_ids()
+        organizations = await servers.attached_organization_ids()
         if number < cls._applied_refresh:
             return
-        cls._workspaces, cls._applied_refresh = workspaces, number
+        cls._workspaces, cls._organizations, cls._applied_refresh = workspaces, organizations, number
 
     @classmethod
     async def refresh_after_write(cls) -> None:
@@ -67,12 +80,12 @@ class AttachedMcpServerIndex:
     @classmethod
     def reset(cls) -> None:
         """Drop the set so the next load starts clean (startup and tests)."""
-        cls._workspaces, cls._applied_refresh = frozenset(), 0
+        cls._workspaces, cls._organizations, cls._applied_refresh = frozenset(), frozenset(), 0
 
     @classmethod
     async def _refresh_on_a_session_of_its_own(cls) -> None:
         async with create_unit_of_work() as uow, uow:
-            await cls.refresh(WorkspaceMcpServerRepository(uow))
+            await cls.refresh(WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow))
 
     @classmethod
     async def _refresh_or_log(cls, log: Callable[..., None], message: str) -> None:

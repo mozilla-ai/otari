@@ -5,9 +5,11 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from collections.abc import AsyncGenerator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -33,6 +35,7 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
+from _roster_support import SeededMember, operator_organization_id, write_member_rows
 from gateway.api.deps import (
     build_hosted_provider_service,
     build_unavailable_model_reporter,
@@ -43,8 +46,11 @@ from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
+from gateway.models.tenancy import DashboardSession, OrganizationMemberRole
+from gateway.models.tenancy import User as TenancyUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.budgets import reserve_budget
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.providers import new_platform_connect_rate_limiter
 from gateway.services.tools import WebSearchBackend
@@ -719,3 +725,65 @@ def live_server(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> Gene
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@pytest.fixture
+def seed_member(
+    db_session: Session, client: TestClient, master_key_header: dict[str, str]
+) -> Callable[..., SeededMember]:
+    """Put a member at an address into the operator's organization, writing the rows directly.
+
+    Yields a function taking the address and the role, for a test that needs a
+    member to exist before the behavior it covers runs.
+
+    The organization is resolved once, here, rather than per call, because a
+    dashboard session set later in the test would otherwise answer for its own
+    organization instead of the operator's.
+    """
+    organization_id = operator_organization_id(client, master_key_header)
+
+    def _seed(*, email: str, role: OrganizationMemberRole = "member") -> SeededMember:
+        return write_member_rows(db_session, email=email, organization_id=organization_id, role=role)
+
+    return _seed
+
+
+@pytest.fixture
+def signed_in_member(
+    db_session: Session, client: TestClient, seed_member: Callable[..., SeededMember]
+) -> Callable[..., TenancyUser]:
+    """Seed a member and sign the client in as them, returning the identity it signed in as.
+
+    Yields a function taking the address and the role, for a test that acts as
+    an ordinary member rather than as the operator.
+
+    NOTE: The client keeps the cookie for the rest of the test, so a later
+    request made without clearing it speaks for this member and not the
+    operator, whatever credential it carries.
+
+    NOTE: The address is verified, unlike the one :func:`seed_member` leaves.
+    Signing in refuses an unverified address, and every path that mints a
+    session stamps it, so a member holding one has always verified. It stays
+    unproved, which is the state a claim through a shared link leaves.
+    """
+
+    def _signed_in(*, email: str, role: OrganizationMemberRole = "member") -> TenancyUser:
+        seeded = seed_member(email=email, role=role)
+        identity = db_session.get(TenancyUser, seeded.user_id)
+        assert identity is not None
+        token = f"session-{uuid.uuid4().hex}"
+        now = datetime.now(UTC)
+        identity.email_verified_at = now
+        db_session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=identity.id,
+                created_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+        db_session.commit()
+        client.cookies.set(SESSION_COOKIE_NAME, token)
+        return identity
+
+    return _signed_in

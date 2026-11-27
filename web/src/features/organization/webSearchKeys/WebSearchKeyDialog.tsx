@@ -25,7 +25,7 @@ import {
   useCreateOrgWebSearchKey,
   useUpdateOrgWebSearchKey,
 } from "@/shared/api/webSearchKeys"
-import { KIND_COPY, offeredProviders } from "./webSearchKeys"
+import { KIND_COPY, needsApiKey, offeredProviders } from "./webSearchKeys"
 
 // Adds one of the organization's search or fetch keys, or edits one. The
 // provider comes first and decides the rest: what it requires, then its
@@ -96,8 +96,7 @@ export function WebSearchKeyDialog({
   // The next call sends the stored secret to the new host, so the gateway
   // refuses the move unless the secret comes with it.
   const needsKeyAgain = movesHost && Boolean(editing?.last4)
-  const keyRequired =
-    (!isEdit && Boolean(provider?.requires_api_key)) || needsKeyAgain
+  const keyRequired = (!isEdit && needsApiKey(provider)) || needsKeyAgain
   // A provider that requires an endpoint has none of its own. For an operator,
   // the catalog gives it the endpoint the deployment's tools inherit, which a
   // key never does, so the key needs its own.
@@ -246,7 +245,9 @@ export function WebSearchKeyDialog({
                 ? "Enter the API key again: it goes to the new URL."
                 : isEdit
                   ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-                  : "Encrypted at rest and never shown again; only the last 4 characters come back."
+                  : keyRequired && provider?.requires_api_key === false
+                    ? "This provider runs without a key, but a key here brings the organization's own account, so its calls never use the keyless allowance this deployment's address shares. Encrypted at rest and never shown again."
+                    : "Encrypted at rest and never shown again; only the last 4 characters come back."
             }
           />
           {isUncataloged ? (

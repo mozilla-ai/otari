@@ -133,7 +133,6 @@ def _searched_with(client: TestClient, headers: dict[str, str]) -> dict[str, Any
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
         patch("gateway.services.tools._web_build.WebSearchBackend", new=fake_search_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json=_REQUEST, headers=headers)
@@ -154,6 +153,21 @@ def test_a_key_is_stored_without_its_secret_and_listed(client: TestClient, maste
     listed = client.get(_KEYS, headers=master_key_header).json()
     assert [key["id"] for key in listed["data"]] == [created["id"]]
     assert "tvly-secret-1234" not in str(listed)
+
+
+def test_a_keenable_key_brings_an_api_key_though_a_keenable_tool_needs_none(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Without one, the organization's searches would run keyless from the deployment's address."""
+    refused = client.post(_KEYS, json={"provider": "keenable", "name": "keyless"}, headers=master_key_header)
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "A key on keenable needs an API key"
+
+    created = client.post(
+        _KEYS, json={"provider": "keenable", "name": "own", "api_key": "keen_own-1234"}, headers=master_key_header
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["last4"] == "1234"
 
 
 def test_a_provider_the_search_tool_cannot_call_is_refused(

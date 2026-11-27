@@ -10,7 +10,7 @@ be built against something canonical.
 
 The reference backend is
 [otari-sandbox-container](https://github.com/mozilla-ai/otari-sandbox-container),
-a single container that stands alone with no orchestrator. mozilla.ai operates a
+a single container that stands alone with no orchestrator. Mozilla AI operates a
 second, pool-backed backend for [otari.ai](https://otari.ai). Both implement this
 contract, and Otari cannot tell which one answered.
 
@@ -202,6 +202,9 @@ validated per command, not per request.
 A client is not required to expose every kind. Otari currently drives only
 `code_execution`, and advertises exactly that one tool to the model; a backend
 MUST still accept the kind it is asked for and MUST refuse an unknown one.
+
+The `code` Otari sends in a `code_execution` call is Python source, which is
+what the reference backend's interpreter runs.
 
 ## Result blocks
 

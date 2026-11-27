@@ -1,4 +1,4 @@
-# Zero Data Retention
+# Data Retention
 
 Otari connects to multiple LLM providers to process inference requests. Each provider has its own policies regarding how request and response data are handled, stored, and used. Understanding these policies helps you select providers that meet your application's privacy, security, and compliance requirements.
 
@@ -16,15 +16,16 @@ When evaluating a provider's data handling policies, there are three key aspects
 
 The following table summarizes the retention classifications of providers supported by Otari.
 
-| Provider       | Data retention | Model training | Privacy Policy                                                        | Models |
-| :------------- | :------------- | :------------- | :-------------------------------------------------------------------- | :----- |
-| Amazon Bedrock | Zero retention | No             | [Privacy](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html) | 67     |
-| Fireworks AI   | Zero retention | No             | [Privacy](https://fireworks.ai/privacy-policy)                        | 26     |
-| Mistral AI     | Zero retention | No             | [Privacy](https://legal.mistral.ai/terms/get-started/#privacy-policy) | 34     |
-| Nebius         | Zero retention | No             | [Privacy](https://docs.nebius.com/legal/privacy)                      | 29     |
-| OVH Cloud      | Zero retention | No             | [Privacy](https://us.ovhcloud.com/legal/privacy-policy/)              | 19     |
-| Together AI    | Zero retention | No             | [Privacy](https://www.together.ai/privacy)                            | 78     |
-| DeepInfra      | Zero retention | No             | [Privacy](https://deepinfra.com/privacy)                              | 153    |
+| Provider       | Data retention | Model training | Processing location | Privacy Policy                                                        | Models |
+| :------------- | :------------- | :------------- | :------------------------------ |:-------------------------------------------------------------------- | :----- |
+| Amazon Bedrock | Zero retention | No             | United States                   | [Privacy](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html) | 67     |
+| Fireworks AI   | Zero retention | No             | United States                   | [Privacy](https://fireworks.ai/privacy-policy)                        | 26     |
+| Mistral AI     | Zero retention | No             | France                          |[Privacy](https://legal.mistral.ai/terms/get-started/#privacy-policy) | 34     |
+| Nebius         | Zero retention | No             | United States, Europe           |[Privacy](https://docs.nebius.com/legal/privacy)                      | 29     |
+| OVH Cloud      | Zero retention | No             | France                          |[Privacy](https://us.ovhcloud.com/legal/privacy-policy/)              | 19     |
+| Together AI    | Zero retention | No             | United States                   |[Privacy](https://www.together.ai/privacy)                            | 78     |
+| DeepInfra      | Zero retention | No             | United States                   |[Privacy](https://deepinfra.com/privacy)                              | 153    |
+| TokenHub       | Zero retention | No             | United States, Singapore, China |[Privacy](https://tokenhub.com/privacy-policy)                        | 62     |
 
 Regarding metadata logging, note that even when Zero Data Retention is enabled, providers may retain operational metadata for monitoring, security, and compliance. This data may include timestamps, token counts, request identifiers, and usage statistics, but should not include prompt or response content under the applicable ZDR policy.
 

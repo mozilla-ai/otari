@@ -3,11 +3,18 @@ import { createFileRoute } from "@tanstack/react-router"
 import { McpServerDetailPage } from "@/features/tools/McpServerDetailPage"
 
 // The page takes the id as a prop rather than reading the router itself, so a
-// test can hand it one without a route tree.
+// test can hand it one without a route tree. Keyed on it, so moving to another
+// server starts the page afresh and no dialog's draft carries across.
 function SelectedServer() {
   const { serverId } = Route.useParams()
   const { workspace } = Route.useSearch()
-  return <McpServerDetailPage serverId={serverId} workspaceId={workspace} />
+  return (
+    <McpServerDetailPage
+      key={serverId}
+      serverId={serverId}
+      workspaceId={workspace}
+    />
+  )
 }
 
 export const Route = createFileRoute("/tools/mcp-servers/$serverId")({

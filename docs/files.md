@@ -369,11 +369,25 @@ as text instead, set `supports_image: false` for it in `model_capabilities`.
 
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
-- `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
-  upload storage (see [Storage backends](#storage-backends)). With
-  `files_enabled` off, a backend that cannot be built (an `s3` backend with no
-  bucket, say) is logged at startup rather than stopping it, and a stored
-  `file_id` then does not resolve; with it on, the same fault stops the boot.
+- `files_api_enabled` (formerly `files_enabled`, which still works and logs a
+  deprecation warning), `files_backend`, `files_max_bytes`,
+  `files_retention_hours`: upload storage (see [Storage backends](#storage-backends)).
+- `files_workspace_max_bytes`, `files_workspace_max_files`: the most bytes and
+  uploads one workspace may hold at once, counting files not yet deleted or
+  expired (code-execution outputs, bounded per call above, are not counted, so
+  an upload naming their purpose, `code_execution_output`, is refused with 400): 1 GB and 500 files by default, and `null` in the config file sets
+  no limit. An upload past either is refused with 413 and nothing stored is
+  deleted, so a workspace makes room by deleting files or waiting for them to
+  expire. Usage is read before the bytes flow, so uploads running at the same
+  time can each take the room that was left: N of them can together store up
+  to N times that room. The limits bound the files a workspace holds, not an
+  exact quota, and not physical storage: a deleted or expired file stops
+  counting at once, but its bytes stay until the sweep reclaims them.
+  `files_api_enabled` turns off the `/api/v1/files` endpoints only: the sweep
+  below keeps reclaiming expired and deleted files. With it off, a backend that
+  cannot be built (an `s3` backend with no bucket, say) is logged at startup
+  rather than stopping it, and a stored `file_id` then does not resolve and the
+  sweep cannot run; with it on, the same fault stops the boot.
 - `files_output_max_files`, `files_output_max_bytes`,
   `files_provider_copy_max_sec`: limits on files produced by code execution
   (see [A file the provider's own sandbox produced](#a-file-the-providers-own-sandbox-produced)).
@@ -382,7 +396,9 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 - `files_sweep_interval_sec`: the background sweep (hourly by default, `0` to
   disable). An expired file answers 404 at once; the sweep then reclaims its
   bytes and row, along with those of deleted files and of uploads that never
-  completed.
+  completed, and drops the rows of provider copies that expired or never
+  finished. With it at `0`, a deployment that still holds any of these says so
+  at startup, since nothing else reclaims them.
 - `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
 a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see

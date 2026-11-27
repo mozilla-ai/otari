@@ -103,6 +103,57 @@ describe("mcpAccess", () => {
     ).toBe("No access")
   })
 
+  it("cuts what a key reaches down to the organization's limit too", () => {
+    const base = {
+      server_id: "s",
+      name: "jira",
+      enabled: true,
+      decided_by: "everyone" as const,
+      grant_id: null,
+      read_tools: ["list_issues", "get_issue"],
+    }
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["*"],
+        allowed_tools: null,
+        organization_tools: ["list_issues"],
+      }),
+    ).toBe("list_issues")
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["*"],
+        allowed_tools: ["get_issue", "create_issue"],
+        organization_tools: ["@read"],
+      }),
+    ).toBe("get_issue")
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["list_*"],
+        allowed_tools: null,
+        organization_tools: ["*"],
+      }),
+    ).toBe("list_*")
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["create_issue"],
+        allowed_tools: null,
+        organization_tools: ["list_issues"],
+      }),
+    ).toBe("No access")
+    expect(
+      keyAccessLabel({
+        ...base,
+        tools: ["*"],
+        allowed_tools: null,
+        organization_tools: null,
+      }),
+    ).toBe("All tools")
+  })
+
   it("says which rule a trace matched", () => {
     const options = { ruleOwner: "Bo's laptop", serverEnabled: true }
     expect(
@@ -129,6 +180,17 @@ describe("mcpAccess", () => {
         { ...options, serverEnabled: false },
       ),
     ).toBe("DENY, the server is disabled")
+    expect(
+      verdictLabel(
+        {
+          allowed: false,
+          decided_by: "organization",
+          grant_id: null,
+          tools: ["get_issue"],
+        },
+        options,
+      ),
+    ).toBe("DENY, the organization's limit for this workspace decided it")
   })
 })
 

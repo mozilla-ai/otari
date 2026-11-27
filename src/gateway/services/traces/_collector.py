@@ -23,7 +23,15 @@ from gateway.services.traces._context import ContextWeights
 from gateway.services.traces._identity import SessionRef
 from gateway.services.traces._turn_content import TurnContent, arguments_of
 from gateway.services.traces._turns import TurnFacts
-from gateway.types.traces import SPAN_CONTENT_MAX_LENGTH, SpanRecord, TraceWrite, is_endpoint, is_identifier
+from gateway.types.traces import (
+    IDENTIFIER_MAX_LENGTH,
+    LIST_SEPARATOR,
+    SPAN_CONTENT_MAX_LENGTH,
+    SpanRecord,
+    TraceWrite,
+    is_endpoint,
+    is_identifier,
+)
 
 # The settled status of an attempt a later candidate made up for, and of one that served.
 _ABSORBED = "absorbed"
@@ -58,6 +66,22 @@ class LlmCall:
 def identifier_or_none(value: object) -> str | None:
     """A client-supplied value as it may be stored, or None when it is not an identifier-shaped string."""
     return value if isinstance(value, str) and is_identifier(value) else None
+
+
+def _identifier_list(values: tuple[str, ...]) -> str | None:
+    """The leading identifiers of ``values`` joined as a list attribute stores them, or None when none fits.
+
+    The stored value is capped as a whole, so the elements past the cap are left
+    off rather than the whole list, and with it the span.
+    """
+    kept: list[str] = []
+    for value in values:
+        if identifier_or_none(value) is None:
+            continue
+        if len(LIST_SEPARATOR.join([*kept, value])) > IDENTIFIER_MAX_LENGTH:
+            break
+        kept.append(value)
+    return LIST_SEPARATOR.join(kept) or None
 
 
 # Longer than any call id a provider issues; past it the value is not one.
@@ -237,13 +261,18 @@ class RequestTrace:
         mcp_server_id: str | None = None,
         decided_by: str | None = None,
         refused: bool = False,
+        error_type: str | None = None,
+        error_status: int | None = None,
+        error_provider: str | None = None,
     ) -> None:
         """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
 
         ``arguments`` and ``result`` are kept only where the request keeps content. ``mcp_server`` names the MCP
         server that owns the tool, since a tool's name alone does not, and ``mcp_server_id`` the stored server, for a
         link to it. ``decided_by`` names the rule that allowed the call, or that refused it when ``refused``: a
-        refused tool never ran, so its span is blocked.
+        refused tool never ran, so its span is blocked. A failed call's ``error_type`` (a failure tag or an exception
+        class, never a message) becomes its error class, with the upstream ``error_status`` and the
+        ``error_provider`` that failed where known.
         """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
@@ -255,6 +284,11 @@ class RequestTrace:
         if decided_by is not None:
             attributes["otari.tool.decision"] = "reject" if refused else "accept"
             attributes["otari.tool.decision_source"] = decided_by
+        failed = not ok and not refused
+        if failed and error_status is not None:
+            attributes["http.response.status_code"] = error_status
+        if failed and (provider := identifier_or_none(error_provider)) is not None:
+            attributes["otari.tool.provider"] = provider
         self._add(
             SpanRecord(
                 span_id=_span_id(),
@@ -264,7 +298,7 @@ class RequestTrace:
                 name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
                 operation="execute_tool",
                 outcome="blocked" if refused else "ok" if ok else "error",
-                error_class=None if ok or refused else "tool_error",
+                error_class=(identifier_or_none(error_type) or "tool_error") if failed else None,
                 start_time=started,
                 end_time=ended,
                 duration_ms=_elapsed_ms(started, ended),
@@ -288,13 +322,15 @@ class RequestTrace:
         event: str | None = None,
         tool: str | None = None,
         withheld: bool = False,
+        categories: tuple[str, ...] = (),
     ) -> None:
         """One guardrail check. ``valid`` is None when the check could not be evaluated.
 
         ``event`` is where it ran: ``before_model`` for input, ``after_tool`` for
         a tool result, ``before_tool`` for a tool call and ``after_model`` for the
         answer, with ``tool`` naming the tool where it is known. ``withheld`` marks
-        a tool result or call the model read a replacement for.
+        a tool result or call the model read a replacement for. ``categories`` are
+        what the guardrail says fired.
         """
         attributes: dict[str, str | int | float | bool] = {}
         if (safe_profile := identifier_or_none(profile)) is not None:
@@ -307,6 +343,8 @@ class RequestTrace:
             attributes["otari.guardrail.tool"] = safe_tool
         if withheld:
             attributes["otari.guardrail.action"] = "withheld"
+        if (safe_categories := _identifier_list(categories)) is not None:
+            attributes["otari.guardrail.categories"] = safe_categories
         self._add(
             SpanRecord(
                 span_id=_span_id(),
@@ -474,8 +512,15 @@ class ToolSpans:
         tool_name: str | None = None,
         mcp_server: str | None = None,
         mcp_server_id: str | None = None,
+        error_type: str | None = None,
+        error_status: int | None = None,
+        error_provider: str | None = None,
     ) -> None:
-        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed."""
+        """One call: ``arguments`` as the model sent them, ``result`` as the model reads it, None where it failed.
+
+        A failed call names why with ``error_type``, ``error_status`` and ``error_provider``, as
+        :meth:`RequestTrace.record_tool_call` takes them.
+        """
         name = tool_name or self.tool_name
         if self.trace is not None and name is not None:
             self.trace.record_tool_call(
@@ -487,4 +532,7 @@ class ToolSpans:
                 result=result,
                 mcp_server=mcp_server,
                 mcp_server_id=mcp_server_id,
+                error_type=error_type,
+                error_status=error_status,
+                error_provider=error_provider,
             )

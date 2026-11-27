@@ -105,22 +105,59 @@ export function patternMatches(pattern: string, tool: string): boolean {
   return pattern === tool
 }
 
+/** The one pattern matching exactly the tools both match, or "" where none does. */
+function bothPatterns(pattern: string, other: string): string {
+  const prefix = (wildcard: string) => wildcard.slice(0, -1)
+  if (pattern.endsWith("*") && other.endsWith("*")) {
+    if (other.startsWith(prefix(pattern))) return other
+    return pattern.startsWith(prefix(other)) ? pattern : ""
+  }
+  if (pattern.endsWith("*"))
+    return other.startsWith(prefix(pattern)) ? other : ""
+  if (other.endsWith("*"))
+    return pattern.startsWith(prefix(other)) ? pattern : ""
+  return pattern === other ? pattern : ""
+}
+
+/**
+ * The patterns matching exactly the tools both lists match, `@read` already
+ * expanded in each: the gateway's `clip_mcp_tool_patterns`, which applies an
+ * organization's limit to a rule.
+ */
+export function clipPatterns(
+  patterns: readonly string[],
+  limit: readonly string[],
+): string[] {
+  const clipped = patterns.flatMap((pattern) =>
+    limit.map((other) => bothPatterns(pattern, other)),
+  )
+  return [...new Set(clipped.filter((pattern) => pattern !== ""))]
+}
+
 /**
  * What a key reaches on one server, for the key editor: the deciding rule cut
- * down by the server's own ceiling, since a tool the server does not expose is
- * never reachable whatever the rule says.
+ * down by the organization's limit for the workspace, where it set one, and by
+ * the server's own ceiling, since a tool the server does not expose is never
+ * reachable whatever the rule says.
  */
 export function keyAccessLabel(access: WorkspaceMcpServerKeyAccess): string {
-  const mode = accessMode(access.tools)
+  // `@read` stands for the server's labeled read tools, which reach exactly as named ones do.
+  const expand = (patterns: readonly string[]) =>
+    patterns.flatMap((pattern) =>
+      pattern === READ_TOOLS ? (access.read_tools ?? []) : [pattern],
+    )
+  const limit = access.organization_tools ?? null
+  const tools =
+    limit === null
+      ? access.tools
+      : clipPatterns(expand(access.tools), expand(limit))
+  const mode = accessMode(tools)
   if (mode === "none") return "No access"
   const ceiling = access.allowed_tools
   if (mode === "all") {
     return ceiling === null ? "All tools" : ceiling.join(", ") || "No access"
   }
-  // `@read` stands for the server's labeled read tools, which reach exactly as named ones do.
-  const patterns = access.tools.flatMap((pattern) =>
-    pattern === READ_TOOLS ? (access.read_tools ?? []) : [pattern],
-  )
+  const patterns = expand(tools)
   const reachable =
     ceiling === null
       ? patterns
@@ -133,7 +170,7 @@ export function keyAccessLabel(access: WorkspaceMcpServerKeyAccess): string {
         )
   const names = [...new Set(reachable)].join(", ")
   if (!names) return "No access"
-  return mode === "read" ? `Read tools: ${names}` : names
+  return accessMode(access.tools) === "read" ? `Read tools: ${names}` : names
 }
 
 /** Which rule decided a key's access, as the key editor says it. */
@@ -159,6 +196,9 @@ export function verdictLabel(
     return serverEnabled
       ? `${verdict}, the server does not expose this tool`
       : `${verdict}, the server is disabled`
+  }
+  if (check.decided_by === "organization") {
+    return `${verdict}, the organization's limit for this workspace decided it`
   }
   if (check.decided_by === "everyone") {
     return `${verdict}, matched the default policy (${ruleSummary(check.tools)})`

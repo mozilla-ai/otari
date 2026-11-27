@@ -55,7 +55,6 @@ from gateway.services.provider_kwargs import (
     no_candidate_configured_detail,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.services.web_retrieval_network import PinnedTransportError
 from gateway.types.attempt import Attempt
 
@@ -137,6 +136,43 @@ def provider_failure_http_exc(
     )
 
 
+def _timeout_detail(failures: Sequence[AttemptFailure]) -> str:
+    """504 detail for a plan whose last candidate timed out: all-timed-out only when every one did."""
+    earlier = [failure.error for failure in failures[:-1]]
+    timed_out = sum(1 for error in earlier if upstream_exception_shape(error)[0] == "timeout")
+    if timed_out == len(earlier):
+        return ALL_ATTEMPTS_TIMED_OUT_DETAIL
+    refused = sum(1 for error in earlier if _refused_the_request(error))
+    other = len(earlier) - refused - timed_out
+    noun = "candidate" if len(earlier) == 1 else "candidates"
+    kinds = [
+        (count, text)
+        for count, text in (
+            (refused, "refused the request"),
+            (timed_out, "timed out"),
+            (other, "failed for another reason"),
+        )
+        if count
+    ]
+    if len(kinds) == 1:
+        return f"The last candidate timed out; the {len(earlier)} earlier {noun} {kinds[0][1]}."
+    parts = [f"{count} {text}" for count, text in kinds]
+    listed = f"{', '.join(parts[:-1])} and {parts[-1]}"
+    return f"The last candidate timed out; of the {len(earlier)} earlier {noun}, {listed}."
+
+
+def _refused_the_request(exc: BaseException) -> bool:
+    """Whether the caller would get a 400 or 413 for this failure that sending the request again would repeat.
+
+    Read from the mapped answer, not the upstream status, so a refusal raised with no status counts while a
+    rejected credential (424), an unknown model (404) and a schema miss that may pass next time do not.
+    """
+    answer = provider_failure_http_exc(exc, fallback_detail="")
+    if answer.status_code not in (status.HTTP_400_BAD_REQUEST, status.HTTP_413_CONTENT_TOO_LARGE):
+        return False
+    return error_code_of(answer.headers) != STRUCTURED_OUTPUT_FAILED
+
+
 def all_attempts_rejected_detail(tried: int, reason: str | None = None) -> str:
     """400 detail for a request every attempt rejected as invalid, with the reason when they all gave one."""
     if reason is None:
@@ -213,25 +249,26 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         )
     if statuses != {status.HTTP_400_BAD_REQUEST}:
         return None
-    if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
+    codes = {error_code_of(answer.headers) for answer in answers}
+    if codes == {CONTEXT_LENGTH_EXCEEDED}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=prompt_too_long_for_every_attempt_detail(len(errors)),
             headers=error_headers(CONTEXT_LENGTH_EXCEEDED),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_CONTENT}:
+    if codes == {UNSUPPORTED_CONTENT}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_images_detail(len(errors)),
             headers=error_headers(UNSUPPORTED_CONTENT),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {STRUCTURED_OUTPUT_FAILED}:
+    if codes == {STRUCTURED_OUTPUT_FAILED}:
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=structured_output_failed_for_every_attempt_detail(len(errors)),
             headers=error_headers(STRUCTURED_OUTPUT_FAILED),
         )
-    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
+    if codes == {UNSUPPORTED_PARAMETER}:
         parameters = (UpstreamFailure(error).unsupported_parameter_name for error in errors)
         named = {name for name in parameters if name is not None}
         return HTTPException(
@@ -242,7 +279,7 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
     reasons = {answer.detail for answer in answers}
-    shared = reasons.pop() if len(reasons) == 1 else ProviderDetail.BAD_REQUEST
+    shared = reasons.pop() if len(reasons) == 1 else None
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=all_attempts_rejected_detail(len(errors), None if shared == ProviderDetail.BAD_REQUEST else shared),
@@ -500,7 +537,7 @@ async def walk_attempts(
             if on_terminal is not None:
                 on_terminal(attempt)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        except (SandboxNotReachableError, WebSearchNotReachableError):
+        except SandboxNotReachableError:
             raise
         except asyncio.CancelledError:
             # The catch below is `BaseException` so a provider client raising
@@ -564,14 +601,18 @@ async def walk_attempts(
         for skipped, refusal in unrecorded_skips:
             await on_skipped(skipped, refusal)
 
-    logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
+    # Every candidate's provider failing is answered with an error response and
+    # is the providers' fault, not the deployment's. Only a failure the
+    # classifier could not place may be the gateway's own.
+    log = logger.error if any(failure.error_class == "unknown" for failure in failures) else logger.warning
+    log("All attempts failed policy=%s failures=%s", policy_name, failures)
     # A candidate that could not serve was never called, so the last one that
     # failed is the one to name, and the status rule counts only the ones called.
     if on_terminal is not None:
         on_terminal(last_failed or attempts[-1])
     single = len(failures) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
-        detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL
+        detail = "LLM provider timeout" if single else _timeout_detail(failures)
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
         raise provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc

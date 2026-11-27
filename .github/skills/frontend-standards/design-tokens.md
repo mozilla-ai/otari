@@ -238,7 +238,7 @@ the one documented off-scale size, and globals.css says why: two letters in a 26
 recognized rather than read.
 
 Mozilla Headline is spent on `text-display` alone; every other content role, `text-heading`
-included, is set in Mozilla Text, because at 18px a slab serif competes with the page title
+included, is set in Inter, because at 18px a slab serif competes with the page title
 instead of sitting under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare
 `h1`-`h6` still defaults to the display face through the `@layer base` rule in the same file,
 which is why a heading always wears a role: left bare it renders serif, and at any size but the

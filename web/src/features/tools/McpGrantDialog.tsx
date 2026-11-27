@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
@@ -46,6 +46,7 @@ export function McpGrantDialog({
   readTools,
   isPending,
   error,
+  held,
   onSubmit,
 }: {
   isOpen: boolean
@@ -73,6 +74,8 @@ export function McpGrantDialog({
   readTools: readonly string[]
   isPending: boolean
   error: unknown
+  /** Why nothing may be saved now, shown above the form, with what to do about it; Save is off while it is set. */
+  held?: ReactNode
   onSubmit: (draft: GrantDraft) => void
 }) {
   const seed = accessDraft(editing?.tools ?? ["*"])
@@ -114,7 +117,7 @@ export function McpGrantDialog({
         })
       }}
       isPending={isPending}
-      isSubmitDisabled={!isComplete}
+      isSubmitDisabled={!isComplete || held !== undefined}
       isDirty={
         keyIds.length > 0 ||
         userIds.length !== initialUserIds.length ||
@@ -124,6 +127,7 @@ export function McpGrantDialog({
       }
       error={error}
     >
+      {held}
       {editing ? null : (
         <div className="flex flex-col gap-2">
           <SearchField

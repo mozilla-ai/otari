@@ -2,15 +2,37 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { OrganizationContext, UpdateCheckStatus } from "@/client"
+import type {
+  OrganizationContext,
+  UpdateCheckStatus,
+  WorkspaceActivation,
+} from "@/client"
 import { UpdateCheckPrompt } from "@/features/updateCheck/UpdateCheckPrompt"
+import { useWorkspaceActivation } from "@/shared/api/activation"
 import { API_ROOT } from "@/shared/api/client"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
   organizationContext,
   updateCheckStatus,
+  workspaceActivation,
 } from "@/tests/fixtures"
+
+const WORKSPACE = "44444444-4444-4444-4444-444444444444"
+const ACTIVATED = workspaceActivation({
+  status: "activated",
+  experience_eligible: false,
+})
+
+/** An operator who belongs to one workspace, the one the shell selects. */
+const operatorContext = (overrides: Partial<OrganizationContext> = {}) =>
+  organizationContext({
+    workspace_memberships: [
+      { workspace_id: WORKSPACE, name: "Default Workspace", role: "owner" },
+    ],
+    ...overrides,
+  })
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,13 +41,19 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** Serves the organization context and the update check, recording each answer. */
+/**
+ * Serves the organization context, the selected workspace's activation and the
+ * update check, recording each answer. `activation` can be moved mid-test, the
+ * way a first request landing would move it.
+ */
 function mockApi(
   status: UpdateCheckStatus,
-  context: OrganizationContext = organizationContext(),
+  context: OrganizationContext = operatorContext(),
   providerCount = 1,
+  initialActivation: WorkspaceActivation = ACTIVATED,
 ) {
   let current = status
+  const activation = { current: initialActivation }
   const answers: boolean[] = []
   const fetchMock = vi
     .spyOn(globalThis, "fetch")
@@ -44,6 +72,9 @@ function mockApi(
       if (url.includes(`${API_ROOT}/hosted-providers`)) {
         return jsonResponse({ data: [] })
       }
+      if (url.endsWith(`/workspaces/${WORKSPACE}/activation`)) {
+        return jsonResponse(activation.current)
+      }
       if (url.endsWith(`${API_ROOT}/update-check`)) {
         if ((init?.method ?? "GET").toUpperCase() === "PUT") {
           const body = JSON.parse(String(init?.body)) as { enabled: boolean }
@@ -58,10 +89,16 @@ function mockApi(
       }
       return jsonResponse({})
     })
-  return { answers, fetchMock }
+  return { answers, fetchMock, activation }
 }
 
-function renderPrompt(surfaces?: string[]) {
+/** Stands in for the setup guide, whose observer polls the same activation. */
+function GuidePoll() {
+  useWorkspaceActivation(WORKSPACE)
+  return null
+}
+
+function renderPrompt(surfaces?: string[], withGuide = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -70,7 +107,10 @@ function renderPrompt(surfaces?: string[]) {
       <DeploymentProvider
         value={bootstrap(surfaces === undefined ? {} : { surfaces })}
       >
-        <UpdateCheckPrompt />
+        <SelectedWorkspaceProvider>
+          <UpdateCheckPrompt />
+          {withGuide ? <GuidePoll /> : null}
+        </SelectedWorkspaceProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
   )
@@ -176,7 +216,7 @@ describe("UpdateCheckPrompt", () => {
   })
 
   it("does not ask while the deployment has no provider yet", async () => {
-    const { fetchMock } = mockApi(updateCheckStatus(), organizationContext(), 0)
+    const { fetchMock } = mockApi(updateCheckStatus(), operatorContext(), 0)
     renderPrompt()
 
     await waitFor(() =>
@@ -188,6 +228,121 @@ describe("UpdateCheckPrompt", () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // Nor reads the activation, whose cache the setup guide would show.
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/activation")),
+    ).toBe(false)
+  })
+
+  it("does not ask before the workspace's first successful request", async () => {
+    const { fetchMock } = mockApi(
+      updateCheckStatus(),
+      operatorContext(),
+      1,
+      workspaceActivation(),
+    )
+    renderPrompt()
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).endsWith(`/workspaces/${WORKSPACE}/activation`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("asks an operator who dismissed the setup guide before any request succeeded", async () => {
+    mockApi(
+      updateCheckStatus(),
+      operatorContext(),
+      1,
+      workspaceActivation({ dismissed: true, experience_eligible: false }),
+    )
+    renderPrompt()
+
+    expect(
+      await screen.findByRole("dialog", { name: TITLE }),
+    ).toBeInTheDocument()
+  })
+
+  it("does not ask over the setup sheet when the first request lands during this load", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { fetchMock, activation } = mockApi(
+        updateCheckStatus(),
+        operatorContext(),
+        1,
+        workspaceActivation(),
+      )
+      const activationReads = () =>
+        fetchMock.mock.calls.filter(([url]) =>
+          String(url).endsWith(`/workspaces/${WORKSPACE}/activation`),
+        ).length
+      renderPrompt(undefined, true)
+
+      await waitFor(() => expect(activationReads()).toBeGreaterThan(0))
+      activation.current = ACTIVATED
+      // The guide's poll finds the request a few seconds later.
+      const before = activationReads()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(activationReads()).toBeGreaterThan(before)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not ask when the activation read fails", async () => {
+    const { fetchMock } = mockApi(updateCheckStatus())
+    const served = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation((input, init) =>
+      String(input).endsWith(`/workspaces/${WORKSPACE}/activation`)
+        ? Promise.resolve(jsonResponse({ detail: "boom" }, 500))
+        : (served?.(input, init) ?? Promise.resolve(jsonResponse({}))),
+    )
+    renderPrompt()
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).endsWith(`/workspaces/${WORKSPACE}/activation`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("does not ask when the organization context read fails, which leaves no workspace selected", async () => {
+    const { fetchMock } = mockApi(updateCheckStatus())
+    const served = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation((input, init) =>
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
+        ? Promise.resolve(jsonResponse({ detail: "boom" }, 500))
+        : (served?.(input, init) ?? Promise.resolve(jsonResponse({}))),
+    )
+    renderPrompt()
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes(`${API_ROOT}/hosted-providers`),
+        ),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("asks an operator who belongs to no workspace, who has no first request to wait for", async () => {
+    mockApi(updateCheckStatus(), operatorContext({ workspace_memberships: [] }))
+    renderPrompt()
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
   it.each([
@@ -217,7 +372,7 @@ describe("UpdateCheckPrompt", () => {
   it("never asks a caller who is not a deployment operator", async () => {
     const { fetchMock } = mockApi(
       updateCheckStatus(),
-      organizationContext({ deployment_operator: false }),
+      operatorContext({ deployment_operator: false }),
     )
     renderPrompt()
 

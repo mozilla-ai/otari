@@ -370,9 +370,6 @@ class StaleGrowthSignal:
     async def record_onboarding_completed(self, **kwargs):
         return None
 
-    async def record_profile_updated(self, **kwargs):
-        return None
-
     async def record_account_deleted(self, **kwargs):
         return None
 
@@ -386,7 +383,7 @@ def register(container):
         build_container("stale_growth_bootstrap:register")
 
 
-def test_a_signup_invite_adapter_written_before_proof_for_fails_at_build(
+def test_a_signup_invite_adapter_written_before_allows_an_account_fails_at_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Without the check, a signup carrying an invitation fails as a 500 with no startup signal."""
@@ -411,14 +408,14 @@ def register(container):
 """,
     )
 
-    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks proof_for"):
+    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks allows_an_account"):
         build_container("stale_invite_bootstrap:register")
 
 
 def test_a_signup_invite_adapter_that_inherits_the_port_stub_fails_at_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The port's own stub answers None for every token, so an adapter carrying it proves no address."""
+    """The port's own stub answers for no token, so an adapter carrying it entitles nothing."""
     _write_bootstrap(
         tmp_path,
         monkeypatch,
@@ -440,11 +437,11 @@ def register(container):
 """,
     )
 
-    with pytest.raises(PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks proof_for"):
+    with pytest.raises(PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks allows_an_account"):
         build_container("inherited_stub_bootstrap:register")
 
 
-def test_a_signup_invite_adapter_that_delegates_proof_for_builds(
+def test_a_signup_invite_adapter_that_delegates_allows_an_account_builds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An adapter may carry the method on the instance, which is an implementation like any other."""
@@ -460,7 +457,7 @@ from gateway.ports.signup_invite_port import SignupInvitePort
 class DelegatingInvite(SignupInvitePort):
     def __init__(self, session):
         del session
-        self.proof_for = NullSignupInviteAdapter().proof_for
+        self.allows_an_account = NullSignupInviteAdapter().allows_an_account
 
 
 def register(container):

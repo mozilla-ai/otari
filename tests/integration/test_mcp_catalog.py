@@ -755,7 +755,11 @@ async def test_servers_a_workspace_already_has_are_left_out_for_whoever_can_see_
     outsider = await _member(async_db, await _organization(async_db, slug="globex"), role="owner")
     workspace = await _workspace(async_db, acme, manager=member)
     # Stored with a trailing slash the catalog's URL does not have.
-    async_db.add(WorkspaceMcpServer(workspace_id=workspace.id, name="Snag", url="https://mcp.snag.ac/mcp/"))
+    async_db.add(
+        WorkspaceMcpServer(
+            organization_id=acme.id, workspace_id=workspace.id, name="Snag", url="https://mcp.snag.ac/mcp/"
+        )
+    )
     await async_db.commit()
 
     everything = await service.search(query="", skip=0, limit=25)
@@ -800,7 +804,11 @@ async def test_the_popular_shelf_leaves_out_what_the_workspace_has(async_db: Asy
     acme = await _organization(async_db)
     member = await _member(async_db, acme, role="member")
     workspace = await _workspace(async_db, acme, manager=member)
-    async_db.add(WorkspaceMcpServer(workspace_id=workspace.id, name="Snag", url="https://mcp.snag.ac/mcp"))
+    async_db.add(
+        WorkspaceMcpServer(
+            organization_id=acme.id, workspace_id=workspace.id, name="Snag", url="https://mcp.snag.ac/mcp"
+        )
+    )
     await async_db.commit()
 
     shelf = await service.popular(user=member, workspace_id=workspace.id)

@@ -1,5 +1,7 @@
 """Errors the provider-key and hosted-provider surfaces raise, and the HTTP status each carries."""
 
+from collections.abc import Sequence
+
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -68,18 +70,44 @@ class OrgProviderKeyClientArgsRefusedError(TenancyValidationError):
         )
 
 
+class OrgProviderKeyClientArgsUnreadableError(TenancyValidationError):
+    """A masked client argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the admin enters the value in full, which is what a
+    rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked client argument keeps the stored value, and there is none that can be read back. "
+            "Enter the client arguments in full."
+        )
+
+
+class OrgProviderKeyEndpointAuthRefusedError(TenancyValidationError):
+    """An endpoint credential a key may not carry, named by what is wrong with it."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"This key cannot carry {reason}")
+
+
 class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     """A new ``api_base`` on a key that holds a credential, sent without the credential.
 
     The next call would send the stored credential to the new host, and whoever
     can edit a key only ever reads its ``last4``, so the move has to come from
     someone who holds the credential.
+
+    NOTE: Callers must name at least one credential. An empty sequence has
+    nothing to report and raises rather than refusing the move.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, credentials: Sequence[str]) -> None:
+        named = " and ".join(filter(None, (", ".join(credentials[:-1]), credentials[-1])))
         super().__init__(
-            "Changing a key's API base URL sends its credentials to the new host: "
-            "send api_key, and any hidden client_args credential, again in the same request"
+            f"Changing a key's API base URL sends its credentials to the new host: send {named} "
+            "again in the same request"
         )
 
 
@@ -498,7 +526,9 @@ __all__ = [
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",
     "OrgProviderKeyClientArgsRefusedError",
+    "OrgProviderKeyClientArgsUnreadableError",
     "OrgProviderKeyDisabledForWorkspaceError",
+    "OrgProviderKeyEndpointAuthRefusedError",
     "OrgProviderKeyNameRequiredError",
     "OrgProviderKeyNotArchivedError",
     "OrgProviderKeyNotFoundError",

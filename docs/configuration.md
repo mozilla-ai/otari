@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
-| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla AI's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -92,6 +92,7 @@ the corresponding startup value after the database is available.
 | `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
 | `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
 | `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
+| `organization_oidc_enabled` | Offer organizations their own OIDC sign-in connection: the **Single sign-on** page and its routes. Defaults to `true`; startup setting. `false` removes both, so no organization can configure a connection or sign in through one. Stored connections are kept. See [Single sign-on](sso.md). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -747,13 +748,9 @@ with the database. If the database holds encrypted credentials and neither
 `OTARI_SECRET_KEY` nor the key file is present, Otari refuses to start rather
 than generate a key that could not decrypt them.
 
-To rotate `OTARI_SECRET_KEY`, configure the new key before the old key,
-run the hosted provider and search-tool re-encryption endpoints
-(`POST /api/v1/hosted-providers/reencrypt` and
-`POST /api/v1/search-tools/reencrypt`), then remove the old key. A subagent
-router's key has no re-encryption endpoint yet: re-enter it on the Subagent
-router page after the rotation. Losing every configured encryption key makes
-stored credentials unrecoverable.
+To rotate `OTARI_SECRET_KEY`, configure the new key before the old key, then run every re-encryption endpoint: `POST /api/v1/hosted-providers/reencrypt`, `POST /api/v1/search-tools/reencrypt` and `POST /api/v1/organization-provider-keys/reencrypt`.
+
+**Keep the old key configured after that.** Only the three stores above have a re-encryption endpoint, and everything else still opens with the key it was written under. A subagent router's key is re-entered on the Subagent router page. Stored trace content is sealed under `OTARI_SECRET_KEY` too, and [Keeping trace content](trace-storage.md#keeping-trace-content) says to keep a rotated-out key for as long as you keep traces. Removing the old key while any of that remains makes it unrecoverable, as losing every configured key does.
 
 ### Hosted providers in config.yml
 
@@ -1097,7 +1094,7 @@ serves, with their history; the cleanup never runs on a schedule.
 An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
 from `models_dev_base_url`. It carries every rate the catalog states, per
 second, image, character and minute as well as per token, so a video, image,
-speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla AI's fork of models.dev,
 which publishes the same documents at the same paths, built from models.dev's
 catalog plus the models it does not list yet; each of those is also offered to
 models.dev, and leaves the fork once it lands there. `https://models.dev` reads
@@ -1378,10 +1375,12 @@ request's price.
 A transcription model that reports tokens and no length, such as
 `gpt-4o-mini-transcribe`, is billed at a `minute` or `second` rate for the
 length Otari reads from the uploaded file. Otari reads the length of a WAV,
-MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF or WMA file by its content,
-not its name. A file it cannot read, such as a WebM upload, gives no length,
-so that request keeps no cost at a `minute` or `second` rate. A length the
-provider reports always wins over the length read from the file.
+MP3, M4A or MP4, Ogg (Vorbis or Opus), FLAC, AIFF, WMA or WebM file by its
+content, not its name. A WebM file from a browser recorder states no length,
+so Otari counts it from the timestamps of the audio blocks in the file. A file
+it cannot read gives no length, so that request keeps no cost at a `minute` or
+`second` rate. A length the provider reports always wins over the length read
+from the file.
 
 A search tool declared in this file takes its rate as `price_per_call`, in USD,
 on its own entry:
@@ -1572,13 +1571,15 @@ file or environment, then to the built-in default.
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search
   with its provider. Several search instances with neither log a warning at
-  startup. A deployment with no search instance also serves the legacy backend
-  to [direct search](tools.md#direct-search), under its provider's name.
+  startup. A deployment with no search instance also serves the search the
+  legacy settings describe to [direct search](tools.md#direct-search), under its
+  provider's name.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
-  together. Default 10. A call past it gets a tool error the model can recover
-  from.
+  together. Default 10. Once it is reached, later rounds no longer offer either
+  tool, and a call past it within one round gets a tool error the model can
+  recover from.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
@@ -1756,10 +1757,45 @@ smtp_password: ${SMTP_PASSWORD}
 `mail_from_name` sets the name shown beside it.
 With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
 
+For local development, Docker Compose carries a mail sink. It accepts messages and delivers them to
+nobody, holding each one in a web inbox instead:
+
+```bash
+docker compose --profile mail up -d mailpit
+```
+
+Then point `config.yml` at it, and read what arrives at `http://localhost:8025`:
+
+```yaml
+public_base_url: "http://localhost:8000"
+mail_transport: smtp
+smtp_host: "mailpit"
+smtp_port: 1025
+smtp_tls: false
+mail_from_email: "otari@example.com"
+```
+
+The host is `mailpit` for a gateway in the same Compose network, and `localhost` on the mapped port
+for one running beside it, which is what `.env.example` carries as `OTARI_` variables. The sink holds
+every message in a temporary database inside its container, which goes when the container does, and
+it accepts any credential. So it belongs in development and never in a deployment that serves
+anybody.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
 `POST /api/v1/settings/mail/test`.
+
+Nothing reaches a recipient on that transport, so anything whose outcome depends
+on somebody receiving the message behaves as it does with no mail at all. An
+invitation hands its accept link back, a password link is shown instead of
+emailed, and health check alerts tell nobody. Signing up without an invitation,
+a verification resend and a password reset need `public_base_url` as well, and
+are refused without it. With it set they are accepted, because their message is
+written to the log for an operator to pass on, and the page that follows says to
+ask for the link rather than to watch an inbox. Signing up from an invitation is
+accepted either way, because the invitation names the address and the account
+needs no verification link.
 
 ### Invitations
 
@@ -1911,12 +1947,21 @@ ui_base_url: "https://app.example.com/dashboard"
 
 Unset, `public_base_url` is used.
 
-- Supply an absolute http(s) URL with no trailing slash.
-- Credentials and fragments are refused, since the value goes into redirects
-  and mail.
-- A query string is kept and joined to every link's own query, ahead of its
-  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
-  for an edge that serves one interface for several deployments.
+Supply an absolute http(s) URL with no trailing slash for either setting. A
+username or password in one is refused, because the value goes into redirects
+and into everybody's inbox. What may follow the host differs, because the two
+are joined to a path in different ways:
+
+- `public_base_url` refuses a query string and a fragment. Every URL naming this
+  deployment is built by appending to it, so either one would land in the middle
+  of the result instead of at its end.
+- `ui_base_url` refuses a fragment and keeps a query string, which is joined to
+  every link's own query ahead of its fragment
+  (`https://app.example.com/dashboard/verify-email?edge=a#token=…`), for an edge
+  that serves one interface for several deployments.
+
+An edge that tags its links therefore sets `ui_base_url` for the query, and
+leaves `public_base_url` as the plain address this process answers on.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is

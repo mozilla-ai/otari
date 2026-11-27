@@ -12,7 +12,6 @@ logged about a failed candidate: the next one is tried.
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
@@ -55,8 +54,6 @@ _CANDIDATE_FAILURES = (
     NetworkDeadlineExceeded,
     ContentDecodingError,
 )
-
-FetchLogo = Callable[[str], Awaitable[Logo | None]]
 
 
 class LogoFetcher:

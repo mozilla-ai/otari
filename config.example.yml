@@ -105,6 +105,17 @@ providers:
 # mail_from_email: "otari@example.com"
 # mail_from_name: "Otari"
 
+# For local development, docker-compose.yml carries a mail sink behind its
+# `mail` profile. Start it with `docker compose --profile mail up -d mailpit`,
+# read what it receives at http://localhost:8025, and point mail at it. From
+# a gateway in the same compose network the host is `mailpit`; from one running
+# on the host it is `localhost` on the mapped port.
+# mail_transport: smtp
+# smtp_host: "mailpit"
+# smtp_port: 1025
+# smtp_tls: false
+# mail_from_email: "otari@example.com"
+
 # Passkeys are on by default; set passkeys_enabled: false (OTARI_PASSKEYS_ENABLED)
 # to switch them off. They default to the host of public_base_url. Set these only for a parent
 # relying-party domain or multiple permitted dashboard origins.
@@ -113,13 +124,17 @@ providers:
 #   - "https://otari.example.com"
 
 # File and image normalization. See docs/files.md.
-# files_enabled: true
+# Serves the /api/v1/files endpoints; the sweep below runs either way.
+# files_api_enabled: true
 # files_local_dir: "./otari-files"
 # Any fsspec filesystem instead of a local directory or boto3 S3:
 # files_backend: fsspec
 # files_url: "gcs://my-bucket/otari-files"
 # files_storage_options: { project: "my-project" }
 # files_max_bytes: 536870912
+# Most bytes and uploads one workspace may hold at once (null: no limit):
+# files_workspace_max_bytes: 1073741824
+# files_workspace_max_files: 500
 # files_gemini_inline_max_bytes: 16777216
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864

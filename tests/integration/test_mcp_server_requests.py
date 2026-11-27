@@ -49,6 +49,7 @@ from gateway.services import mcp_stateless
 from gateway.services.mail import Mailer, MailMessage
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.mcp_stateless import ServerCheck
+from gateway.services.organizations import OrganizationReach
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
@@ -490,7 +491,11 @@ async def test_a_stored_url_with_whitespace_around_it_still_counts_as_stored(
     async_db: AsyncSession, stored: str
 ) -> None:
     team = await _team(async_db)
-    async_db.add(WorkspaceMcpServer(workspace_id=team.workspace.id, name="sentry", url=stored))
+    async_db.add(
+        WorkspaceMcpServer(
+            organization_id=team.workspace.organization_id, workspace_id=team.workspace.id, name="sentry", url=stored
+        )
+    )
     await async_db.commit()
 
     async with UnitOfWork(async_db) as uow:
@@ -770,7 +775,12 @@ async def test_a_member_who_leaves_the_workspace_has_their_waiting_requests_with
 
     uow = UnitOfWork(async_db)
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(team.ada.id, [team.workspace.id])
+        await McpGrantMembershipListener(
+            uow,
+            OrganizationReach(
+                WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            ),
+        ).member_lost_workspaces(team.ada.id, [team.workspace.id])
 
     group = (await world.requests.pending(user=team.owner, workspace_id=team.workspace.id)).data[0]
     assert [who.full_name for who in group.requesters] == ["Grace Viewer"]

@@ -22,6 +22,8 @@ from gateway.api.deps import (
     OrgProviderKeyServiceDep,
     OrgProviderModelServiceDep,
     PersonGrowthSignalPortDep,
+    refuse_access_tokens,
+    require_deployment_operator,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -35,6 +37,7 @@ from gateway.schemas.providers import (
     OrgProviderKeyModelUpdateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
+    OrgProviderKeysReencryptPublic,
     OrgProviderKeyUpdateRequest,
     OrgProviderModelsRefreshPublic,
     WorkspaceProviderKeyOverridePublic,
@@ -64,6 +67,34 @@ workspace_router = APIRouter(
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )
+
+# A third scope, and a third router rather than a route that overrides the gate
+# in place: ``OTARI_SECRET_KEY`` seals every tenant's rows, so re-sealing them
+# is the deployment operator's step and no organization owns it.
+operator_router = APIRouter(
+    prefix="/organization-provider-keys",
+    tags=["provider-keys"],
+    dependencies=[Depends(require_deployment_operator)],
+)
+
+
+# ==============================================================================
+# Deployment-wide
+# ==============================================================================
+
+
+@operator_router.post("/reencrypt")
+async def reencrypt_org_provider_keys(service: OrgProviderKeyServiceDep) -> OrgProviderKeysReencryptPublic:
+    """Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.
+
+    Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+    ``POST /api/v1/hosted-providers/reencrypt`` and
+    ``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's
+    encrypted values: the provider API key, the stored client arguments and the
+    endpoint credential. A key holding one no configured secret reads is left
+    as it is and counted, to be re-entered.
+    """
+    return await service.reencrypt()
 
 
 # ==============================================================================
@@ -314,7 +345,7 @@ async def refresh_org_provider_key_model_pricing(
     return await service.refresh_pricing(user=current_identity, key_id=key_id)
 
 
-@org_router.get("/{key_id}/available-models")
+@org_router.get("/{key_id}/available-models", dependencies=[Depends(refuse_access_tokens)])
 async def list_org_provider_key_available_models(
     service: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,

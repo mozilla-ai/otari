@@ -21,16 +21,20 @@ export type AclRow =
 export function McpGrantsTable({
   grants,
   defaultTools,
+  defaultDetail = "any other key",
   labels,
   canManage,
   showRules = true,
   onEdit,
   onEditDefault,
+  defaultHeld = "",
   onRemove,
 }: {
   grants: readonly WorkspaceMcpServerGrant[]
   /** The server's `everyone_tools`. */
   defaultTools: readonly string[]
+  /** The caption beside "Default policy", which says where it comes from. */
+  defaultDetail?: string
   /** User labels by user id, from the organization roster. */
   labels: ReadonlyMap<string, string>
   canManage: boolean
@@ -38,6 +42,8 @@ export function McpGrantsTable({
   showRules?: boolean
   onEdit: (grant: WorkspaceMcpServerGrant) => void
   onEditDefault: () => void
+  /** Why the default policy's Edit is held, as its menu item says; empty when it is not. */
+  defaultHeld?: string
   onRemove: (grant: WorkspaceMcpServerGrant) => void
 }) {
   const rules = showRules
@@ -63,7 +69,7 @@ export function McpGrantsTable({
           return (
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium">Default policy</span>
-              <span className="text-caption">any other key</span>
+              <span className="text-caption">{defaultDetail}</span>
             </span>
           )
         }
@@ -123,8 +129,9 @@ export function McpGrantsTable({
               <RowAction
                 icon={FiEdit2}
                 label="Edit…"
-                ariaLabel="Edit the default policy"
+                ariaLabel={defaultHeld || "Edit the default policy"}
                 onPress={onEditDefault}
+                isDisabled={defaultHeld !== ""}
               />
             </RowActionRow>
           )

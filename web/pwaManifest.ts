@@ -22,7 +22,19 @@ import type { Plugin } from "vite"
 /** Where the manifest lands in the bundle, beside the icons `public/pwa/` ships. */
 export const MANIFEST_PATH = "pwa/manifest.webmanifest"
 
-export function buildManifest(base: string) {
+export interface ManifestOptions {
+  /**
+   * What install surfaces say the app is. A build that composes onto this
+   * dashboard (otari-ai's superset) describes its own product here, as it
+   * already does in index.html.
+   */
+  description?: string
+}
+
+const DEFAULT_DESCRIPTION =
+  "Otari admin dashboard: browse and price models, manage aliases, and toggle runtime settings."
+
+export function buildManifest(base: string, options: ManifestOptions = {}) {
   // Vite's resolved `base` always ends in "/"; normalize anyway so a caller
   // holding a bare prefix cannot produce "/dashboardpwa/icon-192.png".
   const prefix = base.endsWith("/") ? base : `${base}/`
@@ -36,8 +48,7 @@ export function buildManifest(base: string) {
     id: prefix,
     name: "Otari",
     short_name: "Otari",
-    description:
-      "Otari admin dashboard: browse and price models, manage aliases, and toggle runtime settings.",
+    description: options.description ?? DEFAULT_DESCRIPTION,
     start_url: prefix,
     scope: prefix,
     display: "standalone",
@@ -55,8 +66,8 @@ export function buildManifest(base: string) {
   }
 }
 
-const serialize = (base: string) =>
-  `${JSON.stringify(buildManifest(base), null, 2)}\n`
+const serialize = (base: string, options: ManifestOptions) =>
+  `${JSON.stringify(buildManifest(base, options), null, 2)}\n`
 
 /**
  * The href rewrite transformIndexHtml applies. Vite rewrites an absolute URL
@@ -73,7 +84,7 @@ export function rewriteManifestLink(html: string, base: string): string {
   )
 }
 
-export function pwaManifest(): Plugin {
+export function pwaManifest(options: ManifestOptions = {}): Plugin {
   let base = "/"
   return {
     name: "otari:pwa-manifest",
@@ -84,7 +95,7 @@ export function pwaManifest(): Plugin {
       this.emitFile({
         type: "asset",
         fileName: MANIFEST_PATH,
-        source: serialize(base),
+        source: serialize(base, options),
       })
     },
     transformIndexHtml(html) {
@@ -98,7 +109,7 @@ export function pwaManifest(): Plugin {
       server.middlewares.use((req, res, next) => {
         if (req.url?.split("?", 1)[0] === served) {
           res.setHeader("Content-Type", "application/manifest+json")
-          res.end(serialize(base))
+          res.end(serialize(base, options))
           return
         }
         next()

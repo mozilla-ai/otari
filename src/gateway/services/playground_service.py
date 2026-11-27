@@ -50,15 +50,21 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import (
     McpCredentialMode,
     ResolvedWebSearchConfig,
-    WorkspaceMcpServer,
     WorkspaceWebSearchConfig,
 )
 from gateway.models.users import User
+from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.model_access import mcp_read_tools, resolve_request_mcp_access
+from gateway.services.model_access import resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tools import McpSignedInServers, WorkspaceCodeExecutionPolicies, fetch_resolves, search_resolves
+from gateway.services.tools import (
+    McpSignedInServers,
+    McpWorkspaceServers,
+    WorkspaceCodeExecutionPolicies,
+    fetch_resolves,
+    search_resolves,
+)
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -282,7 +288,7 @@ class LocalToolOffer:
 
     def files(self) -> ToolAvailability:
         """Uploads, unless the deployment turned them off."""
-        if not self._config.files_enabled:
+        if not self._config.files_api_enabled:
             return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
         return ToolAvailability(configured=True, enabled=True)
 
@@ -295,6 +301,7 @@ async def resolve_tool_availability(
     code_execution_policies: WorkspaceCodeExecutionPolicies,
     web_policies: WebAccessPolicies,
     signed_in: McpSignedInServers,
+    mcp_servers: McpWorkspaceServers,
     workspace_id: uuid.UUID,
     user_id: str,
 ) -> PlaygroundToolAvailability:
@@ -320,19 +327,14 @@ async def resolve_tool_availability(
     web_allowed, web_policy = await web_policies.access(workspace_id)
     code_execution_policy = await code_execution_policies.resolve(workspace_id)
     code_execution_row = code_execution_policy.enabled if code_execution_policy is not None else None
+    organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
     servers = (
-        (
-            await db.execute(
-                select(WorkspaceMcpServer)
-                .where(WorkspaceMcpServer.workspace_id == workspace_id)
-                .order_by(WorkspaceMcpServer.name)
-            )
-        )
-        .scalars()
-        .all()
+        sorted(await mcp_servers.every(workspace_id, organization_id), key=lambda view: view.row.name)
+        if organization_id is not None
+        else []
     )
     access = await resolve_request_mcp_access(db, None, workspace_id, session_user_id=user_id)
-    per_user = [server.id for server in servers if server.credential_mode == McpCredentialMode.PER_USER]
+    per_user = [server.id for server in servers if server.row.credential_mode == McpCredentialMode.PER_USER]
     connected = await signed_in.signed_in(user_id, per_user)
 
     return PlaygroundToolAvailability(
@@ -359,15 +361,13 @@ async def resolve_tool_availability(
         mcp_servers=[
             McpServerAvailability(
                 id=server.id,
-                name=server.name,
-                purpose_hint=server.purpose_hint,
+                name=server.row.name,
+                purpose_hint=server.row.purpose_hint,
                 enabled=server.enabled,
                 sign_in_required=server.id in per_user and server.id not in connected,
             )
             for server in servers
-            if access.patterns_for(
-                server.id, server.everyone_tools, mcp_read_tools(server.read_tools, server.read_tools_hinted)
-            )
+            if server.patterns_for(access)
         ],
     )
 

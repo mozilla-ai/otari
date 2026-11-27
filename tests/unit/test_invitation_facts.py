@@ -79,12 +79,12 @@ class _Store:
         full_name: str | None = "Ada",
         is_active: bool = True,
         verified_at: datetime | None = _NOW,
-        vouched_at: datetime | None = None,
+        proven_at: datetime | None = _NOW,
     ) -> uuid.UUID:
         row = User(
             email="ada@example.com",
             email_verified_at=verified_at,
-            email_vouched_at=vouched_at,
+            email_proven_at=proven_at,
             full_name=full_name,
             is_active=is_active,
         )
@@ -177,16 +177,16 @@ async def test_an_inviter_who_no_longer_exists_names_nobody(store: _Store) -> No
 
 
 @pytest.mark.parametrize(
-    ("verified_at", "vouched_at"),
-    [(None, None), (_NOW, _NOW)],
+    ("verified_at", "proven_at"),
+    [(None, None), (_NOW, None)],
     ids=["never verified", "verified by an admin's word"],
 )
 async def test_an_inviter_address_that_the_inviter_has_not_verified_is_absent(
-    store: _Store, verified_at: datetime | None, vouched_at: datetime | None
+    store: _Store, verified_at: datetime | None, proven_at: datetime | None
 ) -> None:
     async with store.uow:
         organization_id = await store.organization()
-        inviter_id = await store.user(full_name="Ada", verified_at=verified_at, vouched_at=vouched_at)
+        inviter_id = await store.user(full_name="Ada", verified_at=verified_at, proven_at=proven_at)
 
         facts = await store.reader.read(_terms(organization_id, invited_by_user_id=inviter_id), now=_NOW)
 

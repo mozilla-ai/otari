@@ -29,8 +29,10 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OverviewIndexRouteImport } from './routes/_overview.index'
 import { Route as OverviewRequestsRouteImport } from './routes/_overview.requests'
+import { Route as OverviewRouterSavingsRouteImport } from './routes/_overview.router-savings'
 import { Route as OverviewSessionsRouteImport } from './routes/_overview.sessions'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
+import { Route as AdminBudgetsRouteImport } from './routes/admin.budgets'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
@@ -41,6 +43,7 @@ import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
 import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
+import { Route as OrganizationMcpServersRouteImport } from './routes/organization.mcp-servers'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
 import { Route as OrganizationProviderKeysRouteImport } from './routes/organization.provider-keys'
@@ -62,6 +65,8 @@ import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as AdminHostedProvidersIndexRouteImport } from './routes/admin.hosted-providers.index'
 import { Route as AdminHostedProvidersNameRouteImport } from './routes/admin.hosted-providers.$name'
+import { Route as OrganizationMcpServersIndexRouteImport } from './routes/organization.mcp-servers.index'
+import { Route as OrganizationMcpServersServerIdRouteImport } from './routes/organization.mcp-servers.$serverId'
 import { Route as ToolsMcpServersIndexRouteImport } from './routes/tools.mcp-servers.index'
 import { Route as ToolsMcpServersServerIdRouteImport } from './routes/tools.mcp-servers.$serverId'
 
@@ -164,6 +169,11 @@ const OverviewRequestsRoute = OverviewRequestsRouteImport.update({
   path: '/requests',
   getParentRoute: () => OverviewRoute,
 } as any)
+const OverviewRouterSavingsRoute = OverviewRouterSavingsRouteImport.update({
+  id: '/router-savings',
+  path: '/router-savings',
+  getParentRoute: () => OverviewRoute,
+} as any)
 const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
   id: '/sessions',
   path: '/sessions',
@@ -172,6 +182,11 @@ const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
   id: '/admin/accounts',
   path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminBudgetsRoute = AdminBudgetsRouteImport.update({
+  id: '/admin/budgets',
+  path: '/admin/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCodeExecutionRoute = AdminCodeExecutionRouteImport.update({
@@ -222,6 +237,11 @@ const OrganizationDomainsRoute = OrganizationDomainsRouteImport.update({
 const OrganizationGuardrailsRoute = OrganizationGuardrailsRouteImport.update({
   id: '/guardrails',
   path: '/guardrails',
+  getParentRoute: () => OrganizationRoute,
+} as any)
+const OrganizationMcpServersRoute = OrganizationMcpServersRouteImport.update({
+  id: '/mcp-servers',
+  path: '/mcp-servers',
   getParentRoute: () => OrganizationRoute,
 } as any)
 const OrganizationMembersRoute = OrganizationMembersRouteImport.update({
@@ -333,6 +353,18 @@ const AdminHostedProvidersNameRoute =
     path: '/$name',
     getParentRoute: () => AdminHostedProvidersRoute,
   } as any)
+const OrganizationMcpServersIndexRoute =
+  OrganizationMcpServersIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => OrganizationMcpServersRoute,
+  } as any)
+const OrganizationMcpServersServerIdRoute =
+  OrganizationMcpServersServerIdRouteImport.update({
+    id: '/$serverId',
+    path: '/$serverId',
+    getParentRoute: () => OrganizationMcpServersRoute,
+  } as any)
 const ToolsMcpServersIndexRoute = ToolsMcpServersIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -364,8 +396,10 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -374,6 +408,7 @@ export interface FileRoutesByFullPath {
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
+  '/organization/mcp-servers': typeof OrganizationMcpServersRouteWithChildren
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
@@ -396,8 +431,10 @@ export interface FileRoutesByFullPath {
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
+  '/organization/mcp-servers/$serverId': typeof OrganizationMcpServersServerIdRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
   '/admin/hosted-providers/': typeof AdminHostedProvidersIndexRoute
+  '/organization/mcp-servers/': typeof OrganizationMcpServersIndexRoute
   '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -414,8 +451,10 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/requests': typeof OverviewRequestsRoute
+  '/router-savings': typeof OverviewRouterSavingsRoute
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
@@ -445,8 +484,10 @@ export interface FileRoutesByTo {
   '/tools': typeof ToolsIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
+  '/organization/mcp-servers/$serverId': typeof OrganizationMcpServersServerIdRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersIndexRoute
+  '/organization/mcp-servers': typeof OrganizationMcpServersIndexRoute
   '/tools/mcp-servers': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesById {
@@ -470,8 +511,10 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/_overview/requests': typeof OverviewRequestsRoute
+  '/_overview/router-savings': typeof OverviewRouterSavingsRoute
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
@@ -480,6 +523,7 @@ export interface FileRoutesById {
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
+  '/organization/mcp-servers': typeof OrganizationMcpServersRouteWithChildren
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
@@ -503,8 +547,10 @@ export interface FileRoutesById {
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
+  '/organization/mcp-servers/$serverId': typeof OrganizationMcpServersServerIdRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
   '/admin/hosted-providers/': typeof AdminHostedProvidersIndexRoute
+  '/organization/mcp-servers/': typeof OrganizationMcpServersIndexRoute
   '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRouteTypes {
@@ -529,8 +575,10 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -539,6 +587,7 @@ export interface FileRouteTypes {
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
+    | '/organization/mcp-servers'
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
@@ -561,8 +610,10 @@ export interface FileRouteTypes {
     | '/tools/'
     | '/workspaces/'
     | '/admin/hosted-providers/$name'
+    | '/organization/mcp-servers/$serverId'
     | '/tools/mcp-servers/$serverId'
     | '/admin/hosted-providers/'
+    | '/organization/mcp-servers/'
     | '/tools/mcp-servers/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -579,8 +630,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/requests'
+    | '/router-savings'
     | '/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/recommender'
     | '/admin/web-search'
@@ -610,8 +663,10 @@ export interface FileRouteTypes {
     | '/tools'
     | '/workspaces'
     | '/admin/hosted-providers/$name'
+    | '/organization/mcp-servers/$serverId'
     | '/tools/mcp-servers/$serverId'
     | '/admin/hosted-providers'
+    | '/organization/mcp-servers'
     | '/tools/mcp-servers'
   id:
     | '__root__'
@@ -634,8 +689,10 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/_overview/requests'
+    | '/_overview/router-savings'
     | '/_overview/sessions'
     | '/admin/accounts'
+    | '/admin/budgets'
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/recommender'
@@ -644,6 +701,7 @@ export interface FileRouteTypes {
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
+    | '/organization/mcp-servers'
     | '/organization/members'
     | '/organization/pricing'
     | '/organization/provider-keys'
@@ -667,8 +725,10 @@ export interface FileRouteTypes {
     | '/tools/'
     | '/workspaces/'
     | '/admin/hosted-providers/$name'
+    | '/organization/mcp-servers/$serverId'
     | '/tools/mcp-servers/$serverId'
     | '/admin/hosted-providers/'
+    | '/organization/mcp-servers/'
     | '/tools/mcp-servers/'
   fileRoutesById: FileRoutesById
 }
@@ -692,6 +752,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AdminAccountsRoute: typeof AdminAccountsRoute
+  AdminBudgetsRoute: typeof AdminBudgetsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRouteWithChildren
   AdminRecommenderRoute: typeof AdminRecommenderRoute
@@ -845,6 +906,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OverviewRequestsRouteImport
       parentRoute: typeof OverviewRoute
     }
+    '/_overview/router-savings': {
+      id: '/_overview/router-savings'
+      path: '/router-savings'
+      fullPath: '/router-savings'
+      preLoaderRoute: typeof OverviewRouterSavingsRouteImport
+      parentRoute: typeof OverviewRoute
+    }
     '/_overview/sessions': {
       id: '/_overview/sessions'
       path: '/sessions'
@@ -857,6 +925,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/accounts'
       fullPath: '/admin/accounts'
       preLoaderRoute: typeof AdminAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/budgets': {
+      id: '/admin/budgets'
+      path: '/admin/budgets'
+      fullPath: '/admin/budgets'
+      preLoaderRoute: typeof AdminBudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/code-execution': {
@@ -927,6 +1002,13 @@ declare module '@tanstack/react-router' {
       path: '/guardrails'
       fullPath: '/organization/guardrails'
       preLoaderRoute: typeof OrganizationGuardrailsRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
+    '/organization/mcp-servers': {
+      id: '/organization/mcp-servers'
+      path: '/mcp-servers'
+      fullPath: '/organization/mcp-servers'
+      preLoaderRoute: typeof OrganizationMcpServersRouteImport
       parentRoute: typeof OrganizationRoute
     }
     '/organization/members': {
@@ -1076,6 +1158,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminHostedProvidersNameRouteImport
       parentRoute: typeof AdminHostedProvidersRoute
     }
+    '/organization/mcp-servers/': {
+      id: '/organization/mcp-servers/'
+      path: '/'
+      fullPath: '/organization/mcp-servers/'
+      preLoaderRoute: typeof OrganizationMcpServersIndexRouteImport
+      parentRoute: typeof OrganizationMcpServersRoute
+    }
+    '/organization/mcp-servers/$serverId': {
+      id: '/organization/mcp-servers/$serverId'
+      path: '/$serverId'
+      fullPath: '/organization/mcp-servers/$serverId'
+      preLoaderRoute: typeof OrganizationMcpServersServerIdRouteImport
+      parentRoute: typeof OrganizationMcpServersRoute
+    }
     '/tools/mcp-servers/': {
       id: '/tools/mcp-servers/'
       path: '/'
@@ -1095,12 +1191,14 @@ declare module '@tanstack/react-router' {
 
 interface OverviewRouteChildren {
   OverviewRequestsRoute: typeof OverviewRequestsRoute
+  OverviewRouterSavingsRoute: typeof OverviewRouterSavingsRoute
   OverviewSessionsRoute: typeof OverviewSessionsRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
 }
 
 const OverviewRouteChildren: OverviewRouteChildren = {
   OverviewRequestsRoute: OverviewRequestsRoute,
+  OverviewRouterSavingsRoute: OverviewRouterSavingsRoute,
   OverviewSessionsRoute: OverviewSessionsRoute,
   OverviewIndexRoute: OverviewIndexRoute,
 }
@@ -1122,9 +1220,26 @@ const ModelsRouteChildren: ModelsRouteChildren = {
 const ModelsRouteWithChildren =
   ModelsRoute._addFileChildren(ModelsRouteChildren)
 
+interface OrganizationMcpServersRouteChildren {
+  OrganizationMcpServersServerIdRoute: typeof OrganizationMcpServersServerIdRoute
+  OrganizationMcpServersIndexRoute: typeof OrganizationMcpServersIndexRoute
+}
+
+const OrganizationMcpServersRouteChildren: OrganizationMcpServersRouteChildren =
+  {
+    OrganizationMcpServersServerIdRoute: OrganizationMcpServersServerIdRoute,
+    OrganizationMcpServersIndexRoute: OrganizationMcpServersIndexRoute,
+  }
+
+const OrganizationMcpServersRouteWithChildren =
+  OrganizationMcpServersRoute._addFileChildren(
+    OrganizationMcpServersRouteChildren,
+  )
+
 interface OrganizationRouteChildren {
   OrganizationDomainsRoute: typeof OrganizationDomainsRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
+  OrganizationMcpServersRoute: typeof OrganizationMcpServersRouteWithChildren
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
   OrganizationProviderKeysRoute: typeof OrganizationProviderKeysRoute
@@ -1137,6 +1252,7 @@ interface OrganizationRouteChildren {
 const OrganizationRouteChildren: OrganizationRouteChildren = {
   OrganizationDomainsRoute: OrganizationDomainsRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
+  OrganizationMcpServersRoute: OrganizationMcpServersRouteWithChildren,
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
   OrganizationProviderKeysRoute: OrganizationProviderKeysRoute,
@@ -1242,6 +1358,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AdminAccountsRoute: AdminAccountsRoute,
+  AdminBudgetsRoute: AdminBudgetsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
   AdminHostedProvidersRoute: AdminHostedProvidersRouteWithChildren,
   AdminRecommenderRoute: AdminRecommenderRoute,

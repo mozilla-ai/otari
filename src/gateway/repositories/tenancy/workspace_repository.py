@@ -173,10 +173,30 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         )
         return list(rows.scalars().all()), count
 
+    async def get_as_stored(self, workspace_id: uuid.UUID) -> Workspace | None:
+        """Return the workspace as the database holds it now, past this session's copy of the row.
+
+        For a caller that waited on ``lock``: a deletion of the workspace commits before that lock is granted,
+        and :meth:`get` would answer from the identity map with the row the deletion removed.
+        """
+        result = await self.db.execute(
+            select(Workspace).where(col(Workspace.id) == workspace_id).execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""
         result = await self.db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
         return result.scalar_one_or_none()
+
+    async def get_organization_ids(self, workspace_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return the organizations these workspaces belong to, in one query."""
+        if not workspace_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(Workspace.organization_id)).where(col(Workspace.id).in_(list(workspace_ids))).distinct()
+        )
+        return set(result.scalars().all())
 
     async def get_by_organization_and_name(self, organization_id: uuid.UUID, name: str) -> Workspace | None:
         """Return an organization's workspace with this name, or None."""
@@ -416,6 +436,15 @@ class WorkspaceMemberRepository:
                 col(Workspace.organization_id) == organization_id,
                 col(WorkspaceMember.status) == "active",
             )
+        )
+        return list(result.scalars().all())
+
+    async def user_ids_for_members(self, member_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """The identity each of these memberships joins, in one query."""
+        if not member_ids:
+            return []
+        result = await self.db.execute(
+            select(col(WorkspaceMember.user_id)).where(col(WorkspaceMember.id).in_(list(member_ids))).distinct()
         )
         return list(result.scalars().all())
 

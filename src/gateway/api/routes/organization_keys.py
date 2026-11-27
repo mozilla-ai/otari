@@ -61,6 +61,7 @@ from gateway.api.deps import (
     CurrentIdentity,
     DeploymentAdministrationAccessDep,
     OrganizationServiceDep,
+    OrgProviderKeyServiceDep,
     PersonGrowthSignalPortDep,
     get_config,
     get_db,
@@ -95,6 +96,7 @@ from gateway.services.api_keys import (
     organization_key_changes,
     refuse_service_key_flag_change,
 )
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -103,7 +105,7 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
@@ -237,8 +239,8 @@ async def _load_own_writable_key(
     key_id: str,
     *,
     revoking: bool = False,
-) -> APIKey:
-    """One of the caller's own keys, or 404, refused with 403 to a viewer of its workspace.
+) -> tuple[Organization, APIKey]:
+    """The caller's organization and one of their own keys in it, or 404, refused with 403 to a viewer of its workspace.
 
     An owner or admin also reaches the organization's service keys. A viewer
     still lists their keys; changing, rotating or revoking one is a write, and an
@@ -251,7 +253,7 @@ async def _load_own_writable_key(
     await organizations.hold_workspace_write_access(
         user=identity, organization_id=organization.id, workspace_id=key.workspace_id, revoking=revoking
     )
-    return key
+    return organization, key
 
 
 async def _load_member_key(
@@ -282,6 +284,7 @@ async def create_own_key(
     key_format: ApiKeyFormatPortDep,
     organizations: OrganizationServiceDep,
     budgets: BudgetServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
 ) -> CreateKeyResponse:
     """Create an API key owned by the caller, in a workspace they may see.
 
@@ -349,8 +352,11 @@ async def create_own_key(
         user=identity, organization_id=organization.id, workspace_id=workspace_id, revoking=False
     )
 
+    key_slugs = await org_provider_keys.slug_providers(organization.id)
     try:
-        allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_models = validate_allowed_models(
+            config, request.allowed_models, organization_id=organization.id, key_slugs=key_slugs
+        )
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
         scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
@@ -378,6 +384,18 @@ async def create_own_key(
     )
     # A key must not grant more than its user's default, the same narrow-only
     # rule the operator surface enforces; here the user is always the caller.
+    # A catalog ID stands for the offerings that default covers.
+    if owner.allowed_models is not None:
+        try:
+            allowed_models = validate_allowed_models(
+                config,
+                request.allowed_models,
+                organization_id=organization.id,
+                within=owner.allowed_models,
+                key_slugs=key_slugs,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not is_allowlist_subset(allowed_models, owner.allowed_models, tool_keys=config.legacy_search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
     if not tools_within_user(config, allowed_tools, user_tools=owner.allowed_tools, user_models=owner.allowed_models):
@@ -498,11 +516,12 @@ async def update_own_key(
     api_keys: ApiKeyServiceDep,
     organizations: OrganizationServiceDep,
     budgets: BudgetServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
 ) -> KeyInfo:
     """Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin."""
     fields = request.model_fields_set
     switching_off = fields == {"is_active"} and request.is_active is False
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
+    organization, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=switching_off)
     refuse_service_key_flag_change(key, request.is_service_key)
 
     # Tri-state via model_fields_set: the nullable columns take null to clear
@@ -530,7 +549,14 @@ async def update_own_key(
     )
 
     try:
-        await api_keys.update_owned(config, key, changes, owner_id=str(key.user_id))
+        await api_keys.update_owned(
+            config,
+            key,
+            changes,
+            owner_id=str(key.user_id),
+            organization_id=organization.id,
+            key_slugs=await org_provider_keys.slug_providers(organization.id),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except DATABASE_ERRORS as exc:
@@ -553,7 +579,7 @@ async def rotate_own_key(
     raw key is returned once, and the previous secret stops authenticating
     immediately with no grace window.
     """
-    key = await _load_own_writable_key(db, organizations, identity, key_id)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id)
 
     new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
@@ -583,7 +609,7 @@ async def delete_own_key(
     organizations: OrganizationServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
-    key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
+    _, key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
     await db.delete(key)
     try:

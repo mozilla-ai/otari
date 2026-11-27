@@ -4,8 +4,7 @@ Only fields the logging rule lets an error carry (design section 7): the
 provider, its HTTP status, a tag, and whether a retry may help; never a body,
 a URL or exception text. The direct endpoint's 502 carries them as headers,
 and a failed entry in Chat Completions' ``otari_tool_calls`` carries them as its
-``error`` when the call's backend kept them: the fetch backend does, and the
-old search backend does not.
+``error`` when the call's backend kept them.
 """
 
 from dataclasses import asdict, dataclass
@@ -67,6 +66,10 @@ class WebToolFailure:
     def as_dict(self) -> dict[str, Any]:
         """The four fields as Chat Completions' ``otari_tool_calls`` entries carry them, ``None`` kept."""
         return asdict(self)
+
+    def as_span_error(self) -> dict[str, Any]:
+        """The fields a failed call's tool span records: the tag as its error type, the status and the provider."""
+        return {"error_type": self.tag, "error_status": self.status, "error_provider": self.provider}
 
     def as_headers(self) -> dict[str, str]:
         """The four fields as the direct endpoint's 502 headers; ``retryable`` is ``true`` or ``false``."""
