@@ -452,9 +452,6 @@ async def create_user_for_signup(
     Such an account founds no organization of its own. The invitation grants its membership
     when it is accepted.
 
-    NOTE: The answer is read without locking the invitation, so a cancellation committed between
-    the read and the write is not seen. The window is this transaction's own remaining work.
-
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
     The mail send is scheduled on ``background_tasks`` after the commit rather
