@@ -18,8 +18,13 @@ from typing import cast
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
+SDK_ROOT = REPO_ROOT / "scripts" / "sdk_codegen"
+if str(SDK_ROOT) not in sys.path:
+    sys.path.insert(0, str(SDK_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+import endpoint_manifest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import FederationIssuer
@@ -125,6 +130,16 @@ def check_spec(spec: dict[str, object], existing_path: Path) -> bool:
     return generated_json == existing_json
 
 
+def warn_unclassified_endpoints(spec: dict[str, object]) -> None:
+    """Show routes absent from the SDK manifest without blocking spec generation."""
+    covered, excluded = endpoint_manifest.load_manifest()
+    missing = endpoint_manifest.unaccounted(endpoint_manifest.spec_endpoints(spec), covered, excluded)
+    if missing:
+        print("Warning: classify these endpoints in scripts/sdk_codegen/sdk-endpoints.txt:", file=sys.stderr)
+        for entry in missing:
+            print(f"  {entry}", file=sys.stderr)
+
+
 def main() -> int:
     """Generate or check OpenAPI specification.
 
@@ -149,6 +164,7 @@ def main() -> int:
 
     print("Generating OpenAPI specification...")
     spec = generate_openapi_spec()
+    warn_unclassified_endpoints(spec)
 
     if args.check:
         print(f"Checking if {args.output} is up to date...")
