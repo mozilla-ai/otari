@@ -105,6 +105,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "empty": Scenario(handler=_replay("serply", "empty")),
         "error": Scenario(handler=_replay("serply", "error")),
     },
+    "specstream": {
+        "normal": Scenario(handler=_replay("specstream", "normal")),
+        "empty": Scenario(handler=_replay("specstream", "empty")),
+        "error": Scenario(handler=_replay("specstream", "error")),
+    },
     "tavily": {
         "normal": Scenario(handler=_replay("tavily", "normal")),
         "empty": Scenario(handler=_replay("tavily", "empty")),

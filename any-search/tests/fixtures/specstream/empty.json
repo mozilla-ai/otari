@@ -1,0 +1,32 @@
+{
+  "status": 200,
+  "body": {
+    "data": {
+      "id": "53e596a50c694ec2b69fcadf5e2c3a97",
+      "request_id": "53e596a50c694ec2b69fcadf5e2c3a97",
+      "query": "zqxjvwk plorbantic frumulous site:nonexistent-domain-example.org",
+      "kind": "list",
+      "columns": [],
+      "answer": null,
+      "rows": [],
+      "sources": [],
+      "handoff": null,
+      "took_ms": 7317,
+      "price_usd": 0.0,
+      "page": 1,
+      "next_page": null,
+      "operators": [
+        {
+          "kind": "site",
+          "shown": 0,
+          "engines": [
+            "duckduckgo",
+            "right_dao",
+            "yahoo_japan",
+            "yandex"
+          ]
+        }
+      ]
+    }
+  }
+}

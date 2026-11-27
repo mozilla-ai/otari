@@ -48,6 +48,7 @@ jobs:
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
       HAS_PERPLEXITY_KEY: ${{ secrets.PERPLEXITY_API_KEY != '' }}
       HAS_SERPLY_KEY: ${{ secrets.SERPLY_API_KEY != '' }}
+      HAS_SPECSTREAM_KEY: ${{ secrets.SPECSTREAM_API_KEY != '' }}
       HAS_SYNTHETIC_KEY: ${{ secrets.SYNTHETIC_API_KEY != '' }}
       HAS_TAVILY_KEY: ${{ secrets.TAVILY_API_KEY != '' }}
       HAS_YDC_KEY: ${{ secrets.YDC_API_KEY != '' }}
@@ -114,6 +115,12 @@ jobs:
       run: |
         echo "::error::The SERPLY_API_KEY secret is not set, so the Serply live tests cannot run."
         exit 1
+
+    # The project holds no SpecStream key yet, so a run without one skips those tests on every
+    # trigger rather than failing a scheduled one.
+    - name: Say so when the SpecStream key is absent
+      if: env.HAS_SPECSTREAM_KEY != 'true'
+      run: echo "::notice::The SPECSTREAM_API_KEY secret is not available to this run; the SpecStream live tests skip."
 
     # Synthetic's search needs a subscription, which the project does not hold yet, so a run
     # without its key skips those tests on every trigger rather than failing a scheduled one.
@@ -190,6 +197,7 @@ jobs:
         PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         SERPLY_API_KEY: ${{ secrets.SERPLY_API_KEY }}
+        SPECSTREAM_API_KEY: ${{ secrets.SPECSTREAM_API_KEY }}
         SYNTHETIC_API_KEY: ${{ secrets.SYNTHETIC_API_KEY }}
         TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         YDC_API_KEY: ${{ secrets.YDC_API_KEY }}
