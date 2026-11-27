@@ -17056,7 +17056,7 @@ export interface components {
         McpConnectionStart: {
             /**
              * Return To
-             * @description A dashboard path to land on once signed in, such as /tools/mcp-servers. Anything that is not a path inside the dashboard is refused
+             * @description A dashboard path to land on once signed in, such as /mcp-servers. Anything that is not a path inside the dashboard is refused
              */
             return_to?: string | null;
         };

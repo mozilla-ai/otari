@@ -108,7 +108,7 @@ describe("McpServerDetailPage, Access", () => {
 
     expect(screen.getByRole("link", { name: "← MCP servers" })).toHaveAttribute(
       "href",
-      "/tools/mcp-servers",
+      "/mcp-servers",
     )
   })
 

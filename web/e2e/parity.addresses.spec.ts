@@ -40,6 +40,19 @@ test.describe("dashboard addresses", () => {
     await expect(pageHeading(page, "Routing")).toBeVisible()
   })
 
+  test("the retired Sessions and Tools MCP servers paths land on the pages that replaced them", async ({
+    page,
+  }) => {
+    await login(page)
+    await page.goto("/sessions?range=7d")
+    await expect(page).toHaveURL(/:\d+\/traces\?range=7d$/)
+    await expect(pageHeading(page, "Traces")).toBeVisible()
+
+    await page.goto("/tools/mcp-servers")
+    await expect(page).toHaveURL(/:\d+\/mcp-servers$/)
+    await expect(pageHeading(page, "MCP servers")).toBeVisible()
+  })
+
   test("an API path a browser opens stays the API's answer", async ({
     page,
   }) => {

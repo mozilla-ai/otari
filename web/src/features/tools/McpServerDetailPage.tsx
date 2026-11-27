@@ -136,7 +136,7 @@ export function McpServerDetailPage({
 
   const back = (
     <nav aria-label="Back" className="text-caption">
-      <Link to="/tools/mcp-servers" className="text-link hover:text-link-hover">
+      <Link to="/mcp-servers" className="text-link hover:text-link-hover">
         ← MCP servers
       </Link>
     </nav>
@@ -393,7 +393,7 @@ export function McpServerDetailPage({
           remove.mutate(ids, {
             onSuccess: () => {
               setDeleting(false)
-              void navigate({ to: "/tools/mcp-servers" })
+              void navigate({ to: "/mcp-servers" })
             },
           })
         }

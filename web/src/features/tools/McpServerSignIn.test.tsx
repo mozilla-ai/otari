@@ -247,7 +247,7 @@ describe("McpServerSignIn", () => {
     )
     // Where the sign-in lands afterwards: this server's own page.
     expect(started?.body).toEqual({
-      return_to: `/tools/mcp-servers/${SERVER.id}`,
+      return_to: `/mcp-servers/${SERVER.id}`,
     })
     // A member is not shown, and does not ask for, who else is connected.
     expect(screen.queryByText("Connected users")).not.toBeInTheDocument()

@@ -18,6 +18,7 @@ import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as HealthChecksRouteImport } from './routes/health-checks'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
+import { Route as McpServersRouteImport } from './routes/mcp-servers'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
@@ -39,6 +40,8 @@ import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
 import { Route as McpConnectionsCallbackRouteImport } from './routes/mcp-connections.callback'
+import { Route as McpServersIndexRouteImport } from './routes/mcp-servers.index'
+import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers.$serverId'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -60,7 +63,6 @@ import { Route as RulesRuleIdRouteImport } from './routes/rules.$ruleId'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
-import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
@@ -113,6 +115,11 @@ const InvitationsRoute = InvitationsRouteImport.update({
 const KeysRoute = KeysRouteImport.update({
   id: '/keys',
   path: '/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpServersRoute = McpServersRouteImport.update({
+  id: '/mcp-servers',
+  path: '/mcp-servers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MembersRoute = MembersRouteImport.update({
@@ -219,6 +226,16 @@ const McpConnectionsCallbackRoute = McpConnectionsCallbackRouteImport.update({
   id: '/mcp-connections/callback',
   path: '/mcp-connections/callback',
   getParentRoute: () => rootRouteImport,
+} as any)
+const McpServersIndexRoute = McpServersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => McpServersRoute,
+} as any)
+const McpServersServerIdRoute = McpServersServerIdRouteImport.update({
+  id: '/$serverId',
+  path: '/$serverId',
+  getParentRoute: () => McpServersRoute,
 } as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
@@ -327,11 +344,6 @@ const ToolsGuardrailsRoute = ToolsGuardrailsRouteImport.update({
   path: '/guardrails',
   getParentRoute: () => ToolsRoute,
 } as any)
-const ToolsMcpServersRoute = ToolsMcpServersRouteImport.update({
-  id: '/mcp-servers',
-  path: '/mcp-servers',
-  getParentRoute: () => ToolsRoute,
-} as any)
 const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
   id: '/web-search',
   path: '/web-search',
@@ -372,14 +384,14 @@ const OrganizationMcpServersServerIdRoute =
     getParentRoute: () => OrganizationMcpServersRoute,
   } as any)
 const ToolsMcpServersIndexRoute = ToolsMcpServersIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ToolsMcpServersRoute,
+  id: '/mcp-servers/',
+  path: '/mcp-servers/',
+  getParentRoute: () => ToolsRoute,
 } as any)
 const ToolsMcpServersServerIdRoute = ToolsMcpServersServerIdRouteImport.update({
-  id: '/$serverId',
-  path: '/$serverId',
-  getParentRoute: () => ToolsMcpServersRoute,
+  id: '/mcp-servers/$serverId',
+  path: '/mcp-servers/$serverId',
+  getParentRoute: () => ToolsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -392,6 +404,7 @@ export interface FileRoutesByFullPath {
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
+  '/mcp-servers': typeof McpServersRouteWithChildren
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
@@ -412,6 +425,7 @@ export interface FileRoutesByFullPath {
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -427,9 +441,9 @@ export interface FileRoutesByFullPath {
   '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
-  '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/mcp-servers/': typeof McpServersIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/people/': typeof PeopleIndexRoute
@@ -467,6 +481,7 @@ export interface FileRoutesByTo {
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -484,6 +499,7 @@ export interface FileRoutesByTo {
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/': typeof OverviewIndexRoute
+  '/mcp-servers': typeof McpServersIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
   '/people': typeof PeopleIndexRoute
@@ -509,6 +525,7 @@ export interface FileRoutesById {
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
+  '/mcp-servers': typeof McpServersRouteWithChildren
   '/members': typeof MembersRoute
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
@@ -529,6 +546,7 @@ export interface FileRoutesById {
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -544,10 +562,10 @@ export interface FileRoutesById {
   '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
-  '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/_overview/': typeof OverviewIndexRoute
+  '/mcp-servers/': typeof McpServersIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/people/': typeof PeopleIndexRoute
@@ -574,6 +592,7 @@ export interface FileRouteTypes {
     | '/health-checks'
     | '/invitations'
     | '/keys'
+    | '/mcp-servers'
     | '/members'
     | '/models'
     | '/organization'
@@ -594,6 +613,7 @@ export interface FileRouteTypes {
     | '/admin/recommender'
     | '/admin/web-search'
     | '/mcp-connections/callback'
+    | '/mcp-servers/$serverId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -609,9 +629,9 @@ export interface FileRouteTypes {
     | '/rules/$ruleId'
     | '/tools/code-execution'
     | '/tools/guardrails'
-    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
+    | '/mcp-servers/'
     | '/models/'
     | '/organization/'
     | '/people/'
@@ -649,6 +669,7 @@ export interface FileRouteTypes {
     | '/admin/recommender'
     | '/admin/web-search'
     | '/mcp-connections/callback'
+    | '/mcp-servers/$serverId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -666,6 +687,7 @@ export interface FileRouteTypes {
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
     | '/'
+    | '/mcp-servers'
     | '/models'
     | '/organization'
     | '/people'
@@ -690,6 +712,7 @@ export interface FileRouteTypes {
     | '/health-checks'
     | '/invitations'
     | '/keys'
+    | '/mcp-servers'
     | '/members'
     | '/models'
     | '/organization'
@@ -710,6 +733,7 @@ export interface FileRouteTypes {
     | '/admin/recommender'
     | '/admin/web-search'
     | '/mcp-connections/callback'
+    | '/mcp-servers/$serverId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -725,10 +749,10 @@ export interface FileRouteTypes {
     | '/rules/$ruleId'
     | '/tools/code-execution'
     | '/tools/guardrails'
-    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
     | '/_overview/'
+    | '/mcp-servers/'
     | '/models/'
     | '/organization/'
     | '/people/'
@@ -754,6 +778,7 @@ export interface RootRouteChildren {
   HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
+  McpServersRoute: typeof McpServersRouteWithChildren
   MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
@@ -840,6 +865,13 @@ declare module '@tanstack/react-router' {
       path: '/keys'
       fullPath: '/keys'
       preLoaderRoute: typeof KeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-servers': {
+      id: '/mcp-servers'
+      path: '/mcp-servers'
+      fullPath: '/mcp-servers'
+      preLoaderRoute: typeof McpServersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/members': {
@@ -989,6 +1021,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpConnectionsCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp-servers/': {
+      id: '/mcp-servers/'
+      path: '/'
+      fullPath: '/mcp-servers/'
+      preLoaderRoute: typeof McpServersIndexRouteImport
+      parentRoute: typeof McpServersRoute
+    }
+    '/mcp-servers/$serverId': {
+      id: '/mcp-servers/$serverId'
+      path: '/$serverId'
+      fullPath: '/mcp-servers/$serverId'
+      preLoaderRoute: typeof McpServersServerIdRouteImport
+      parentRoute: typeof McpServersRoute
+    }
     '/models/': {
       id: '/models/'
       path: '/'
@@ -1136,13 +1182,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ToolsGuardrailsRouteImport
       parentRoute: typeof ToolsRoute
     }
-    '/tools/mcp-servers': {
-      id: '/tools/mcp-servers'
-      path: '/mcp-servers'
-      fullPath: '/tools/mcp-servers'
-      preLoaderRoute: typeof ToolsMcpServersRouteImport
-      parentRoute: typeof ToolsRoute
-    }
     '/tools/web-search': {
       id: '/tools/web-search'
       path: '/web-search'
@@ -1194,17 +1233,17 @@ declare module '@tanstack/react-router' {
     }
     '/tools/mcp-servers/': {
       id: '/tools/mcp-servers/'
-      path: '/'
+      path: '/mcp-servers'
       fullPath: '/tools/mcp-servers/'
       preLoaderRoute: typeof ToolsMcpServersIndexRouteImport
-      parentRoute: typeof ToolsMcpServersRoute
+      parentRoute: typeof ToolsRoute
     }
     '/tools/mcp-servers/$serverId': {
       id: '/tools/mcp-servers/$serverId'
-      path: '/$serverId'
+      path: '/mcp-servers/$serverId'
       fullPath: '/tools/mcp-servers/$serverId'
       preLoaderRoute: typeof ToolsMcpServersServerIdRouteImport
-      parentRoute: typeof ToolsMcpServersRoute
+      parentRoute: typeof ToolsRoute
     }
   }
 }
@@ -1225,6 +1264,20 @@ const OverviewRouteChildren: OverviewRouteChildren = {
 
 const OverviewRouteWithChildren = OverviewRoute._addFileChildren(
   OverviewRouteChildren,
+)
+
+interface McpServersRouteChildren {
+  McpServersServerIdRoute: typeof McpServersServerIdRoute
+  McpServersIndexRoute: typeof McpServersIndexRoute
+}
+
+const McpServersRouteChildren: McpServersRouteChildren = {
+  McpServersServerIdRoute: McpServersServerIdRoute,
+  McpServersIndexRoute: McpServersIndexRoute,
+}
+
+const McpServersRouteWithChildren = McpServersRoute._addFileChildren(
+  McpServersRouteChildren,
 )
 
 interface ModelsRouteChildren {
@@ -1299,34 +1352,22 @@ const RoutingRouteChildren: RoutingRouteChildren = {
 const RoutingRouteWithChildren =
   RoutingRoute._addFileChildren(RoutingRouteChildren)
 
-interface ToolsMcpServersRouteChildren {
-  ToolsMcpServersServerIdRoute: typeof ToolsMcpServersServerIdRoute
-  ToolsMcpServersIndexRoute: typeof ToolsMcpServersIndexRoute
-}
-
-const ToolsMcpServersRouteChildren: ToolsMcpServersRouteChildren = {
-  ToolsMcpServersServerIdRoute: ToolsMcpServersServerIdRoute,
-  ToolsMcpServersIndexRoute: ToolsMcpServersIndexRoute,
-}
-
-const ToolsMcpServersRouteWithChildren = ToolsMcpServersRoute._addFileChildren(
-  ToolsMcpServersRouteChildren,
-)
-
 interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
-  ToolsMcpServersRoute: typeof ToolsMcpServersRouteWithChildren
   ToolsWebSearchRoute: typeof ToolsWebSearchRoute
   ToolsIndexRoute: typeof ToolsIndexRoute
+  ToolsMcpServersServerIdRoute: typeof ToolsMcpServersServerIdRoute
+  ToolsMcpServersIndexRoute: typeof ToolsMcpServersIndexRoute
 }
 
 const ToolsRouteChildren: ToolsRouteChildren = {
   ToolsCodeExecutionRoute: ToolsCodeExecutionRoute,
   ToolsGuardrailsRoute: ToolsGuardrailsRoute,
-  ToolsMcpServersRoute: ToolsMcpServersRouteWithChildren,
   ToolsWebSearchRoute: ToolsWebSearchRoute,
   ToolsIndexRoute: ToolsIndexRoute,
+  ToolsMcpServersServerIdRoute: ToolsMcpServersServerIdRoute,
+  ToolsMcpServersIndexRoute: ToolsMcpServersIndexRoute,
 }
 
 const ToolsRouteWithChildren = ToolsRoute._addFileChildren(ToolsRouteChildren)
@@ -1368,6 +1409,7 @@ const rootRouteChildren: RootRouteChildren = {
   HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
+  McpServersRoute: McpServersRouteWithChildren,
   MembersRoute: MembersRoute,
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,

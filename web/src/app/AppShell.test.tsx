@@ -1731,7 +1731,7 @@ const WORKSPACE_RAIL = [
   "/routing",
   "/models",
   "/tools",
-  "/tools/mcp-servers",
+  "/mcp-servers",
   "/keys",
 ]
 

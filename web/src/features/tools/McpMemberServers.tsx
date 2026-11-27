@@ -23,7 +23,7 @@ import { useDisconnectMcp, useMyMcpConnections } from "@/shared/api/tools"
 import { formatDate } from "@/shared/helpers/format"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
-const LIST = "/tools/mcp-servers"
+const LIST = "/mcp-servers"
 
 /** What the access rules give the member on a server, in a chip's two words. */
 const ACCESS: Record<
@@ -281,7 +281,7 @@ function ServerCard({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Link
-            to="/tools/mcp-servers/$serverId"
+            to="/mcp-servers/$serverId"
             params={{ serverId: server.id }}
             className="line-clamp-2 font-medium break-words after:absolute after:inset-0 after:content-['']"
           >

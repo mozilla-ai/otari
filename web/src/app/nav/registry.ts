@@ -97,10 +97,9 @@ const BASE_NAV_SECTIONS = [
         // stays selected there (the prefix match below).
       },
       // Servers are connectors rather than tools, so they are a row of their
-      // own. Its pages sit under `/tools/mcp-servers`, and the longest prefix
-      // wins (`navItemForPath`), so Tools is not selected there.
+      // own, with their pages under `/mcp-servers`.
       {
-        to: "/tools/mcp-servers",
+        to: "/mcp-servers",
         label: "MCP servers",
         surface: "tools",
         icon: FiServer,
@@ -232,7 +231,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // reaches. Beside Providers and gated as they are: like the provider
       // keys, these are the organization's own connections to an outside
       // service, which its workspaces use. Not the workspace rail's
-      // `/tools/mcp-servers`, which lists one workspace's own.
+      // `/mcp-servers`, which lists one workspace's own.
       {
         to: "/organization/mcp-servers",
         label: "MCP servers",

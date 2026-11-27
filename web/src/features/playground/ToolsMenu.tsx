@@ -175,7 +175,7 @@ export function ToolsMenu({
                 Configure code execution
               </Link>
               <Link
-                to="/tools/mcp-servers"
+                to="/mcp-servers"
                 className="text-caption text-link hover:text-link-hover"
               >
                 Configure MCP servers

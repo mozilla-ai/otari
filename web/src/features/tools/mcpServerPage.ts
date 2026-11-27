@@ -3,7 +3,7 @@ import type { McpServerScope } from "@/shared/api/mcpServerScope"
 /** The dashboard page a scope's servers are listed on. */
 export function mcpServersPagePath(scope: McpServerScope): string {
   return scope.kind === "workspace"
-    ? "/tools/mcp-servers"
+    ? "/mcp-servers"
     : "/organization/mcp-servers"
 }
 

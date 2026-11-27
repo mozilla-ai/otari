@@ -32,7 +32,7 @@ export interface McpConnectionCallbackSearch {
   return_to?: string
 }
 
-const LIST = "/tools/mcp-servers"
+const LIST = "/mcp-servers"
 
 /**
  * The server's own page, for a sign-in that named no page to go back to. No

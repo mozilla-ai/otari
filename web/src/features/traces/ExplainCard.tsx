@@ -18,7 +18,7 @@ export function ExplainCard({ explanation }: { explanation: Explanation }) {
               <dd className="min-w-0 break-words text-body">
                 {link ? (
                   <Link
-                    to="/tools/mcp-servers/$serverId"
+                    to="/mcp-servers/$serverId"
                     params={{ serverId: link.serverId }}
                     search={{
                       workspace: link.workspace,

@@ -888,7 +888,7 @@ class McpConnectionStart(pydantic.BaseModel):
     return_to: str | None = pydantic.Field(
         default=None,
         max_length=2048,
-        description="A dashboard path to land on once signed in, such as /tools/mcp-servers. "
+        description="A dashboard path to land on once signed in, such as /mcp-servers. "
         "Anything that is not a path inside the dashboard is refused",
     )
 

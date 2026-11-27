@@ -57,7 +57,7 @@ describe("nav registry", () => {
       "/routing",
       "/models",
       "/tools",
-      "/tools/mcp-servers",
+      "/mcp-servers",
       "/keys",
     ])
     expect(items.flatMap((item) => item.children ?? [])).toEqual([])
@@ -866,12 +866,12 @@ describe("navPageForPath", () => {
   })
 
   it("files a server's pages under MCP servers, not under Tools", () => {
-    for (const path of ["/tools/mcp-servers", "/tools/mcp-servers/abc"]) {
+    for (const path of ["/mcp-servers", "/mcp-servers/abc"]) {
       expect(navPageForPath(path)).toEqual({
-        to: "/tools/mcp-servers",
+        to: "/mcp-servers",
         label: "MCP servers",
       })
-      expect(railPathForPath(path)).toBe("/tools/mcp-servers")
+      expect(railPathForPath(path)).toBe("/mcp-servers")
       expect(navItemForPath(path)?.surface).toBe("tools")
     }
     expect(railPathForPath("/tools")).toBe("/tools")
@@ -1012,7 +1012,7 @@ const WORKSPACE = [
   "/routing",
   "/models",
   "/tools",
-  "/tools/mcp-servers",
+  "/mcp-servers",
   "/keys",
   "/members",
 ]

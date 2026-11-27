@@ -41,8 +41,8 @@ function renderCallback(search: McpConnectionCallbackSearch) {
       wrapper: withRouter({
         url: "/mcp-connections/callback",
         routes: [
-          { path: "/tools/mcp-servers/$serverId", element: <p>Server page</p> },
-          { path: "/tools/mcp-servers", element: <p>Server list</p> },
+          { path: "/mcp-servers/$serverId", element: <p>Server page</p> },
+          { path: "/mcp-servers", element: <p>Server list</p> },
           {
             path: "/organization/mcp-servers/$serverId",
             element: <p>Organization server page</p>,
@@ -68,7 +68,7 @@ describe("McpConnectionCallbackPage", () => {
         server_id: SERVER_ID,
         workspace_id: "w",
         server_name: "notion",
-        return_to: "/tools/mcp-servers",
+        return_to: "/mcp-servers",
         checked: true,
       }),
     )
@@ -113,7 +113,7 @@ describe("McpConnectionCallbackPage", () => {
         server_id: SERVER_ID,
         workspace_id: "w",
         server_name: "drive",
-        return_to: "/tools/mcp-servers",
+        return_to: "/mcp-servers",
       }),
     )
     markSignInWindow("another-state")
@@ -262,7 +262,7 @@ describe("McpConnectionCallbackPage", () => {
   it("goes back to the page the sign-in started from when it is cancelled", async () => {
     window.sessionStorage.setItem(
       "otari.mcp-sign-in.origin",
-      `/tools/mcp-servers/${SERVER_ID}`,
+      `/mcp-servers/${SERVER_ID}`,
     )
     mockComplete(() => Response.json({}))
     renderCallback({ error: "access_denied", state: "s" })
@@ -291,7 +291,7 @@ describe("McpConnectionCallbackPage", () => {
     async (returnTo) => {
       window.sessionStorage.setItem(
         "otari.mcp-sign-in.origin",
-        `/tools/mcp-servers/${SERVER_ID}`,
+        `/mcp-servers/${SERVER_ID}`,
       )
       mockComplete(() => Response.json({}))
       renderCallback({
@@ -309,7 +309,7 @@ describe("McpConnectionCallbackPage", () => {
     async (returnTo) => {
       window.sessionStorage.setItem(
         "otari.mcp-sign-in.origin",
-        `/tools/mcp-servers/${SERVER_ID}`,
+        `/mcp-servers/${SERVER_ID}`,
       )
       mockComplete(() => Response.json({}))
       renderCallback({

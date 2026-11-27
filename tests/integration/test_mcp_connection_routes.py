@@ -147,7 +147,7 @@ def test_a_member_signs_in_lists_their_connection_and_disconnects(
     server_id = _per_user_server(client, master_key_header, workspace)
     mine = f"{API_ROOT}/workspaces/{workspace}/mcp-connections"
 
-    started = client.post(f"{mine}/{server_id}", json={"return_to": "/tools/mcp-servers"}, headers=master_key_header)
+    started = client.post(f"{mine}/{server_id}", json={"return_to": "/mcp-servers"}, headers=master_key_header)
     assert started.status_code == 200, started.text
     authorization_url = started.json()["authorization_url"]
     query = {key: value[0] for key, value in parse_qs(urlsplit(authorization_url).query).items()}
@@ -177,7 +177,7 @@ def test_a_member_signs_in_lists_their_connection_and_disconnects(
         "workspace_id": str(workspace),
         "server_name": "drive",
         "server_scope": "workspace",
-        "return_to": "/tools/mcp-servers",
+        "return_to": "/mcp-servers",
         "checked": False,
         "shared": False,
     }
@@ -487,7 +487,7 @@ def test_a_manager_signs_in_for_everyone_on_a_shared_server_and_ends_it_over_htt
 
     assert client.post(account, json={}).status_code in (401, 403), "starting it takes a session"
     assert client.delete(account, headers=master_key_header).status_code == 404, "no account to end yet"
-    started = client.post(account, json={"return_to": "/tools/mcp-servers"}, headers=master_key_header)
+    started = client.post(account, json={"return_to": "/mcp-servers"}, headers=master_key_header)
     assert started.status_code == 200, started.text
     query = {key: values[0] for key, values in parse_qs(urlsplit(started.json()["authorization_url"]).query).items()}
     done = client.post(

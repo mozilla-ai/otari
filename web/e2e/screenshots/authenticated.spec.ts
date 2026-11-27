@@ -162,7 +162,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // captures its table. Captured at rest, so its two dialogs are covered by
   // neither this nor the vitest suite.
   {
-    route: "/tools/mcp-servers",
+    route: "/mcp-servers",
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },

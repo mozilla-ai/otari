@@ -172,7 +172,7 @@ export function WorkspaceMcpServersCard() {
   const remove = useDeleteWorkspaceMcpServer()
   const check = useMcpServerCheck({
     scope: workspaceMcpScope(selected?.workspace_id ?? ""),
-    returnTo: "/tools/mcp-servers",
+    returnTo: "/mcp-servers",
   })
   const navigate = useNavigate()
   // The workspace row carries the request-named servers switch; only a manager
@@ -235,7 +235,7 @@ export function WorkspaceMcpServersCard() {
 
   const openServer = (serverId: string) =>
     void navigate({
-      to: "/tools/mcp-servers/$serverId",
+      to: "/mcp-servers/$serverId",
       params: { serverId },
     })
 

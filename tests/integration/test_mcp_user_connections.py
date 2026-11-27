@@ -445,7 +445,7 @@ async def test_a_per_user_server_is_checked_through_a_sign_in_that_connects_noth
     own_token = own.encrypted_access_token
 
     wire.issue = McpOAuthTokens(access_token="check-access", refresh_token="check-refresh", expires_in=3600)
-    started = await service.start_check_sign_in(user=world.owner, return_to="/tools/mcp-servers", **ids)
+    started = await service.start_check_sign_in(user=world.owner, return_to="/mcp-servers", **ids)
     done = await service.complete_connection(user=world.owner, state=_state(started.authorization_url), code="code")
 
     assert done.checked
@@ -803,7 +803,7 @@ async def test_a_sign_in_registers_a_client_once_and_stores_only_ciphertext(
     service = _service(async_db, config)
 
     started = await service.start_connection(
-        user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to="/tools/mcp-servers"
+        user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to="/mcp-servers"
     )
 
     query = {key: value[0] for key, value in parse_qs(urlsplit(started.authorization_url).query).items()}
@@ -818,7 +818,7 @@ async def test_a_sign_in_registers_a_client_once_and_stores_only_ciphertext(
     assert (flow.user_id, flow.identity_id, flow.return_to) == (
         str(world.member.id),
         world.member.id,
-        "/tools/mcp-servers",
+        "/mcp-servers",
     )
     client = stored_oauth_client(await _row(async_db, world.server.id))
     assert client is not None and client.dynamic and client.redirect_uri == CALLBACK
@@ -830,7 +830,7 @@ async def test_a_sign_in_registers_a_client_once_and_stores_only_ciphertext(
         world.server.id,
         world.workspace.id,
         "drive",
-        "/tools/mcp-servers",
+        "/mcp-servers",
     )
     assert wire.exchanges[0]["code"] == "the-code"
     assert wire.exchanges[0]["resource"] == PUBLIC_URL
@@ -1522,7 +1522,7 @@ async def test_a_return_link_outside_the_dashboard_is_refused(return_to: str) ->
 
 
 async def test_a_dashboard_path_is_kept_as_the_return_link() -> None:
-    assert checked_return_to("/tools/mcp-servers/1?tab=access") == "/tools/mcp-servers/1?tab=access"
+    assert checked_return_to("/mcp-servers/1?tab=access") == "/mcp-servers/1?tab=access"
     assert checked_return_to(None) is None
     assert checked_return_to("") is None
 

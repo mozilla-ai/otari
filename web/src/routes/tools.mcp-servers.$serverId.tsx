@@ -1,26 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { McpServerDetailPage } from "@/features/tools/McpServerDetailPage"
-
-// The page takes the id as a prop rather than reading the router itself, so a
-// test can hand it one without a route tree. Keyed on it, so moving to another
-// server starts the page afresh and no dialog's draft carries across.
-function SelectedServer() {
-  const { serverId } = Route.useParams()
-  const { workspace } = Route.useSearch()
-  return (
-    <McpServerDetailPage
-      key={serverId}
-      serverId={serverId}
-      workspaceId={workspace}
-    />
-  )
-}
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/tools/mcp-servers/$serverId")({
-  // A trace links here with the workspace its call ran in, which need not be
-  // the one the sidebar has selected. Only one id is kept; anything else is
-  // dropped, and the page reads the selected workspace instead.
+  // The old path of one server's page. The query carries the workspace a trace
+  // opened it for, so it travels with the redirect.
   validateSearch: (
     search: Record<string, unknown>,
   ): { workspace?: string } => ({
@@ -29,5 +11,12 @@ export const Route = createFileRoute("/tools/mcp-servers/$serverId")({
         ? search.workspace
         : undefined,
   }),
-  component: SelectedServer,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({
+      to: "/mcp-servers/$serverId",
+      params: { serverId: params.serverId },
+      search,
+      replace: true,
+    })
+  },
 })
