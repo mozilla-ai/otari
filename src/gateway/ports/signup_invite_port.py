@@ -14,8 +14,12 @@ class SignupInvitePort(Protocol):
         """Whether an invitation named by ``token`` allows an account for ``claimed_address``.
 
         NOTE: An implementation must answer true only for a link that reached the claimed
-        mailbox. A true answer is recorded as that mailbox having answered, which is the
-        strongest thing an address can carry, and no caller can check the claim.
+        mailbox. A true answer records the address as proved by that mailbox. That is the
+        strongest thing an address can carry and nothing here can verify it. A false proof puts
+        the account within reach of any organization that has proved the address's domain.
+
+        NOTE: There is no weaker answer to give. A link that reached no mailbox allows no
+        account, so an implementation that cannot say a link was delivered answers false.
 
         NOTE: An implementation must read through the request's own Unit of Work, and must hold
         the invitation it answers true for until that transaction ends. The answer is used in the

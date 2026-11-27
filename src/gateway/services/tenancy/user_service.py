@@ -519,6 +519,8 @@ async def create_user_for_signup(
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": account.full_name or full_name}
             if invited:
+                # The address is recorded as proved by its own mailbox. Only the port's obligation
+                # to answer for a delivered link makes that truthful.
                 values.update(address_values(AddressAuthority.MAILBOX, now=datetime.now(UTC)))
             else:
                 values["email_verification_token_hash"] = hash_token(token)
