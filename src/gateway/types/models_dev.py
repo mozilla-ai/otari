@@ -1134,7 +1134,7 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
 
 
 # Where the documents are fetched from unless ``GatewayConfig.models_dev_base_url``
-# says otherwise: Mozilla.ai's fork of models.dev, which publishes models.dev's
+# says otherwise: Mozilla AI's fork of models.dev, which publishes models.dev's
 # catalog plus the models it does not list yet (github.com/mozilla-ai/models.dev).
 MODELS_DEV_BASE_URL = "https://mozilla-ai.github.io/models.dev"
 

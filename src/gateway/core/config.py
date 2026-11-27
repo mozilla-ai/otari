@@ -1179,7 +1179,7 @@ class GatewayConfig(
     models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
         default=MODELS_DEV_BASE_URL,
         description=(
-            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "Where the models.dev catalog is fetched from. The default is Mozilla AI's fork, which "
             "publishes models.dev's catalog plus the models it does not list yet. Set "
             "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
