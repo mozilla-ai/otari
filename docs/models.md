@@ -826,9 +826,10 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor. A limit the
-offering tried first does not know, such as the context length of a model a vLLM
-server also serves, is the smallest one the model's other offerings report. An
+of the offering tried first, and `owned_by` is the model's vendor. A limit or a
+capability the offering tried first does not know, such as the context length of
+a model a vLLM server also serves, comes from the model's other offerings: the
+smallest limit, or the parameters the first of them reports. An
 output limit filled that way is capped at the entry's context window. A field
 no offering reports is read from models.dev's entry for the model, preferring
 the vendor's own: a model served on an organization's key to an
