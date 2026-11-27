@@ -154,20 +154,22 @@ async def test_an_entitled_signup_creates_an_account_where_signup_is_closed(asyn
     assert claimed.email_verified_at is not None
 
 
-async def test_an_entitled_signup_founds_no_organization(async_db: AsyncSession) -> None:
-    """Registering an unknown address founds one, and an invitation for the same address must not.
+async def test_an_invited_address_with_no_account_gets_an_organization_of_its_own(
+    async_db: AsyncSession,
+) -> None:
+    """A deployment that refuses an open signup still registers an invited address, with a tenancy.
 
-    The membership is the invitation's to grant when it is accepted. An address an admin already
-    added is covered by the open-deployment case below, because a closed one founds nothing for it
-    either way.
+    No signup leaves an account holding no organization. An address an organization invited already
+    holds one, set when the invitation was created, so the only invitation reaching this branch is
+    one to the deployment itself.
     """
     before = await _organization_count(async_db)
 
     claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite())
 
     assert claimed is not None
-    assert claimed.active_organization_id is None
-    assert await _organization_count(async_db) == before
+    assert claimed.active_organization_id is not None
+    assert await _organization_count(async_db) == before + 1
 
 
 async def test_an_entitled_signup_claims_an_identity_nobody_still_wants(async_db: AsyncSession) -> None:
@@ -180,11 +182,13 @@ async def test_an_entitled_signup_claims_an_identity_nobody_still_wants(async_db
     assert claimed.email_verified_at is not None
 
 
-async def test_an_entitled_signup_founds_no_organization_on_an_open_deployment(async_db: AsyncSession) -> None:
-    """Founding one is forbidden for an invited person whether this deployment's signup is open or closed.
+async def test_an_invitation_leaves_the_organization_question_to_the_rules_that_own_it(
+    async_db: AsyncSession,
+) -> None:
+    """An invitation registers an address. It does not decide whether an organization is founded.
 
-    An open deployment is the only one that would found an organization for an identity no
-    membership still wants, so it is the case the rule has to be checked against.
+    An identity no membership still wants gets what any claim of it gets, which on an open
+    deployment is an organization of its own.
     """
     await _seed_unclaimed_identity(async_db, still_wanted=False)
     before = await _organization_count(async_db)
@@ -192,4 +196,4 @@ async def test_an_entitled_signup_founds_no_organization_on_an_open_deployment(a
     claimed = await _signup(async_db, invites=lambda _: _EntitlingInvite(), config=_config(open_signup=True))
 
     assert claimed is not None
-    assert await _organization_count(async_db) == before
+    assert await _organization_count(async_db) == before + 1

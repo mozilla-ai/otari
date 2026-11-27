@@ -395,8 +395,12 @@ class SignupSubmission:
     terms_accepted: bool = False
 
 
+class _SignupRefused(Exception):
+    """A refusal raised inside the signup's block, so the block rolls back and writes nothing."""
+
+
 class _SignupRaceLostError(Exception):
-    """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
+    """Another write claimed the address while this one was hashing its password."""
 
 
 async def create_user_for_signup(
@@ -449,8 +453,8 @@ async def create_user_for_signup(
     none. Where ``invites`` allows an account for it, the address is recorded as proved by the
     mailbox the link reached, no verification email is sent, and the caller can sign in at once.
     That answer is read in the transaction that writes the account, so the two commit together.
-    Such an account founds no organization of its own. The invitation grants its membership
-    when it is accepted.
+    An invitation registers an address this deployment would otherwise refuse. It decides nothing
+    about the organization the account lands in, which is settled as it is for any other signup.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -486,52 +490,35 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
-            entitled = submission.invite_token is not None and await invites.allows_an_account(
+            invited = submission.invite_token is not None and await invites.allows_an_account(
                 submission.invite_token, claimed_address=address
             )
             if identity is None:
-                if entitled:
-                    # The membership is the invitation's to grant, so this writes the account alone.
-                    staged = await UserRepository(db).try_create(
-                        email=address, full_name=full_name, active_organization_id=None
-                    )
-                    if staged is None:
-                        # This answers like every other enumeration-safe refusal.
-                        await verify_absent_password_async(password)
-                        raise _SignupRaceLostError
-                    identity = staged
-                elif not config.open_signup:
-                    # The same bcrypt cost as the branch above, for the same reason: an
-                    # address this deployment will not register has to answer in about
-                    # the time one it would register takes.
-                    await verify_absent_password_async(password)
-                    return None
-                else:
-                    # The registration, the password and the verification token below are committed together.
-                    registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
-                    if not registration.created:
-                        # This answers like every other enumeration-safe refusal.
-                        await verify_absent_password_async(password)
-                        raise _SignupRaceLostError
-                    identity = registration.identity
+                if not invited and not config.open_signup:
+                    raise _SignupRefused
+                # An invited address is not a stranger, so an invitation registers it where this
+                # deployment refuses an open signup.
+                registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
+                if not registration.created:
+                    raise _SignupRefused
+                account = registration.identity
             else:
-                if not entitled:
-                    # An identity no organization still wants gets what a new address gets,
-                    # and a lost race rolls it back.
-                    await organizations.provision_tenancy_for_claim(
-                        identity, open_signup=config.open_signup, full_name=full_name
-                    )
+                # An identity no organization still wants gets what a new address gets.
+                await organizations.provision_tenancy_for_claim(
+                    identity, open_signup=config.open_signup, full_name=full_name
+                )
+                # Locked before the rule below is asked, so nothing can drop the identity between
+                # the answer and the write it admits.
                 await organizations.lock_identity(identity.id)
-                if not entitled and not await unverified_identity_is_claimable(
+                if not invited and not await unverified_identity_is_claimable(
                     organizations, identity, open_signup=config.open_signup
                 ):
-                    # Checked in the block that writes the claim, so nothing can drop the identity in between.
-                    await verify_absent_password_async(password)
-                    return None
+                    raise _SignupRefused
+                account = identity
 
             token = generate_token()
-            values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
-            if entitled:
+            values: dict[str, str | datetime | None] = {"full_name": account.full_name or full_name}
+            if invited:
                 values.update(address_values(AddressAuthority.MAILBOX, now=datetime.now(UTC)))
             else:
                 values["email_verification_token_hash"] = hash_token(token)
@@ -543,18 +530,22 @@ async def create_user_for_signup(
             # NOTE: A provider sign-in or another first password can commit after the check above.
             # The condition in this write decides.
             claimed = await UserRepository(db).claim_first_password(
-                identity.id,
+                account.id,
                 hashed_password=await hash_password_async(password),
                 require_unverified=True,
                 values=values,
             )
             if not claimed:
                 raise _SignupRaceLostError
+    except _SignupRefused:
+        # Every refusal inside the block pays one hash, so it takes about as long as a claim.
+        await verify_absent_password_async(password)
+        return None
     except _SignupRaceLostError:
         return None
-    await db.refresh(identity)
-    if entitled:
-        return identity
+    await db.refresh(account)
+    if invited:
+        return account
 
     background_tasks.add_task(
         mailer.send,
@@ -565,7 +556,7 @@ async def create_user_for_signup(
             asset_root=mailer.asset_root,
         ),
     )
-    return identity
+    return account
 
 
 async def verify_email(
