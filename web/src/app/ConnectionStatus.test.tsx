@@ -84,13 +84,17 @@ describe("ConnectionStatus", () => {
     expect(band()).not.toHaveClass("fixed")
     expect(screen.queryByRole("status")).toBeNull()
     expect(screen.queryByRole("alert")).toBeNull()
-    expect(vi.mocked(announce).mock.calls).toEqual([
-      [
-        expect.stringMatching(
-          /^Can’t reach the gateway\. Showing what loaded before \d\d:\d\d\. Changes won’t save until it answers\.$/,
-        ),
-      ],
-    ])
+    // Announced from an effect that runs after the band is painted, so the
+    // text being there does not mean the effect has run yet.
+    await waitFor(() =>
+      expect(vi.mocked(announce).mock.calls).toEqual([
+        [
+          expect.stringMatching(
+            /^Can’t reach the gateway\. Showing what loaded before \d\d:\d\d\. Changes won’t save until it answers\.$/,
+          ),
+        ],
+      ]),
+    )
     // One failed request is only the suspicion; the alarm follows the probe and
     // its retries failing too. The failed request itself is not sent again: it
     // may be a heavy read, and the probe is what rechecks.
