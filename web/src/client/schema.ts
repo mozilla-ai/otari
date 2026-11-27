@@ -29153,7 +29153,7 @@ export interface operations {
                     "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
-            /** @description The upload exceeds the configured maximum size. */
+            /** @description The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -37181,7 +37181,7 @@ export interface operations {
                     "application/json": components["schemas"]["OpenAIFileObject"];
                 };
             };
-            /** @description The upload exceeds the configured maximum size. */
+            /** @description The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows. */
             413: {
                 headers: {
                     [name: string]: unknown;

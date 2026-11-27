@@ -6312,9 +6312,7 @@ def build_streaming_response(
     async def _on_error(exc: BaseException) -> None:
         report_refusal(exc)
         if automatic_observation is not None:
-            automatic_observation.finish(
-                unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
-            )
+            _finish_failed(automatic_observation, exc)
         if isinstance(exc, IncompleteStreamError):
             # codeql[py/clear-text-logging-sensitive-data]
             logger.warning(
@@ -6553,6 +6551,15 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
         or kind in {"timeout", "conn_err"}
         or code in (402, 429)
         or (code is not None and code >= 500)
+    )
+
+
+def _finish_failed(observation: AutomaticObservation, exc: BaseException) -> None:
+    """Report a failed call to automatic routing, as an outage, a failed credential or a model not served."""
+    observation.finish(
+        unhealthy=_automatic_unhealthy(exc),
+        account=AutomaticRouter.is_account_failure(exc),
+        missing=AutomaticRouter.is_missing_model(exc),
     )
 
 
@@ -6807,9 +6814,7 @@ async def run_single_attempt_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(
-                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
-                        )
+                        _finish_failed(observation, exc)
                     raise
 
             absorbed_rows: list[asyncio.Task[None]] = []
@@ -7245,9 +7250,7 @@ async def run_non_stream(
                     )
                 except BaseException as exc:
                     if observation is not None:
-                        observation.finish(
-                            unhealthy=_automatic_unhealthy(exc), account=AutomaticRouter.is_account_failure(exc)
-                        )
+                        _finish_failed(observation, exc)
                     raise
                 if observation is not None:
                     observation.finish(success=True)

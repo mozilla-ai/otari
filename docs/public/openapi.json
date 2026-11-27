@@ -41246,7 +41246,7 @@
             "description": "Successful Response"
           },
           "413": {
-            "description": "The upload exceeds the configured maximum size."
+            "description": "The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows."
           },
           "422": {
             "content": {
@@ -57665,7 +57665,7 @@
             "description": "Successful Response"
           },
           "413": {
-            "description": "The upload exceeds the configured maximum size."
+            "description": "The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows."
           },
           "422": {
             "content": {
