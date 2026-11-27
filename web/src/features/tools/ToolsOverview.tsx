@@ -157,7 +157,7 @@ export function ToolsOverview() {
             name: "Guardrail services",
             state: "Operator",
             tone: "unknown" as const,
-            line: "The endpoints this deployment calls to check a request. Which checks run is set under Routing, Guardrails.",
+            line: "The endpoints this deployment calls to check a request. Which checks run is set under Rules, on the Data tab.",
             to: "/tools" as const,
             search: { service: "guardrails" },
           },
