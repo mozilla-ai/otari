@@ -319,9 +319,12 @@ def _stub_provider(
     return client
 
 
-async def _copy(bridge: SandboxFileBridge, *file_ids: str) -> None:
+async def _copy(bridge: SandboxFileBridge, *file_ids: str, call_kwargs: dict[str, Any] | None = None) -> None:
     await bridge.copy_provider_files(
-        [ProviderFile(file_id=file_id) for file_id in file_ids], provider="anthropic", provider_instance="anthropic-eu"
+        [ProviderFile(file_id=file_id) for file_id in file_ids],
+        provider="anthropic",
+        provider_instance="anthropic-eu",
+        call_kwargs={"api_key": "sk-ant-test"} if call_kwargs is None else call_kwargs,
     )
 
 
@@ -517,25 +520,17 @@ async def test_a_copy_whose_stamp_is_uncertain_keeps_its_blob(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_no_credential_copies_nothing_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_request_sent_with_no_key_copies_nothing_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The provider's variable is never a fallback: the files are in the account the request was sent to."""
     _stub_provider(monkeypatch, {"file_01a": b"a"})
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
     store = _MemoryStore()
+    opened = len(_PROVIDER_FILES.opened)
 
-    await _copy(_bridge(store, providers={"anthropic-eu": {"provider_type": "anthropic"}}), "file_01a")
-
-    assert store.blobs == {}
-
-
-@pytest.mark.asyncio
-async def test_an_undeclared_instance_never_copies_on_the_providers_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_provider(monkeypatch, {"file_01a": b"a"})
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-environment")
-    store = _MemoryStore()
-
-    await _copy(_bridge(store, providers={}), "file_01a")
+    await _copy(_bridge(store), "file_01a", call_kwargs={"api_base": "https://1.1.1.1"})
 
     assert store.blobs == {}
+    assert len(_PROVIDER_FILES.opened) == opened
 
 
 @pytest.mark.asyncio
@@ -544,7 +539,7 @@ async def test_a_provider_otari_cannot_read_from_is_not_copied(monkeypatch: pyte
     db = _FakeDb()
 
     await _bridge(_MemoryStore(), _CommittingUnitOfWork(db)).copy_provider_files(
-        [ProviderFile(file_id="file_01a")], provider="nebius", provider_instance="nebius"
+        [ProviderFile(file_id="file_01a")], provider="nebius", provider_instance="nebius", call_kwargs={"api_key": "k"}
     )
 
     assert db.added == []

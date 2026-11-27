@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import mimetypes
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,7 +23,7 @@ from gateway.services.files._metadata import expiry_for
 from gateway.services.files._provider_files import produced_files_for, store_inline_outputs
 from gateway.services.files._service import FileBackends, FileService, NewOutput
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
-from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
+from gateway.services.provider_kwargs import effective_credential
 from gateway.types.provider_file import ProviderFile
 
 # A missing credential or a database failure, which stop a copy before it starts.
@@ -152,9 +152,13 @@ class SandboxFileBridge:
         """Store the files ``reply`` carries inline, rewriting it to name each stored file instead."""
         await store_inline_outputs(dialect, reply, self.store_provider_output)
 
-    async def copy_provider_files(self, files: list[ProviderFile], *, provider: str, provider_instance: str) -> None:
+    async def copy_provider_files(
+        self, files: list[ProviderFile], *, provider: str, provider_instance: str, call_kwargs: Mapping[str, Any]
+    ) -> None:
         """Copy the files a provider's own sandbox produced into the store, each under the provider's ID.
 
+        The files are read back with the credential in ``call_kwargs``, the kwargs the request
+        was sent with, because that is the account the files are in.
         The provider's ID is kept so a client that sends the turn back still names a file Otari knows.
         A file already recorded, or already settled earlier in the request, is left alone. A file the
         provider merely refused is not settled, so a later event naming it tries again.
@@ -175,9 +179,8 @@ class SandboxFileBridge:
                     # Otari cannot read this provider's files back at all, so a later event will fare no better.
                     self._provider_files_settled.update(file.file_id for file in new)
                     return
-                kwargs = get_provider_kwargs(self._config, member, provider_instance, workspace_id=self._workspace_id)
                 client = self._provider_files.open_session(
-                    provider=member, instance=provider_instance, credential=effective_credential(member, kwargs)
+                    provider=member, instance=provider_instance, credential=effective_credential(member, call_kwargs)
                 )
                 await stack.enter_async_context(contextlib.aclosing(client))
                 known = await self._files.existing_output_ids([file.file_id for file in new])

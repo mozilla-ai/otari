@@ -5,19 +5,26 @@ call is mocked, so nothing is dialed.
 """
 
 from collections.abc import Generator, Iterator
+from functools import partial
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
 import httpx
+import httpx2
 import pytest
+from anthropic.types import CodeExecutionOutputBlock, CodeExecutionResultBlock, CodeExecutionToolResultBlock
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.files import FileObject
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.services.providers._owned_endpoint_network import OwnedEndpointHttpx2Transport
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
@@ -351,3 +358,80 @@ def test_an_anthropic_endpoint_serves_the_messages_route_with_its_defaults(clien
     assert call["model"] == "anthropic:claude"
     assert call["api_base"] == "https://1.1.1.1"
     assert call["extra_body"] == {"top_k": 5}
+
+
+def test_a_file_an_anthropic_endpoints_sandbox_produced_is_read_back_with_the_endpoints_key(
+    client: TestClient, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cast(Any, client.app).state.file_store = LocalDirFileStore(str(tmp_path))
+    headers = _user_with_key(client, "alice")
+    created = _create(client, user_id="alice", provider="anthropic", api_base="https://1.1.1.1", api_key="sk-ant-alice")
+    assert created.status_code == 201, created.text
+    reads: list[tuple[str, str | None, bool]] = []
+
+    def files_api(pinned: bool, request: httpx2.Request) -> httpx2.Response:
+        reads.append((request.url.host, request.headers.get("x-api-key"), pinned))
+        if request.url.path.endswith("/content"):
+            return httpx2.Response(200, content=b"chart")
+        return httpx2.Response(
+            200,
+            json={
+                "id": "file_01chart",
+                "type": "file",
+                "filename": "chart.png",
+                "mime_type": "image/png",
+                "size_bytes": 5,
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        )
+
+    original_init = httpx2.AsyncClient.__init__
+
+    def stubbed_init(self: httpx2.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        pinned = isinstance(kwargs.get("transport"), OwnedEndpointHttpx2Transport)
+        kwargs["transport"] = httpx2.MockTransport(partial(files_api, pinned))
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", stubbed_init)
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        run = CodeExecutionToolResultBlock(
+            type="code_execution_tool_result",
+            tool_use_id="srvtoolu_01",
+            content=CodeExecutionResultBlock(
+                type="code_execution_result",
+                stdout="",
+                stderr="",
+                return_code=0,
+                content=[CodeExecutionOutputBlock(type="code_execution_output", file_id="file_01chart")],
+            ),
+        )
+        return MessageResponse(
+            id="msg_test",
+            type="message",
+            role="assistant",
+            model="claude",
+            content=[run],
+            stop_reason=cast(Any, "end_turn"),
+            stop_sequence=None,
+            usage=MessageUsage(input_tokens=5, output_tokens=2),
+        )
+
+    with patch("gateway.api.routes.messages.amessages", side_effect=fake_amessages):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": "my-vllm:claude",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "plot it"}],
+                "tools": [{"type": "code_execution_20250825", "name": "code_execution"}],
+            },
+            headers=headers,
+        )
+
+    assert resp.status_code == 200, resp.text
+    # Through the client that checks the endpoint's address, as the completion was.
+    assert reads and set(reads) == {("1.1.1.1", "sk-ant-alice", True)}
+    row = db_session.get(FileObject, "file_01chart")
+    assert row is not None and row.storage_ref is not None
+    assert (row.user_id, row.provider, row.provider_instance) == ("alice", "anthropic", "my-vllm")
