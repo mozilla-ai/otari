@@ -43,7 +43,7 @@ const PAGES = [
       ).toBeVisible(),
   },
   {
-    route: "/sessions",
+    route: "/traces",
     heading: "Traces",
     // The tab row and the chart are the widest rows on the page.
     ready: (page: Page) =>

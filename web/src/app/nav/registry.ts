@@ -68,7 +68,7 @@ const BASE_NAV_SECTIONS = [
         reachableWithoutOrganization: true,
       },
       {
-        to: "/sessions",
+        to: "/traces",
         label: "Traces",
         icon: FiList,
         views: ["/requests", "/router-savings"],

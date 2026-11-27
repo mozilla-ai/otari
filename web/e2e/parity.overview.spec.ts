@@ -66,7 +66,7 @@ test.describe("Activity and Traces", () => {
     await expect(page).toHaveURL(/\/requests\?.*range=7d/)
 
     await views.getByRole("link", { name: "Sessions" }).click()
-    await expect(page).toHaveURL(/\/sessions\?.*range=7d/)
+    await expect(page).toHaveURL(/\/traces\?.*range=7d/)
   })
 
   test("the Requests view lists the newest requests first", async ({

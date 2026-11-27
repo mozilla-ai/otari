@@ -19,7 +19,7 @@ function Ids() {
 
 async function readIds() {
   await renderWithRouter(<Ids />, {
-    url: "/sessions",
+    url: "/traces",
     shell: (
       <Provider>
         <Outlet />

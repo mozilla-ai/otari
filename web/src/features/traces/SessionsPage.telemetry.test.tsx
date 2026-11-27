@@ -51,7 +51,7 @@ describe("SessionsPage telemetry", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const sessions = await screen.findByRole("grid", { name: "Sessions" })
     await user.click(
       await within(sessions).findByRole("row", { name: /claude-code/ }),
@@ -83,7 +83,7 @@ describe("SessionsPage telemetry", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}`,
     )
     await screen.findByRole("complementary", { name: "Trace claude-code" })
 
@@ -95,7 +95,7 @@ describe("SessionsPage telemetry", () => {
   it("records a session a timeline bar opened", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     await userEvent.click(await screen.findByText("Select a bucket"))
     await screen.findByRole("complementary", { name: "Trace claude-code" })
 
@@ -116,7 +116,7 @@ describe("SessionsPage telemetry", () => {
           type="button"
           onClick={() =>
             void navigate({
-              to: "/sessions",
+              to: "/traces",
               search: {
                 peek: summary.trace_id,
                 peek_workspace: summary.workspace_id,
@@ -134,7 +134,7 @@ describe("SessionsPage telemetry", () => {
         <SessionsPage />
         <LinkBack />
       </>,
-      "/sessions",
+      "/traces",
     )
     const sessions = await screen.findByRole("grid", { name: "Sessions" })
     await user.click(
@@ -172,7 +172,7 @@ describe("SessionsPage telemetry", () => {
       history.back = useRouter().history.back
       const open = (id: string) =>
         void navigate({
-          to: "/sessions",
+          to: "/traces",
           search: { peek: id, peek_workspace: pressed.workspace_id },
         })
       return (
@@ -192,7 +192,7 @@ describe("SessionsPage telemetry", () => {
         <SessionsPage />
         <Navigation />
       </>,
-      "/sessions",
+      "/traces",
     )
     const sessions = await screen.findByRole("grid", { name: "Sessions" })
     const row = await within(sessions).findByRole("row", {
@@ -226,7 +226,7 @@ describe("SessionsPage telemetry", () => {
   it("records nothing while no session is open", async () => {
     mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     await screen.findByRole("grid", { name: "Sessions" })
 
     expect(opened()).toEqual([])

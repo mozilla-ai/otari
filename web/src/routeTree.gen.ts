@@ -23,6 +23,7 @@ import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as RoutingRouteImport } from './routes/routing'
+import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
@@ -30,7 +31,7 @@ import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OverviewIndexRouteImport } from './routes/_overview.index'
 import { Route as OverviewRequestsRouteImport } from './routes/_overview.requests'
 import { Route as OverviewRouterSavingsRouteImport } from './routes/_overview.router-savings'
-import { Route as OverviewSessionsRouteImport } from './routes/_overview.sessions'
+import { Route as OverviewTracesRouteImport } from './routes/_overview.traces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminBudgetsRouteImport } from './routes/admin.budgets'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
@@ -139,6 +140,11 @@ const RoutingRoute = RoutingRouteImport.update({
   path: '/routing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SessionsRoute = SessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -174,9 +180,9 @@ const OverviewRouterSavingsRoute = OverviewRouterSavingsRouteImport.update({
   path: '/router-savings',
   getParentRoute: () => OverviewRoute,
 } as any)
-const OverviewSessionsRoute = OverviewSessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
+const OverviewTracesRoute = OverviewTracesRouteImport.update({
+  id: '/traces',
+  path: '/traces',
   getParentRoute: () => OverviewRoute,
 } as any)
 const AdminAccountsRoute = AdminAccountsRouteImport.update({
@@ -391,13 +397,14 @@ export interface FileRoutesByFullPath {
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
   '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/requests': typeof OverviewRequestsRoute
   '/router-savings': typeof OverviewRouterSavingsRoute
-  '/sessions': typeof OverviewSessionsRoute
+  '/traces': typeof OverviewTracesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
@@ -448,11 +455,12 @@ export interface FileRoutesByTo {
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/requests': typeof OverviewRequestsRoute
   '/router-savings': typeof OverviewRouterSavingsRoute
-  '/sessions': typeof OverviewSessionsRoute
+  '/traces': typeof OverviewTracesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
@@ -506,13 +514,14 @@ export interface FileRoutesById {
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
   '/routing': typeof RoutingRouteWithChildren
+  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/_overview/requests': typeof OverviewRequestsRoute
   '/_overview/router-savings': typeof OverviewRouterSavingsRoute
-  '/_overview/sessions': typeof OverviewSessionsRoute
+  '/_overview/traces': typeof OverviewTracesRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/budgets': typeof AdminBudgetsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
@@ -570,13 +579,14 @@ export interface FileRouteTypes {
     | '/organization'
     | '/playground'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/workspaces'
     | '/requests'
     | '/router-savings'
-    | '/sessions'
+    | '/traces'
     | '/admin/accounts'
     | '/admin/budgets'
     | '/admin/code-execution'
@@ -627,11 +637,12 @@ export interface FileRouteTypes {
     | '/keys'
     | '/members'
     | '/playground'
+    | '/sessions'
     | '/settings'
     | '/usage'
     | '/requests'
     | '/router-savings'
-    | '/sessions'
+    | '/traces'
     | '/admin/accounts'
     | '/admin/budgets'
     | '/admin/code-execution'
@@ -684,13 +695,14 @@ export interface FileRouteTypes {
     | '/organization'
     | '/playground'
     | '/routing'
+    | '/sessions'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/workspaces'
     | '/_overview/requests'
     | '/_overview/router-savings'
-    | '/_overview/sessions'
+    | '/_overview/traces'
     | '/admin/accounts'
     | '/admin/budgets'
     | '/admin/code-execution'
@@ -747,6 +759,7 @@ export interface RootRouteChildren {
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
   RoutingRoute: typeof RoutingRouteWithChildren
+  SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
@@ -864,6 +877,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RoutingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sessions': {
+      id: '/sessions'
+      path: '/sessions'
+      fullPath: '/sessions'
+      preLoaderRoute: typeof SessionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -913,11 +933,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OverviewRouterSavingsRouteImport
       parentRoute: typeof OverviewRoute
     }
-    '/_overview/sessions': {
-      id: '/_overview/sessions'
-      path: '/sessions'
-      fullPath: '/sessions'
-      preLoaderRoute: typeof OverviewSessionsRouteImport
+    '/_overview/traces': {
+      id: '/_overview/traces'
+      path: '/traces'
+      fullPath: '/traces'
+      preLoaderRoute: typeof OverviewTracesRouteImport
       parentRoute: typeof OverviewRoute
     }
     '/admin/accounts': {
@@ -1192,14 +1212,14 @@ declare module '@tanstack/react-router' {
 interface OverviewRouteChildren {
   OverviewRequestsRoute: typeof OverviewRequestsRoute
   OverviewRouterSavingsRoute: typeof OverviewRouterSavingsRoute
-  OverviewSessionsRoute: typeof OverviewSessionsRoute
+  OverviewTracesRoute: typeof OverviewTracesRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
 }
 
 const OverviewRouteChildren: OverviewRouteChildren = {
   OverviewRequestsRoute: OverviewRequestsRoute,
   OverviewRouterSavingsRoute: OverviewRouterSavingsRoute,
-  OverviewSessionsRoute: OverviewSessionsRoute,
+  OverviewTracesRoute: OverviewTracesRoute,
   OverviewIndexRoute: OverviewIndexRoute,
 }
 
@@ -1353,6 +1373,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
   RoutingRoute: RoutingRouteWithChildren,
+  SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,

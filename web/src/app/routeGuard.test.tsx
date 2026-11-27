@@ -357,7 +357,7 @@ describe("the selected rail row", () => {
     ["/rules/some-rule", "Rules", "/rules/$ruleId"],
     ["/routing/coding", "Routing", "/routing/$name"],
     ["/keys?state=disabled", "API keys", "/keys"],
-    ["/sessions?range=30d", "Traces", "/sessions"],
+    ["/traces?range=30d", "Traces", "/traces"],
   ] as const) {
     it(`is announced as current on ${url}`, async () => {
       setDesktop()

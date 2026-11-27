@@ -200,7 +200,7 @@ async function renderPage({
 } = {}) {
   await renderWithRouter(<KeysPage />, {
     url,
-    routes: [{ path: "/sessions", element: <p>Sessions</p> }],
+    routes: [{ path: "/traces", element: <p>Sessions</p> }],
     shell: (
       <Provider>
         <DeploymentProvider value={bootstrap(deployment)}>

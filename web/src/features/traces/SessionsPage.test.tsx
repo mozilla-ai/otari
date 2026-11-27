@@ -125,7 +125,7 @@ describe("SessionsPage", () => {
         <SessionsPage />
         <SpanProbe />
       </>,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-2`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-2`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -154,7 +154,7 @@ describe("SessionsPage", () => {
   it("draws no notice band on a session with nothing to say about its content", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await within(peek).findByRole("button", { name: /^Tool, Bash/ })
 
@@ -178,7 +178,7 @@ describe("SessionsPage", () => {
     })
     mockApi({ traces: [traceSummary()], traceDetail: privateDetail })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const control = await within(peek).findByRole("button", {
       name: "Open by break-glass",
@@ -226,7 +226,7 @@ describe("SessionsPage", () => {
       openings += 1
       return jsonResponse(openedDetail)
     })
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
 
     const peek = await openFirstSession(user)
     await user.click(
@@ -260,7 +260,7 @@ describe("SessionsPage", () => {
   it("lists sessions from the trace API and opens one into its spans", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -288,7 +288,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -349,7 +349,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=llm-1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -393,7 +393,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=call-toolu_1`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=call-toolu_1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -428,7 +428,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -451,7 +451,7 @@ describe("SessionsPage", () => {
       traceDetail: traceDetail(),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     await openFirstSession()
 
     await vi.waitFor(() =>
@@ -473,7 +473,7 @@ describe("SessionsPage", () => {
       ceilings: [keyCeiling({ max_budget: 10, current_spend: 6 })],
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -496,7 +496,7 @@ describe("SessionsPage", () => {
       ceilings: [keyCeiling()],
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -512,7 +512,7 @@ describe("SessionsPage", () => {
       deploymentOperator: false,
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$0.02")
@@ -536,7 +536,7 @@ describe("SessionsPage", () => {
     )
     mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     await userEvent.hover(
@@ -579,7 +579,7 @@ describe("SessionsPage", () => {
     )
     mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const context = await within(peek).findByRole("region", {
       name: "Context",
@@ -619,7 +619,7 @@ describe("SessionsPage", () => {
     )
     mockApi({ traces: [traceSummary()], traceDetail: { ...detail, spans } })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const context = await within(peek).findByRole("region", {
       name: "Context",
@@ -657,7 +657,7 @@ describe("SessionsPage", () => {
   it("opens the span a gateway decision is about", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", {
@@ -703,7 +703,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const gatesTab = await within(peek).findByRole("button", {
       name: "Gates · 1 blocked",
@@ -762,7 +762,7 @@ describe("SessionsPage", () => {
     })
     const scrolled = vi.spyOn(Element.prototype, "scrollIntoView")
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", { name: "Collapse all" }),
@@ -802,7 +802,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const bash = await within(peek).findByRole("button", {
       name: /^Tool, Bash/,
@@ -834,7 +834,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", { name: /^Tool, Bash/ }),
@@ -855,7 +855,7 @@ describe("SessionsPage", () => {
   it("says at a glance what a session did and where its time went", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await within(peek).findByText("At a glance")).toBeInTheDocument()
@@ -889,7 +889,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -930,7 +930,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -976,7 +976,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     expect(await within(peek).findByText("Cost by tool")).toBeInTheDocument()
     await userEvent.click(
@@ -993,7 +993,7 @@ describe("SessionsPage", () => {
   it("shows a quiet session's cost", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$0.02")
@@ -1012,7 +1012,7 @@ describe("SessionsPage", () => {
       }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$1.97")
@@ -1033,7 +1033,7 @@ describe("SessionsPage", () => {
       traceDetail: traceDetail({ summary: traceSummary({ cost: 2 }) }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await costTotal(peek)).toBe("$2.00")
@@ -1075,7 +1075,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", { name: /^Gates/ }),
@@ -1123,7 +1123,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     const tool = await within(peek).findByRole("button", {
       name: /^Tool, Bash/,
@@ -1148,7 +1148,7 @@ describe("SessionsPage", () => {
   it("charts the sessions active each minute of the last hour", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?range=1h")
+    renderPage(<SessionsPage />, "/traces?range=1h")
 
     expect(
       await screen.findByText("Active sessions / minute"),
@@ -1173,7 +1173,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
     await userEvent.click(
       await within(peek).findByRole("button", { name: "Gates · 1 blocked" }),
@@ -1217,7 +1217,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      `/sessions?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
+      `/traces?peek=${summary.trace_id}&peek_workspace=${summary.workspace_id}&span=gate-1`,
     )
     const peek = await screen.findByRole("complementary", {
       name: "Trace claude-code",
@@ -1248,7 +1248,7 @@ describe("SessionsPage", () => {
       },
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     const tool = await within(peek).findByRole("button", {
@@ -1274,7 +1274,7 @@ describe("SessionsPage", () => {
       }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     await user.click(
       await within(peek).findByRole("button", { name: "Log view" }),
@@ -1290,7 +1290,7 @@ describe("SessionsPage", () => {
   it("has no Gates tab for a session no hook reported to", async () => {
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -1305,7 +1305,7 @@ describe("SessionsPage", () => {
     const { mock } = mockApi()
     refuse(mock, /\/traces\?/, "Trace store unavailable")
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
 
     expect(
       await screen.findByText(/Trace store unavailable/),
@@ -1316,7 +1316,7 @@ describe("SessionsPage", () => {
     const { mock } = mockApi({ traces: [traceSummary()] })
     refuse(mock, /\/traces\/s-/, "Trace store unavailable")
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(await within(peek).findByRole("alert")).toHaveTextContent(
@@ -1335,7 +1335,7 @@ describe("SessionsPage", () => {
     })
     const refusals = refuse(mock, /\/scoped-budgets/, "Budgets unavailable")
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     // A refused read renders as one still in flight does, so wait for the
@@ -1360,7 +1360,7 @@ describe("SessionsPage", () => {
       ceilings: [keyCeiling({ provider_key_id: "provider-key-1" })],
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession()
 
     expect(
@@ -1373,7 +1373,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?page=2")
+    renderPage(<SessionsPage />, "/traces?page=2")
     await vi.waitFor(() => expect(listReads(calls)[0]?.get("skip")).toBe("100"))
     await user.type(
       await screen.findByRole("searchbox", { name: "Search sessions" }),
@@ -1393,7 +1393,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const search = await screen.findByRole("searchbox", {
       name: "Search sessions",
     })
@@ -1410,7 +1410,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const search = await screen.findByRole("searchbox", {
       name: "Search sessions",
     })
@@ -1426,7 +1426,7 @@ describe("SessionsPage", () => {
   it("names the search when nothing matches it", async () => {
     mockApi({ traces: [] })
 
-    renderPage(<SessionsPage />, "/sessions?q=codex")
+    renderPage(<SessionsPage />, "/traces?q=codex")
 
     expect(
       await screen.findByText("No sessions in this window match “codex”."),
@@ -1438,10 +1438,7 @@ describe("SessionsPage", () => {
     const start = "2026-10-01T00:00:00.000Z"
     const end = "2026-10-02T00:00:00.000Z"
 
-    renderPage(
-      <SessionsPage />,
-      `/sessions?start_date=${start}&end_date=${end}`,
-    )
+    renderPage(<SessionsPage />, `/traces?start_date=${start}&end_date=${end}`)
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     const [params] = listReads(calls)
@@ -1453,7 +1450,7 @@ describe("SessionsPage", () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
     const start = "2026-10-01T00:00:00.000Z"
 
-    renderPage(<SessionsPage />, `/sessions?start_date=${start}`)
+    renderPage(<SessionsPage />, `/traces?start_date=${start}`)
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     const [params] = listReads(calls)
@@ -1468,7 +1465,7 @@ describe("SessionsPage", () => {
 
     renderPage(
       <SessionsPage />,
-      "/sessions?user_id=u1&user_id=u2&api_key_id=k1&status=error",
+      "/traces?user_id=u1&user_id=u2&api_key_id=k1&status=error",
     )
 
     await waitFor(() =>
@@ -1491,7 +1488,7 @@ describe("SessionsPage", () => {
   it("reads status=success as sessions without an error", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?status=success")
+    renderPage(<SessionsPage />, "/traces?status=success")
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     expect(listReads(calls)[0].get("has_error")).toBe("false")
@@ -1500,7 +1497,7 @@ describe("SessionsPage", () => {
   it("sends a model filter with the list", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?model=gpt-5.6&model=claude-x")
+    renderPage(<SessionsPage />, "/traces?model=gpt-5.6&model=claude-x")
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     expect(listReads(calls)[0].getAll("model")).toEqual(["gpt-5.6", "claude-x"])
@@ -1509,7 +1506,7 @@ describe("SessionsPage", () => {
   it("sends no has_error for a status with no session meaning", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?status=absorbed")
+    renderPage(<SessionsPage />, "/traces?status=absorbed")
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     expect(listReads(calls)[0].has("has_error")).toBe(false)
@@ -1523,7 +1520,7 @@ describe("SessionsPage", () => {
         <SessionsPage />
         <RangeProbe />
       </>,
-      "/sessions?range=90d",
+      "/traces?range=90d",
     )
 
     await waitFor(() =>
@@ -1541,7 +1538,7 @@ describe("SessionsPage", () => {
         <SessionsPage />
         <RangeProbe />
       </>,
-      "/sessions?range=90d&start_date=2026-10-01T00:00:00.000Z&end_date=2026-10-02T00:00:00.000Z",
+      "/traces?range=90d&start_date=2026-10-01T00:00:00.000Z&end_date=2026-10-02T00:00:00.000Z",
     )
 
     await screen.findByRole("grid", { name: "Sessions" })
@@ -1553,7 +1550,7 @@ describe("SessionsPage", () => {
   it("omits its heading when embedded", async () => {
     mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage embedded />, "/sessions")
+    renderPage(<SessionsPage embedded />, "/traces")
 
     await screen.findByRole("grid", { name: "Sessions" })
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
@@ -1567,7 +1564,7 @@ describe("SessionsPage", () => {
       ),
     })
 
-    renderPage(<SessionsPage />, "/sessions?size=25")
+    renderPage(<SessionsPage />, "/traces?size=25")
     const next = await screen.findByRole("button", {
       name: "Next page, Sessions",
     })
@@ -1589,7 +1586,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?page=2")
+    renderPage(<SessionsPage />, "/traces?page=2")
     await vi.waitFor(() =>
       expect(listReads(calls)[0]?.get("sort")).toBe("last_activity"),
     )
@@ -1614,7 +1611,7 @@ describe("SessionsPage", () => {
   it("reads the sort a link names", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?sort=errors&order=asc")
+    renderPage(<SessionsPage />, "/traces?sort=errors&order=asc")
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     expect(listReads(calls)[0].toString()).toMatch(/sort=errors&order=asc/)
@@ -1626,7 +1623,7 @@ describe("SessionsPage", () => {
   it("asks for the default order when a link names a sort it does not offer", async () => {
     const { calls } = mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?sort=name&order=sideways")
+    renderPage(<SessionsPage />, "/traces?sort=name&order=sideways")
 
     await vi.waitFor(() => expect(listReads(calls).length).toBeGreaterThan(0))
     expect(listReads(calls)[0].toString()).toMatch(
@@ -1646,7 +1643,7 @@ describe("SessionsPage", () => {
         traceDetail: traceDetail(),
       })
 
-      renderPage(<SessionsPage />, "/sessions")
+      renderPage(<SessionsPage />, "/traces")
       await openFirstSession(user)
 
       await user.keyboard("j")
@@ -1681,7 +1678,7 @@ describe("SessionsPage", () => {
     })
     mockApi({ traces: [summary], traceDetail: traceDetail({ summary }) })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const sessions = await screen.findByRole("grid", { name: "Sessions" })
     await user.click(
       await within(sessions).findByRole("row", { name: /openai/ }),
@@ -1699,7 +1696,7 @@ describe("SessionsPage", () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-      renderPage(<SessionsPage />, "/sessions")
+      renderPage(<SessionsPage />, "/traces")
       const peek = await openFirstSession(user)
       const search = await within(peek).findByRole("searchbox", {
         name: "Search spans",
@@ -1730,7 +1727,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     const tree = await within(peek).findByRole("list", { name: "Spans" })
     expect(
@@ -1754,7 +1751,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     const tree = await within(peek).findByRole("list", { name: "Spans" })
     const [request] = within(tree).getAllByRole("button", {
@@ -1776,7 +1773,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     await user.click(
       await within(peek).findByRole("radio", { name: "Timeline" }),
@@ -1808,7 +1805,7 @@ describe("SessionsPage", () => {
       }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     const format = () =>
       within(peek).queryByRole("radiogroup", { name: "Format" })
@@ -1844,7 +1841,7 @@ describe("SessionsPage", () => {
       }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
 
     await user.click(
@@ -1865,7 +1862,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     await user.click(
       await within(peek).findByRole("button", { name: "Log view" }),
@@ -1891,7 +1888,7 @@ describe("SessionsPage", () => {
       }),
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
 
     expect(
@@ -1910,7 +1907,7 @@ describe("SessionsPage", () => {
     const user = userEvent.setup()
     mockApi({ traces: [traceSummary()], traceDetail: traceDetail() })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     const peek = await openFirstSession(user)
     await user.type(
       await within(peek).findByRole("searchbox", { name: "Search spans" }),

@@ -341,7 +341,7 @@ export function TeamHome({
     const target = await workspaceFor(row)
     if (target) select(target)
     void navigate({
-      to: cut.value === "providers" ? "/requests" : "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/traces",
       search: {
         ...sessionsSearchFor(window),
         [cut.filter]: filterValues(row),
@@ -714,7 +714,7 @@ export function TeamHome({
           graphic={
             hasSessions ? (
               <Link
-                to="/sessions"
+                to="/traces"
                 search={{
                   ...sessionsSearchFor(window),
                   ...workspaceSearch(workspaceId),

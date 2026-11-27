@@ -439,7 +439,7 @@ export function KeysPage() {
       // Sessions lists one workspace, so it opens on the key's own.
       select(key.workspace_id)
       void navigate({
-        to: "/sessions",
+        to: "/traces",
         search: { start_date: month.start, api_key_id: key.id },
       })
     }

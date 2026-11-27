@@ -15,7 +15,7 @@ function renderCall() {
       endMs={START + 5_000}
       summary={<p>The span's own summary</p>}
     />,
-    "/sessions",
+    "/traces",
   )
 }
 

@@ -17,7 +17,7 @@ export type ObserveView = "usage" | "requests" | "sessions"
 export const OBSERVE_PATHS = {
   usage: "/",
   requests: "/requests",
-  sessions: "/sessions",
+  sessions: "/traces",
 } as const satisfies Record<ObserveView, string>
 
 /**

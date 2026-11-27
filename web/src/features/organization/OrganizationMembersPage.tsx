@@ -1251,7 +1251,7 @@ export function OrganizationMembersPage() {
                         icon: FiLayers,
                         run: () =>
                           void navigate({
-                            to: "/sessions",
+                            to: "/traces",
                             search: { range: "30d", user_id: sessionsUser },
                           }),
                       },

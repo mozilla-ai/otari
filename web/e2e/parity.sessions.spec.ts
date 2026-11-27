@@ -12,7 +12,7 @@ test.describe("sessions", () => {
     await login(page)
     await nav(page).getByRole("link", { name: "Traces" }).click()
     await expect(pageHeading(page, "Traces")).toBeVisible()
-    await expect(page).toHaveURL(/\/sessions/)
+    await expect(page).toHaveURL(/\/traces/)
 
     const row = tableRows(page, "Sessions").filter({
       hasText: PARITY_SESSION.agent,

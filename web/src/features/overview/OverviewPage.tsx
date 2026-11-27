@@ -35,7 +35,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 /**
- * The pathless `_overview` layout over `/`, `/sessions`, `/requests` and
+ * The pathless `_overview` layout over `/`, `/traces`, `/requests` and
  * `/router-savings`.
  *
  * `/` is Home (`features/home/Home.tsx`, its index route), and the other three

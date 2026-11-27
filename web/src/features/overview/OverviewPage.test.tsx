@@ -103,7 +103,7 @@ function LocationProbe() {
 // The fixture's roster plus traces, so every tab of Sessions is served.
 const ALL_SURFACES = [...SURFACES, "traces"]
 
-function renderPage(ui: ReactElement, initial = "/sessions") {
+function renderPage(ui: ReactElement, initial = "/traces") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -212,7 +212,7 @@ describe("the Sessions layout", () => {
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,
-      { wrapper: withRouter({ url: "/sessions" }) },
+      { wrapper: withRouter({ url: "/traces" }) },
     )
 
     await screen.findByRole("navigation", SESSIONS_VIEWS)
@@ -244,7 +244,7 @@ describe("the Sessions layout", () => {
     await screen.findByRole("navigation", SESSIONS_VIEWS)
 
     const sessions = hrefOf("Sessions")
-    expect(sessions.pathname).toBe("/sessions")
+    expect(sessions.pathname).toBe("/traces")
     expect(sessions.searchParams.get("range")).toBe("7d")
     expect(sessions.searchParams.getAll("user_id")).toEqual(["u1", "u2"])
     expect(sessions.searchParams.get("status")).toBe("error")
@@ -253,7 +253,7 @@ describe("the Sessions layout", () => {
 
   it("puts the tabs ahead of the filters", async () => {
     mockApi()
-    renderPage(<OverviewIndex />, "/sessions")
+    renderPage(<OverviewIndex />, "/traces")
 
     const views = await screen.findByRole("navigation", SESSIONS_VIEWS)
     expect(
@@ -304,13 +304,13 @@ describe("the Sessions tabs by deployment", () => {
   }
 
   it("lands Requests on Sessions where only traces are recorded", async () => {
-    renderWith(["traces"], "/requests", "/sessions")
+    renderWith(["traces"], "/requests", "/traces")
 
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/sessions")
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/traces")
   })
 
   it("lands Sessions on Requests where only usage is recorded", async () => {
-    renderWith(["usage"], "/sessions", "/requests")
+    renderWith(["usage"], "/traces", "/requests")
 
     expect(await screen.findByTestId("loc")).toHaveTextContent("/requests")
   })
@@ -360,7 +360,7 @@ describe("Sessions on a phone", () => {
   })
 
   it("does the same behind an open session", async () => {
-    await renderOnPhone("/sessions?peek=t1")
+    await renderOnPhone("/traces?peek=t1")
 
     expect(covered()).not.toBeNull()
   })

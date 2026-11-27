@@ -51,7 +51,7 @@ describe("nav registry", () => {
     const items = NAV_SECTIONS.flatMap((section) => section.items)
     expect(items.map((item) => item.to)).toEqual([
       "/",
-      "/sessions",
+      "/traces",
       "/people",
       "/rules",
       "/routing",
@@ -354,7 +354,7 @@ describe("nav registry", () => {
     expect(sessions?.views).toEqual(["/requests", "/router-savings"])
     for (const view of ["/requests", "/router-savings"]) {
       expect(NAV_ITEMS.map((item) => item.to)).not.toContain(view)
-      expect(railPathForPath(view)).toBe("/sessions")
+      expect(railPathForPath(view)).toBe("/traces")
     }
   })
 
@@ -647,9 +647,9 @@ describe("isPathVisible", () => {
 
   it("answers a view of Traces with Traces", () => {
     expect(navItemForPath("/requests")?.label).toBe("Traces")
-    expect(navItemForPath("/sessions")?.label).toBe("Traces")
+    expect(navItemForPath("/traces")?.label).toBe("Traces")
     // Ungated, like the page it is a view of: each tab gates itself.
-    expect(isPathVisible("/sessions", without("traces"))).toBe(true)
+    expect(isPathVisible("/traces", without("traces"))).toBe(true)
   })
 
   it("leaves a path the registry does not declare ungated", () => {
@@ -838,7 +838,7 @@ describe("composeNavItems", () => {
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
     expect(pageLabelForPath("/keys")).toBe("API keys")
-    expect(pageLabelForPath("/sessions")).toBe("Traces")
+    expect(pageLabelForPath("/traces")).toBe("Traces")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()
@@ -1004,7 +1004,7 @@ function reach(caller: Caller): string[] {
 
 const WORKSPACE = [
   "/",
-  "/sessions",
+  "/traces",
   "/requests",
   "/router-savings",
   "/people",

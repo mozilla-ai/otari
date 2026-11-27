@@ -1725,7 +1725,7 @@ function railLinks(): string[] {
 
 const WORKSPACE_RAIL = [
   "/",
-  "/sessions",
+  "/traces",
   "/people",
   "/rules",
   "/routing",
