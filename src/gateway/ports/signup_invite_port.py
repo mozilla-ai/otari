@@ -4,7 +4,11 @@ from typing import Protocol
 
 
 class SignupInvitePort(Protocol):
-    """Whether an invitation token allows an account for the address somebody claims."""
+    """Whether an invitation token allows an account for the address somebody claims.
+
+    NOTE: One implementation answers for the whole deployment. A build that sends invitations from
+    more than one place recognizes all of them here, because binding replaces rather than adds.
+    """
 
     async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
         """Whether an invitation named by ``token`` allows an account for ``claimed_address``.
