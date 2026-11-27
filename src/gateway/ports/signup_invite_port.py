@@ -13,9 +13,10 @@ class SignupInvitePort(Protocol):
         mailbox. A true answer is recorded as that mailbox having answered, which is the
         strongest thing an address can carry, and no caller can check the claim.
 
-        NOTE: An implementation must read through the request's own Unit of Work. The answer is
-        used in the transaction that writes the account, and one read through a session of its
-        own can name an invitation that is gone by the time the account is written.
+        NOTE: An implementation must read through the request's own Unit of Work, and must hold
+        the invitation it answers true for until that transaction ends. The answer is used in the
+        transaction that writes the account, and an unlocked read lets a cancellation commit
+        before the write it admitted.
 
         NOTE: An implementation must compare addresses by ``gateway.core.addresses.same_address``
         and must not normalize further. A looser comparison allows one address and records

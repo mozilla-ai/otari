@@ -386,11 +386,18 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         )
         return list(result.scalars().all())
 
-    async def get_by_token_hash(self, token_hash: str) -> OrganizationInvitation | None:
-        """Return the invitation with this token hash, or None if there is none."""
-        result = await self.db.execute(
-            select(OrganizationInvitation).where(OrganizationInvitation.token_hash == token_hash)
-        )
+    async def get_by_token_hash(self, token_hash: str, *, lock: bool = False) -> OrganizationInvitation | None:
+        """Return the invitation with this token hash, or None if there is none.
+
+        ``lock`` holds the row until the caller's transaction ends, so a cancellation or a decline
+        of it waits.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
+        """
+        statement = select(OrganizationInvitation).where(OrganizationInvitation.token_hash == token_hash)
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         return result.scalar_one_or_none()
 
     async def get_in_organization(

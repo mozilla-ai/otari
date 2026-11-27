@@ -225,6 +225,44 @@ async def test_an_entitlement_waits_for_a_connection_requirement_still_being_wri
     assert entitled is False
 
 
+async def test_a_cancellation_waits_for_an_entitlement_that_has_not_committed(postgres_url: str) -> None:
+    """The read holds the invitation it allowed, so a cancellation cannot land before the write it admits.
+
+    Without the lock the cancellation commits inside the caller's own remaining work, and an account
+    is minted on a link nobody can accept any more.
+    """
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    address = "grace@example.com"
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="cancellation-waits")
+            await _invite(setup, organization, email=address)
+            await setup.commit()
+            invited = (await setup.execute(select(OrganizationInvitation))).scalar_one()
+
+        async with sessions() as asking, sessions() as canceling:
+            canceling_task: asyncio.Task[bool] | None = None
+            uow = UnitOfWork(asking)
+            async with uow:
+                entitled = await _link(asking, uow=uow).allows_an_account(_TOKEN, claimed_address=address)
+                assert entitled is True
+
+                # The write production takes to cancel the invitation, arriving while the read holds it.
+                canceling_task = asyncio.create_task(
+                    OrganizationInvitationRepository(canceling).delete_in_organization(invited.id, organization.id)
+                )
+                finished, _ = await asyncio.wait({canceling_task}, timeout=_WRITER_WINDOW)
+                assert not finished, "the cancellation must wait on the invitation the read holds"
+
+            canceled = await asyncio.wait_for(canceling_task, timeout=_RACE_DEADLINE)
+    finally:
+        await engine.dispose()
+
+    assert canceled is True
+
+
 async def test_an_accept_racing_a_cancel_finds_the_link_gone(
     postgres_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
