@@ -14,6 +14,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Set
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,7 @@ from gateway.log_config import logger
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import (
     Identities,
+    ModelArchitecture,
     OfferingRow,
     OrganizationSelectors,
     apply_model_metadata,
@@ -188,7 +190,7 @@ def models_by_identity(
             }
         )
         if any(getattr(row, field) is None for field in _DESCRIBED_FIELDS):
-            row = _described_as_identity(config, catalog, row, identity, organization_id)
+            row = _described_as_identity(catalog, row, identity)
         rows[identity.id] = row
     return [rows[model_id] for model_id in sorted(rows)]
 
@@ -223,11 +225,9 @@ def _entries_by_identity(catalog: ModelsDevCatalog) -> dict[str, list[tuple[str,
 
 
 def _described_as_identity(
-    config: GatewayConfig,
     catalog: ModelsDevCatalog | None,
     row: ModelObject,
     identity: ModelIdentity,
-    organization_id: uuid.UUID | None,
 ) -> ModelObject:
     """``row`` with what it leaves unknown read from models.dev's entry for the model it was grouped as.
 
@@ -238,27 +238,49 @@ def _described_as_identity(
     under its vendor or its resellers; the vendor's own entry is preferred. A
     field an offering does report is kept, and a filled output limit is capped
     at the row's context window, as :func:`_limits_from_others` caps one.
+
+    Only the entry is read. The row's own offerings were already read under the
+    selectors they are served by, so an override or served fact recorded for the
+    vendor's own selector would describe an endpoint this row does not reach.
     """
     entries = _entries_by_identity(catalog).get(identity.key) if catalog is not None else None
     if not entries:
         return row
     own = own_providers_for_vendor_slug(vendor_slug(identity.vendor)) if identity.vendor else frozenset()
     provider_type, model_id = next((entry for entry in entries if entry[0] in own), entries[0])
-    read = row.model_copy()
-    apply_model_metadata(
-        config,
-        catalog,
-        read,
-        f"{provider_type}:{model_id}",
-        organization_id=organization_id,
-        provider_type=provider_type,
-    )
-    update = {field: getattr(read, field) for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
+    entry = metadata_entry(catalog, provider_type, model_id)
+    if entry is None:
+        return row
+    described = _entry_fields(entry)
+    update = {field: described[field] for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
     window = row.context_window if row.context_window is not None else update.get("context_window")
     output = update.get("max_output_tokens")
     if window is not None and output is not None and output > window:
         update["max_output_tokens"] = window
     return row.model_copy(update=update)
+
+
+def _entry_fields(entry: ModelCatalogEntry) -> dict[str, Any]:
+    """What models.dev's entry for a model says, in the listing's own field names."""
+    flags = (
+        (entry.tool_call, ("tools", "tool_choice")),
+        (entry.structured_output, ("response_format",)),
+        (entry.reasoning, ("reasoning",)),
+        (entry.temperature, ("temperature",)),
+    )
+    return {
+        "name": entry.name,
+        "type": entry.type,
+        "context_window": entry.context_window,
+        "max_output_tokens": entry.max_output_tokens,
+        "supported_parameters": [parameter for flag, parameters in flags if flag for parameter in parameters],
+        "architecture": ModelArchitecture(
+            input_modalities=list(entry.input_modalities), output_modalities=list(entry.output_modalities)
+        ),
+        "description": entry.description,
+        "release_date": entry.release_date,
+        "knowledge_cutoff": entry.knowledge_cutoff,
+    }
 
 
 def _read_under_slug(

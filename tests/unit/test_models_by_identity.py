@@ -6,6 +6,8 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services import catalog as selectors
+from gateway.services.catalog import _overrides, _served
+from gateway.services.catalog._overrides import MetadataOverride
 from gateway.services.merged_catalog_service import ALIAS_OWNED_BY, ModelObject, ModelPricingInfo
 from gateway.services.model_identity import group_offerings
 from gateway.services.selector_index_service import answered_by_listing, models_by_identity, seed_for
@@ -374,6 +376,23 @@ def test_a_named_row_still_takes_what_it_leaves_unknown_from_the_identitys_entry
 
     assert row.name == "DeepSeek V4.1 Flash 1017"
     assert row.max_output_tokens == 393216
+
+
+def test_an_override_of_the_vendors_own_selector_does_not_describe_the_row(
+    config: GatewayConfig, no_index: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fill reads the entry, not what this deployment says about a selector the row is not served by."""
+    monkeypatch.setattr(_served, "_served", {})
+    monkeypatch.setattr(
+        _overrides, "_overrides", {(None, "deepseek"): {"deepseek-flash": MetadataOverride(context_window=131072)}}
+    )
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert row.context_window == 1048576
 
 
 def test_a_model_models_dev_does_not_list_stays_undescribed(config: GatewayConfig, no_index: None) -> None:
