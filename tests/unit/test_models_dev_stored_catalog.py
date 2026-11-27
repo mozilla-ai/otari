@@ -133,3 +133,13 @@ def test_catalogs_read_apart_share_their_text() -> None:
 
     assert first.name is second.name is parsed.name
     assert first.family is second.family is parsed.family
+
+
+def test_a_stored_catalog_keeps_the_reasoning_controls() -> None:
+    reasoning = {"supported": True, "effort": ["none", "high"], "default": {"type": "effort", "value": "high"}}
+    catalog = parse_catalog_v2({"p": {"models": {"m": {"capabilities": {"reasoning": reasoning}}}}})
+
+    model = read_catalog_document(_stored(catalog)).providers["p"].models["m"]
+
+    assert model.reasoning_efforts == ("none", "high")
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == ("high", True)

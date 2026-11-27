@@ -408,3 +408,18 @@ def test_a_base_url_a_document_path_cannot_follow_is_refused_without_being_repea
 
 def test_a_base_url_keeps_its_path_and_loses_its_trailing_slash() -> None:
     assert normalize_models_dev_base_url(" https://mirror.example/catalog/ ") == "https://mirror.example/catalog"
+
+
+def test_v1_reads_the_effort_values_of_its_reasoning_options() -> None:
+    raw = {"reasoning": True, "reasoning_options": [{"type": "toggle"}, {"type": "effort", "values": ["none", "high"]}]}
+    model = parse_catalog({"p": {"models": {"m": raw}}}).providers["p"].models["m"]
+
+    assert model.reasoning_efforts == ("none", "high")
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == (None, None)
+
+
+def test_v1_reasoning_options_of_the_wrong_shape_are_named() -> None:
+    catalog = parse_catalog({"p": {"models": {"m": {"reasoning": True, "reasoning_options": "effort"}}}})
+
+    assert catalog.providers["p"].models["m"].reasoning_efforts == ()
+    assert "p.models.m.reasoning_options" in catalog.issues.describe()

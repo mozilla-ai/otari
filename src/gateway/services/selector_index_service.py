@@ -25,6 +25,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog import (
     Identities,
     ModelArchitecture,
+    ModelReasoning,
     OfferingRow,
     OrganizationSelectors,
     apply_model_metadata,
@@ -204,6 +205,7 @@ _DESCRIBED_FIELDS = (
     "max_output_tokens",
     "supported_parameters",
     "architecture",
+    "reasoning",
     "description",
     "release_date",
     "knowledge_cutoff",
@@ -278,6 +280,7 @@ def _entry_fields(entry: ModelCatalogEntry) -> dict[str, Any]:
         "architecture": ModelArchitecture(
             input_modalities=list(entry.input_modalities), output_modalities=list(entry.output_modalities)
         ),
+        "reasoning": ModelReasoning.from_entry(entry) if entry.reasoning else None,
         "description": entry.description,
         "release_date": entry.release_date,
         "knowledge_cutoff": entry.knowledge_cutoff,

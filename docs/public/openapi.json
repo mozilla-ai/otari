@@ -17492,6 +17492,16 @@
             "title": "Pricing Source",
             "type": "string"
           },
+          "reasoning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoning"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "release_date": {
             "anyOf": [
               {
@@ -17639,6 +17649,49 @@
           "output_price_per_million"
         ],
         "title": "ModelPricingInfo",
+        "type": "object"
+      },
+      "ModelReasoning": {
+        "description": "How a model's reasoning can be set, in OpenRouter's ``reasoning`` shape; a field models.dev omits is unset.",
+        "properties": {
+          "default_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Effort"
+          },
+          "default_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Enabled"
+          },
+          "supported_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Efforts"
+          }
+        },
+        "title": "ModelReasoning",
         "type": "object"
       },
       "ModerationRequest": {

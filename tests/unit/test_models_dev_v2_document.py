@@ -393,3 +393,42 @@ def test_a_rule_on_a_condition_not_known_here_is_kept_named_once_and_is_not_dama
     assert pricing is not None
     assert len(pricing.modalities["text"].input.overrides) == 1  # type: ignore[union-attr]
     assert len(pricing.multipliers) == 1
+
+
+def _reasoning(reasoning: dict[str, Any]) -> ModelsDevModel:
+    document = {"p": {"models": {"m": {"capabilities": {"reasoning": reasoning}}}}}
+    return parse_catalog_v2(document).providers["p"].models["m"]
+
+
+def test_v2_reasoning_carries_its_efforts_and_a_default_effort() -> None:
+    model = _reasoning(
+        {"supported": True, "effort": ["none", "low", "high"], "default": {"type": "effort", "value": "low"}}
+    )
+
+    assert model.reasoning is True
+    assert model.reasoning_efforts == ("none", "low", "high")
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == ("low", True)
+
+
+def test_a_default_effort_of_none_means_reasoning_is_off_by_default() -> None:
+    model = _reasoning({"supported": True, "effort": ["none", "high"], "default": {"type": "effort", "value": "none"}})
+
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == ("none", False)
+
+
+def test_a_toggle_default_says_whether_reasoning_is_on_and_names_no_effort() -> None:
+    model = _reasoning({"supported": True, "toggle": True, "default": {"type": "toggle", "value": True}})
+
+    assert model.reasoning_efforts == ()
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == (None, True)
+
+
+def test_a_default_of_a_kind_not_known_here_reads_as_unknown_and_is_not_damage() -> None:
+    document = {
+        "p": {"models": {"m": {"capabilities": {"reasoning": {"supported": True, "default": {"type": "dial"}}}}}}
+    }
+    catalog = parse_catalog_v2(document)
+    model = catalog.providers["p"].models["m"]
+
+    assert (model.reasoning_default_effort, model.reasoning_default_enabled) == (None, None)
+    assert catalog.issues.count == 0

@@ -31,6 +31,26 @@ class ModelArchitecture(BaseModel):
     output_modalities: list[str] = Field(default_factory=list)
 
 
+class ModelReasoning(BaseModel):
+    """How a model's reasoning can be set, in OpenRouter's ``reasoning`` shape; a field models.dev omits is unset."""
+
+    supported_efforts: list[str] | None = None
+    default_effort: str | None = None
+    default_enabled: bool | None = None
+
+    @classmethod
+    def from_entry(cls, entry: ModelCatalogEntry) -> "ModelReasoning | None":
+        """What models.dev records of the entry's reasoning controls, or ``None`` where it records none."""
+        recorded = (entry.reasoning_efforts, entry.reasoning_default_effort, entry.reasoning_default_enabled)
+        if not recorded[0] and recorded[1] is None and recorded[2] is None:
+            return None
+        return cls(
+            supported_efforts=list(entry.reasoning_efforts) or None,
+            default_effort=entry.reasoning_default_effort,
+            default_enabled=entry.reasoning_default_enabled,
+        )
+
+
 class ModelLimits(NamedTuple):
     """A model's token limits, ``None`` where neither dataset knows one."""
 
@@ -48,6 +68,7 @@ class ModelCapabilities(NamedTuple):
     description: str | None = None
     release_date: str | None = None
     knowledge_cutoff: str | None = None
+    reasoning: ModelReasoning | None = None
 
 
 # Where models.dev lists open-weight models by their Hugging Face ids, which is
@@ -258,6 +279,7 @@ def model_capabilities(
         description=metadata.description if metadata else None,
         release_date=metadata.release_date if metadata else None,
         knowledge_cutoff=metadata.knowledge_cutoff if metadata else None,
+        reasoning=ModelReasoning.from_entry(metadata) if metadata and reasoning else None,
     )
 
 
@@ -287,7 +309,7 @@ def apply_model_metadata(
     obj.type = model_type(config, models_dev, selector, provider_type=provider_type)
     capabilities = model_capabilities(config, models_dev, selector, organization_id, provider_type=provider_type)
     if capabilities is None:
-        obj.name = obj.supported_parameters = obj.architecture = None
+        obj.name = obj.supported_parameters = obj.architecture = obj.reasoning = None
         obj.description = obj.release_date = obj.knowledge_cutoff = None
         return
     obj.name = capabilities.name if with_name else None
@@ -295,6 +317,7 @@ def apply_model_metadata(
     obj.release_date = capabilities.release_date if with_name else None
     obj.knowledge_cutoff = capabilities.knowledge_cutoff if with_name else None
     obj.supported_parameters = capabilities.supported_parameters
+    obj.reasoning = capabilities.reasoning
     obj.architecture = ModelArchitecture(
         input_modalities=capabilities.input_modalities, output_modalities=capabilities.output_modalities
     )

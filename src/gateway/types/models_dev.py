@@ -302,6 +302,12 @@ class ModelsDevModel:
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
     reasoning: bool = False
+    reasoning_efforts: tuple[str, ...] = ()
+    """The ``reasoning_effort`` values the host takes, ``none`` among them where reasoning can be switched off."""
+    reasoning_default_effort: str | None = None
+    """The effort the host reasons at when a request names none. v2 only."""
+    reasoning_default_enabled: bool | None = None
+    """Whether the host reasons when a request does not say. v2 only."""
     tool_call: bool = False
     structured_output: bool = False
     attachment: bool = False
@@ -499,6 +505,31 @@ class _Reader:
             self.note(f"{path}.{name}", "a list of strings")
         return items
 
+    def efforts_v1(self, raw: dict[str, Any], path: str) -> tuple[str, ...]:
+        """The effort values of v1's ``reasoning_options``, a list of ``{"type": ..., ...}`` controls."""
+        options = raw.get("reasoning_options")
+        if options is None:
+            return ()
+        if not isinstance(options, list) or not all(isinstance(option, dict) for option in options):
+            self.note(f"{path}.reasoning_options", "a list of objects")
+            return ()
+        at = f"{path}.reasoning_options"
+        return next((self.texts(option, "values", at) for option in options if option.get("type") == "effort"), ())
+
+    def reasoning_default(self, raw: dict[str, Any], path: str) -> tuple[str | None, bool | None]:
+        """v2's ``reasoning.default``: an effort (``{"type": "effort", "value": "high"}``) or an on/off toggle.
+
+        A default of a kind not known here reads as unknown rather than as damage,
+        so a kind models.dev adds cannot push a document past the refusal share.
+        """
+        default = self.mapping(raw, "default", path) or {}
+        value = default.get("value")
+        if default.get("type") == "effort" and isinstance(value, str):
+            return _shared(value), value != "none"
+        if default.get("type") == "toggle" and isinstance(value, bool):
+            return None, value
+        return None, None
+
     def limit(self, raw: dict[str, Any], name: str, path: str) -> int | None:
         """A token limit; models.dev writes 0 for one it does not know, which a client would read as no tokens."""
         value = raw.get(name)
@@ -558,6 +589,7 @@ class _Reader:
             input_modalities=self.texts(modalities, "input", f"{path}.modalities"),
             output_modalities=self.texts(modalities, "output", f"{path}.modalities"),
             reasoning=self.flag(raw, "reasoning", path),
+            reasoning_efforts=self.efforts_v1(raw, path),
             tool_call=self.flag(raw, "tool_call", path),
             structured_output=self.flag(raw, "structured_output", path),
             attachment=self.flag(raw, "attachment", path),
@@ -591,6 +623,8 @@ class _Reader:
         at = f"{path}.capabilities"
         inputs = self.modalities(modalities, "input", f"{path}.modalities")
         pricing = self.pricing(raw, path)
+        reasoning = self.mapping(capabilities, "reasoning", at) or {}
+        default_effort, default_enabled = self.reasoning_default(reasoning, f"{at}.reasoning")
         return ModelsDevModel(
             id=self.text(raw, "id", path) or key,
             name=self.text(raw, "name", path),
@@ -600,7 +634,10 @@ class _Reader:
             status=self.text(raw, "status", path),
             input_modalities=inputs,
             output_modalities=self.modalities(modalities, "output", f"{path}.modalities"),
-            reasoning=self.flag(self.mapping(capabilities, "reasoning", at) or {}, "supported", f"{at}.reasoning"),
+            reasoning=self.flag(reasoning, "supported", f"{at}.reasoning"),
+            reasoning_efforts=self.texts(reasoning, "effort", f"{at}.reasoning"),
+            reasoning_default_effort=default_effort,
+            reasoning_default_enabled=default_enabled,
             tool_call=self.flag(self.mapping(capabilities, "tools", at) or {}, "supported", f"{at}.tools"),
             structured_output=self.flag(capabilities, "structured_output", at),
             attachment=any(modality != "text" for modality in inputs),

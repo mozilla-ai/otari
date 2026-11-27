@@ -18001,6 +18001,7 @@ export interface components {
              * @default none
              */
             pricing_source: string;
+            reasoning?: components["schemas"]["ModelReasoning"] | null;
             /** Release Date */
             release_date?: string | null;
             /** Supported Parameters */
@@ -18033,6 +18034,18 @@ export interface components {
              * @enum {string}
              */
             unit: "token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search";
+        };
+        /**
+         * ModelReasoning
+         * @description How a model's reasoning can be set, in OpenRouter's ``reasoning`` shape; a field models.dev omits is unset.
+         */
+        ModelReasoning: {
+            /** Default Effort */
+            default_effort?: string | null;
+            /** Default Enabled */
+            default_enabled?: boolean | null;
+            /** Supported Efforts */
+            supported_efforts?: string[] | null;
         };
         /**
          * ModerationRequest

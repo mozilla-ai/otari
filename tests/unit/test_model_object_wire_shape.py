@@ -35,10 +35,12 @@ OMITTABLE_FIELDS = {
         "max_output_tokens",
         "name",
         "pricing",
+        "reasoning",
         "release_date",
         "supported_parameters",
         "type",
     },
+    "ModelReasoning": {"default_effort", "default_enabled", "supported_efforts"},
     "ModelPricingInfo": {
         "cache_read_price_per_million",
         "cache_write_price_per_million",

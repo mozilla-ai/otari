@@ -1,5 +1,6 @@
 """Tests for the GET /api/v1/models endpoint."""
 
+import copy
 from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
@@ -391,6 +392,28 @@ def test_the_listing_carries_each_models_capabilities(limits_client: TestClient)
 
     assert _capabilities(_read(limits_client, f"{API_ROOT}/models/{_QWEN_ID}")) == qwen
     assert _capabilities(_read(limits_client, f"{API_ROOT}/models/house-gemini"))[0] is None
+
+
+def test_the_listing_carries_each_models_reasoning_controls(limits_client: TestClient) -> None:
+    """models.dev's reasoning efforts, in OpenRouter's ``reasoning`` object; a model with none has no object."""
+    qwen = _MODELS_DEV["nebius"]["models"]["Qwen/Qwen3-30B-A3B-Instruct-2507"]
+    document = copy.deepcopy(_MODELS_DEV)
+    document["nebius"]["models"]["Qwen/Qwen3-30B-A3B-Instruct-2507"] = {
+        **qwen,
+        "reasoning": True,
+        "reasoning_options": [{"type": "effort", "values": ["none", "high"]}],
+    }
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(document)):
+        listed = limits_client.get(f"{API_ROOT}/models", headers=headers)
+        read = limits_client.get(f"{API_ROOT}/models/{_QWEN_ID}", headers=headers)
+    assert listed.status_code == read.status_code == 200, listed.text
+    rows = {model["id"]: model for model in listed.json()["data"]}
+
+    assert rows[_QWEN_ID]["reasoning"] == {"supported_efforts": ["none", "high"]}
+    assert "reasoning" in rows[_QWEN_ID]["supported_parameters"]
+    assert read.json()["reasoning"] == {"supported_efforts": ["none", "high"]}
+    assert "reasoning" not in rows[_UNKNOWN_ID]
 
 
 def test_without_models_dev_the_window_comes_from_the_snapshot(limits_client: TestClient) -> None:
