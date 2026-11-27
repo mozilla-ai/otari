@@ -95,7 +95,7 @@ servers by id. It treats a disabled server differently: its endpoints answer
 
 ### Configuring them
 
-The dashboard manages them under **Tools → MCP servers**, which acts on the
+The dashboard manages them under **MCP servers**, which acts on the
 workspace the switcher has selected. Everything below is the same thing over the
 API.
 
@@ -181,7 +181,7 @@ curl -X PATCH http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers/
 
 In the dashboard it is the **Every request** choice of **Availability**, on the
 server's page and in the form that adds one; the server's row under
-**Tools → MCP servers** shows it.
+**MCP servers** shows it.
 
 - **Other replicas pick it up on their next refresh.** Attaching a server
   applies at once on the replica that served the change; the others refresh

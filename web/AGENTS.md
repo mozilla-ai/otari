@@ -220,7 +220,7 @@ and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
 published build resolve its assets under `/<repo>/`, since the merged
 `vite.config.ts` carries the app's own `base: "/"`.
 
-The dashboard bundles no documentation. Its Documentation links open `docs_url`
+The dashboard bundles no documentation. Its Docs links open `docs_url`
 where a deployment sets one and `https://docs.otari.ai/` otherwise
 (`web/src/shared/helpers/docs.ts`).
 

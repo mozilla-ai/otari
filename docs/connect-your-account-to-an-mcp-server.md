@@ -251,7 +251,7 @@ catalog, so a deployment without it offers no **Request a server**.
 ## Disconnect
 
 - **Your own account.** Click **Disconnect** on the server's card under
-  **Tools → MCP servers**, or under **Your account** on its page. An owner or
+  **MCP servers**, or under **Your account** on its page. An owner or
   admin clicks **Your account: connected** at the top of the server's page,
   then **Disconnect**, or **Remove connection** in the menu of their own row
   under **Connected users**, which is marked **(you)**. Otari deletes your tokens and asks the server to revoke

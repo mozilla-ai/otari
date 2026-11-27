@@ -6,7 +6,7 @@ looking up their URLs. Otari fills it by copying the official
 list of its own for well-known servers the registry does not list (see
 [Servers the registry does not list](#servers-the-registry-does-not-list)).
 You use it from
-**Tools → MCP servers → Browse catalog**; the steps are in
+**MCP servers → Browse catalog**; the steps are in
 [MCP servers](mcp-servers.md#add-servers-from-the-catalog).
 
 Being listed permits nothing, and does not mean anyone checked the server. A
