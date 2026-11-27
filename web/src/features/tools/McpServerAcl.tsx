@@ -16,6 +16,7 @@ import {
 import { McpAccessTest } from "@/features/tools/McpAccessTest"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
 import { McpGrantsTable } from "@/features/tools/McpGrantsTable"
+import { McpUnconfirmedNotice } from "@/features/tools/McpUnconfirmedNotice"
 import { isLiteralToolName } from "@/features/tools/mcpAccess"
 import {
   grantSubject,
@@ -24,6 +25,10 @@ import {
   userLabel,
 } from "@/features/tools/mcpGrantSubjects"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
+import {
+  isOrganizationServer,
+  isSamePolicy,
+} from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
 import { ApiError } from "@/shared/api/client"
@@ -32,9 +37,12 @@ import { useOrganizationMembers } from "@/shared/api/organizations"
 import {
   useAddWorkspaceMcpServerGrants,
   useDeleteWorkspaceMcpServerGrant,
+  useSetWorkspaceMcpServerOverride,
   useUpdateMcpServer,
   useUpdateWorkspaceMcpServerGrant,
+  useWorkspaceMcpServer,
   useWorkspaceMcpServerAccess,
+  useWorkspaceMcpServerOverridePending,
 } from "@/shared/api/tools"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useUrlValue } from "@/shared/helpers/urlState"
@@ -56,6 +64,11 @@ export interface UserRuleRequest {
 /**
  * A server's access rules: its rules for keys and users, its default policy,
  * and a trace of one key's call to one tool through them.
+ *
+ * On an organization's server, `server` is as the workspace uses it
+ * (`asWorkspaceUses`): its default policy is the workspace's own where it set
+ * one, and changing it sets the workspace's own, since the server's is the
+ * organization's.
  */
 export function McpServerAcl({
   workspaceId,
@@ -76,6 +89,22 @@ export function McpServerAcl({
   const linkedCall =
     linkedKey && linkedTool ? { keyId: linkedKey, tool: linkedTool } : undefined
   const updateServer = useUpdateMcpServer()
+  const setOverride = useSetWorkspaceMcpServerOverride()
+  const isOrganizations = isOrganizationServer(server)
+  const defaultWrite = isOrganizations ? setOverride : updateServer
+  // The workspace's settings card above writes the same override, and holds
+  // it the same way: while a write or a re-read is in flight, and after a
+  // failed write whose re-read failed too.
+  const isOverrideWriting =
+    useWorkspaceMcpServerOverridePending(workspaceId, server.id) &&
+    isOrganizations
+  const read = useWorkspaceMcpServer(workspaceId, server.id)
+  const isUnconfirmed = read.isRefetchError && isOrganizations
+  const defaultHeld = isUnconfirmed
+    ? "Refresh the settings first"
+    : isOverrideWriting
+      ? "Saving another change first"
+      : ""
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
   const removeGrant = useDeleteWorkspaceMcpServerGrant()
@@ -90,6 +119,8 @@ export function McpServerAcl({
   const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServerGrant>()
   const [isEditingDefault, setEditingDefault] = useState(false)
+  // The policy the default's editor opened on; see `isSamePolicy`.
+  const [openedWith, setOpenedWith] = useState<readonly string[]>([])
   const [removing, setRemoving] = useState<WorkspaceMcpServerGrant>()
   const [presetUserId, setPresetUserId] = useState("")
   const section = useRef<HTMLDivElement>(null)
@@ -113,7 +144,8 @@ export function McpServerAcl({
     tools,
     descriptions: picker.descriptions,
     isKnown: picker.isKnown,
-    onCheck: () => check.run(server),
+    // Only the organization checks its own server.
+    onCheck: isOrganizations ? undefined : () => check.run(server),
     isChecking: check.isRunning(server.id),
     checkError: check.error,
     onDismissCheckError: check.dismissError,
@@ -171,7 +203,9 @@ export function McpServerAcl({
     setEditing(grant)
   }
   const openEditDefault = () => {
-    updateServer.reset()
+    if (defaultHeld) return
+    defaultWrite.reset()
+    setOpenedWith(server.everyone_tools)
     setOpenCount((count) => count + 1)
     setEditingDefault(true)
   }
@@ -226,11 +260,17 @@ export function McpServerAcl({
           <McpGrantsTable
             grants={grants}
             defaultTools={server.everyone_tools}
+            defaultDetail={
+              server.in_workspace && server.in_workspace.everyone_tools === null
+                ? "any other key, as your organization set it"
+                : undefined
+            }
             labels={labels}
             canManage={canManage}
             showRules={!isRefused}
             onEdit={openEdit}
             onEditDefault={openEditDefault}
+            defaultHeld={defaultHeld}
             onRemove={(grant) => {
               removeGrant.reset()
               setRemoving(grant)
@@ -317,18 +357,41 @@ export function McpServerAcl({
           editing={{ name: "the default policy", tools: server.everyone_tools }}
           {...pickerProps}
           readTools={server.read_tools}
-          isPending={updateServer.isPending}
-          error={updateServer.error}
-          onSubmit={(draft) =>
+          isPending={defaultWrite.isPending || isOverrideWriting}
+          error={defaultWrite.error}
+          held={
+            isUnconfirmed ? (
+              <McpUnconfirmedNotice
+                onRefresh={() => void read.refetch()}
+                isRefreshing={read.isFetching}
+              />
+            ) : undefined
+          }
+          onSubmit={(draft) => {
+            const onSuccess = () => setEditingDefault(false)
+            if (isOrganizations) {
+              if (defaultHeld) return
+              // Unchanged: saving it would store the inherited policy as the
+              // workspace's own, which would stop following the organization's.
+              if (isSamePolicy(draft.tools, openedWith)) {
+                onSuccess()
+                return
+              }
+              setOverride.mutate(
+                { ...ids, body: { everyone_tools: draft.tools } },
+                { onSuccess },
+              )
+              return
+            }
             updateServer.mutate(
               {
                 scope: workspaceMcpScope(workspaceId),
                 serverId: server.id,
                 body: { everyone_tools: draft.tools },
               },
-              { onSuccess: () => setEditingDefault(false) },
+              { onSuccess },
             )
-          }
+          }}
         />
       ) : null}
       <ConfirmDialog

@@ -9,14 +9,16 @@ import { CREDENTIAL_MODE_COPY } from "@/features/tools/mcpServerForm"
 /**
  * How Otari reaches the server, to read: its URL, how people sign in, the
  * credential a Shared server sends and the OAuth client a sign-in goes
- * through. All of it is changed in Settings, which `onOpenSettings` opens.
+ * through. All of it is changed in Settings, which `onOpenSettings` opens;
+ * without it, as on an organization's server read in a workspace, the section
+ * is only read.
  */
 export function McpServerConnection({
   server,
   onOpenSettings,
 }: {
   server: WorkspaceMcpServer
-  onOpenSettings: () => void
+  onOpenSettings?: () => void
 }) {
   const isPersonal = server.credential_mode === "per_user"
   const credential = server.shared_account
@@ -28,24 +30,30 @@ export function McpServerConnection({
     <SettingsGroup
       title="Connection"
       description={
-        <>
-          How Otari reaches this server. Change it in{" "}
-          {/* Named apart from the heading's Settings button, which it repeats. */}
-          <button
-            type="button"
-            aria-label="Open Settings"
-            onClick={onOpenSettings}
-            className="text-link underline hover:text-link-hover"
-          >
-            Settings
-          </button>
-          .
-        </>
+        onOpenSettings === undefined ? (
+          "How Otari reaches this server."
+        ) : (
+          <>
+            How Otari reaches this server. Change it in{" "}
+            {/* Named apart from the heading's Settings button, which it repeats. */}
+            <button
+              type="button"
+              aria-label="Open Settings"
+              onClick={onOpenSettings}
+              className="text-link underline hover:text-link-hover"
+            >
+              Settings
+            </button>
+            .
+          </>
+        )
       }
       action={
-        <Button onPress={onOpenSettings} aria-label="Edit connection">
-          Edit
-        </Button>
+        onOpenSettings === undefined ? null : (
+          <Button onPress={onOpenSettings} aria-label="Edit connection">
+            Edit
+          </Button>
+        )
       }
       isBounded
     >

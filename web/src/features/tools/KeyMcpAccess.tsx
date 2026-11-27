@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { decidedByLabel, keyAccessLabel } from "@/features/tools/mcpAccess"
+import { organizationLimitLabel } from "@/features/tools/mcpWorkspaceView"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useWorkspaceMcpKeyAccess } from "@/shared/api/tools"
 
@@ -10,6 +11,9 @@ import { useWorkspaceMcpKeyAccess } from "@/shared/api/tools"
  * What one key reaches on each of its workspace's MCP servers, read-only, for
  * the key editor. Changing it happens on each server's page, which every row
  * links to, because the access list belongs to the server rather than the key.
+ *
+ * Its organization's servers are listed too, each with the organization's
+ * limit for the workspace where it set one, which caps whatever the rule says.
  *
  * Shown only to someone who manages the key's workspace, and not at all when
  * the workspace has no servers or the read is refused: a key form has nothing
@@ -56,6 +60,12 @@ export function KeyMcpAccess({
             <span className="text-caption">
               matched {decidedByLabel(server.decided_by)}
             </span>
+            {organizationLimitLabel(server.organization_tools) ? (
+              <span className="text-caption">
+                organization limit:{" "}
+                {organizationLimitLabel(server.organization_tools)}
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

@@ -51,24 +51,26 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
             query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
         return list((await self.db.execute(query)).scalars().all())
 
-    async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerGrant]:
-        """A server's grants, oldest first."""
-        return list(
-            (
-                await self.db.execute(
-                    select(WorkspaceMcpServerGrant)
-                    .where(WorkspaceMcpServerGrant.server_id == server_id)
-                    .order_by(WorkspaceMcpServerGrant.created_at, WorkspaceMcpServerGrant.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
+    async def for_server(
+        self, server_id: uuid.UUID, workspace_id: uuid.UUID | None = None
+    ) -> list[WorkspaceMcpServerGrant]:
+        """A server's grants, oldest first; with ``workspace_id`` only those applying there."""
+        query = select(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.server_id == server_id)
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
+        query = query.order_by(WorkspaceMcpServerGrant.created_at, WorkspaceMcpServerGrant.id)
+        return list((await self.db.execute(query)).scalars().all())
 
-    async def get_on_server(self, server_id: uuid.UUID, grant_id: uuid.UUID) -> WorkspaceMcpServerGrant | None:
-        """One grant of a server, or ``None`` when the id names none on it."""
-        grant = await self.db.get(WorkspaceMcpServerGrant, grant_id)
-        return grant if grant is not None and grant.server_id == server_id else None
+    async def get_on_server(
+        self, server_id: uuid.UUID, grant_id: uuid.UUID, workspace_id: uuid.UUID | None = None
+    ) -> WorkspaceMcpServerGrant | None:
+        """One grant of a server, applying in ``workspace_id`` when given, or ``None`` when the id names none."""
+        query = select(WorkspaceMcpServerGrant).where(
+            WorkspaceMcpServerGrant.id == grant_id, WorkspaceMcpServerGrant.server_id == server_id
+        )
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
+        return (await self.db.execute(query)).scalar_one_or_none()
 
     async def put(
         self,

@@ -9,6 +9,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Chip } from "@/design-system/indicators/Chip"
 import { Dot } from "@/design-system/indicators/Dot"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
@@ -30,6 +31,10 @@ import { toolNoun } from "@/features/tools/mcpAccess"
 import { AVAILABILITY, availabilityOf } from "@/features/tools/mcpAvailability"
 import type { CatalogPick } from "@/features/tools/mcpCatalog"
 import { hasToolListing } from "@/features/tools/mcpServerHealth"
+import {
+  asWorkspaceUses,
+  isOrganizationServer,
+} from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { WorkspaceRequestMcpServers } from "@/features/tools/WorkspaceRequestMcpServers"
 import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
@@ -206,7 +211,9 @@ export function WorkspaceMcpServersCard() {
     )
   }
 
-  const rows = query.data?.data ?? []
+  // An organization's server is listed as this workspace uses it, so one the
+  // workspace or the organization turned off here reads Off.
+  const rows = (query.data?.data ?? []).map(asWorkspaceUses)
   const connectedIds = new Set(
     (mine.data?.data ?? []).map((entry) => entry.server_id),
   )
@@ -254,6 +261,7 @@ export function WorkspaceMcpServersCard() {
           />
           <span className="font-medium">{row.name}</span>
           <McpServerStatusDot name={row.name} health={row.health} />
+          {isOrganizationServer(row) ? <Chip>Organization</Chip> : null}
         </span>
       ),
     },
@@ -312,33 +320,45 @@ export function WorkspaceMcpServersCard() {
     columns.push({
       id: "actions",
       header: "",
-      cell: (row) => (
-        <RowActionRow>
-          <RowAction
-            icon={FiActivity}
-            label={
-              row.credential_mode === "per_user"
-                ? "Check this server (opens a sign-in, connects nothing)"
-                : "Check this server"
-            }
-            ariaLabel={`Check ${row.name}`}
-            isDisabled={check.isRunning(row.id)}
-            onPress={() => check.run(row)}
-          />
-          <RowAction
-            icon={FiChevronRight}
-            label="Manage"
-            ariaLabel={`Manage ${row.name}`}
-            onPress={() => openServer(row.id)}
-          />
-          <RowAction
-            icon={FiTrash2}
-            label="Delete…"
-            isDestructive
-            onPress={() => openDelete(row)}
-          />
-        </RowActionRow>
-      ),
+      // An organization's server is checked and deleted by the organization,
+      // so its row only opens its page.
+      cell: (row) =>
+        isOrganizationServer(row) ? (
+          <RowActionRow>
+            <RowAction
+              icon={FiChevronRight}
+              label="Manage"
+              ariaLabel={`Manage ${row.name}`}
+              onPress={() => openServer(row.id)}
+            />
+          </RowActionRow>
+        ) : (
+          <RowActionRow>
+            <RowAction
+              icon={FiActivity}
+              label={
+                row.credential_mode === "per_user"
+                  ? "Check this server (opens a sign-in, connects nothing)"
+                  : "Check this server"
+              }
+              ariaLabel={`Check ${row.name}`}
+              isDisabled={check.isRunning(row.id)}
+              onPress={() => check.run(row)}
+            />
+            <RowAction
+              icon={FiChevronRight}
+              label="Manage"
+              ariaLabel={`Manage ${row.name}`}
+              onPress={() => openServer(row.id)}
+            />
+            <RowAction
+              icon={FiTrash2}
+              label="Delete…"
+              isDestructive
+              onPress={() => openDelete(row)}
+            />
+          </RowActionRow>
+        ),
     })
   }
 

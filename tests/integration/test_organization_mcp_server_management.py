@@ -18,6 +18,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.exceptions.tools_exceptions import (
+    McpServerIsOrganizationsError,
     McpServerNameTakenError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
@@ -96,8 +97,10 @@ async def test_an_owner_adds_changes_and_removes_an_organization_server(
     assert [(server.id, server.scope, server.workspace_id) for server in listed.data] == [(jira, "organization", None)]
     assert renamed.name == "tracker"
     workspace_list = await service.list_servers(user=world.owner, workspace_id=world.workspace.id)
-    assert jira not in [server.id for server in workspace_list.data], "the workspace's page lists its own: PR 4"
-    with pytest.raises(WorkspaceMcpServerNotFoundError):
+    assert [(server.id, server.scope) for server in workspace_list.data if server.id == jira] == [
+        (jira, "organization")
+    ], "a workspace lists its organization's servers beside its own"
+    with pytest.raises(McpServerIsOrganizationsError):
         await service.update_server(
             user=world.owner, workspace_id=world.workspace.id, server_id=jira, request=WorkspaceMcpServerUpdate()
         )

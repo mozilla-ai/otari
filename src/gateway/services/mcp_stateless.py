@@ -617,10 +617,22 @@ class DiscoveredCatalog:
 class ContactObserver(Protocol):
     """Hears what a real request found when it talked to a stored server, without waiting or raising."""
 
-    def reached(self, server_id: uuid.UUID | str | None, url: str, listing: ServerCheck | None = None) -> None:
-        """The server answered; ``listing`` is its whole tool catalog, when the request read one."""
+    def reached(
+        self,
+        server_id: uuid.UUID | str | None,
+        url: str,
+        listing: ServerCheck | None = None,
+        *,
+        credential_mode: str | None = None,
+    ) -> None:
+        """The server answered; ``listing`` is its whole tool catalog, when the request read one.
 
-    def failed(self, server_id: uuid.UUID | str | None, url: str, failure: BaseException) -> None:
+        ``credential_mode`` is whose credential the request sent, where it knows.
+        """
+
+    def failed(
+        self, server_id: uuid.UUID | str | None, url: str, failure: BaseException, *, credential_mode: str | None = None
+    ) -> None:
         """No session could be opened on the server."""
 
 
@@ -701,7 +713,7 @@ async def _list_live(server: ResolvedMcpServer, contacts: ContactObserver | None
         # failure of all escape the error contract and answer nothing.
         logger.warning("Stateless MCP discovery failed error_class=%s", failure_class(exc))
         if contacts is not None:
-            contacts.failed(server.id, server.url, exc)
+            contacts.failed(server.id, server.url, exc, credential_mode=server.credential_mode)
         raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
@@ -715,7 +727,12 @@ async def _list_once(server: ResolvedMcpServer, contacts: ContactObserver | None
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
         if contacts is not None:
             # An allow-list stops the listing early, so only a server without one was read in full.
-            contacts.reached(server.id, server.url, catalog_of(listed) if server.allowed_tools is None else None)
+            contacts.reached(
+                server.id,
+                server.url,
+                catalog_of(listed) if server.allowed_tools is None else None,
+                credential_mode=server.credential_mode,
+            )
         return listed
     finally:
         await _close_bounded(stack)
@@ -1116,13 +1133,13 @@ async def _execute_once(
             task = asyncio.current_task()
             cancelled = isinstance(exc, asyncio.CancelledError) and task is not None and task.cancelling()
             if contacts is not None and not cancelled:
-                contacts.failed(server.id, server.url, exc)
+                contacts.failed(server.id, server.url, exc, credential_mode=server.credential_mode)
             raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
         timings["connect_ms"] = (monotonic() - phase_started) * 1000
         if contacts is not None:
             # The session initialized, which is the server answering, whatever the call then does.
-            contacts.reached(server.id, server.url)
+            contacts.reached(server.id, server.url, credential_mode=server.credential_mode)
         if on_dispatch is not None:
             on_dispatch()
         phase_started = monotonic()

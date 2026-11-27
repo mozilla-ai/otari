@@ -385,13 +385,18 @@ class MCPClientPool:
             return
         if cut_short and isinstance(exc, TimeoutError):
             return
-        self._contacts.failed(cfg.stored_server_id, cfg.url, exc)
+        self._contacts.failed(cfg.stored_server_id, cfg.url, exc, credential_mode=cfg.credential_mode)
 
     def _connected(self, cfg: McpServerConfig, session: ClientSession, listed: ListToolsResult) -> _ConnectedServer:
         if self._contacts is not None and cfg.stored_server_id is not None:
             # One page is the whole catalog only when the server offered no more.
             whole = getattr(listed, "next_cursor", None) is None
-            self._contacts.reached(cfg.stored_server_id, cfg.url, catalog_of(listed.tools) if whole else None)
+            self._contacts.reached(
+                cfg.stored_server_id,
+                cfg.url,
+                catalog_of(listed.tools) if whole else None,
+                credential_mode=cfg.credential_mode,
+            )
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         not_granted: list[str] = []

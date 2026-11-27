@@ -107,6 +107,11 @@ _LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
 CLIENT_METADATA_PATH = "/mcp-connections/client-metadata"
 # Where a manager supplies a client, said wherever a sign-in cannot start without one.
 _WHERE_TO_ADD_A_CLIENT = "Add an OAuth client ID: on the server's page, open Settings."
+# A workspace cannot change its organization's server, so its members are sent to who can.
+_WHERE_TO_ADD_AN_ORGANIZATION_CLIENT = (
+    "An organization owner or admin must add an OAuth client ID: open Settings on the server's page in "
+    "Organization > MCP servers."
+)
 # The dashboard route that finishes a sign-in a dashboard session started.
 DASHBOARD_CALLBACK_ROUTE = "/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
@@ -231,7 +236,7 @@ def _pin_issuer(server: WorkspaceMcpServer, client: StoredMcpOAuthClient, metada
     elif not pin.admits(metadata):
         if not client.dynamic:
             logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server.id)
-            raise McpOAuthIssuerChangedError
+            raise McpOAuthIssuerChangedError(organization=server.workspace_id is None)
         raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
 
 
@@ -304,8 +309,11 @@ def client_metadata(config: GatewayConfig) -> dict[str, object] | None:
     return _mcp_oauth.client_metadata_document(url, callback_url(config)) if url is not None else None
 
 
-def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
-    """Why no client could be had for a sign-in, and where a manager supplies one."""
+def _registration_refusal(exc: McpOAuthRegistrationError, *, organization: bool = False) -> str:
+    """Why no client could be had for a sign-in, and where a manager supplies one.
+
+    On an ``organization`` server, that manager is one of the organization's owners or admins.
+    """
     if exc.status_code is None:
         what = "This server's sign-in does not let Otari register itself as a client."
     else:
@@ -314,7 +322,7 @@ def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
         what = f"This server's sign-in refused to register Otari as a client ({detail})."
     if exc.takes_client_metadata:
         what += " It reads a client's details from a public https address instead, which this deployment does not have."
-    return f"{what} {_WHERE_TO_ADD_A_CLIENT}"
+    return f"{what} {_WHERE_TO_ADD_AN_ORGANIZATION_CLIENT if organization else _WHERE_TO_ADD_A_CLIENT}"
 
 
 def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str, workspace_id: uuid.UUID | None) -> str:
@@ -919,6 +927,7 @@ class McpConnectionService:
             server = await self._reachable_in_mode(server_id, mode, workspace_id, managing=for_check or for_shared)
             # A manager's sign-in to an organization's server from no workspace starts from none.
             started_in = server.workspace_id or workspace_id
+            is_organizations = server.workspace_id is None
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -926,12 +935,12 @@ class McpConnectionService:
                 if not stored.dynamic:
                     # Before anything is sent through the client: its secret was saved for the other server.
                     logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server_id)
-                    raise McpOAuthIssuerChangedError
+                    raise McpOAuthIssuerChangedError(organization=is_organizations)
                 # A client Otari registered with the other server means nothing to this one: register anew.
                 stored = None
             client = await self._client(server_id, mode, url, stored, metadata, redirect_uri)
         except McpOAuthRegistrationError as exc:
-            raise McpConnectionSetupError(_registration_refusal(exc)) from None
+            raise McpConnectionSetupError(_registration_refusal(exc, organization=is_organizations)) from None
         except McpOAuthPkceUnsupportedError as exc:
             raise McpConnectionSetupError(f"This server cannot be signed in to: {exc}") from None
         except McpOAuthDiscoveryError as exc:

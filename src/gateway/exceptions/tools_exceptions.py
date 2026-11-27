@@ -80,6 +80,16 @@ class McpServerNameTakenError(TenancyConflictError):
         super().__init__(f"An MCP server named '{name}' is already available to this organization's workspaces")
 
 
+class McpServerIsOrganizationsError(TenancyConflictError):
+    """A workspace route was asked to change its organization's server, which the organization defines."""
+
+    def __init__(self, name: object):
+        super().__init__(
+            f"MCP server '{name}' is your organization's: its owners and admins change it, and this workspace "
+            "changes only its own settings on it"
+        )
+
+
 class WorkspaceMcpServerUnsafeUrlError(TenancyValidationError):
     """The URL failed the same SSRF and TLS checks a request-body MCP server faces.
 
@@ -238,11 +248,16 @@ class McpOAuthIssuerChangedError(McpConnectionSetupError):
 
     error_code = MCP_OAUTH_ISSUER_CHANGED
 
-    def __init__(self) -> None:
+    def __init__(self, *, organization: bool = False) -> None:
+        who = (
+            "An organization owner or admin must save the OAuth client again, under Settings on the server's "
+            "page in Organization > MCP servers,"
+            if organization
+            else "A workspace admin must save the OAuth client again, under Settings on the server's page,"
+        )
         super().__init__(
             "This server now sends sign-ins to a different authorization server than the one its OAuth client "
-            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
-            "page, to approve the new sign-in server."
+            f"was saved for. {who} to approve the new sign-in server."
         )
 
 
@@ -767,6 +782,7 @@ __all__ = [
     "McpConnectionUpstreamError",
     "McpSignInRequiredError",
     "McpServerNameTakenError",
+    "McpServerIsOrganizationsError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",

@@ -35,18 +35,14 @@ export interface McpConnectionCallbackSearch {
 const LIST = "/tools/mcp-servers"
 
 /**
- * Where a sign-in that named no page to go back to lands. No workspace is an
- * organization owner's sign-in to an organization's server, whose page is
- * under Organization. A member's own sign-in to one names the workspace it
- * started from, which has no page for the server, so it lands on that
- * workspace's list.
+ * The server's own page, for a sign-in that named no page to go back to. No
+ * workspace is an organization owner's sign-in to an organization's server,
+ * whose page is under Organization. A member's own sign-in to one names the
+ * workspace it started from, which shows the server too.
  */
 function serverPage(done: McpConnectionCompleted): string {
-  if (done.workspace_id === null) {
-    return `/organization/mcp-servers/${done.server_id}`
-  }
-  return done.server_scope === "organization"
-    ? LIST
+  return done.workspace_id === null
+    ? `/organization/mcp-servers/${done.server_id}`
     : `${LIST}/${done.server_id}`
 }
 
