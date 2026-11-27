@@ -187,7 +187,7 @@ def models_by_identity(
                 **_facts_from_others(first, reached),
             }
         )
-        if row.name is None:
+        if any(getattr(row, field) is None for field in _DESCRIBED_FIELDS):
             row = _described_as_identity(config, catalog, row, identity, organization_id)
         rows[identity.id] = row
     return [rows[model_id] for model_id in sorted(rows)]
@@ -231,10 +231,13 @@ def _described_as_identity(
 ) -> ModelObject:
     """``row`` with what it leaves unknown read from models.dev's entry for the model it was grouped as.
 
-    A key on an OpenAI-compatible endpoint (a proxy, a reseller) is stored under
+    An offering that finds no models.dev entry leaves the row undescribed: a key
+    on an OpenAI-compatible endpoint (a proxy, a reseller) is stored under
     ``openai``, which models.dev lists none of its models under, so no offering
     read finds the model. The identity still names it, and models.dev lists it
-    under its vendor or its resellers; the vendor's own entry is preferred.
+    under its vendor or its resellers; the vendor's own entry is preferred. A
+    field an offering does report is kept, and a filled output limit is capped
+    at the row's context window, as :func:`_limits_from_others` caps one.
     """
     entries = _entries_by_identity(catalog).get(identity.key) if catalog is not None else None
     if not entries:
@@ -250,9 +253,12 @@ def _described_as_identity(
         organization_id=organization_id,
         provider_type=provider_type,
     )
-    return row.model_copy(
-        update={field: getattr(read, field) for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
-    )
+    update = {field: getattr(read, field) for field in _DESCRIBED_FIELDS if getattr(row, field) is None}
+    window = row.context_window if row.context_window is not None else update.get("context_window")
+    output = update.get("max_output_tokens")
+    if window is not None and output is not None and output > window:
+        update["max_output_tokens"] = window
+    return row.model_copy(update=update)
 
 
 def _read_under_slug(

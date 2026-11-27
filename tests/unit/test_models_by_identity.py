@@ -345,7 +345,7 @@ def test_an_openai_compatible_key_offering_is_described_as_the_model_it_groups_u
 
 
 def test_a_limit_another_offering_reports_wins_over_the_identitys_entry(config: GatewayConfig, no_index: None) -> None:
-    """The fallback only fills what the model's offerings leave unknown."""
+    """The fallback only fills what the model's offerings leave unknown, capped at the window they report."""
     catalog = _deepseek_catalog()
     org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
     selectors.apply_model_metadata(config, catalog, org)
@@ -358,6 +358,22 @@ def test_a_limit_another_offering_reports_wins_over_the_identitys_entry(config: 
     assert row.pricing.input_price_per_million == 0.3
     assert row.name == "DeepSeek V4.1 Flash 1017"
     assert row.context_window == 262144
+    assert row.max_output_tokens == 262144
+
+
+def test_a_named_row_still_takes_what_it_leaves_unknown_from_the_identitys_entry(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """A reseller's entry names the model but gives no output limit, which the vendor's own entry fills."""
+    catalog = _deepseek_catalog()
+    resold = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.5)
+    selectors.apply_model_metadata(config, catalog, resold)
+    assert (resold.name, resold.max_output_tokens) == ("DeepSeek V4.1 Flash 1017", None)
+
+    (row,) = models_by_identity(config, catalog, [resold])
+
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.max_output_tokens == 393216
 
 
 def test_a_model_models_dev_does_not_list_stays_undescribed(config: GatewayConfig, no_index: None) -> None:
