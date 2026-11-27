@@ -136,7 +136,7 @@ describe("WorkspaceDetailPage", () => {
     )
     expect(screen.getByLabelText("Name")).toHaveValue("Default Workspace")
     expect(
-      await screen.findByRole("link", { name: "← Workspaces" }),
+      await screen.findByRole("link", { name: "Workspaces" }),
     ).toHaveAttribute("href", "/workspaces")
   })
 
@@ -159,7 +159,7 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
     )
-    expect(screen.queryByRole("link", { name: "← Workspaces" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Workspaces" })).toBeNull()
   })
 
   it("says a workspace it cannot find is not found", async () => {

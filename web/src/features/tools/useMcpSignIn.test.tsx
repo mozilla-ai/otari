@@ -21,7 +21,7 @@ it("closes the blank popup when the page goes before the sign-in starts", () => 
     () =>
       useMcpSignIn({
         scope: workspaceMcpScope("w-1"),
-        returnTo: "/tools/mcp-servers/s-1",
+        returnTo: "/mcp-servers/s-1",
         openWindow: () => popup as unknown as Window,
       }),
     {

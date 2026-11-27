@@ -130,7 +130,7 @@ charge, and cache pricing is only as accurate as the source's token counts.
 
 ## Reading imported usage
 
-Imported rows show in **Sessions**, where the **Requests** view marks them. The
+Imported rows show in **Traces**, where the **Requests** view marks them. The
 usage APIs filter on `source`, `api_key_id`, user, model and session label.
 
 Budget gauges do not include imported usage.

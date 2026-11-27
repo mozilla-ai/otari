@@ -5,7 +5,7 @@ The **Web search** settings let you control how requests from a workspace can ac
 To configure web search for a workspace:
 
 1. Select the workspace in the top-left corner.
-2. Go to **Tools** → **Web search**.
+2. Go to **Tools**, then open **Web search**.
 3. Turn **Allow in <workspace>** on to allow web search for requests in this workspace, or off to block the web search and fetch tools Otari runs.
 4. Under **Search with** and **Fetch with**, choose which of the organization's keys the workspace uses, or a default. Only an owner or admin can change these.
 5. Under **Who runs provider web search** and **Who runs provider web fetch**, choose whether a provider's own search and fetch tools run on the provider or on Otari, or leave them **Not set**.

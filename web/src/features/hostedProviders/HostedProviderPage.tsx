@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { FiActivity, FiEdit2, FiPlus, FiTrash2 } from "react-icons/fi"
 
@@ -26,8 +26,8 @@ import {
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
+import { BackLink } from "@/shared/components/BackLink"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
 import { dataLocationLabel } from "./dataLocations"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
@@ -43,17 +43,8 @@ import { formatCountries } from "./supportedCountries"
 // A provider defined in config.yml shows its settings read-only, since the
 // file is where they change, and its models are managed here like any other's.
 
-function BackLink() {
-  return (
-    <nav aria-label="Breadcrumb" className="text-caption">
-      <Link
-        to="/admin/hosted-providers"
-        className="text-link hover:text-link-hover"
-      >
-        ← Hosted providers
-      </Link>
-    </nav>
-  )
+function ListBackLink() {
+  return <BackLink to="/admin/hosted-providers" label="Hosted providers" />
 }
 
 /** One fact about the provider, label above value. */
@@ -203,7 +194,7 @@ export function HostedProviderPage({ name }: { name: string }) {
   if (access.isError) {
     return (
       <div className="flex flex-col">
-        <BackLink />
+        <ListBackLink />
         <PageIntro title={name} />
         <ErrorBanner error={access.error} />
       </div>
@@ -228,7 +219,7 @@ export function HostedProviderPage({ name }: { name: string }) {
   if (providers.error) {
     return (
       <div className="flex flex-col">
-        <BackLink />
+        <ListBackLink />
         <PageIntro title={name} />
         <ErrorBanner error={providers.error} />
       </div>
@@ -243,7 +234,7 @@ export function HostedProviderPage({ name }: { name: string }) {
     }
     return (
       <div className="flex flex-col gap-2">
-        <BackLink />
+        <ListBackLink />
         <EmptyState
           title={`No hosted provider named ${name}`}
           description="It may have been removed. The list shows every provider this deployment serves on its own keys."
@@ -265,7 +256,7 @@ export function HostedProviderPage({ name }: { name: string }) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <BackLink />
+        <ListBackLink />
         <PageIntro
           title={provider.name}
           action={

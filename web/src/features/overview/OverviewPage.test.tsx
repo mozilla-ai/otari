@@ -103,7 +103,7 @@ function LocationProbe() {
 // The fixture's roster plus traces, so every tab of Sessions is served.
 const ALL_SURFACES = [...SURFACES, "traces"]
 
-function renderPage(ui: ReactElement, initial = "/sessions") {
+function renderPage(ui: ReactElement, initial = "/traces") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -150,7 +150,7 @@ const TWO_WORKSPACES = {
   ],
 }
 
-const SESSIONS_VIEWS = { name: "Sessions views" }
+const SESSIONS_VIEWS = { name: "Traces views" }
 
 describe("the Sessions layout", () => {
   afterEach(() => {
@@ -165,12 +165,12 @@ describe("the Sessions layout", () => {
       "http://localhost",
     )
 
-  it("titles the page Sessions over its views", async () => {
+  it("titles the page Traces over its views", async () => {
     mockApi()
     renderPage(<OverviewIndex />, "/requests")
 
     expect(
-      await screen.findByRole("heading", { name: "Sessions" }),
+      await screen.findByRole("heading", { name: "Traces" }),
     ).toBeInTheDocument()
     expect(
       tabs()
@@ -184,7 +184,7 @@ describe("the Sessions layout", () => {
     renderPage(<OverviewIndex />, "/router-savings")
 
     expect(
-      await screen.findByRole("heading", { name: "Sessions" }),
+      await screen.findByRole("heading", { name: "Traces" }),
     ).toBeInTheDocument()
     expect(
       tabs().getByRole("link", { name: "Router savings" }),
@@ -212,7 +212,7 @@ describe("the Sessions layout", () => {
           <OverviewIndex />
         </DeploymentProvider>
       </QueryClientProvider>,
-      { wrapper: withRouter({ url: "/sessions" }) },
+      { wrapper: withRouter({ url: "/traces" }) },
     )
 
     await screen.findByRole("navigation", SESSIONS_VIEWS)
@@ -244,7 +244,7 @@ describe("the Sessions layout", () => {
     await screen.findByRole("navigation", SESSIONS_VIEWS)
 
     const sessions = hrefOf("Sessions")
-    expect(sessions.pathname).toBe("/sessions")
+    expect(sessions.pathname).toBe("/traces")
     expect(sessions.searchParams.get("range")).toBe("7d")
     expect(sessions.searchParams.getAll("user_id")).toEqual(["u1", "u2"])
     expect(sessions.searchParams.get("status")).toBe("error")
@@ -253,7 +253,7 @@ describe("the Sessions layout", () => {
 
   it("puts the tabs ahead of the filters", async () => {
     mockApi()
-    renderPage(<OverviewIndex />, "/sessions")
+    renderPage(<OverviewIndex />, "/traces")
 
     const views = await screen.findByRole("navigation", SESSIONS_VIEWS)
     expect(
@@ -262,7 +262,7 @@ describe("the Sessions layout", () => {
     ).toBeTruthy()
   })
 
-  it("leaves the Sessions title and tabs off Home", async () => {
+  it("leaves the Traces title and tabs off Activity", async () => {
     mockApi()
     renderPage(<OverviewIndex />, "/")
 
@@ -274,7 +274,7 @@ describe("the Sessions layout", () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByRole("navigation", SESSIONS_VIEWS)).toBeNull()
-    expect(screen.queryByRole("heading", { name: "Sessions" })).toBeNull()
+    expect(screen.queryByRole("heading", { name: "Traces" })).toBeNull()
   })
 })
 
@@ -304,13 +304,13 @@ describe("the Sessions tabs by deployment", () => {
   }
 
   it("lands Requests on Sessions where only traces are recorded", async () => {
-    renderWith(["traces"], "/requests", "/sessions")
+    renderWith(["traces"], "/requests", "/traces")
 
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/sessions")
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/traces")
   })
 
   it("lands Sessions on Requests where only usage is recorded", async () => {
-    renderWith(["usage"], "/sessions", "/requests")
+    renderWith(["usage"], "/traces", "/requests")
 
     expect(await screen.findByTestId("loc")).toHaveTextContent("/requests")
   })
@@ -360,7 +360,7 @@ describe("Sessions on a phone", () => {
   })
 
   it("does the same behind an open session", async () => {
-    await renderOnPhone("/sessions?peek=t1")
+    await renderOnPhone("/traces?peek=t1")
 
     expect(covered()).not.toBeNull()
   })
@@ -617,21 +617,23 @@ describe("OverviewIndex for an identity with no organization", () => {
       screen.getByRole("link", { name: "Open your invitations" }),
     ).toHaveAttribute("href", "/invitations")
     expect(
-      screen.queryByRole("navigation", { name: "Sessions views" }),
+      screen.queryByRole("navigation", { name: "Traces views" }),
     ).not.toBeInTheDocument()
   })
 
-  it("says how to get in when nothing is waiting, rather than Home", async () => {
+  it("says how to get in when nothing is waiting, rather than Activity", async () => {
     mockWithoutOrganization([])
 
     renderHome()
 
     expect(await screen.findByText(EMPTY_STATE)).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Activity" }),
+    ).toBeInTheDocument()
     // The deployment-wide page fails open on an unreadable context, and a 404
     // is not one: it is the server saying there is no organization.
     expect(
-      screen.queryByRole("navigation", { name: "Sessions views" }),
+      screen.queryByRole("navigation", { name: "Traces views" }),
     ).toBeNull()
     expect(
       screen.getByRole("link", { name: /View invitations/ }),

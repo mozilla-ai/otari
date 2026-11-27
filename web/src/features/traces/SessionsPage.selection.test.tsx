@@ -31,7 +31,7 @@ describe("SessionsPage timeline selection", () => {
   it("opens the session when the selected window holds exactly one", async () => {
     mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     await userEvent.click(await screen.findByText("Select a bucket"))
 
     expect(
@@ -47,7 +47,7 @@ describe("SessionsPage timeline selection", () => {
       ],
     })
 
-    renderPage(<SessionsPage />, "/sessions")
+    renderPage(<SessionsPage />, "/traces")
     await userEvent.click(await screen.findByText("Select a bucket"))
 
     await screen.findByRole("grid", { name: "Sessions" })
@@ -59,7 +59,7 @@ describe("SessionsPage timeline selection", () => {
   it("falls back to the preset when a link's start date does not parse", async () => {
     mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?start_date=not-a-date")
+    renderPage(<SessionsPage />, "/traces?start_date=not-a-date")
 
     expect(
       await screen.findByRole("grid", { name: "Sessions" }),
@@ -69,7 +69,7 @@ describe("SessionsPage timeline selection", () => {
   it("does not open a lone session just because the page opened on one", async () => {
     mockApi({ traces: [traceSummary()] })
 
-    renderPage(<SessionsPage />, "/sessions?status=error")
+    renderPage(<SessionsPage />, "/traces?status=error")
 
     await screen.findByRole("grid", { name: "Sessions" })
     expect(
@@ -106,7 +106,7 @@ describe("SessionsPage timeline selection", () => {
         <SessionsPage />
         <Recover />
       </>,
-      "/sessions",
+      "/traces",
     )
     await userEvent.click(await screen.findByText("Select a bucket"))
     await vi.waitFor(() =>
@@ -140,7 +140,7 @@ describe("SessionsPage timeline selection", () => {
           onClick={() => {
             failing = false
             void navigate({
-              to: "/sessions",
+              to: "/traces",
               search: { start_date: START, end_date: END, status: "error" },
             })
           }}
@@ -155,7 +155,7 @@ describe("SessionsPage timeline selection", () => {
         <SessionsPage />
         <Narrow />
       </>,
-      "/sessions",
+      "/traces",
     )
     await userEvent.click(await screen.findByText("Select a bucket"))
     await vi.waitFor(() =>

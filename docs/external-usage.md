@@ -2,7 +2,7 @@
 
 Usage that does not go through Otari, such as a coding agent on a subscription or
 an app that calls a provider directly, can still be recorded. It then shows in
-**Sessions** beside your routed traffic, with what the same usage would cost
+**Traces** beside your routed traffic, with what the same usage would cost
 on the API.
 
 Importing works on a gateway you run, not on otari.ai today. To record a client's
@@ -101,7 +101,7 @@ in [Event fields](external-usage-reference.md#event-fields).
 
 ## See what you imported
 
-In **Sessions**, the **Requests** view marks imported rows by their source.
+In **Traces**, the **Requests** view marks imported rows by their source.
 Their cost is an estimate at API rates, not what a subscription charged, and an
 event with no price is kept without a cost. Budget gauges leave imported usage out. How each
 event is priced is in [Pricing](external-usage-reference.md#pricing).

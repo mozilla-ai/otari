@@ -259,7 +259,7 @@ def checked_return_to(return_to: str | None) -> str | None:
         and not any(ord(char) < 0x20 or ord(char) == 0x7F for char in return_to)
     )
     if not usable:
-        raise McpConnectionSetupError("return_to must be a path inside the dashboard, such as /tools/mcp-servers")
+        raise McpConnectionSetupError("return_to must be a path inside the dashboard, such as /mcp-servers")
     return return_to
 
 

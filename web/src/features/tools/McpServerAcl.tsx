@@ -138,7 +138,7 @@ export function McpServerAcl({
     : (server.allowed_tools ?? []).filter(isLiteralToolName)
   const check = useMcpServerCheck({
     scope: workspaceMcpScope(workspaceId),
-    returnTo: `/tools/mcp-servers/${server.id}`,
+    returnTo: `/mcp-servers/${server.id}`,
   })
   const pickerProps = {
     tools,

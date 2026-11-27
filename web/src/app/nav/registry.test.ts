@@ -20,7 +20,6 @@ import {
   ORG_NAV_SECTIONS,
   PLAYGROUND_NAV_ITEM,
   pageLabelForPath,
-  railLabelForPath,
   railPathForPath,
   visibleNavSections,
 } from "./registry"
@@ -52,11 +51,13 @@ describe("nav registry", () => {
     const items = NAV_SECTIONS.flatMap((section) => section.items)
     expect(items.map((item) => item.to)).toEqual([
       "/",
-      "/sessions",
+      "/traces",
       "/people",
       "/rules",
+      "/routing",
       "/models",
       "/tools",
+      "/mcp-servers",
       "/keys",
     ])
     expect(items.flatMap((item) => item.children ?? [])).toEqual([])
@@ -89,14 +90,15 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Members",
-      "Routing",
       "Guardrails",
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
       "Workspaces",
       "Members & roles",
@@ -338,21 +340,21 @@ describe("nav registry", () => {
   })
 
   it("leaves the index ungated on both axes", () => {
-    const overview = NAV_ITEMS.find((item) => item.label === "Home")
+    const overview = NAV_ITEMS.find((item) => item.label === "Activity")
     // The deployment's own front page: it reads whatever it is allowed to, so
     // gating it would leave a deployment with no landing page at all.
     expect(overview?.surface).toBeUndefined()
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("files Requests and Router savings under Sessions rather than rows of their own", () => {
+  it("files Requests and Router savings under Traces rather than rows of their own", () => {
     // Views under one title, each gated on its own surface inside the page,
     // so neither adds a row.
-    const sessions = NAV_ITEMS.find((item) => item.label === "Sessions")
+    const sessions = NAV_ITEMS.find((item) => item.label === "Traces")
     expect(sessions?.views).toEqual(["/requests", "/router-savings"])
     for (const view of ["/requests", "/router-savings"]) {
       expect(NAV_ITEMS.map((item) => item.to)).not.toContain(view)
-      expect(railPathForPath(view)).toBe("/sessions")
+      expect(railPathForPath(view)).toBe("/traces")
     }
   })
 
@@ -477,12 +479,14 @@ describe("nav registry", () => {
     const index = NAV_SECTIONS.find((section) => section.id === "index")
     expect(index?.label).toBeUndefined()
     expect(index?.items.map((item) => item.label)).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     const general = ORG_NAV_SECTIONS.find(
@@ -588,7 +592,7 @@ describe("navItemForPath", () => {
   })
 
   it("matches the index only exactly", () => {
-    expect(navItemForPath("/")?.label).toBe("Home")
+    expect(navItemForPath("/")?.label).toBe("Activity")
     // As a prefix, "/" would claim every path in the dashboard and gate the
     // whole shell on the index's (absent) gating.
     expect(navItemForPath("/keys")?.label).toBe("API keys")
@@ -641,11 +645,11 @@ describe("isPathVisible", () => {
     expect(isPathVisible("/routing/new", without("routing"))).toBe(false)
   })
 
-  it("answers a view of Sessions with Sessions", () => {
-    expect(navItemForPath("/requests")?.label).toBe("Sessions")
-    expect(navItemForPath("/sessions")?.label).toBe("Sessions")
+  it("answers a view of Traces with Traces", () => {
+    expect(navItemForPath("/requests")?.label).toBe("Traces")
+    expect(navItemForPath("/traces")?.label).toBe("Traces")
     // Ungated, like the page it is a view of: each tab gates itself.
-    expect(isPathVisible("/sessions", without("traces"))).toBe(true)
+    expect(isPathVisible("/traces", without("traces"))).toBe(true)
   })
 
   it("leaves a path the registry does not declare ungated", () => {
@@ -834,7 +838,7 @@ describe("composeNavItems", () => {
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
     expect(pageLabelForPath("/keys")).toBe("API keys")
-    expect(pageLabelForPath("/sessions")).toBe("Sessions")
+    expect(pageLabelForPath("/traces")).toBe("Traces")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()
@@ -854,11 +858,23 @@ describe("navPageForPath", () => {
   })
 
   it("files a tool's pages under Tools, the row they open from", () => {
-    expect(navPageForPath("/tools/mcp-servers/abc")).toEqual({
+    expect(navPageForPath("/tools/web-search")).toEqual({
       to: "/tools",
       label: "Tools",
     })
-    expect(pageLabelForPath("/tools/web-search")).toBe("Tools")
+    expect(pageLabelForPath("/tools/code-execution")).toBe("Tools")
+  })
+
+  it("files a server's pages under MCP servers, not under Tools", () => {
+    for (const path of ["/mcp-servers", "/mcp-servers/abc"]) {
+      expect(navPageForPath(path)).toEqual({
+        to: "/mcp-servers",
+        label: "MCP servers",
+      })
+      expect(railPathForPath(path)).toBe("/mcp-servers")
+      expect(navItemForPath(path)?.surface).toBe("tools")
+    }
+    expect(railPathForPath("/tools")).toBe("/tools")
   })
 
   it("names a destination with no row after itself, not after its row", () => {
@@ -871,16 +887,24 @@ describe("navPageForPath", () => {
   })
 })
 
-describe("destinations with no row", () => {
-  it("selects Rules on the Routing pages and the workspace's guardrails", () => {
-    for (const path of ["/routing", "/routing/coding", "/tools/guardrails"]) {
-      expect(railPathForPath(path)).toBe("/rules")
-      expect(railLabelForPath(path)).toBe("Rules")
+describe("Routing", () => {
+  it("is a rail row directly after Rules, selected on its own pages", () => {
+    const index = NAV_SECTIONS.find((section) => section.id === "index")
+    const labels = index?.items.map((item) => item.label) ?? []
+    expect(labels.indexOf("Routing")).toBe(labels.indexOf("Rules") + 1)
+    for (const path of ["/routing", "/routing/coding"]) {
+      expect(railPathForPath(path)).toBe("/routing")
       expect(navContextForPath(path)).toBe("workspace")
+      expect(navItemForPath(path)?.surface).toBe("routing")
     }
-    // Gated as their own entries, not as Rules.
-    expect(navItemForPath("/routing")?.surface).toBe("routing")
-    expect(navItemForPath("/routing/coding")?.surface).toBe("routing")
+  })
+})
+
+describe("destinations with no row", () => {
+  it("selects Rules on the workspace's guardrails", () => {
+    expect(railPathForPath("/tools/guardrails")).toBe("/rules")
+    expect(navContextForPath("/tools/guardrails")).toBe("workspace")
+    // Gated as its own entry, not as Rules.
     expect(navItemForPath("/tools/guardrails")?.surface).toBe("tools")
   })
 
@@ -888,7 +912,6 @@ describe("destinations with no row", () => {
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navItemForPath("/members")?.surface).toBe("workspaces")
     expect(railPathForPath("/members")).toBe("/people")
-    expect(railLabelForPath("/members")).toBe("People")
   })
 
   it("draws none of them as a row", () => {
@@ -902,7 +925,7 @@ describe("destinations with no row", () => {
         (item.children ?? []).map((child) => child.to),
       ),
     ])
-    for (const path of ["/routing", "/tools/guardrails", "/members"]) {
+    for (const path of ["/tools/guardrails", "/members"]) {
       expect(rows).not.toContain(path)
     }
   })
@@ -912,8 +935,6 @@ describe("destinations with no row", () => {
     expect(railPathForPath("/tools/web-search")).toBe("/tools")
     expect(railPathForPath("/people/some-person")).toBe("/people")
     expect(railPathForPath("/rules/some-rule")).toBe("/rules")
-    expect(railLabelForPath("/rules")).toBeUndefined()
-    expect(railLabelForPath("/tools/web-search")).toBeUndefined()
     expect(railPathForPath("/account")).toBeUndefined()
   })
 })
@@ -983,16 +1004,17 @@ function reach(caller: Caller): string[] {
 
 const WORKSPACE = [
   "/",
-  "/sessions",
+  "/traces",
   "/requests",
   "/router-savings",
   "/people",
   "/rules",
+  "/routing",
   "/models",
   "/tools",
+  "/mcp-servers",
   "/keys",
   "/members",
-  "/routing",
 ]
 const ORGANIZATION = [
   "/workspaces",
@@ -1034,15 +1056,13 @@ describe("the rails, per role", () => {
   }
 
   it("keeps each page with no row within reach of a row the same role is offered", () => {
-    // A tool's page opens from Tools, a routing page and the workspace's
-    // guardrails from Rules, and the roster from People. A role that may open
+    // A tool's page opens from Tools, the workspace's guardrails from Rules,
+    // and the roster from People. A role that may open
     // the page has to be offered the row it opens from, or the page is only
     // reachable by typing its address.
     const OPENED_FROM: Readonly<Record<string, string>> = {
       "/tools/web-search": "/tools",
       "/tools/code-execution": "/tools",
-      "/tools/mcp-servers": "/tools",
-      "/routing": "/rules",
       "/tools/guardrails": "/rules",
       "/members": "/people",
     }
@@ -1069,7 +1089,7 @@ describe("the rails, per role", () => {
 })
 
 describe("reachableWithoutOrganization", () => {
-  it("is declared by Home alone in the base registry", () => {
+  it("is declared by Activity alone in the base registry", () => {
     const optedIn = [
       ...NAV_SECTIONS,
       ...ORG_NAV_SECTIONS,

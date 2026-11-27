@@ -322,7 +322,7 @@ export function MemberHome({
   const open = (row: SpendRow) => {
     if (!row.filterKey) return
     void navigate({
-      to: cut.value === "providers" ? "/requests" : "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/traces",
       search: {
         ...mySessions,
         [cut.value === "keys"
@@ -455,7 +455,7 @@ export function MemberHome({
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
-        title="Home"
+        title="Activity"
         action={
           <SpendPeriodPicker
             value={period}
@@ -584,7 +584,7 @@ export function MemberHome({
             graphic={slot(
               sessionCount ? (
                 <Link
-                  to="/sessions"
+                  to="/traces"
                   search={mySessions}
                   className="self-start text-xs text-link underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
                 >

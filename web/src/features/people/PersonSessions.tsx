@@ -92,7 +92,7 @@ export function PersonSessions({
       count={person.unread.sessions ? undefined : person.sessions}
       action={
         <Link
-          to="/sessions"
+          to="/traces"
           search={search}
           onClick={onOpenAll}
           className="inline-flex min-h-11 items-center text-sm text-link underline"
@@ -115,7 +115,7 @@ export function PersonSessions({
             if (!session) return
             showWorkspace(session.workspace_id)
             void navigate({
-              to: "/sessions",
+              to: "/traces",
               search: {
                 ...search,
                 peek: session.trace_id,

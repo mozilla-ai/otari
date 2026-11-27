@@ -246,7 +246,7 @@ instead.
    ```
 
 3. Run Claude Code, ask for something that uses a tool or two, and open
-   **Sessions** in the dashboard. A short `claude -p` run can exit before its
+   **Traces** in the dashboard. A short `claude -p` run can exit before its
    last spans are sent.
 
 | Variables | What they send |

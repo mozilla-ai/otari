@@ -70,7 +70,7 @@ loaded and falls back where it is not.
 
 ## Chrome lives in the shell, not in a route
 
-`AppShell` renders the sidebar, header, and breadcrumbs around the router outlet. Putting any
+`AppShell` renders the sidebar and header around the router outlet. Putting any
 of that inside a route component remounts it on every navigation, which shifts the layout and
 throws away the drawer's open state. A route renders its page and nothing around it.
 

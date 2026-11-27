@@ -30,7 +30,7 @@ describe("ExplainCard", () => {
 
     const link = await screen.findByRole("link", { name: "github" })
     const href = new URL(link.getAttribute("href") ?? "", "http://x")
-    expect(href.pathname).toBe("/tools/mcp-servers/srv-1")
+    expect(href.pathname).toBe("/mcp-servers/srv-1")
     expect(Object.fromEntries(href.searchParams)).toEqual({
       workspace: "ws-1",
       key: "key-bo",

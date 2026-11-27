@@ -52,12 +52,12 @@ describe("a build that replaces the wallet-slot module", () => {
     )
 
     await screen.findByRole("link", { name: "Playground" })
-    const cluster = (await screen.findByRole("link", { name: "Documentation" }))
+    const cluster = (await screen.findByRole("link", { name: "Docs" }))
       .parentElement
 
     expect([...(cluster?.children ?? [])].map((el) => el.textContent)).toEqual([
       "Playground",
-      "Documentation",
+      "Docs",
       "Community",
       "$12.34",
     ])

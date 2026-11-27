@@ -375,7 +375,7 @@ describe("People, in a workspace", () => {
     await screen.findByRole("heading", { name: "Wei Zhang" })
     expect(await screen.findByText("Tokens this month")).toBeVisible()
     expect(screen.queryByText("Sessions this month")).toBeNull()
-    expect(screen.queryByText(/sessions/i)).toBeNull()
+    expect(screen.queryByText(/traces/i)).toBeNull()
   })
 
   it("counts a person's sessions in one read, not by paging the list", async () => {

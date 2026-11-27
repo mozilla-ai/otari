@@ -25,8 +25,8 @@ export function expectedKeyFingerprint(key: string): string {
 // page has tile-links whose names substring-collide with sidebar items
 // ("Providers healthy", "No budgets configured"), so an unscoped
 // getByRole("link", { name }) is ambiguous there.
-// The sidebar specifically: the header's breadcrumb is a navigation landmark
-// too, so an unnamed query now matches both.
+// The sidebar specifically: a page's tab row is a navigation landmark too, so
+// an unnamed query matches both.
 export const nav = (page: Page): Locator =>
   page.getByRole("navigation", { name: "Sidebar" })
 
@@ -63,7 +63,7 @@ export async function login(page: Page): Promise<void> {
   await field.press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
-  await expect(nav(page).getByRole("link", { name: "Home" })).toBeVisible()
+  await expect(nav(page).getByRole("link", { name: "Activity" })).toBeVisible()
 }
 
 // The dashboard authenticates with a session cookie, but the seeding and
@@ -132,23 +132,26 @@ export async function openNested(
   await nav(page).getByRole("link", { name: child, exact: true }).click()
 }
 
+/** Open a rail row. The name is spelled at the call site so the docs check sees it. */
+export async function openRow(page: Page, row: string): Promise<void> {
+  await nav(page).getByRole("link", { name: row, exact: true }).click()
+}
+
 /**
- * Open a rail row, then one of the tabs its page draws under its title: a
- * tool under Tools, Routing under Rules. The tab is current once it has
- * opened. The names are spelled at the call site so the docs check sees them.
+ * Open a rail row, then one of the entries its page lists: a tool under Tools.
+ * The names are spelled at the call site so the docs check sees them.
  */
-export async function openTab(
+export async function openListed(
   page: Page,
   row: string,
-  tab: string,
+  entry: string,
 ): Promise<void> {
-  await nav(page).getByRole("link", { name: row, exact: true }).click()
-  const link = page
+  await openRow(page, row)
+  await page
     .getByRole("main")
-    .getByRole("navigation")
-    .getByRole("link", { name: tab, exact: true })
-  await link.click()
-  await expect(link).toHaveAttribute("aria-current", "page")
+    .getByRole("link", { name: new RegExp(`^${entry}`) })
+    .first()
+    .click()
 }
 
 /**

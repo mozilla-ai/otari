@@ -24,7 +24,7 @@ const DRAWER_LINK =
 
 /**
  * The public catalog's bar: the same destinations as the site in front of it
- * (Models, Providers, Documentation, Log in, Sign up, GitHub, Discord), so a visitor who
+ * (Models, Providers, Docs, Log in, Sign up, GitHub, Discord), so a visitor who
  * came from that site's navbar finds the same one here. The logo goes back to the site
  * where the deployment names one (`site_url`), else to the catalog.
  *
@@ -73,7 +73,7 @@ export function PublicCatalogBar({
           rel="noopener noreferrer"
           className={LINK}
         >
-          Documentation
+          Docs
         </a>
         <a href={routeHref("/")} onClick={followInAppLink} className={LINK}>
           Log in
@@ -164,7 +164,7 @@ export function PublicCatalogBar({
                     rel="noopener noreferrer"
                     className={DRAWER_LINK}
                   >
-                    Documentation
+                    Docs
                   </a>
                   <a
                     href={GITHUB_URL}

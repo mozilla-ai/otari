@@ -15,7 +15,7 @@ export function RequestTraceLink({ entry }: { entry: UsageEntry }) {
   if (!trace.data) return null
   return (
     <Link
-      to="/sessions"
+      to="/traces"
       search={{
         peek: trace.data.trace_id,
         peek_workspace: trace.data.workspace_id,

@@ -62,7 +62,7 @@ MAX_REQUESTERS_PAGE = 100
 # The most of a member's own requests one page holds.
 MAX_OWN_PAGE = 100
 
-SERVERS_PAGE = "/tools/mcp-servers"
+SERVERS_PAGE = "/mcp-servers"
 
 # Runs a coroutine once the response is on its way, so slow mail never holds a request.
 SendLater = Callable[[Callable[[], Awaitable[None]]], object]

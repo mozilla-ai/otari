@@ -95,7 +95,7 @@ through the explicit overlay seams.
   run things in the selected workspace (`contributor`); a row on the
   organization rail is a manager's without saying so
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
-  caller with no organization can use (Home today); every other row,
+  caller with no organization can use (Activity today); every other row,
   overlay rows included, is hidden from that caller, and from every caller
   until `GET /v1/organizations/me` has answered
 
@@ -117,8 +117,8 @@ shell.
 
 The workspace and organization rails have separate registries. A sidebar item
 points to a real page, never a redirect. A few destinations have no row of
-their own (`OFF_RAIL_ITEMS`) and select the row that stands for them: Routing
-and the workspace's guardrails select Rules, and the workspace roster People.
+their own (`OFF_RAIL_ITEMS`) and select the row that stands for them: the
+workspace's guardrails select Rules, and the workspace roster People.
 `/playground`, `/account`, and `/invitations` are chrome destinations and do
 not belong in a rail.
 
@@ -220,7 +220,7 @@ and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
 published build resolve its assets under `/<repo>/`, since the merged
 `vite.config.ts` carries the app's own `base: "/"`.
 
-The dashboard bundles no documentation. Its Documentation links open `docs_url`
+The dashboard bundles no documentation. Its Docs links open `docs_url`
 where a deployment sets one and `https://docs.otari.ai/` otherwise
 (`web/src/shared/helpers/docs.ts`).
 

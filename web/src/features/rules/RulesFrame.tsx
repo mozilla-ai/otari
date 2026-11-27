@@ -8,31 +8,19 @@ import { useIsOrganizationManager } from "@/features/organization/access"
 import { NewRuleDialog } from "@/features/rules/NewRuleDialog"
 import { RULE_TAB_LABEL, type RuleTab, ruleTabs } from "@/features/rules/rules"
 import { ViewTabs } from "@/shared/components/ViewTabs"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
 
-/** What the tab row names the view by: a type of rule, or Routing. */
-export type RulesView = RuleTab | "routing"
-
-/**
- * Rules' title and tab row, over either view: the list of rules
- * (`RulesPage.tsx`, one tab per type) or the routing policies
- * (`features/routing/RoutingPage.tsx`, at `/routing`). Two routes under one
- * tab row, as Sessions and Requests are. Routing is offered to every role, on
- * a deployment that hosts the routing surface.
- */
+/** Rules' title and tab row, over the list of rules, one tab per type. */
 export function RulesFrame({
   current,
   error,
   children,
 }: {
-  current: RulesView
+  current: RuleTab
   error?: unknown
   children: ReactNode
 }) {
   const isManager = useIsOrganizationManager()
-  const hostsSurface = useSurfaces()
   const [isNewOpen, setNewOpen] = useState(false)
-  const isRouting = current === "routing"
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -40,8 +28,7 @@ export function RulesFrame({
         <PageIntro
           title="Rules"
           action={
-            // Routing's own Create policy is the action on that view.
-            isManager && !isRouting ? (
+            isManager ? (
               <Button variant="primary" onPress={() => setNewOpen(true)}>
                 <FiPlus aria-hidden className="size-4" />
                 New rule
@@ -57,17 +44,12 @@ export function RulesFrame({
         <ViewTabs
           label="Rule types"
           current={current}
-          tabs={[
-            ...ruleTabs(isManager).map((one) => ({
-              id: one,
-              to: "/rules",
-              label: RULE_TAB_LABEL[one],
-              search: one === "all" ? {} : { type: one },
-            })),
-            ...(hostsSurface("routing")
-              ? [{ id: "routing", to: "/routing", label: "Routing" }]
-              : []),
-          ]}
+          tabs={ruleTabs(isManager).map((one) => ({
+            id: one,
+            to: "/rules",
+            label: RULE_TAB_LABEL[one],
+            search: one === "all" ? {} : { type: one },
+          }))}
         />
       </div>
       {children}

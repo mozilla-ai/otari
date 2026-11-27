@@ -7,7 +7,7 @@ import {
   dismissComboBox,
   expectOk,
   login,
-  openTab,
+  openRow,
   pressRowAction,
 } from "../helpers"
 import { call, docScreenshot, listed } from "./fixtures"
@@ -52,7 +52,7 @@ test("configure an MCP server", async ({ page }) => {
   const keyId = await createKey(page)
   try {
     await login(page)
-    await openTab(page, "Tools", "MCP servers")
+    await openRow(page, "MCP servers")
     await page.getByRole("button", { name: "Add MCP server" }).click()
 
     const dialog = page.getByRole("dialog")
@@ -230,7 +230,7 @@ async function fakeCatalog(page: Page): Promise<void> {
 test("browse the catalog", async ({ page }) => {
   await fakeCatalog(page)
   await login(page)
-  await openTab(page, "Tools", "MCP servers")
+  await openRow(page, "MCP servers")
   await page.getByRole("button", { name: "Browse catalog" }).click()
 
   const dialog = page.getByRole("dialog", { name: "Browse catalog" })
@@ -298,7 +298,7 @@ test("browse the catalog", async ({ page }) => {
 
 test("an empty catalog offers to load it", async ({ page }) => {
   await login(page)
-  await openTab(page, "Tools", "MCP servers")
+  await openRow(page, "MCP servers")
   await page.getByRole("button", { name: "Browse catalog" }).click()
 
   const dialog = page.getByRole("dialog", { name: "Browse catalog" })

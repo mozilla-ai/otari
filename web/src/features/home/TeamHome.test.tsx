@@ -159,7 +159,7 @@ describe("Home, Where it went by model", () => {
     })
     await renderWithRouter(<TeamHome />, {
       url: "/?by=models",
-      routes: [{ path: "/sessions", element: <SessionsProbe /> }],
+      routes: [{ path: "/traces", element: <SessionsProbe /> }],
       shell: (
         <Provider>
           <DeploymentProvider

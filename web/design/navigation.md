@@ -109,7 +109,8 @@ Never hand-write a nav row. `rowStyles.ts` owns the classes and
 
 The selected row is announced as current (`aria-current="page"`), on a detail
 page too. A destination with no row of its own selects the row that stands for
-it: Routing selects Rules, the workspace roster People (`railPathForPath`).
+it: the workspace's guardrails select Rules, the workspace roster People
+(`railPathForPath`).
 
 The workspace rail opens with its one action, **Create API key**, a primary
 button above the rows for anyone who may create a key; collapsed, it is a "+"

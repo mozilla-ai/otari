@@ -204,10 +204,10 @@ function renderCard(
       // A real router, because a row and a new server open the server's own
       // page; the probe stands in for that page.
       wrapper: withRouter({
-        url: "/tools/mcp-servers",
+        url: "/mcp-servers",
         routes: [
           {
-            path: "/tools/mcp-servers/$serverId",
+            path: "/mcp-servers/$serverId",
             element: <ServerPageProbe />,
           },
         ],
@@ -240,7 +240,7 @@ describe("WorkspaceMcpServersCard", () => {
   })
 
   it("draws no heading of its own and leads with its controls", async () => {
-    // The Tools tab names this view, so a heading here would say it twice.
+    // The page titles this view (`McpServersPage`), so a heading here would say it twice.
     mockApi()
     renderCard()
 
@@ -661,7 +661,7 @@ describe("WorkspaceMcpServersCard", () => {
     // The card opens the server's page.
     expect(within(list).getByRole("link", { name: "drive" })).toHaveAttribute(
       "href",
-      `/tools/mcp-servers/${servers[1].id}`,
+      `/mcp-servers/${servers[1].id}`,
     )
     expect(
       within(list).getByRole("button", { name: "Disconnect drive" }),
@@ -770,7 +770,7 @@ describe("WorkspaceMcpServersCard", () => {
     )
     expect(started?.url).toContain(`/mcp-connections/${servers[0].id}`)
     expect(window.sessionStorage.getItem("otari.mcp-sign-in.origin")).toBe(
-      "/tools/mcp-servers",
+      "/mcp-servers",
     )
   })
 

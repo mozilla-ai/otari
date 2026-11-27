@@ -38,7 +38,7 @@ export function useOwnMcpAccount({
   const [isDisconnecting, setDisconnecting] = useState(false)
   const signIn = useMcpSignIn({
     scope: workspaceMcpScope(workspaceId ?? ""),
-    returnTo: `/tools/mcp-servers/${server.id}`,
+    returnTo: `/mcp-servers/${server.id}`,
     onLeave,
     openWindow,
   })

@@ -39,7 +39,7 @@ function canShare(email: string): boolean {
 }
 
 /**
- * A message to the Otari team, opened from Contact beside Documentation: in the
+ * A message to the Otari team, opened from Contact beside Docs: in the
  * top bar from `md` up, and in the account menu below it.
  *
  * Not a `FormDialog`: that frame always renders a titled header and a footer

@@ -1,5 +1,3 @@
-import { Link } from "@tanstack/react-router"
-
 import type { CallerWorkspaceMembership } from "@/client"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -18,6 +16,7 @@ import {
 import { WorkspaceGeneralForm } from "@/features/workspaces/WorkspaceGeneralForm"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useWorkspaces } from "@/shared/api/workspaces"
+import { BackLink } from "@/shared/components/BackLink"
 import { useUrlState } from "@/shared/helpers/urlState"
 
 // Each capability is a tab of its own rather than a section of one long tab,
@@ -50,11 +49,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   // which is an organization owner's or admin's.
   const isManager = useIsOrganizationManager()
   const back = isManager ? (
-    <nav aria-label="Breadcrumb" className="text-caption">
-      <Link to="/workspaces" className="text-link hover:text-link-hover">
-        ← Workspaces
-      </Link>
-    </nav>
+    <BackLink to="/workspaces" label="Workspaces" />
   ) : null
 
   if (workspace === undefined) {

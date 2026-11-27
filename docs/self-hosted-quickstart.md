@@ -114,7 +114,7 @@ The answer is an OpenAI-style chat completion, with the model's reply in
 ## 7. See it in the dashboard
 
 Open <http://localhost:8000/> and sign in with your master key (`echo
-$OTARI_MASTER_KEY` prints it). Open **Sessions**, then its **Requests** view, to
+$OTARI_MASTER_KEY` prints it). Open **Traces**, then its **Requests** view, to
 see your request with its model, tokens and cost. The OpenAI provider is under
 **Deployment**, **Hosted providers**, in the account menu.
 

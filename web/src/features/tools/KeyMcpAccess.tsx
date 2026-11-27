@@ -48,7 +48,7 @@ export function KeyMcpAccess({
             className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2"
           >
             <Link
-              to="/tools/mcp-servers/$serverId"
+              to="/mcp-servers/$serverId"
               params={{ serverId: server.server_id }}
               className="shrink-0 text-link hover:text-link-hover"
             >

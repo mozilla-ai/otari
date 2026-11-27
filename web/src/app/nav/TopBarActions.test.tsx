@@ -25,7 +25,7 @@ function renderActions(
 }
 
 const cluster = async () =>
-  (await screen.findByRole("link", { name: "Documentation" })).parentElement
+  (await screen.findByRole("link", { name: "Docs" })).parentElement
 
 // Playground waits on the membership read like every rail row, so a case that
 // counts the cluster waits for it first.
@@ -50,7 +50,7 @@ describe("TopBarActions", () => {
     const link = await screen.findByRole("link", { name: "Playground" })
     expect(link).toHaveAttribute("href", "/playground")
     expect(link.nextElementSibling).toBe(
-      screen.getByRole("link", { name: "Documentation" }),
+      screen.getByRole("link", { name: "Docs" }),
     )
   })
 
@@ -59,7 +59,7 @@ describe("TopBarActions", () => {
     expect(
       screen.queryByRole("link", { name: "Playground" }),
     ).not.toBeInTheDocument()
-    expect(await cluster()).toHaveTextContent("Documentation")
+    expect(await cluster()).toHaveTextContent("Docs")
   })
 
   it("omits Playground for a caller with no organization", async () => {
@@ -73,7 +73,7 @@ describe("TopBarActions", () => {
         screen.queryByRole("link", { name: "Playground" }),
       ).not.toBeInTheDocument(),
     )
-    expect(await cluster()).toHaveTextContent("Documentation")
+    expect(await cluster()).toHaveTextContent("Docs")
     vi.restoreAllMocks()
   })
 
@@ -106,7 +106,7 @@ describe("TopBarActions", () => {
   it("points Documentation at docs.otari.ai when no docs site is configured", async () => {
     await renderActions()
 
-    const link = await screen.findByRole("link", { name: "Documentation" })
+    const link = await screen.findByRole("link", { name: "Docs" })
     expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(link).toHaveAttribute("target", "_blank")
   })
@@ -114,7 +114,7 @@ describe("TopBarActions", () => {
   it("retargets Documentation at the deployment's own docs site", async () => {
     await renderActions({ docs_url: "https://docs.example.com/" })
 
-    const link = await screen.findByRole("link", { name: "Documentation" })
+    const link = await screen.findByRole("link", { name: "Docs" })
     expect(link).toHaveAttribute("href", "https://docs.example.com/")
     // A new tab, like every other link out of the dashboard.
     expect(link).toHaveAttribute("target", "_blank")
@@ -125,12 +125,12 @@ describe("TopBarActions", () => {
     const onOpenFeedback = vi.fn()
     await renderActions({ feedback_enabled: true }, onOpenFeedback)
     const button = screen.getByRole("button", { name: "Contact" })
-    expect(
-      screen.getByRole("link", { name: "Documentation" }).nextElementSibling,
-    ).toBe(button)
+    expect(screen.getByRole("link", { name: "Docs" }).nextElementSibling).toBe(
+      button,
+    )
     // The same class as the links beside it, so it reads as one of them.
     expect(button.className).toContain(
-      screen.getByRole("link", { name: "Documentation" }).className,
+      screen.getByRole("link", { name: "Docs" }).className,
     )
     await userEvent.setup().click(button)
     expect(onOpenFeedback).toHaveBeenCalledOnce()
@@ -138,7 +138,7 @@ describe("TopBarActions", () => {
 
   it("offers no Contact when the deployment has feedback off", async () => {
     await renderActions({ feedback_enabled: false }, vi.fn())
-    expect(await cluster()).toHaveTextContent("Documentation")
+    expect(await cluster()).toHaveTextContent("Docs")
     expect(
       screen.queryByRole("button", { name: "Contact" }),
     ).not.toBeInTheDocument()

@@ -116,7 +116,7 @@ const x: Access = "blocked"
 const TABLE: readonly [string, readonly Access[]][] = [
   // Workspace pages.
   ["/", [o, o, o, o, o, o]],
-  ["/sessions", [o, o, o, o, o, o]],
+  ["/traces", [o, o, o, o, o, o]],
   ["/requests", [o, o, o, o, o, o]],
   ["/people", [o, o, o, o, o, o]],
   ["/people/some-person", [o, o, o, o, o, o]],
@@ -129,8 +129,8 @@ const TABLE: readonly [string, readonly Access[]][] = [
   ["/tools", [o, o, o, o, o, o]],
   ["/tools/web-search", [o, o, o, o, o, o]],
   ["/tools/code-execution", [o, o, o, o, o, o]],
-  ["/tools/mcp-servers", [o, o, o, o, o, o]],
-  ["/tools/mcp-servers/some-server", [o, o, o, o, o, o]],
+  ["/mcp-servers", [o, o, o, o, o, o]],
+  ["/mcp-servers/some-server", [o, o, o, o, o, o]],
   ["/tools/guardrails", [o, o, x, x, x, x]],
   ["/mcp-connections/callback", [o, o, o, o, o, o]],
   ["/keys", [o, o, o, o, o, o]],
@@ -324,7 +324,7 @@ describe("while the caller is still being read", () => {
   })
 
   it("opens an ungated page straight away", () => {
-    expect(routeAccess(at("/sessions"), loading)).toBe("open")
+    expect(routeAccess(at("/traces"), loading)).toBe("open")
   })
 
   it("waits for the selected workspace before the Playground", () => {
@@ -370,7 +370,7 @@ describe("when the caller could not be read", () => {
       answer: "no-organization",
       selectedWorkspaceRole: null,
     }
-    for (const address of ["/people", "/rules", "/keys", "/sessions"]) {
+    for (const address of ["/people", "/rules", "/keys", "/traces"]) {
       expect(routeAccess(at(address), outside), address).toBe("blocked")
     }
     // Pages no rail row governs, such as the caller's own account, still open.

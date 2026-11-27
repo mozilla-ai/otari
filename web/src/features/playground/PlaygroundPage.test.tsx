@@ -924,9 +924,7 @@ describe("sending a question", () => {
       await screen.findByRole("checkbox", { name: "Drive" }),
     ).toBeDisabled()
     expect(
-      screen.getByText(
-        "Connect your account under Tools, MCP servers, to use it.",
-      ),
+      screen.getByText("Connect your account under MCP servers to use it."),
     ).toBeVisible()
     await user.keyboard("{Escape}")
 

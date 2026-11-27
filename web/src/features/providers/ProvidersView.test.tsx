@@ -250,10 +250,10 @@ describe("ProviderDetailView", () => {
     expect(within(table).getByText("$2.00 / 1M")).toBeInTheDocument()
     expect(within(table).getByText("200K")).toBeInTheDocument()
     expect(within(table).getByText(/\$0\.04.*image/)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "← Providers" })).toHaveAttribute(
-      "href",
-      "/providers",
-    )
+    // The page's own back link, beside the navbar's Providers link.
+    expect(
+      within(screen.getByRole("main")).getByRole("link", { name: "Providers" }),
+    ).toHaveAttribute("href", "/providers")
   })
 
   it("says so when the provider does not exist", async () => {

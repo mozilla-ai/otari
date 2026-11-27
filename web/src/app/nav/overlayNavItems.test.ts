@@ -56,12 +56,14 @@ describe("a build that replaces the nav-item module", () => {
     expect(
       section(NAV_SECTIONS, "index")?.items.map((item) => item.label),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
       "Reports",
     ])

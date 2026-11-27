@@ -10,7 +10,7 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { Route } from "@/routes/tools.mcp-servers.$serverId"
+import { Route } from "@/routes/mcp-servers.$serverId"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, workspaceMcpServer } from "@/tests/fixtures"
@@ -30,14 +30,14 @@ async function renderRoute(serverId: string) {
   const root = createRootRoute()
   const page = createRoute({
     getParentRoute: () => root,
-    path: "/tools/mcp-servers/$serverId",
+    path: "/mcp-servers/$serverId",
     validateSearch: Route.options.validateSearch,
     component: Route.options.component,
   })
   const router = createRouter({
     routeTree: root.addChildren([page]),
     history: createMemoryHistory({
-      initialEntries: [`/tools/mcp-servers/${serverId}`],
+      initialEntries: [`/mcp-servers/${serverId}`],
     }),
   })
   const client = new QueryClient({
@@ -82,7 +82,7 @@ describe("a workspace's MCP server route", () => {
     // As Back or Forward through history moves to another server.
     await act(() =>
       router.navigate({
-        to: "/tools/mcp-servers/$serverId",
+        to: "/mcp-servers/$serverId",
         params: { serverId: OTHER.id },
         search: {},
       }),
@@ -91,9 +91,7 @@ describe("a workspace's MCP server route", () => {
     // Settled on the new id: its read answered and the heading is back. A
     // dialog still open would hide the heading from this query.
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe(
-        `/tools/mcp-servers/${OTHER.id}`,
-      ),
+      expect(router.state.location.pathname).toBe(`/mcp-servers/${OTHER.id}`),
     )
     await screen.findByRole("heading", { level: 1, name: OTHER.name })
     expect(screen.queryByRole("dialog")).toBeNull()

@@ -40,7 +40,7 @@ export function McpReadTools({
   const picker = checkedTools(server, { withinAllowList: true })
   const check = useMcpServerCheck({
     scope,
-    returnTo: `/tools/mcp-servers/${server.id}`,
+    returnTo: `/mcp-servers/${server.id}`,
   })
   const [isEditing, setEditing] = useState(false)
   const [picked, setPicked] = useState<string[]>([...stored])

@@ -146,7 +146,7 @@ export function ToolsMenu({
                       !server.enabled
                         ? "Turned off for this workspace."
                         : server.sign_in_required
-                          ? "Connect your account under Tools, MCP servers, to use it."
+                          ? "Connect your account under MCP servers to use it."
                           : (server.purpose_hint ?? undefined)
                     }
                   />
@@ -175,7 +175,7 @@ export function ToolsMenu({
                 Configure code execution
               </Link>
               <Link
-                to="/tools/mcp-servers"
+                to="/mcp-servers"
                 className="text-caption text-link hover:text-link-hover"
               >
                 Configure MCP servers

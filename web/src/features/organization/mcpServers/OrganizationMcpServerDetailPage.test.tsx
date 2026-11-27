@@ -175,6 +175,17 @@ describe("OrganizationMcpServerDetailPage", () => {
     ).toBeVisible()
   })
 
+  it("links back to the organization's MCP servers once the server has loaded", async () => {
+    mockApi()
+    renderPage()
+
+    await screen.findByRole("heading", { level: 1, name: SERVER.name })
+    expect(screen.getByRole("link", { name: "MCP servers" })).toHaveAttribute(
+      "href",
+      "/organization/mcp-servers",
+    )
+  })
+
   it("lists each workspace with whether it reaches the server and the limit set for it", async () => {
     mockApi()
     renderPage()

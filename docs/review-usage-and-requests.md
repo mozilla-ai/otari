@@ -1,16 +1,16 @@
 # Review usage and requests
 
-**Home**, the page the dashboard opens on, shows what a time window cost and
+**Activity**, the page the dashboard opens on, shows what a time window cost and
 where the spend went. The per-request log is the **Requests** view of
-**Sessions**, beside its list of agent sessions (see [Sessions](sessions.md)).
+**Traces**, beside its list of agent sessions (see [Sessions](sessions.md)).
 
-## Home
+## Activity
 
 Pick the window at the top: **Today**, **Yesterday**, **7D**, **30D**, **3M** or
-**6M**; Home opens on **30D**. Days are your browser's calendar days. **Today**
+**6M**; Activity opens on **30D**. Days are your browser's calendar days. **Today**
 runs from midnight to now and **Yesterday** is the whole day before it, both
 read by the hour; the others are whole days ending with today. On a phone the
-same windows are in a select. What Home shows depends on your role.
+same windows are in a select. What Activity shows depends on your role.
 
 An organization owner or admin sees the whole organization, or one workspace
 picked beside the window when there is more than one:
@@ -22,7 +22,7 @@ picked beside the window when there is more than one:
 - **Failures**: the share of requests that failed.
 - Billed tokens, and how much of the input was read from cache.
 - **People active**: how many members spent anything in the window, and how
-  many sessions ran. **See the sessions** opens them, on the workspace Home
+  many sessions ran. **See the sessions** opens them, on the workspace Activity
   shows or on all of them.
 
 **Where it went** then breaks the window's spend down by **People**,
@@ -51,14 +51,14 @@ Someone with no active key and no session yet is offered
 
 ### Get started
 
-On a gateway with nothing to route to and nothing served yet, Home opens with
+On a gateway with nothing to route to and nothing served yet, Activity opens with
 **Get started with Otari**. The operator is offered **Add your first provider**,
 an organization owner or admin **Add a provider key**, and anyone else is told
 to ask an owner or admin.
 
 ## Requests
 
-Open **Sessions** and pick **Requests** for the per-request log. Sessions and
+Open **Traces** and pick **Requests** for the per-request log. Sessions and
 Requests share one time range and the model, user, API key and status filters,
 which stay in place when you switch between them and are kept in the URL.
 **Status** narrows Requests, and Sessions for errors and successes. **Provider** narrows Requests
@@ -66,8 +66,8 @@ only, so it stays behind when you switch to Sessions. On Requests, dragging
 across the chart narrows the range. Both views show everyone's requests in the workspace; pick
 yourself under **User** to see only yours.
 
-The views follow the workspace selected in the dashboard. A link from Home opens
-them on the workspace Home showed instead, or on all workspaces, and a
+The views follow the workspace selected in the dashboard. A link from Activity opens
+them on the workspace Activity showed instead, or on all workspaces, and a
 **Workspace** control beside the title says which and changes it. Picking a
 workspace in the dashboard's switcher goes back to following it.
 

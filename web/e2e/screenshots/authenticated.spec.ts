@@ -96,7 +96,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   /** Creates what the page draws, where the seed holds none of it. */
   readonly prepare?: (page: Page) => Promise<void>
 }> = [
-  { route: "/", name: "overview", heading: /overview/i },
+  { route: "/", name: "overview", heading: /activity/i },
   // The one page in this matrix with no page title, which is why its heading
   // regex names the greeting instead: a chat surface heads with the composer
   // and its own empty state, not with a title band, and the seeded deployment
@@ -138,14 +138,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-domains",
     heading: /email domains/i,
   },
-  // The Overview's other two tabs, one baseline each ("overview" above is the
-  // first): they share the heading and the tab row, and differ below it.
-  { route: "/requests", name: "requests", heading: /overview/i },
-  { route: "/sessions", name: "sessions", heading: /overview/i },
+  // Traces' three views, one baseline each: they share the heading and the tab
+  // row, and differ below it.
+  { route: "/requests", name: "requests", heading: /traces/i },
+  { route: "/traces", name: "sessions", heading: /traces/i },
   {
     route: "/router-savings",
     name: "router-savings",
-    heading: /overview/i,
+    heading: /traces/i,
   },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
@@ -162,7 +162,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // captures its table. Captured at rest, so its two dialogs are covered by
   // neither this nor the vitest suite.
   {
-    route: "/tools/mcp-servers",
+    route: "/mcp-servers",
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },

@@ -37,7 +37,7 @@ vi.mock("@/app/nav/overlayNavItems", async () => {
               { to: "/aliases", label: "Spend", icon: FiBarChart2 },
               {
                 to: "/activity",
-                label: "Activity",
+                label: "Audit log",
                 icon: FiActivity,
                 // Grouped with Reports, served by the usage surface.
                 surface: "usage",
@@ -107,7 +107,7 @@ describe("a nested destination with a surface of its own", () => {
     expect(
       await within(sidebar).findByRole("button", { name: "Reports" }),
     ).toBeInTheDocument()
-    expect(within(sidebar).getByText("Activity")).toBeInTheDocument()
+    expect(within(sidebar).getByText("Audit log")).toBeInTheDocument()
   })
 
   it("is dropped when the deployment lacks its surface, and the group with it", async () => {
@@ -126,7 +126,7 @@ describe("a nested destination with a surface of its own", () => {
     expect(
       within(sidebar).queryByRole("button", { name: "Reports" }),
     ).toBeNull()
-    expect(within(sidebar).queryByText("Activity")).toBeNull()
+    expect(within(sidebar).queryByText("Audit log")).toBeNull()
   })
 
   it("answers its route with the panel when its surface is gone", async () => {
@@ -136,7 +136,7 @@ describe("a nested destination with a surface of its own", () => {
     await renderShell(bootstrap({ surfaces: WITHOUT_USAGE }), "/activity")
 
     expect(
-      await screen.findByText("Activity is not available here"),
+      await screen.findByText("Audit log is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })

@@ -95,7 +95,7 @@ describe("viewForPath", () => {
     expect(viewForPath("/")).toBe("usage")
     expect(viewForPath("/")).toBe("usage")
     expect(viewForPath("/requests")).toBe("requests")
-    expect(viewForPath("/sessions")).toBe("sessions")
+    expect(viewForPath("/traces")).toBe("sessions")
   })
 })
 

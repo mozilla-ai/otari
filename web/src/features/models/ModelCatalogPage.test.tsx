@@ -529,7 +529,7 @@ describe("ModelCatalogPage", () => {
     )
 
     await user.click(within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }))
-    await user.click(await screen.findByRole("link", { name: "← Models" }))
+    await user.click(await screen.findByRole("link", { name: "Models" }))
 
     const search = await screen.findByRole("searchbox", {
       name: "Search models",
@@ -569,7 +569,7 @@ describe("ModelCatalogPage", () => {
 
     await user.click(within(table).getByText("GLM-5.3"))
 
-    const back = await screen.findByRole("link", { name: "← Models" })
+    const back = await screen.findByRole("link", { name: "Models" })
     const search = new URLSearchParams(back.getAttribute("href")?.split("?")[1])
     expect(search.get("q")).toBe("glm")
     expect(search.get("column")).toBe("input")

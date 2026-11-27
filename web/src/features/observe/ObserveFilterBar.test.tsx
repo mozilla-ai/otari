@@ -28,7 +28,7 @@ function UrlProbe() {
 const PATHS: Record<ObserveView, string> = {
   usage: "/",
   requests: "/requests",
-  sessions: "/sessions",
+  sessions: "/traces",
 }
 
 async function renderBar(view: ObserveView, search = "") {

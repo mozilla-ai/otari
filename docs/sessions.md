@@ -6,9 +6,9 @@ it serves, so you can see what an agent did, not only what one call did.
 
 ## Look at a session
 
-1. Open **Sessions**.
+1. Open **Traces**.
 
-   ![Sessions, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
+   ![Traces, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
 
 2. Click a session to open it.
 

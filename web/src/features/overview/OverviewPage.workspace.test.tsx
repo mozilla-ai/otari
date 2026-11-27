@@ -123,9 +123,9 @@ function renderSessions(subject: ReactElement, url: string) {
       </QueryClientProvider>
     ),
     routes: [
-      ...(url.startsWith("/sessions")
+      ...(url.startsWith("/traces")
         ? []
-        : [{ path: "/sessions", element: <SessionsPage embedded /> }]),
+        : [{ path: "/traces", element: <SessionsPage embedded /> }]),
       ...(url.startsWith("/router-savings")
         ? []
         : [{ path: "/router-savings", element: <RouterSavingsPage /> }]),
@@ -247,7 +247,7 @@ describe("A Sessions view whose link names a workspace", () => {
     mockGateway()
     await renderSessions(
       <SessionsPage embedded />,
-      "/sessions?workspace=ws-2&peek=trace-1&peek_workspace=ws-2&span=span-1",
+      "/traces?workspace=ws-2&peek=trace-1&peek_workspace=ws-2&span=span-1",
     )
 
     await pickOption(user, "Workspace", "Production")

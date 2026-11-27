@@ -214,7 +214,7 @@ export function renderMcpServerPage(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const url = `/tools/mcp-servers/${serverId}${search}`
+  const url = `/mcp-servers/${serverId}${search}`
   const rendered = render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
@@ -226,7 +226,7 @@ export function renderMcpServerPage(
     {
       wrapper: withRouter({
         url,
-        routes: [{ path: "/tools/mcp-servers", element: <p>Server list</p> }],
+        routes: [{ path: "/mcp-servers", element: <p>Server list</p> }],
       }),
     },
   )

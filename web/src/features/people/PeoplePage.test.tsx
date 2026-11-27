@@ -169,7 +169,7 @@ describe("People", () => {
     expect(
       within(table).queryByRole("columnheader", { name: "Sessions" }),
     ).toBeNull()
-    expect(screen.queryByText(/sessions/i)).toBeNull()
+    expect(screen.queryByText(/traces/i)).toBeNull()
   })
 
   for (const role of ["member", "viewer"] as const) {

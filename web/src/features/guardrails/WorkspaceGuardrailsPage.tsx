@@ -16,6 +16,7 @@ import { canManage } from "@/features/organization/roles"
 import { useOrganizationGuardrailDefinitions } from "@/shared/api/guardrails"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useOrganizationGuardrails } from "@/shared/api/tools"
+import { BackLink } from "@/shared/components/BackLink"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // Which of the organization's guardrails run on this workspace's requests, and
@@ -89,6 +90,7 @@ export function WorkspaceGuardrailsPage() {
 
   return (
     <div className="flex flex-col">
+      <BackLink to="/rules" search={{ type: "data" }} label="Rules" />
       <PageIntro title="Guardrails" />
 
       <ErrorBanner

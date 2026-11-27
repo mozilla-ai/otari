@@ -40,7 +40,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(ADMIN)
   await page.getByLabel("Password").fill(ADMIN_PASSWORD)
   await page.getByRole("button", { name: "Sign in", exact: true }).click()
-  await expect(nav(page).getByRole("link", { name: "Home" })).toBeVisible()
+  await expect(nav(page).getByRole("link", { name: "Activity" })).toBeVisible()
 }
 
 /**

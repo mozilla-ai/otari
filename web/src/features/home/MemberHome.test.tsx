@@ -274,7 +274,7 @@ async function renderMemberHome({
       url,
       routes: [
         { path: "/requests", element: <LocationProbe /> },
-        { path: "/sessions", element: <LocationProbe /> },
+        { path: "/traces", element: <LocationProbe /> },
       ],
       shell: (
         <Provider>
@@ -403,7 +403,7 @@ describe("MemberHome, by model", () => {
     await user.click(within(row).getByRole("rowheader"))
     const landed = await screen.findByTestId("location")
     const [path, query] = (landed.textContent ?? "").split("?")
-    expect(path).toBe("/sessions")
+    expect(path).toBe("/traces")
     expect(new URLSearchParams(query).getAll("model")).toEqual([
       "zai-org/GLM-5.3",
       "accounts/fireworks/models/glm-5p3",

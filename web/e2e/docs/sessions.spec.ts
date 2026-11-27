@@ -9,7 +9,7 @@ import { docScreenshot } from "./fixtures"
 // would show in the parity flows.
 test("look at a session", async ({ page }) => {
   await login(page)
-  await nav(page).getByRole("link", { name: "Sessions" }).click()
+  await nav(page).getByRole("link", { name: "Traces" }).click()
   const row = tableRows(page, "Sessions").filter({
     hasText: PARITY_SESSION.agent,
   })

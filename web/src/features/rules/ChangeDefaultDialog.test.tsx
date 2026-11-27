@@ -49,7 +49,7 @@ describe("Change the limit for everyone in a workspace", () => {
     expect(field).toHaveValue("25")
     expect(
       screen.getByText(
-        "A request that would take a person past the limit is refused until their week resets, and the refusal shows in Sessions.",
+        "A request that would take a person past the limit is refused until their week resets, and the refusal shows in Traces.",
       ),
     ).toBeVisible()
   })

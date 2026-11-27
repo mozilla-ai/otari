@@ -439,7 +439,7 @@ export function KeysPage() {
       // Sessions lists one workspace, so it opens on the key's own.
       select(key.workspace_id)
       void navigate({
-        to: "/sessions",
+        to: "/traces",
         search: { start_date: month.start, api_key_id: key.id },
       })
     }
@@ -515,9 +515,11 @@ export function KeysPage() {
       </span>
       <span className="text-caption">
         Each person sees and changes their own keys.
-        {/* Home lists every key's spend for an owner or admin, and only a
+        {/* Activity lists every key's spend for an owner or admin, and only a
             member's own for anyone else. */}
-        {isManager ? " Their spend per key is on Home, under API keys." : null}
+        {isManager
+          ? " Their spend per key is on Activity, under API keys."
+          : null}
       </span>
     </span>
   ) : rows.length === 0 ? (

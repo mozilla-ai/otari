@@ -219,10 +219,10 @@ describe("PublicCatalogPage", () => {
     expect(rowMenuTriggers(grid)).toHaveLength(0)
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
-    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
-      "href",
-      "/models",
-    )
+    // The page's own back link, beside the navbar's Models link.
+    expect(
+      within(screen.getByRole("main")).getByRole("link", { name: "Models" }),
+    ).toHaveAttribute("href", "/models")
   })
 
   it("starts an account from Use this model, sign-in while signup is closed", async () => {
@@ -271,9 +271,10 @@ describe("PublicCatalogPage", () => {
       "href",
       "/",
     )
-    expect(
-      within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute("href", "https://docs.otari.ai/")
+    expect(within(nav).getByRole("link", { name: "Docs" })).toHaveAttribute(
+      "href",
+      "https://docs.otari.ai/",
+    )
     expect(within(nav).getByRole("link", { name: "GitHub" })).toHaveAttribute(
       "href",
       "https://github.com/mozilla-ai/otari",
@@ -303,9 +304,10 @@ describe("PublicCatalogPage", () => {
       "href",
       "/signup",
     )
-    expect(
-      within(nav).getByRole("link", { name: "Documentation" }),
-    ).toHaveAttribute("href", "https://docs.example.com/")
+    expect(within(nav).getByRole("link", { name: "Docs" })).toHaveAttribute(
+      "href",
+      "https://docs.example.com/",
+    )
     await screen.findByRole("list", { name: "Models" })
   })
 
@@ -317,7 +319,7 @@ describe("PublicCatalogPage", () => {
     await user.click(screen.getByRole("button", { name: "Open menu" }))
 
     const menu = await screen.findByRole("dialog", { name: "Menu" })
-    for (const name of ["Models", "Documentation", "GitHub", "Log in"]) {
+    for (const name of ["Models", "Docs", "GitHub", "Log in"]) {
       expect(within(menu).getByRole("link", { name })).toBeInTheDocument()
     }
     expect(within(menu).getByRole("link", { name: "Models" })).toHaveAttribute(

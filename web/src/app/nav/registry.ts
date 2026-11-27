@@ -1,13 +1,13 @@
 import {
   FiActivity,
   FiAtSign,
+  FiBarChart2,
   FiBox,
   FiCode,
   FiCpu,
   FiDollarSign,
   FiGlobe,
   FiGrid,
-  FiHome,
   FiKey,
   FiLayers,
   FiList,
@@ -41,9 +41,9 @@ import type {
  * The workspace rail, and the only place its destinations are declared.
  *
  * One section, headingless: every row is a place in the selected workspace,
- * and none of them is a category. Three destinations are registered without a
- * row (`OFF_RAIL_ITEMS`): Routing and the workspace's Guardrails, which open
- * from Rules, and `/members`, the workspace roster, which opens from People.
+ * and none of them is a category. Two destinations are registered without a
+ * row (`OFF_RAIL_ITEMS`): the workspace's Guardrails, which opens from Rules,
+ * and `/members`, the workspace roster, which opens from People.
  *
  * Each thing exists once: Billing, Providers and Email domains are
  * organization pages, reached from the footer's Organization row.
@@ -63,18 +63,21 @@ const BASE_NAV_SECTIONS = [
       // organization keeps, since it is where they are told how to get in.
       {
         to: "/",
-        label: "Home",
-        icon: FiHome,
+        label: "Activity",
+        icon: FiBarChart2,
         reachableWithoutOrganization: true,
       },
       {
-        to: "/sessions",
-        label: "Sessions",
+        to: "/traces",
+        label: "Traces",
         icon: FiList,
         views: ["/requests", "/router-savings"],
       },
       { to: "/people", label: "People", icon: FiUsers },
       { to: "/rules", label: "Rules", icon: FiShield },
+      // Not tagged `capability: "routing"`: ARCHITECTURE.md marks the routing
+      // split provisional. `/aliases` redirects onto `/routing`.
+      { to: "/routing", label: "Routing", surface: "routing", icon: FiRepeat },
       // No `operatorOnly` on Models, per the rule the axis carries: a row
       // leaves the list by its page ceasing to refuse anyone (otari-ai#1942).
       // Models reads the catalog any session may read.
@@ -92,6 +95,14 @@ const BASE_NAV_SECTIONS = [
         // One row, one page. `/tools` lists every tool with what it does and
         // whether it is on; each one's settings open from it, and the row
         // stays selected there (the prefix match below).
+      },
+      // Servers are connectors rather than tools, so they are a row of their
+      // own, with their pages under `/mcp-servers`.
+      {
+        to: "/mcp-servers",
+        label: "MCP servers",
+        surface: "tools",
+        icon: FiServer,
       },
       // Create API key above the rail starts one; this lists and edits them.
       { to: "/keys", label: "API keys", surface: "keys", icon: FiKey },
@@ -220,7 +231,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // reaches. Beside Providers and gated as they are: like the provider
       // keys, these are the organization's own connections to an outside
       // service, which its workspaces use. Not the workspace rail's
-      // `/tools/mcp-servers`, which lists one workspace's own.
+      // `/mcp-servers`, which lists one workspace's own.
       {
         to: "/organization/mcp-servers",
         label: "MCP servers",
@@ -372,7 +383,7 @@ export function applyNavLabelOverrides(
           const label = disclosureLabels[item.to]
           // Groups only, which is what the platform's single `NavDisclosure`
           // label maps to. A group is a destination here as well as a heading,
-          // so renaming one also renames what the breadcrumbs and the shell's
+          // so renaming one also renames what the tab title and the shell's
           // gated-off panel call that page; the group and the page sharing a
           // name is why that reads correctly rather than as a bug.
           // A plain link's label and a `NavChild`'s are outside the seam, as
@@ -519,22 +530,8 @@ export const PLAYGROUND_NAV_ITEM = {
  */
 export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS
 
-/**
- * The Routing pages, registered without a row. Routing is a tab of Rules
- * (`features/rules/RulesFrame.tsx`), and the workspace's guardrails open from
- * its Data tab, so both select Rules in the rail (`railPathForPath`). Not
- * tagged `capability: "routing"`: ARCHITECTURE.md marks the routing split
- * provisional. `/aliases` redirects onto `/routing`.
- */
-const ROUTING_NAV_ITEM = {
-  to: "/routing",
-  label: "Routing",
-  surface: "routing",
-  icon: FiRepeat,
-} as const satisfies NavItem
-
 // An owner or admin sets the workspace's guardrails; the page has nothing for
-// anyone else to do.
+// anyone else to do. It opens from Rules' Data tab, so it selects Rules.
 const WORKSPACE_GUARDRAILS_NAV_ITEM = {
   to: "/tools/guardrails",
   label: "Guardrails",
@@ -558,7 +555,6 @@ const WORKSPACE_MEMBERS_NAV_ITEM = {
 /** Destinations with no rail row, by the rail row that stands for them. */
 const OFF_RAIL_ITEMS: readonly { item: NavItem; railPath?: NavPath }[] = [
   { item: WORKSPACE_MEMBERS_NAV_ITEM, railPath: "/people" },
-  { item: ROUTING_NAV_ITEM, railPath: "/rules" },
   { item: WORKSPACE_GUARDRAILS_NAV_ITEM, railPath: "/rules" },
 ]
 
@@ -580,7 +576,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 
 /**
  * The rail row to mark selected at this pathname: for a destination with no
- * row, the row that stands for it (Rules for Routing), and otherwise the
+ * row, the row that stands for it (Rules for the workspace guardrails), and otherwise the
  * destination's own entry.
  */
 export function railPathForPath(pathname: string): NavPath | undefined {
@@ -588,18 +584,6 @@ export function railPathForPath(pathname: string): NavPath | undefined {
   if (!item) return undefined
   const offRail = OFF_RAIL_ITEMS.find((one) => one.item.to === item.to)
   return offRail ? offRail.railPath : item.to
-}
-
-/**
- * The rail row a destination with no row of its own sits under, by name, for
- * the breadcrumb ("Rules" for Routing), or nothing.
- */
-export function railLabelForPath(pathname: string): string | undefined {
-  const item = navItemForPath(pathname)
-  const railPath = OFF_RAIL_ITEMS.find(
-    (one) => one.item.to === item?.to,
-  )?.railPath
-  return railPath ? navItemForPath(railPath)?.label : undefined
 }
 
 /**
@@ -641,11 +625,11 @@ const DEPLOYMENT_PATHS: readonly string[] = DEPLOYMENT_NAV_SECTIONS.flatMap(
 )
 
 /**
- * What to call the destination at this pathname, as a breadcrumb would.
+ * What to call the destination at this pathname.
  *
  * Distinct from `navItemForPath`, which answers with the entry that *gates* a
  * path: for a nested destination that is the parent, so it would name
- * `/tools/web-search` "Tools". A breadcrumb wants the leaf.
+ * `/tools/web-search` "Tools". A page's name is the leaf's.
  */
 export function navLabelForPath(pathname: string): string | undefined {
   return navPageForPath(pathname)?.label
@@ -655,7 +639,8 @@ export function navLabelForPath(pathname: string): string | undefined {
  * The rail destination a pathname is, or sits under, as `{ to, label }`.
  *
  * A child wins over its parent for its own subpages too, so a server's page at
- * `/tools/mcp-servers/<id>` is under "MCP servers" rather than "Tools".
+ * `/organization/web-search-keys/<id>` is under "Web search" rather than
+ * "Providers".
  */
 export function navPageForPath(
   pathname: string,
@@ -675,7 +660,7 @@ const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
 
 /**
  * What to call the page at this pathname, rail or chrome, for the tab title
- * and the breadcrumb alike, so the two cannot name one page differently.
+ * and the gated-off panel alike, so the two cannot name one page differently.
  */
 export function pageLabelForPath(pathname: string): string | undefined {
   return navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]

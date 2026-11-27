@@ -31,7 +31,7 @@ export function TopBarActions({
 
   return (
     // Hidden below the md breakpoint, where the mobile header has room for the
-    // dismiss control and the trail and nothing else. The slot is inside the
+    // dismiss control and nothing else. The slot is inside the
     // cluster and so inherits that, which is what otari.ai's own navbar does
     // with the balance.
     <div className="hidden shrink-0 items-center gap-5 md:flex">
@@ -46,7 +46,7 @@ export function TopBarActions({
         rel="noopener noreferrer"
         className={ACTION}
       >
-        Documentation
+        Docs
       </a>
       {/* A button beside the links, so it takes their class and the pointer a
           link gets for free. */}

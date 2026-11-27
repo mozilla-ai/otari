@@ -81,7 +81,7 @@ This is the only credential your application needs to send requests through Otar
 The routing policies let you control how requests are routed across models and providers. A policy has a name, which your application sends as the model. When creating a policy, you can choose the routing strategy that best fits your needs:
 
 1. Open the target workspace.
-2. Open **Rules**, then the **Routing** tab.
+2. Open **Routing**.
 3. Click **Create policy**.
 4. Choose the routing strategy:
    * **Fallback**: Define the ordered list of models to use if the main model call fails, helping keep requests running when a model or provider is unavailable. This is the routing option we’ll be testing in this guide.

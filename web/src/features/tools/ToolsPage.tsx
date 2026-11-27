@@ -7,15 +7,19 @@ import type { DashboardSearch } from "@/shared/helpers/search"
 
 /**
  * `/tools`: every tool at a glance. The deployment's guardrail service
- * endpoints have no tab of their own, so the overview's operator row opens
+ * endpoints have no page of their own, so the overview's operator row opens
  * them here, by `?service=guardrails`; anyone else gets the overview.
  */
 export function ToolsPage() {
   const search = useSearch({ strict: false }) as DashboardSearch
   const { isOperator } = useDeploymentOperator()
+  const showsGuardrails = search.service === "guardrails" && isOperator
   return (
-    <ToolsFrame current="/tools">
-      {search.service === "guardrails" && isOperator ? (
+    <ToolsFrame
+      title={showsGuardrails ? "Guardrail services" : "Tools"}
+      back={showsGuardrails}
+    >
+      {showsGuardrails ? (
         <ToolsGuardrailsPage only="guardrails" />
       ) : (
         <ToolsOverview />

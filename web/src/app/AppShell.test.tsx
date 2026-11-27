@@ -23,7 +23,6 @@ import type {
 } from "@/client"
 import { useOpenCreateKey } from "@/features/keys/openCreateKey"
 import { API_ROOT } from "@/shared/api/client"
-import { useBreadcrumbLeaf } from "@/shared/hooks/BreadcrumbLeaf"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -284,12 +283,14 @@ describe("AppShell responsive layout", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
 
@@ -361,8 +362,8 @@ describe("AppShell responsive layout", () => {
 
     // On the index first, because that is the half the comment above is about:
     // "/" lights here and must stop lighting once a page under it is open.
-    expect(document.title).toBe("Home · Otari")
-    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute(
+    expect(document.title).toBe("Activity · Otari")
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute(
       "aria-current",
       "page",
     )
@@ -591,7 +592,7 @@ describe("AppShell responsive layout", () => {
 
     // In the top bar, where the design puts it, rather than inside the account
     // menu: the docs are read alongside a page rather than instead of one.
-    const guideLink = await screen.findByRole("link", { name: "Documentation" })
+    const guideLink = await screen.findByRole("link", { name: "Docs" })
     expect(guideLink).toHaveAttribute("href", "https://docs.otari.ai/")
   })
 
@@ -633,7 +634,7 @@ describe("AppShell for a caller with no organization", () => {
 
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" })
     expect(
-      await within(sidebar).findByRole("link", { name: "Home" }),
+      await within(sidebar).findByRole("link", { name: "Activity" }),
     ).toBeInTheDocument()
     // A 404 is no organization, not an unavailable context, which would fail
     // open onto the operator rows and the organization rail.
@@ -651,14 +652,19 @@ describe("the invitations page in the chrome", () => {
     window.localStorage.clear()
   })
 
-  it("titles the tab and the breadcrumb", async () => {
+  it("draws no breadcrumb trail over the page", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap(), { url: "/invitations" })
 
-    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
-      "Invitations",
-    )
-    expect(document.title).toBe("Invitations · Otari")
+    await screen.findByRole("navigation", { name: "Sidebar" })
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull()
+  })
+
+  it("titles the tab", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/invitations" })
+
+    await waitFor(() => expect(document.title).toBe("Invitations · Otari"))
   })
 
   it("closes the mobile drawer when the switcher opens the inbox", async () => {
@@ -765,12 +771,14 @@ describe("AppShell surface gating", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     // One level: no row on this rail is a group.
@@ -869,7 +877,58 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
-    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument()
+  })
+
+  it("draws Routing only where the routing surface is hosted, and MCP servers with Tools", async () => {
+    mockMatchMedia(false)
+    const everything = ["models", "keys", "routing", "tools"]
+    const rowsOf = async (surfaces: string[]) => {
+      const view = await renderShell(bootstrap({ surfaces }))
+      expect(
+        await screen.findByRole("link", { name: "API keys" }),
+      ).toBeInTheDocument()
+      const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+      const names = within(sidebar)
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+      view.unmount()
+      cleanup()
+      return names
+    }
+
+    expect(await rowsOf(everything)).toEqual([
+      "Activity",
+      "Traces",
+      "People",
+      "Rules",
+      "Routing",
+      "Models",
+      "Tools",
+      "MCP servers",
+      "API keys",
+    ])
+    expect(await rowsOf(everything.filter((one) => one !== "routing"))).toEqual(
+      [
+        "Activity",
+        "Traces",
+        "People",
+        "Rules",
+        "Models",
+        "Tools",
+        "MCP servers",
+        "API keys",
+      ],
+    )
+    expect(await rowsOf(everything.filter((one) => one !== "tools"))).toEqual([
+      "Activity",
+      "Traces",
+      "People",
+      "Rules",
+      "Routing",
+      "Models",
+      "API keys",
+    ])
   })
 
   it("drops a section header once its whole group is gated away", async () => {
@@ -915,12 +974,14 @@ describe("AppShell entitlement gating", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
   })
@@ -946,7 +1007,7 @@ describe("AppShell entitlement gating", () => {
       screen.getByText(/Choose another page from the menu/),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Go to Home" }),
+      screen.getByRole("button", { name: "Go to Activity" }),
     ).toBeInTheDocument()
   })
 
@@ -1074,7 +1135,7 @@ describe("AppShell entitlement gating", () => {
       await screen.findByRole("link", { name: "Members & roles" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Sessions" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Traces" })).toBeNull()
   })
 
   it("offers a way into the organization rail, and a way back out", async () => {
@@ -1390,32 +1451,18 @@ describe("AppShell entitlement gating", () => {
     // pointing at it below the breakpoint. The row carries `md:hidden` for the
     // mirror-image reason: above it, the top bar already answers.
     await user.click(screen.getByRole("button", { name: /^Account:/ }))
-    const guideRow = await screen.findByRole("link", { name: "Documentation" })
+    const guideRow = await screen.findByRole("link", { name: "Docs" })
     expect(guideRow).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(guideRow).toHaveClass("md:hidden")
   })
 
-  it("names the scope and the page, leaving out an organization there is one of", async () => {
-    mockMatchMedia(false)
-    await renderShell()
-
-    // First boot provisions one organization and most deployments keep exactly
-    // that, so naming it on every page is a segment that never disambiguates
-    // anything; the scope switcher names the active one where it matters.
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Home")
-    expect(crumb).not.toHaveTextContent(/organization/i)
-  })
-
-  it("names a nested destination after itself, not after its group", async () => {
+  it("titles a nested destination after itself, not after its group", async () => {
     mockMatchMedia(false)
     // `navItemForPath` answers with the entry that gates a path, which for a
-    // child is its parent; a breadcrumb wants the leaf.
+    // child is its parent; the title wants the leaf.
     await renderShell(bootstrap(), { url: "/organization/web-search-keys" })
 
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Web search")
-    expect(crumb).not.toHaveTextContent("Providers")
+    await waitFor(() => expect(document.title).toBe("Web search · Otari"))
   })
 
   it("offers no way into the deployment rail to a caller who operates nothing there", async () => {
@@ -1463,14 +1510,10 @@ describe("AppShell entitlement gating", () => {
     expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
   })
 
-  it("names the deployment as the scope of its own pages", async () => {
+  it("shows the deployment's own rail on its pages", async () => {
     mockMatchMedia(false)
-    // The deployment has no name to show, unlike the other two scopes, which
-    // are data. The word is the scope, and it is the same word the control that
-    // reaches these pages carries.
-    // With a workspace selected, so the scope crumb is one this case could
-    // fail on: with none, "does not name a scope" is trivially true and the
-    // assertion proves nothing.
+    // With a workspace selected, so "neither of the other rails" is one this
+    // case could fail on.
     const inWorkspace = {
       workspace_memberships: [
         {
@@ -1486,11 +1529,6 @@ describe("AppShell entitlement gating", () => {
       context: inWorkspace,
     })
 
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Deployment")
-    expect(crumb).toHaveTextContent("Settings")
-    expect(crumb).not.toHaveTextContent(/workspace/i)
-    expect(crumb).not.toHaveTextContent(/organization/i)
     // Its own rail, and the row is marked: these are ordinary rail rows now, so
     // the highlight comes from the path every other row is on rather than from
     // anything built here.
@@ -1501,33 +1539,10 @@ describe("AppShell entitlement gating", () => {
       within(rail).getByRole("link", { name: "Accounts" }),
     ).toBeInTheDocument()
     // And neither of the other two rails is showing.
-    expect(within(rail).queryByRole("link", { name: "Home" })).toBeNull()
+    expect(within(rail).queryByRole("link", { name: "Activity" })).toBeNull()
     expect(
       within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
-  })
-
-  it("still names the workspace on an ordinary page, which is what the case above turns off", async () => {
-    mockMatchMedia(false)
-    // The control for the assertion above. Same fixture, a page a rail does own,
-    // and the scope is in the trail: without this, "the trail names no scope"
-    // could pass because the harness never produces one.
-    await renderShell(bootstrap(), {
-      url: "/usage",
-      context: {
-        workspace_memberships: [
-          {
-            name: "Default workspace",
-            role: "owner",
-            workspace_id: "44444444-4444-4444-4444-444444444444",
-          },
-        ],
-      },
-    })
-
-    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
-      "Default workspace",
-    )
   })
 
   it("answers a page with no row with the panel when its own surface is gone", async () => {
@@ -1681,7 +1696,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/models" })
 
-    await user.click(screen.getByRole("link", { name: "Home" }))
+    await user.click(screen.getByRole("link", { name: "Activity" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "index",
@@ -1761,11 +1776,13 @@ function railLinks(): string[] {
 
 const WORKSPACE_RAIL = [
   "/",
-  "/sessions",
+  "/traces",
   "/people",
   "/rules",
+  "/routing",
   "/models",
   "/tools",
+  "/mcp-servers",
   "/keys",
 ]
 
@@ -1830,40 +1847,30 @@ describe("the workspace rail, per role", () => {
 
   // The workspace's guardrails open to owners and admins only, so that page is
   // checked as an owner.
-  for (const [path, page, role] of [
-    ["/routing", "Routing", "member"],
-    ["/routing/coding", "Routing", "member"],
-    ["/tools/guardrails", "Guardrails", "owner"],
-  ] as const) {
-    it(`selects Rules on ${path} and names it in the breadcrumb`, async () => {
-      mockMatchMedia(false)
-      await renderShell(bootstrap(), { url: path, ...asRole(role) })
-      const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
-      const rules = await within(sidebar).findByRole("link", { name: "Rules" })
-      expect(rules).toHaveAttribute("aria-current", "page")
-      expect(rules.className).toBe(
-        `${navRowClass({ isActive: true, isCollapsed: false })} w-full`,
-      )
-      const tools = within(sidebar).getByRole("link", { name: "Tools" })
-      expect(tools).not.toHaveAttribute("aria-current")
-      expect(tools.className).toBe(
-        `${navRowClass({ isActive: false, isCollapsed: false })} w-full`,
-      )
-      const trail = within(
-        screen.getByRole("navigation", { name: "Breadcrumb" }),
-      ).getAllByRole("listitem")
-      expect(
-        trail
-          .map((item) => item.textContent)
-          .filter((text) => text !== "/")
-          .slice(-2),
-      ).toEqual(["Rules", page])
+  it("selects Rules on /tools/guardrails", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), {
+      url: "/tools/guardrails",
+      ...asRole("owner"),
     })
-  }
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+    const rules = await within(sidebar).findByRole("link", { name: "Rules" })
+    expect(rules).toHaveAttribute("aria-current", "page")
+    expect(rules.className).toBe(
+      `${navRowClass({ isActive: true, isCollapsed: false })} w-full`,
+    )
+    const tools = within(sidebar).getByRole("link", { name: "Tools" })
+    expect(tools).not.toHaveAttribute("aria-current")
+    expect(tools.className).toBe(
+      `${navRowClass({ isActive: false, isCollapsed: false })} w-full`,
+    )
+  })
 
   for (const [path, row] of [
     ["/members", "People"],
-    ["/requests", "Sessions"],
+    ["/routing", "Routing"],
+    ["/routing/coding", "Routing"],
+    ["/requests", "Traces"],
     ["/tools/web-search", "Tools"],
   ] as const) {
     it(`announces ${row} as the current row on ${path}, and no other`, async () => {
@@ -1880,29 +1887,6 @@ describe("the workspace rail, per role", () => {
       ).toHaveLength(1)
     })
   }
-
-  it("ends the breadcrumb on the record a page names, after a link back to where it sits", async () => {
-    function ServerPage() {
-      useBreadcrumbLeaf("notion")
-      return <div>PAGE CONTENT</div>
-    }
-    mockMatchMedia(false)
-    await renderShell(bootstrap(), {
-      url: "/tools/mcp-servers/srv-1",
-      page: <ServerPage />,
-      ...asRole("member"),
-    })
-    const trail = screen.getByRole("navigation", { name: "Breadcrumb" })
-
-    expect(await within(trail).findByText("notion")).toHaveAttribute(
-      "aria-current",
-      "page",
-    )
-    expect(within(trail).getByRole("link", { name: "Tools" })).toHaveAttribute(
-      "href",
-      "/tools",
-    )
-  })
 })
 
 /** The openings so far; the shell's page views share the same recorder. */
@@ -2110,5 +2094,150 @@ describe("the team budget at the rail's foot", () => {
     })
     await screen.findByRole("link", { name: "API keys" })
     expect(screen.queryByText("Team budget")).toBeNull()
+  })
+})
+
+describe("the dense sidebar switch", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  const railRow = (name: string) => {
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+    return within(sidebar).findByRole("link", { name })
+  }
+
+  it("is off by default: a 264px rail of 44px rows", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell()
+
+    const aside = container.querySelector("aside")
+    expect(aside).toHaveClass("w-[16.5rem]")
+    expect(aside).not.toHaveClass("w-[15rem]")
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: false })} w-full`,
+    )
+    expect(await railRow("People")).toHaveClass("min-h-11")
+  })
+
+  it("draws a 240px rail of 32px rows once it is on", async () => {
+    mockMatchMedia(false)
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    const { container } = await renderShell()
+
+    const aside = container.querySelector("aside")
+    expect(aside).toHaveClass("w-[15rem]")
+    expect(aside).not.toHaveClass("w-[16.5rem]")
+    const row = await railRow("People")
+    expect(row.className).toBe(
+      `${navRowClass({ isCollapsed: false, isDense: true })} w-full`,
+    )
+    expect(row).toHaveClass("min-h-8", "pointer-coarse:min-h-11")
+  })
+
+  it("makes Create API key 32px in place of 36px", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), asRole("owner"))
+    const normal = await screen.findByRole("button", { name: "Create API key" })
+    const normalClass = normal.className
+    cleanup()
+
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    await renderShell(bootstrap(), asRole("owner"))
+    const dense = await screen.findByRole("button", { name: "Create API key" })
+    expect(dense.className).not.toBe(normalClass)
+    expect(dense).toHaveClass("button--sm")
+    expect(normalClass.split(" ")).not.toContain("button--sm")
+  })
+
+  it("leaves the collapsed rail and the mobile drawer at their own sizes", async () => {
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
+    mockMatchMedia(false)
+    const collapsed = await renderShell()
+    expect(collapsed.container.querySelector("aside")).toHaveClass("w-[4.5rem]")
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: true })} w-full`,
+    )
+    collapsed.unmount()
+    cleanup()
+    window.localStorage.removeItem("otari.dashboard.sidebarCollapsed")
+
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    const drawer = await renderShell()
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    expect(drawer.container.querySelector("aside")).not.toHaveClass("w-[15rem]")
+    expect((await railRow("People")).className).toBe(
+      `${navRowClass({ isCollapsed: false })} w-full`,
+    )
+  })
+
+  it("is turned on and off from the account menu, and records nothing", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    const { container } = await renderShell()
+
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    const toggle = await screen.findByRole("switch", { name: "Dense sidebar" })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(toggle).toHaveTextContent("Off")
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    expect(toggle).toHaveTextContent("On")
+    expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
+      "1",
+    )
+    expect(container.querySelector("aside")).toHaveClass("w-[15rem]")
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
+      "0",
+    )
+    expect(container.querySelector("aside")).toHaveClass("w-[16.5rem]")
+    expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("publishes the narrower rail's footprint, and the default's when off", async () => {
+    mockMatchMedia(false)
+    const off = await renderShell()
+    expect(off.container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "expanded",
+    )
+    off.unmount()
+    cleanup()
+
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    const on = await renderShell()
+    expect(on.container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "dense",
+    )
+  })
+
+  it("offers the switch on the expanded rail and not on the collapsed one", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    expect(
+      await screen.findByRole("switch", { name: "Dense sidebar" }),
+    ).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    await screen.findByRole("dialog", { name: "Account" })
+    expect(screen.queryByRole("switch", { name: "Dense sidebar" })).toBeNull()
   })
 })

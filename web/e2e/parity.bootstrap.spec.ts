@@ -47,7 +47,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // sign-in credential while staying the API one; see
     // docs/access-control.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
-    // No docs_url in this e2e environment, so the dashboard's Documentation
+    // No docs_url in this e2e environment, so the dashboard's Docs
     // links open docs.otari.ai; see docs/configuration.md#documentation-links.
     docs_url: null,
     // No legal pages configured here; see docs/configuration.md#legal-pages.

@@ -107,7 +107,7 @@ Rotate a key when it has been compromised, or you suspect it has; when your orga
 3. Click **Add provider key**. Select the same provider, enter a distinct **Name**, and paste the new API key.
 4. Set the new key as the provider's default: choose **Make default provider** from its row's menu.
 5. For each workspace that pins the old key, open it on **Workspaces**, select its **Providers** tab, and choose **Always use this key** from the new key's **More** menu.
-6. Send a test request from each affected workspace. Confirm it completes successfully, and not on a fallback, in the workspace's **Sessions**, on its **Requests** view.
+6. Send a test request from each affected workspace. Confirm it completes successfully, and not on a fallback, in the workspace's **Traces**, on its **Requests** view.
 
 ### Remove the old key
 

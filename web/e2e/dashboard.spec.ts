@@ -9,9 +9,10 @@ import {
   nav,
   openAccountMenu,
   openDeployment,
+  openListed,
   openNested,
   openOrganization,
-  openTab,
+  openRow,
   pageHeading,
   pressRowAction,
 } from "./helpers"
@@ -24,7 +25,7 @@ test.describe("dashboard core flows", () => {
     page,
   }) => {
     await login(page)
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
     await expect(page.getByText("Get started with Otari")).toBeVisible()
   })
 
@@ -115,7 +116,7 @@ test.describe("dashboard core flows", () => {
 
     // Permanent: the offer does not come back on the next page load.
     await page.reload()
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
     await expect(sheet).toBeHidden()
   })
 
@@ -126,15 +127,19 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Models", exact: true }).click()
     await expect(pageHeading(page, "Models")).toBeVisible()
 
-    // Routing is a tab of Rules, which titles the page, and each tool a view
-    // of Tools.
-    await openTab(page, "Rules", "Routing")
-    await expect(pageHeading(page, "Rules")).toBeVisible()
-    await openTab(page, "Tools", "Web search")
-    await expect(pageHeading(page, "Tools")).toBeVisible()
-    // The one Tools view that is not a filtered view of the settings page, so
-    // reaching it proves its own route resolves rather than that the filter did.
-    await openTab(page, "Tools", "MCP servers")
+    // Routing is a row of its own, and each tool a view of Tools.
+    await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
+    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await openListed(page, "Tools", "Web search")
+    await expect(pageHeading(page, "Web search")).toBeVisible()
+    // A tool's settings lead back to the list, which has no tab row to do it.
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Tools", exact: true })
+      .click()
+    await expect(page).toHaveURL(/\/tools$/)
+    // A page of its own, so reaching it proves its own route resolves.
+    await openRow(page, "MCP servers")
     await expect(
       page.getByRole("button", { name: "Add MCP server" }),
     ).toBeVisible()
@@ -283,7 +288,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a routing policy", async ({ page }) => {
     await login(page)
-    await openTab(page, "Rules", "Routing")
+    await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -312,7 +317,7 @@ test.describe("dashboard core flows", () => {
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
-    await openTab(page, "Rules", "Routing")
+    await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -359,7 +364,7 @@ test.describe("dashboard core flows", () => {
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
-    await openTab(page, "Rules", "Routing")
+    await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
 
     const chained = page
       .getByRole("row")
@@ -371,7 +376,10 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Rename" }).click()
     // The page follows the policy to its new address.
     await expect(pageHeading(page, "renamed")).toBeVisible()
-    await page.getByRole("link", { name: "← Routing" }).click()
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Routing", exact: true })
+      .click()
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.

@@ -200,7 +200,7 @@ async function renderPage({
 } = {}) {
   await renderWithRouter(<KeysPage />, {
     url,
-    routes: [{ path: "/sessions", element: <p>Sessions</p> }],
+    routes: [{ path: "/traces", element: <p>Sessions</p> }],
     shell: (
       <Provider>
         <DeploymentProvider value={bootstrap(deployment)}>
@@ -511,22 +511,24 @@ describe("KeysPage", () => {
       ).not.toBeInTheDocument()
     })
 
-    it("does not send a member to a Home that lists only their own keys", async () => {
+    it("does not send a member to an Activity page that lists only their own keys", async () => {
       mockApi({ deploymentOperator: false, role: "member" })
       await renderPage({ url: "/?owner=someone-else" })
 
       expect(
         await screen.findByText(/Each person sees and changes their own keys/),
       ).toBeVisible()
-      expect(screen.queryByText(/Their spend per key is on Home/)).toBeNull()
+      expect(
+        screen.queryByText(/Their spend per key is on Activity/),
+      ).toBeNull()
     })
 
-    it("still points an owner to Home, which lists every key's spend", async () => {
+    it("still points an owner to Activity, which lists every key's spend", async () => {
       mockApi({ deploymentOperator: false, role: "owner" })
       await renderPage({ url: "/?owner=someone-else" })
 
       expect(
-        await screen.findByText(/Their spend per key is on Home/),
+        await screen.findByText(/Their spend per key is on Activity/),
       ).toBeVisible()
     })
   })

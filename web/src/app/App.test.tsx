@@ -58,7 +58,7 @@ describe("App", () => {
     expect(
       await screen.findByText("Lazy overview", undefined, { timeout: 3000 }),
     ).toBeInTheDocument()
-    expect(document.title).toBe("Home · Otari")
+    expect(document.title).toBe("Activity · Otari")
   })
 
   it("reopens the model a visitor chose once their session starts", async () => {

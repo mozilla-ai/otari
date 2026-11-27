@@ -33,7 +33,7 @@ describe("ActivityPage trace link", () => {
     const link = await screen.findByRole("link", { name: "View trace" })
 
     const href = new URL(link.getAttribute("href")!, "http://localhost")
-    expect(href.pathname).toBe("/sessions")
+    expect(href.pathname).toBe("/traces")
     expect(Object.fromEntries(href.searchParams)).toEqual({
       peek: traceSummary().trace_id,
       peek_workspace: traceSummary().workspace_id,

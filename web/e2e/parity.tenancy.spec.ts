@@ -245,7 +245,10 @@ test.describe("tenancy", () => {
     await expect(
       page.getByRole("heading", { name: RENAMED_WORKSPACE, level: 1 }),
     ).toBeVisible()
-    await page.getByRole("link", { name: "← Workspaces" }).click()
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Workspaces", exact: true })
+      .click()
 
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()

@@ -105,7 +105,7 @@ Which sign-in forms the page offers is described in
 4. Test the provider connection, or declare model IDs for a backend with no
    model-listing endpoint.
 5. Create an API key from the setup guide or the **Keys** page.
-6. Send a request and check that it appears in **Sessions**, in its
+6. Send a request and check that it appears in **Traces**, in its
    **Requests** view.
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
@@ -269,7 +269,7 @@ has it; a source install without it refuses to start.
 
 ## Custom documentation
 
-The dashboard's Documentation link opens docs.otari.ai unless `docs_url` names
+The dashboard's Docs link opens docs.otari.ai unless `docs_url` names
 another site; see [Documentation links](configuration.md#documentation-links).
 
 ## Legal pages

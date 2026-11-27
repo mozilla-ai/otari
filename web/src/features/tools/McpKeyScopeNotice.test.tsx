@@ -47,7 +47,7 @@ function renderNotice(
     <QueryClientProvider client={client}>
       <McpKeyScopeNotice workspaceId={ALPHA} />
     </QueryClientProvider>,
-    { wrapper: withRouter({ url: "/tools/mcp-servers" }) },
+    { wrapper: withRouter({ url: "/mcp-servers" }) },
   )
 }
 

@@ -35,7 +35,7 @@ async function renderPage(url: string) {
   )
 }
 
-const OVERVIEW_ROW = "Lets an agent call the tools a connected server offers."
+const OVERVIEW_ROW = /Lets the model search the web for current information\./
 const GUARDRAILS_LINK = { name: "Guardrails" }
 
 describe("ToolsPage", () => {
@@ -43,7 +43,7 @@ describe("ToolsPage", () => {
     vi.restoreAllMocks()
   })
 
-  it("shows the overview under the Tools tabs by default", async () => {
+  it("shows the overview by default, with no tab row and no way back", async () => {
     mockApi(true)
     await renderPage("/tools")
 
@@ -52,6 +52,8 @@ describe("ToolsPage", () => {
     ).toBeInTheDocument()
     expect(await screen.findByText(OVERVIEW_ROW)).toBeInTheDocument()
     expect(screen.queryByRole("link", GUARDRAILS_LINK)).not.toBeInTheDocument()
+    expect(screen.queryByRole("navigation", { name: "Tools views" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
   })
 
   it("gives an operator with ?service=guardrails the guardrail services view", async () => {
@@ -62,6 +64,14 @@ describe("ToolsPage", () => {
       "href",
       "/organization/guardrails",
     )
+    expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute(
+      "href",
+      "/tools",
+    )
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Guardrail services" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull()
   })
 
   it("gives a non-operator with ?service=guardrails the overview", async () => {
@@ -70,5 +80,6 @@ describe("ToolsPage", () => {
 
     expect(await screen.findByText(OVERVIEW_ROW)).toBeInTheDocument()
     expect(screen.queryByRole("link", GUARDRAILS_LINK)).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
   })
 })

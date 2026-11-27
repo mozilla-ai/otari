@@ -1,12 +1,12 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { BackLink } from "@/shared/components/BackLink"
 import { useUrlValue } from "@/shared/helpers/urlState"
-
 import { FallbackChainGroup } from "./FallbackChainGroup"
 import { GuardrailsGroup } from "./GuardrailsGroup"
 import { MainSelectionGroup } from "./MainSelectionGroup"
@@ -43,13 +43,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
     (entry) => entry.name === name && (entry.user_id ?? "") === userId,
   )
 
-  const back = (
-    <nav aria-label="Breadcrumb" className="text-caption">
-      <Link to="/routing" className="text-link hover:text-link-hover">
-        ← Routing
-      </Link>
-    </nav>
-  )
+  const back = <BackLink to="/routing" label="Routing" />
 
   if (row === undefined) {
     if (isLoading || isFetching) return <PageLoading label="Loading policy…" />

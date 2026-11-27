@@ -68,7 +68,7 @@ provider on the dashboard's **Hosted providers** page and enable default
 pricing there. The key in the link is the gateway's master key, so keep the
 link private.
 
-Create an API key in the dashboard, from the setup guide on **Home** or
+Create an API key in the dashboard, from the setup guide on **Activity** or
 on the **API keys** page, and send a request with it:
 
 ```bash

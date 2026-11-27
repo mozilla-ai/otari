@@ -101,7 +101,7 @@ describe("KeyMcpAccess", () => {
     ).toBeVisible()
     expect(screen.getByRole("link", { name: "github" })).toHaveAttribute(
       "href",
-      "/tools/mcp-servers/55555555-5555-5555-5555-555555555555",
+      "/mcp-servers/55555555-5555-5555-5555-555555555555",
     )
     expect(screen.getByText("All tools")).toBeVisible()
     expect(screen.getByText("matched the default policy")).toBeVisible()
@@ -129,7 +129,7 @@ describe("KeyMcpAccess", () => {
 
     expect(await screen.findByRole("link", { name: "hub" })).toHaveAttribute(
       "href",
-      "/tools/mcp-servers/88888888-8888-8888-8888-888888888888",
+      "/mcp-servers/88888888-8888-8888-8888-888888888888",
     )
     expect(screen.getByText("organization limit: Read tools")).toBeVisible()
     // Only where the organization set one.

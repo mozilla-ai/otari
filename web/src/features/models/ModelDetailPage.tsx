@@ -43,6 +43,7 @@ import {
   useDeploymentOperator,
   useOrganizationContext,
 } from "@/shared/api/organizations"
+import { BackAnchor, BackLink } from "@/shared/components/BackLink"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { followInAppLink, routeHref } from "@/shared/helpers/appLocation"
 import {
@@ -501,15 +502,7 @@ function CatalogBackLink() {
   const search = useLocation({
     select: (location) => location.state.catalogSearch,
   })
-  return (
-    <Link
-      to="/models"
-      search={search ?? {}}
-      className="text-link hover:text-link-hover"
-    >
-      ← Models
-    </Link>
-  )
+  return <BackLink to="/models" search={search ?? {}} label="Models" />
 }
 
 export function ModelDetailView({
@@ -606,19 +599,15 @@ export function ModelDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <nav aria-label="Breadcrumb" className="text-caption">
-        {publicView ? (
-          <a
-            href={publicCatalogHref()}
-            onClick={followInAppLink}
-            className="text-link hover:text-link-hover"
-          >
-            ← Models
-          </a>
-        ) : (
-          <CatalogBackLink />
-        )}
-      </nav>
+      {publicView ? (
+        <BackAnchor
+          href={publicCatalogHref()}
+          onClick={followInAppLink}
+          label="Models"
+        />
+      ) : (
+        <CatalogBackLink />
+      )}
 
       {selected.isError ? <ErrorBanner error={selected.error} /> : null}
 

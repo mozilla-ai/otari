@@ -195,7 +195,7 @@ reach, such as the Compose service name of the MCP server.
 
 ## Store the credentials in Otari
 
-On either route, add the server as usual (**Tools**, then **MCP servers**, then
+On either route, add the server as usual (**MCP servers**, then
 **Add MCP server**; [MCP servers](mcp-servers.md) has the steps). **Sign-in mode**
 decides what you store:
 

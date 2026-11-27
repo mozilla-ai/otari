@@ -58,12 +58,14 @@ describe("a build that replaces the label-override module", () => {
         (item) => item.label,
       ),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
+      "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     expect(ORG_NAV_SECTIONS.map((section) => section.label)).toEqual([
@@ -92,7 +94,7 @@ describe("a build that replaces the label-override module", () => {
     expect(navItemForPath("/organization/provider-keys")?.label).toBe(
       "Provider keys",
     )
-    // Its first child shares its address, so the breadcrumb and the shell's
+    // Its first child shares its address, so the tab title and the shell's
     // gated-off panel name that page after the child, which is not part of
     // this seam.
     expect(navLabelForPath("/organization/provider-keys")).toBe("Inference")
