@@ -1,13 +1,13 @@
 import {
   FiActivity,
   FiAtSign,
+  FiBarChart2,
   FiBox,
   FiCode,
   FiCpu,
   FiDollarSign,
   FiGlobe,
   FiGrid,
-  FiHome,
   FiKey,
   FiLayers,
   FiList,
@@ -64,7 +64,7 @@ const BASE_NAV_SECTIONS = [
       {
         to: "/",
         label: "Activity",
-        icon: FiHome,
+        icon: FiBarChart2,
         reachableWithoutOrganization: true,
       },
       {
