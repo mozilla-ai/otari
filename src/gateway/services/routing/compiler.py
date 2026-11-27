@@ -476,8 +476,12 @@ def _resolve_candidates(
             resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             # Startup validation rejects an unresolvable selector, so reaching
-            # this means the provider set changed under a running gateway.
-            dropped.append(DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})"))
+            # this means the provider set changed under a running gateway. The
+            # cause is logged rather than carried in `detail`, which `explain`
+            # returns and the usage row stores: an exception message names provider
+            # config and would ride into a tenant-readable field.
+            logger.warning("Routing candidate '%s' does not resolve (%s)", selector, type(exc).__name__)
+            dropped.append(DroppedCandidate(selector, "unresolvable", "could not be resolved to a provider"))
             continue
 
         canonical = f"{resolved.instance}:{resolved.model}"
