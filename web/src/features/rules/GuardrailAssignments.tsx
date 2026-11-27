@@ -60,9 +60,15 @@ const includesText = (haystack: readonly string[], query: string) =>
  */
 export function GuardrailAssignments({
   rules,
+  isRulesLoading,
+  pageError,
   moderation,
 }: {
   rules: readonly Rule[]
+  /** Until the budgets land, a ceiling's name is a stand-in. */
+  isRulesLoading: boolean
+  /** A read the page made failed; said once, here. */
+  pageError: unknown
   moderation: Moderation
 }) {
   const url = useUrlState(URL_DEFAULTS)
@@ -130,9 +136,12 @@ export function GuardrailAssignments({
     ]
   })
 
+  // Nothing is empty that could not be read.
+  const unread = <span className="text-muted">Could not be read</span>
   // Every row here runs the workspace's moderation: it is set per workspace.
-  const moderationCell = moderation.isLoading ? null : moderation.rows
-      .length === 0 ? (
+  const moderationCell = moderation.isLoading ? null : moderation.error ? (
+    unread
+  ) : moderation.rows.length === 0 ? (
     <span className="text-muted">None</span>
   ) : (
     <span className="flex min-w-0 items-center gap-2">
@@ -145,7 +154,9 @@ export function GuardrailAssignments({
     </span>
   )
   const budgetCell = (names: readonly string[]) =>
-    names.length === 0 ? (
+    ceilings.error ? (
+      unread
+    ) : names.length === 0 ? (
       <span className="text-muted">None</span>
     ) : (
       <span className="block truncate" title={names.join(", ")}>
@@ -209,8 +220,9 @@ export function GuardrailAssignments({
     },
   ]
 
-  const error = members.error ?? ceilings.error ?? keys.error
+  const error = members.error ?? ceilings.error ?? keys.error ?? pageError
   const isLoading =
+    isRulesLoading ||
     members.isLoading ||
     ceilings.isLoading ||
     keys.isLoading ||

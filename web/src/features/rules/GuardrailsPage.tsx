@@ -102,8 +102,9 @@ export function GuardrailsPage() {
             ) : undefined
           }
         />
-        {/* One banner: a read both lists share fails once. */}
-        {error || moderation.error ? (
+        {/* One banner: a read both views share fails once, and Assignments
+            carries it with its own reads. */}
+        {!isAssignments && (error || moderation.error) ? (
           <div className="pb-4">
             <ErrorBanner error={error ?? moderation.error} />
           </div>
@@ -131,7 +132,12 @@ export function GuardrailsPage() {
       </div>
 
       {isAssignments ? (
-        <GuardrailAssignments rules={rules} moderation={moderation} />
+        <GuardrailAssignments
+          rules={rules}
+          isRulesLoading={isLoading}
+          pageError={error ?? moderation.error}
+          moderation={moderation}
+        />
       ) : isEmpty ? (
         <EmptyState
           title="No guardrails yet"

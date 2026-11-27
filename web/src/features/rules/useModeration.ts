@@ -46,7 +46,9 @@ export interface Moderation {
  * The organization's content moderation that runs on the selected
  * workspace's requests. A paused one runs nowhere, so it is not listed. Owners
  * and admins only: the server refuses anyone else both lists, since they name
- * the vendors the organization has accounts with.
+ * the vendors the organization has accounts with. Rows wait for all three
+ * reads, since a row drawn before the definitions or the workspaces land
+ * names neither.
  */
 export function useModeration(isManager: boolean): Moderation {
   const { selected } = useSelectedWorkspace()
@@ -60,11 +62,17 @@ export function useModeration(isManager: boolean): Moderation {
     (workspaces.data ?? []).map((one) => [one.id, one.name]),
   )
   const teamName = (id: string) => workspaceName.get(id) ?? "A workspace"
-  const running: OrganizationGuardrail[] = selected
-    ? mandatesFor(selected.workspace_id, mandates.data ?? []).filter(
-        (mandate) => mandate.enabled,
-      )
-    : []
+  const isRead =
+    isManager &&
+    mandates.data !== undefined &&
+    definitions.data !== undefined &&
+    workspaces.data !== undefined
+  const running: OrganizationGuardrail[] =
+    isRead && selected
+      ? mandatesFor(selected.workspace_id, mandates.data ?? []).filter(
+          (mandate) => mandate.enabled,
+        )
+      : []
 
   return {
     rows: running
@@ -91,6 +99,8 @@ export function useModeration(isManager: boolean): Moderation {
     isLoading:
       isManager &&
       (mandates.isLoading || definitions.isLoading || workspaces.isLoading),
-    error: mandates.error ?? definitions.error ?? workspaces.error,
+    error: isManager
+      ? (mandates.error ?? definitions.error ?? workspaces.error)
+      : undefined,
   }
 }

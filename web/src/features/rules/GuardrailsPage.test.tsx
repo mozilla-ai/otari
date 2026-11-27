@@ -149,6 +149,10 @@ interface Data {
   members?: unknown[]
   ceilings?: unknown[]
   keys?: unknown[]
+  /** Paths answered with a 403, which the client does not retry. */
+  failing?: string[]
+  /** Paths held until the test lets them answer. */
+  held?: Record<string, Promise<void>>
 }
 
 const FULL: Data = {
@@ -166,7 +170,11 @@ async function renderAs(
   data: Data = FULL,
 ) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const path = String(input).slice(API_ROOT.length).split("?")[0]
+    const path = String(input).slice(API_ROOT.length).split("?")[0] ?? ""
+    if (data.failing?.includes(path)) {
+      return Response.json({ detail: `Refused ${path}` }, { status: 403 })
+    }
+    await data.held?.[path]
     const paged = (rows: unknown[] = []) =>
       Response.json({ data: rows, count: rows.length })
     switch (path) {
@@ -398,4 +406,115 @@ describe("Guardrails, Assignments", () => {
       screen.queryByRole("grid", { name: "Guardrails on each member" }),
     ).toBeNull()
   })
+})
+
+describe("Guardrails, when a read fails or is slow", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("says a member's moderation could not be read, and says why once", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        failing: ["/organizations/me/guardrails"],
+      },
+    )
+    const grid = await screen.findByRole("grid", {
+      name: "Guardrails on each member",
+    })
+    const wei = await within(grid).findByRole("row", { name: /Wei Zhang/ })
+    expect(wei).toHaveTextContent("Could not be read")
+    expect(wei).not.toHaveTextContent("None")
+    expect(screen.getAllByRole("alert")).toHaveLength(1)
+  })
+
+  it("says a member's budget could not be read, and says why once", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        failing: ["/organizations/me/spend-ceilings"],
+      },
+    )
+    const grid = await screen.findByRole("grid", {
+      name: "Guardrails on each member",
+    })
+    const wei = await within(grid).findByRole("row", { name: /Wei Zhang/ })
+    expect(wei).toHaveTextContent("Could not be read")
+    expect(screen.getAllByRole("alert")).toHaveLength(1)
+  })
+
+  it("draws no moderation row before the definitions and workspaces land", async () => {
+    let answer = () => {}
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    await renderAs("owner", <GuardrailsPage />, "/guardrails", {
+      ...FULL,
+      held: { "/workspaces": held },
+    })
+    await screen.findByRole("heading", { name: /^Content moderation/ })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("prompt-injection")).toBeNull()
+    expect(screen.queryByText(/A workspace/)).toBeNull()
+    answer()
+    const grid = await screen.findByRole("grid", {
+      name: "Content moderation running in Platform",
+    })
+    expect(
+      await within(grid).findByRole("row", { name: /^prompt-injection/ }),
+    ).toHaveTextContent("Platform, Research")
+  })
+
+  it("names no budget in Assignments before the budgets land", async () => {
+    let answer = () => {}
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        // Ceilings named by their budget alone, as a ceiling made without a name is.
+        ceilings: CEILINGS.map((one) => ({ ...one, name: null })),
+        held: { "/organizations/me/budgets": held },
+      },
+    )
+    await screen.findByRole("grid", { name: "Guardrails on each member" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText(/Spend limit/)).toBeNull()
+    answer()
+    expect(
+      await screen.findByRole("row", { name: /Wei Zhang/ }),
+    ).toBeInTheDocument()
+  })
+
+  for (const role of ["member", "viewer"] as const) {
+    it(`asks nothing a ${role} would be refused`, async () => {
+      await renderAs(role, <GuardrailsPage />, "/guardrails")
+      await screen.findByRole("heading", { name: /^Budget/ })
+      const asked = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.map(
+          ([input]) => String(input).slice(API_ROOT.length).split("?")[0],
+        )
+      for (const path of [
+        "/organizations/me/guardrails",
+        "/organizations/me/guardrail-definitions",
+        "/organizations/me/spend-ceilings",
+        "/workspaces",
+      ]) {
+        expect(asked, path).not.toContain(path)
+      }
+    })
+  }
 })
