@@ -1,6 +1,5 @@
 """User-approved app credentials, delivered with S256 PKCE."""
 
-import hashlib
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from apron_auth.pkce import generate_code_challenge
 from gateway.auth.models import MCP_ACCESS_TOKEN_PREFIX, MCP_REFRESH_TOKEN_PREFIX, PERSONAL_ACCESS_TOKEN_PREFIX
 from gateway.core.oauth_apps import APP_KEY_LIFETIMES, open_app_site, redirect_matches
 from gateway.core.settings.identity import OAuthAppConfig
+from gateway.core.tokens import generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import AppKeyOwnerInactiveError
 from gateway.exceptions.identity_exceptions import OAuthAppGrantError, PersonalAccessTokenLimitReachedError
@@ -64,11 +64,6 @@ class IssuedCredential:
     expires_in: int | None
     manage_path: str
     refresh_token: str | None = None
-
-
-def _code_hash(code: str) -> str:
-    """How an authorization code is stored and looked up, so the code itself is never kept."""
-    return hashlib.sha256(code.encode()).hexdigest()
 
 
 class OAuthAppService:
@@ -187,7 +182,7 @@ class OAuthAppService:
         app = await self.resolve_app(request.client_id, request.redirect_uri)
         now = self.clock()
         lifetime = APP_KEY_LIFETIMES[request.expiration]
-        code = secrets.token_urlsafe(32)
+        code = generate_token()
         if app.credential == APP_CREDENTIAL_ACCESS_TOKEN:
             if request.expiration not in _MCP_SIGN_IN_LIFETIMES:
                 raise OAuthAppGrantError("invalid_request", "An MCP client is approved for at most 90 days")
@@ -199,7 +194,7 @@ class OAuthAppService:
                 await self.organizations.lock_identity(user.id)
                 await self.clients.mark_authorized(request.client_id, now)
                 await self.grants.issue(
-                    code_hash=_code_hash(code),
+                    code_hash=hash_token(code),
                     client_id=request.client_id,
                     redirect_uri=request.redirect_uri,
                     challenge=request.code_challenge,
@@ -234,7 +229,7 @@ class OAuthAppService:
                 user=user, organization_id=workspace.organization_id, workspace_id=workspace.id, revoking=False
             )
             await self.grants.issue(
-                code_hash=_code_hash(code),
+                code_hash=hash_token(code),
                 client_id=request.client_id,
                 redirect_uri=request.redirect_uri,
                 challenge=request.code_challenge,
@@ -311,7 +306,7 @@ class OAuthAppService:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
-                code_hash=_code_hash(code),
+                code_hash=hash_token(code),
                 client_id=request.client_id,
                 redirect_uri=redirect_uri,
                 challenge=generate_code_challenge(code_verifier),
