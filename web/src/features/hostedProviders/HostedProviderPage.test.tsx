@@ -729,7 +729,7 @@ describe("HostedProviderPage", () => {
       await screen.findByText("No hosted provider named nope"),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "← Hosted providers" }),
+      screen.getByRole("link", { name: "Hosted providers" }),
     ).toHaveAttribute("href", "/admin/hosted-providers")
   })
 

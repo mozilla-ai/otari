@@ -219,10 +219,10 @@ describe("PublicCatalogPage", () => {
     expect(rowMenuTriggers(grid)).toHaveLength(0)
     expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
     expect(screen.queryByText(/Your effective price/)).toBeNull()
-    expect(screen.getByRole("link", { name: "← Models" })).toHaveAttribute(
-      "href",
-      "/models",
-    )
+    // The page's own back link, beside the navbar's Models link.
+    expect(
+      within(screen.getByRole("main")).getByRole("link", { name: "Models" }),
+    ).toHaveAttribute("href", "/models")
   })
 
   it("starts an account from Use this model, sign-in while signup is closed", async () => {

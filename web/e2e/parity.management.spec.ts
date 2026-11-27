@@ -478,7 +478,10 @@ test.describe("fallback routing", () => {
     )
     await page.getByRole("button", { name: "Save fallback chain" }).click()
     await expect(page.getByText("Unsaved changes")).toHaveCount(0)
-    await page.getByRole("link", { name: "← Routing" }).click()
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Routing", exact: true })
+      .click()
     await expect(
       row(page, "Routing policies", POLICY)
         .getByRole("list", { name: "Backups" })

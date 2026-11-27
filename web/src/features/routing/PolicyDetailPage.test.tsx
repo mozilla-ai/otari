@@ -108,7 +108,7 @@ describe("PolicyDetailPage", () => {
     expect(
       screen.getByRole("region", { name: "Where requests go" }),
     ).toHaveTextContent(/Requests to fast go to .*If that fails/)
-    expect(screen.getByRole("link", { name: "← Routing" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Routing" })).toHaveAttribute(
       "href",
       "/routing",
     )

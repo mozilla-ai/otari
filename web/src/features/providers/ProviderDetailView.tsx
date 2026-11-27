@@ -18,6 +18,7 @@ import {
 import { publicProvidersHref } from "@/features/providers/publicProviders"
 import { ApiError } from "@/shared/api/client"
 import { useCatalogProvider } from "@/shared/api/models"
+import { BackAnchor } from "@/shared/components/BackLink"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { followInAppLink } from "@/shared/helpers/appLocation"
 import { formatContext } from "@/shared/helpers/format"
@@ -97,17 +98,13 @@ function modelColumns(): DataTableColumn<CatalogProviderModel>[] {
 
 const rowKey = (row: CatalogProviderModel) => row.id
 
-function BackLink() {
+function ListBackLink() {
   return (
-    <nav aria-label="Back" className="text-caption">
-      <a
-        href={publicProvidersHref()}
-        onClick={followInAppLink}
-        className="text-link hover:text-link-hover"
-      >
-        ← Providers
-      </a>
-    </nav>
+    <BackAnchor
+      href={publicProvidersHref()}
+      onClick={followInAppLink}
+      label="Providers"
+    />
   )
 }
 
@@ -139,7 +136,7 @@ export function ProviderDetailView({
     ) {
       return (
         <div className="flex flex-col gap-6">
-          <BackLink />
+          <ListBackLink />
           <PageIntro
             title="Provider not found"
             detail={
@@ -155,7 +152,7 @@ export function ProviderDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink />
+      <ListBackLink />
       {selected.isError ? <ErrorBanner error={selected.error} /> : null}
       <div className="flex flex-col gap-2">
         <PageIntro

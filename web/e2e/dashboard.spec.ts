@@ -376,7 +376,10 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Rename" }).click()
     // The page follows the policy to its new address.
     await expect(pageHeading(page, "renamed")).toBeVisible()
-    await page.getByRole("link", { name: "← Routing" }).click()
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Routing", exact: true })
+      .click()
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.

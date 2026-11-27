@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
 import type { McpConnectionCompleted } from "@/client"
@@ -20,6 +20,7 @@ import {
 } from "@/features/tools/mcpSignInWindow"
 import { CANCELLED_NOTICE } from "@/features/tools/useMcpSignIn"
 import { useCompleteMcpConnection } from "@/shared/api/tools"
+import { BackLink } from "@/shared/components/BackLink"
 
 export interface McpConnectionCallbackSearch {
   state?: string
@@ -214,14 +215,8 @@ export function McpConnectionCallbackPage({
   }
   return (
     <>
-      <PageIntro
-        title="Connect your account"
-        detail={
-          <Link to={LIST} className="text-link hover:text-link-hover">
-            ← MCP servers
-          </Link>
-        }
-      />
+      <BackLink to={LIST} label="MCP servers" />
+      <PageIntro title="Connect your account" />
       {refusal ? <InfoBanner tone="warning">{refusal}</InfoBanner> : null}
       {complete.error ? (
         <InfoBanner tone="warning">
