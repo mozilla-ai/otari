@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PolicySpec } from "@/client"
 import { PolicyDetailPage } from "@/features/routing/PolicyDetailPage"
 import { API_ROOT } from "@/shared/api/client"
+import { apiKey } from "@/tests/fixtures"
 import {
   adminContext,
   CHAIN,
@@ -756,6 +757,88 @@ describe("PolicyDetailPage test section", () => {
         budget_used_pct: 85,
       }),
     )
+  })
+
+  it("compiles as a chosen key, so its allow-list decides the plan", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi(undefined, undefined, [], {
+      keys: [
+        apiKey({
+          id: "key-9",
+          key_name: "anthropic-only",
+          allowed_models: ["anthropic:*"],
+        }),
+      ],
+    })
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    await user.click(await test.findByRole("button", { name: /As API key/ }))
+    await user.click(
+      await screen.findByRole("option", { name: "anthropic-only" }),
+    )
+
+    // The allow-list rides along: the endpoint evaluates `key_id` against
+    // `when.key_id` conditions and reads no allow-list of its own.
+    await waitFor(() =>
+      expect(
+        calls
+          .filter((call) =>
+            call.url.endsWith(`${API_ROOT}/routing/policies/explain`),
+          )
+          .at(-1)?.body,
+      ).toMatchObject({
+        name: "fast",
+        key_id: "key-9",
+        allowed_models: ["anthropic:*"],
+      }),
+    )
+  })
+
+  it("shows a weighted policy's split, which needs no request to know", async () => {
+    mockApi(undefined, undefined, [], {
+      explain: {
+        ...EXPLAINED,
+        selection_reason: "router:weighted",
+        router_backend: "weighted",
+        router_weights: {
+          "openai:gpt-5": 80,
+          "anthropic:claude-sonnet-4-5": 20,
+        },
+        candidates: [
+          {
+            position: 1,
+            instance: "openai",
+            model: "gpt-5",
+            selection_reason: "router:weighted",
+            dispatch_model: "openai:gpt-5",
+          },
+        ],
+        dropped: [],
+      },
+    })
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(await test.findByText(/Traffic split:/)).toHaveTextContent("80%")
+    expect(test.getByText(/router weighted/)).toBeInTheDocument()
+  })
+
+  it("says when this build has no router the policy names", async () => {
+    mockApi(undefined, undefined, [], {
+      explain: {
+        ...EXPLAINED,
+        router_backend: "cheapest",
+        selection_reason: "default",
+        dropped: [],
+      },
+    })
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(
+      await test.findByText(/This build has no router named cheapest/),
+    ).toBeInTheDocument()
   })
 
   it("says so when no model is left", async () => {

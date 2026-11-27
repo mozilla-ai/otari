@@ -4,6 +4,7 @@ import type { ReactElement } from "react"
 import { vi } from "vitest"
 
 import type {
+  ApiKey,
   AutomaticFallback,
   CatalogModelSummary,
   ExplainPolicyResponse,
@@ -170,6 +171,8 @@ export function mockApi(
     fallbacks?: AutomaticFallback[]
     // What either surface's policy explain answers.
     explain?: ExplainPolicyResponse
+    // What the key read answers, for the Test section's "as this caller" picker.
+    keys?: ApiKey[]
   } = {},
 ) {
   let list = [...policies]
@@ -344,6 +347,14 @@ export function mockApi(
             ),
           ),
         )
+      }
+      // Both key surfaces answer the same shape, so one branch covers the
+      // operator's `/keys` and a member's `/organizations/me/keys`.
+      if (
+        url.includes(`${API_ROOT}/keys`) ||
+        url.includes(`${API_ROOT}/organizations/me/keys`)
+      ) {
+        return jsonResponse(opts.keys ?? [])
       }
       if (url.includes(`${API_ROOT}/users`)) return jsonResponse(USERS)
       if (url.includes(`${API_ROOT}/models`))
