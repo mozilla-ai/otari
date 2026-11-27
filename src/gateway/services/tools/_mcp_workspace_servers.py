@@ -124,16 +124,15 @@ class McpWorkspaceServers:
         server_ids: Collection[uuid.UUID],
         *,
         attached: bool,
-    ) -> tuple[list[McpServerInWorkspace], dict[uuid.UUID, uuid.UUID], set[uuid.UUID]]:
+    ) -> tuple[list[McpServerInWorkspace], dict[uuid.UUID, uuid.UUID]]:
         """The servers these ids name in the workspace, and with ``attached`` every one it might attach, oldest first.
 
         Also returns the id each given id names: itself, or for an old id of a folded workspace copy the
         organization's server it was folded into. Callers check :attr:`McpServerInWorkspace.attach_by_default`.
 
-        And the given ids to skip: an id the workspace's own server had, folded or promoted since, whose server
-        is now turned off for the workspace. A request naming it skipped that server while it was off, and still
-        does, before any access rule is read. Any other id of a server turned off for the workspace names nothing,
-        in the same request too.
+        An id the workspace's own server had, folded or promoted since, whose server is now turned off for the
+        workspace names nothing: a request naming it skipped that server while it was off, and still does, before
+        any access rule is read. So does any other id of a server turned off for the workspace.
         """
         named = list(dict.fromkeys(server_ids))
         rows = await self._servers.for_request(workspace_id, organization_id, named, attached=attached)
@@ -150,7 +149,7 @@ class McpWorkspaceServers:
             hidden = {view.id for view in views if not view.visible}
         skipped = {given for given, target in targets.items() if target in hidden}
         names = {server_id: targets.get(server_id, server_id) for server_id in named if server_id not in skipped}
-        return [view for view in views if view.visible], names, skipped
+        return [view for view in views if view.visible], names
 
     async def swap_aliases(self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """These ids in their order, each old id of a folded copy swapped for the server it names in the workspace."""

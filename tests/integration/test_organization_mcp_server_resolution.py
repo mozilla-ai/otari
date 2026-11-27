@@ -545,7 +545,7 @@ async def test_a_workspace_s_own_setting_attaches_an_organization_server_there_a
     assert await servers.any_attached(sales.id, organization_id)
     assert not await servers.any_attached(world.workspace.id, organization_id)
     # The request then reads the server as the workspace sees it, and attaches it.
-    views, _, _ = await McpWorkspaceServers(
+    views, _ = await McpWorkspaceServers(
         WorkspaceMcpServerRepository(async_db),
         WorkspaceMcpServerOverrideRepository(async_db),
         McpServerAliasRepository(async_db),

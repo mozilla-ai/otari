@@ -154,6 +154,7 @@ class McpServerFold:
         """
         signed_in_there = await self._signed_in(target)
         accounts = await self._connections.shared_for_servers([copy.id for copy in copies])
+        connections = await self._connections.every_for_servers([copy.id for copy in copies])
         # A copy with no credential of its own still changes account when the target brings one.
         if target is not None:
             with_token = target.encrypted_token is not None or bool(
@@ -163,7 +164,7 @@ class McpServerFold:
         for copy in copies:
             if copy.workspace_id is None:
                 continue
-            plan = _plan(await self._connections.every_for_server(copy.id), target, signed_in_there)
+            plan = _plan(connections.get(copy.id, []), target, signed_in_there)
             own_credential = copy.encrypted_token is not None or copy.id in accounts
             weighed.append(
                 McpServerFoldCandidate(
@@ -263,7 +264,7 @@ class McpServerFold:
     async def _signed_in(self, target: WorkspaceMcpServer | None) -> set[str]:
         if target is None:
             return set()
-        return {connection.user_id for connection in await self._connections.every_for_server(target.id)}
+        return await self._connections.signed_in_users(target.id)
 
 
 def _limit(copy: WorkspaceMcpServer, target: WorkspaceMcpServer, held: list[str] | None) -> list[str] | None:

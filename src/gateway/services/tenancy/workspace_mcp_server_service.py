@@ -1099,7 +1099,7 @@ async def _resolve_for_request(
         if server_ids:
             raise WorkspaceMcpServerNotFoundError(server_ids[0])
         return RequestMcpServers()
-    seen, names, _ = await _mcp_views(db).for_request(workspace_id, organization_id, server_ids, attached=attach)
+    seen, names = await _mcp_views(db).for_request(workspace_id, organization_id, server_ids, attached=attach)
     by_id = {view.id: view.row for view in seen}
     in_workspace = {view.id: view for view in seen}
 
@@ -1333,7 +1333,7 @@ async def resolve_workspace_mcp_server(
     organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
     if organization_id is None:
         return None
-    seen, _, _ = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
+    seen, _ = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
     if not seen:
         return None
     view = seen[0]
