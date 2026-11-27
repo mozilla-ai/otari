@@ -48,9 +48,33 @@ interface KeyRow {
   budgets: string[]
 }
 
-const includesText = (haystack: readonly string[], query: string) =>
-  query === "" ||
-  haystack.some((one) => one.toLowerCase().includes(query.toLowerCase()))
+const includesText = (haystack: readonly string[], query: string) => {
+  // Trimmed, as the New guardrail picker trims: a pasted name often carries a space.
+  const needle = query.trim().toLowerCase()
+  return (
+    needle === "" || haystack.some((one) => one.toLowerCase().includes(needle))
+  )
+}
+
+/**
+ * The shared budgets every row is also under, naming only the ones that
+ * exist: the organization's, and the selected workspace's own.
+ */
+function sharedBudgetsLine(
+  subject: "members" | "keys",
+  hasOrganization: boolean,
+  hasWorkspace: boolean,
+): string | undefined {
+  if (!hasOrganization && !hasWorkspace) return undefined
+  const whose = subject === "members" ? "their" : "its"
+  const budgets = [
+    hasOrganization ? "the organization’s budget" : "",
+    hasWorkspace ? `${whose} workspace’s own budget` : "",
+  ].filter(Boolean)
+  const shared = budgets.length === 2 ? "which are shared" : "which is shared"
+  const who = subject === "members" ? "Everyone" : "Every key"
+  return `${who} also stays under ${budgets.join(" and ")}, ${shared}. When several budgets apply, a request has to fit all of them.`
+}
 
 /**
  * Who in the selected workspace is under which guardrail, for an owner or
@@ -74,6 +98,7 @@ export function GuardrailAssignments({
   const url = useUrlState(URL_DEFAULTS)
   const by = url.get("by") === "keys" ? "keys" : "members"
   const query = url.get("q")
+  const shownQuery = query.trim()
   const [now] = useState(() => Date.now())
   const members = useOrganizationMembers()
   const ceilings = useAllSpendCeilings()
@@ -227,10 +252,18 @@ export function GuardrailAssignments({
     ceilings.isLoading ||
     keys.isLoading ||
     moderation.isLoading
+  const sharedLine = sharedBudgetsLine(
+    by,
+    allCeilings.some((ceiling) => ceiling.scope_type === "organization"),
+    allCeilings.some(
+      (ceiling) =>
+        ceiling.scope_type === "workspace" && ceiling.scope_id === workspaceId,
+    ),
+  )
   const noMatch = (
     <EmptyMessage>
-      {query
-        ? `Nothing matches “${query}”.`
+      {shownQuery
+        ? `Nothing matches “${shownQuery}”.`
         : by === "keys"
           ? "No API key you can read is in this workspace."
           : "Nobody is in this workspace yet."}
@@ -280,19 +313,13 @@ export function GuardrailAssignments({
           />
         </TableScrollFrame>
       )}
-      {by === "members" &&
-      allCeilings.some(
-        (ceiling) =>
-          ceiling.scope_type === "organization" ||
-          (ceiling.scope_type === "workspace" &&
-            ceiling.scope_id === workspaceId),
-      ) ? (
+      {by === "keys" ? (
         <p className="text-caption">
-          Everyone also stays under the organization’s budget and their
-          workspace’s own budget, which are shared. When several budgets apply,
-          a request has to fit all of them.
+          Your own API keys and the organization’s service keys in this
+          workspace. Other members’ keys are not listed.
         </p>
       ) : null}
+      {sharedLine ? <p className="text-caption">{sharedLine}</p> : null}
     </div>
   )
 }

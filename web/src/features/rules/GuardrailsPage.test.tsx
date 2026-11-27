@@ -383,6 +383,86 @@ describe("Guardrails, Assignments", () => {
     expect(within(grid).getByText("Elena Petrova")).toBeVisible()
   })
 
+  it("finds a member when the search carries a trailing space", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments&q=petrova%20",
+    )
+    const grid = await screen.findByRole("grid", {
+      name: "Guardrails on each member",
+    })
+    expect(
+      await within(grid).findByRole("row", { name: /Elena Petrova/ }),
+    ).toBeInTheDocument()
+    expect(within(grid).queryByText("Wei Zhang")).toBeNull()
+  })
+
+  it("names only the shared budgets that exist", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        ceilings: [
+          ...CEILINGS.filter((one) => one.scope_type !== "organization"),
+          organizationSpendCeiling({
+            id: "c-platform",
+            scope_type: "workspace",
+            scope_id: PLATFORM.id,
+            budget_id: "b-platform",
+            name: "Platform, monthly",
+            max_budget: 300,
+          }),
+        ],
+      },
+    )
+    expect(
+      await screen.findByText(
+        "Everyone also stays under their workspace’s own budget, which is shared. When several budgets apply, a request has to fit all of them.",
+      ),
+    ).toBeVisible()
+  })
+
+  it("says no shared budget where there is none", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        ceilings: CEILINGS.filter((one) => one.scope_type !== "organization"),
+      },
+    )
+    await screen.findByRole("row", { name: /Wei Zhang/ })
+    expect(screen.queryByText(/also stays under/)).toBeNull()
+  })
+
+  it("opens on API keys from the address, says whose keys it lists, and names the shared budget", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments&by=keys&q=ci",
+    )
+    const grid = await screen.findByRole("grid", {
+      name: "Guardrails on each API key",
+    })
+    expect(
+      await within(grid).findByRole("row", { name: /CI pipeline/ }),
+    ).toBeInTheDocument()
+    expect(within(grid).queryByText("Claude Code, laptop")).toBeNull()
+    expect(
+      screen.getByRole("searchbox", { name: "Search API keys" }),
+    ).toHaveValue("ci")
+    expect(
+      screen.getByText(/Your own API keys and the organization’s service keys/),
+    ).toBeVisible()
+    expect(
+      screen.getByText(/^Every key also stays under the organization’s budget/),
+    ).toBeVisible()
+  })
+
   it("lists the selected workspace's API keys with their budgets and lists", async () => {
     const user = userEvent.setup()
     await renderAs("owner", <GuardrailsPage />, "/guardrails?view=assignments")
