@@ -70,8 +70,11 @@ def _answers(monkeypatch: pytest.MonkeyPatch, outcomes: list[str]) -> None:
 def _store_server(test_db: Session, api_key_id: str, *, workspace_id: uuid.UUID | None = None) -> WorkspaceMcpServer:
     key = test_db.get(APIKey, api_key_id)
     assert key is not None and key.workspace_id is not None
+    workspace = test_db.get(Workspace, workspace_id or key.workspace_id)
+    assert workspace is not None
     row = WorkspaceMcpServer(
-        workspace_id=workspace_id or key.workspace_id,
+        organization_id=workspace.organization_id,
+        workspace_id=workspace.id,
         name="apify",
         url=PUBLIC_URL,
         encrypted_token=encrypt_secret("apify_api_token"),
