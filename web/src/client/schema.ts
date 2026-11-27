@@ -4326,6 +4326,237 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Mcp Servers
+         * @description List the organization's own MCP servers, oldest first. Organization owners and admins only.
+         */
+        get: operations["mcp-servers-list_organization_mcp_servers"];
+        put?: never;
+        /**
+         * Create Organization Mcp Server
+         * @description Add an MCP server every workspace of the organization reaches. Organization owners and admins only.
+         *
+         *     Its access rules, attach setting and tool list are the defaults each workspace starts from, and its tool
+         *     list is the most any workspace's callers reach. A name another server of the organization has, its own or a
+         *     workspace's, is refused with a 409.
+         */
+        post: operations["mcp-servers-create_organization_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Organization Mcp Server Connection
+         * @description Check connection details without storing anything. Organization owners and admins only.
+         */
+        post: operations["mcp-servers-check_organization_mcp_server_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Mcp Server
+         * @description One of the organization's own MCP servers. Organization owners and admins only.
+         */
+        get: operations["mcp-servers-get_organization_mcp_server"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Mcp Server
+         * @description Delete one of the organization's own MCP servers, from every workspace. Organization owners and admins only.
+         *
+         *     Every sign-in to it ends, and its authorization server is asked to end their tokens once the deletion commits.
+         */
+        delete: operations["mcp-servers-delete_organization_mcp_server"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Organization Mcp Server
+         * @description Change one of the organization's own MCP servers. Organization owners and admins only.
+         */
+        patch: operations["mcp-servers-update_organization_mcp_server"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Organization Mcp Server
+         * @description Check the server's connection now and store the outcome as `health`. Organization owners and admins only.
+         */
+        post: operations["mcp-servers-check_organization_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Organization Mcp Server Check Sign In
+         * @description Start a sign-in made only to check a per-user server. Organization owners and admins only.
+         */
+        post: operations["mcp-servers-start_organization_mcp_server_check_sign_in"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Mcp Server Connections
+         * @description Everyone signed in to the server, from any workspace. Organization owners and admins only.
+         */
+        get: operations["mcp-servers-list_organization_mcp_server_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Organization Mcp Server Connection
+         * @description End one person's sign-in to the server. Organization owners and admins only.
+         */
+        delete: operations["mcp-servers-remove_organization_mcp_server_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/shared-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Organization Mcp Server Shared Sign In
+         * @description Start a sign-in for everyone, which every workspace's calls then carry. Organization owners and admins only.
+         */
+        post: operations["mcp-servers-start_organization_mcp_server_shared_sign_in"];
+        /**
+         * End Organization Mcp Server Shared Account
+         * @description End the server's shared account, and check it again without one. Organization owners and admins only.
+         */
+        delete: operations["mcp-servers-end_organization_mcp_server_shared_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Mcp Server Workspaces
+         * @description Each workspace of the organization, whether it reaches the server, and the limit set for it.
+         *
+         *     Organization owners and admins only.
+         */
+        get: operations["mcp-servers-list_organization_mcp_server_workspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces/{workspace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Organization Mcp Server Workspace Limit
+         * @description Limit the tools a workspace's callers reach on the server. Organization owners and admins only.
+         *
+         *     The workspace's own rules still apply under the limit, and its admins can narrow it but never raise it.
+         *     `[]` turns the server off for the workspace.
+         */
+        put: operations["mcp-servers-set_organization_mcp_server_workspace_limit"];
+        post?: never;
+        /**
+         * Clear Organization Mcp Server Workspace Limit
+         * @description Lift the organization's limit in a workspace. Organization owners and admins only. Idempotent.
+         */
+        delete: operations["mcp-servers-clear_organization_mcp_server_workspace_limit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/member-invitations": {
         parameters: {
             query?: never;
@@ -16738,6 +16969,13 @@ export interface components {
             /** Server Name */
             server_name: string;
             /**
+             * Server Scope
+             * @description Whose the server is: one workspace's own, or its organization's, which a member signs in to from a workspace that reaches it
+             * @default workspace
+             * @enum {string}
+             */
+            server_scope: "workspace" | "organization";
+            /**
              * Shared
              * @description The sign-in was a manager's for everyone: it is now the shared server's account
              * @default false
@@ -16745,9 +16983,9 @@ export interface components {
             shared: boolean;
             /**
              * Workspace Id
-             * Format: uuid
+             * @description The workspace the sign-in started from; null for an owner's sign-in to an organization's server
              */
-            workspace_id: string;
+            workspace_id: string | null;
         };
         /**
          * McpConnectionPublic
@@ -19209,6 +19447,60 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrganizationGuardrailPublic"][];
+        };
+        /**
+         * OrganizationMcpServerLimit
+         * @description The organization's limit on one workspace's callers of one of its servers.
+         */
+        OrganizationMcpServerLimit: {
+            /**
+             * Tools
+             * @description Tool patterns ('*', a name, 'prefix*', '@read') the workspace's callers may reach at most; [] turns the server off for the workspace, and its admins cannot turn it back on
+             */
+            tools: string[];
+        };
+        /**
+         * OrganizationMcpServerWorkspace
+         * @description One workspace of the organization, as one of its servers reaches it.
+         */
+        OrganizationMcpServerWorkspace: {
+            /** Name */
+            name: string;
+            /**
+             * Narrowed
+             * @description The workspace's admins changed something of their own: turned the server off, or set its default access or whether it is attached
+             */
+            narrowed: boolean;
+            /**
+             * Organization Tools
+             * @description The organization's limit for the workspace; null sets none, [] turns the server off there
+             */
+            organization_tools: string[] | null;
+            /**
+             * Reached
+             * @description The workspace's requests reach the server: neither the organization nor the workspace turned it off there, and the server itself is on
+             */
+            reached: boolean;
+            /**
+             * Workspace Enabled
+             * @description The workspace's own switch, which its admins set
+             */
+            workspace_enabled: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * OrganizationMcpServerWorkspaces
+         * @description Every workspace of the organization, as one of its servers reaches each, by name.
+         */
+        OrganizationMcpServerWorkspaces: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationMcpServerWorkspace"][];
         };
         /**
          * OrganizationMembershipContextPublic
@@ -25387,6 +25679,12 @@ export interface components {
              * @description True while no manager has edited read_tools, so they are the readOnlyHint of the server's first listing
              */
             read_tools_from_server: boolean;
+            /**
+             * Scope
+             * @description Who owns the server: one workspace, or its organization
+             * @enum {string}
+             */
+            scope: "workspace" | "organization";
             /** @description On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none */
             shared_account?: components["schemas"]["McpSharedAccountPublic"] | null;
             /** Updated At */
@@ -25395,9 +25693,9 @@ export interface components {
             url: string;
             /**
              * Workspace Id
-             * Format: uuid
+             * @description The workspace that owns the server; null for an organization's
              */
-            workspace_id: string;
+            workspace_id: string | null;
         };
         /**
          * WorkspaceMcpServerUpdate
@@ -33114,6 +33412,521 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_organization_mcp_servers": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-create_organization_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Another server of the organization, its own or a workspace's, already has this name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-check_organization_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
+                };
+            };
+            /** @description The URL failed the SSRF or TLS check */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-get_organization_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-delete_organization_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-update_organization_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-check_organization_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Every check slot on this gateway was busy; nothing was recorded. Try again shortly. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-servers-start_organization_mcp_server_check_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_organization_mcp_server_connections": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-remove_organization_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-start_organization_mcp_server_shared_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-end_organization_mcp_server_shared_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_organization_mcp_server_workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMcpServerWorkspaces"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-set_organization_mcp_server_workspace_limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationMcpServerLimit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMcpServerWorkspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-clear_organization_mcp_server_workspace_limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMcpServerWorkspace"];
                 };
             };
             /** @description Validation Error */

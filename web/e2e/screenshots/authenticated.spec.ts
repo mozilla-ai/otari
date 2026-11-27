@@ -166,6 +166,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
+  // The organization's own servers, on the organization rail. Captured at
+  // rest, an empty table on a fresh gateway; a server's own page and its
+  // Workspaces table need a stored server, which the seed does not hold.
+  {
+    route: "/organization/mcp-servers",
+    name: "organization-mcp-servers",
+    heading: /mcp servers/i,
+  },
   // The deployment's own pages, reached from the account menu rather than
   // from a rail, and covered here all the same for the reason /account below
   // is: this matrix is about how a page renders, not about which control opens

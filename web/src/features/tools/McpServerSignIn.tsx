@@ -21,6 +21,7 @@ import {
   SettingsGroup,
 } from "@/design-system/layout/SettingsGroup"
 import type { OwnMcpAccount } from "@/features/tools/McpOwnAccount"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useMcpServerConnections,
@@ -44,35 +45,39 @@ const MEANING =
  * Exposed tools, which connects nobody.
  */
 export function McpServerSignIn({
-  workspaceId,
+  scope,
   server,
   canManage,
   own,
   onOpenUserRule,
 }: {
-  workspaceId: string
+  scope: McpServerScope
   server: WorkspaceMcpServer
   canManage: boolean
-  /** The viewer's own account on this server, shared with the page's heading. */
-  own: OwnMcpAccount
+  /**
+   * The viewer's own account on this server, shared with the page's heading.
+   * Absent on an organization's page, since an account is connected from a
+   * workspace that reaches the server; there only a manager's list is shown.
+   */
+  own?: OwnMcpAccount
   /** Opens a connected user's access rule for this server. */
   onOpenUserRule?: (userId: string) => void
 }) {
-  const { connection, isKnown, isStarting, hasExpired } = own
-
   if (canManage) {
     return (
       <ConnectedUsers
         // Its page starts over on another server.
         key={server.id}
-        workspaceId={workspaceId}
+        scope={scope}
         server={server}
-        own={connection}
+        own={own?.connection}
         onOpenUserRule={onOpenUserRule}
-        onDisconnect={own.openDisconnect}
+        onDisconnect={own?.openDisconnect}
       />
     )
   }
+  if (!own) return null
+  const { connection, isKnown, isStarting, hasExpired } = own
 
   return (
     <SettingsGroup
@@ -141,23 +146,24 @@ export function McpServerSignIn({
  * the manager's own row it is Disconnect, with its confirmation.
  */
 function ConnectedUsers({
-  workspaceId,
+  scope,
   server,
   own,
   onOpenUserRule,
   onDisconnect,
 }: {
-  workspaceId: string
+  scope: McpServerScope
   server: WorkspaceMcpServer
   /** The manager's own connection, when they have one. */
   own?: McpConnection
   onOpenUserRule?: (userId: string) => void
-  onDisconnect: () => void
+  /** Ends the manager's own connection; absent where it is removed like anyone else's. */
+  onDisconnect?: () => void
 }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
   const connections = useMcpServerConnections(
-    workspaceId,
+    scope,
     server.id,
     { page, pageSize },
     true,
@@ -222,7 +228,7 @@ function ConnectedUsers({
       id: "actions",
       header: "",
       cell: (row) =>
-        isOwn(row) ? (
+        isOwn(row) && onDisconnect ? (
           <RowActionRow>
             <RowAction
               icon={FiTrash2}
@@ -305,7 +311,7 @@ function ConnectedUsers({
           error={remove.error}
           onConfirm={() =>
             remove.mutate(
-              { workspaceId, serverId: server.id, userId: removing.user_id },
+              { scope, serverId: server.id, userId: removing.user_id },
               { onSuccess: () => setRemoving(undefined) },
             )
           }

@@ -389,7 +389,10 @@ class WorkspaceMcpServerPublic(BaseModel):
     """
 
     id: uuid.UUID
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID | None = Field(description="The workspace that owns the server; null for an organization's")
+    scope: Literal["workspace", "organization"] = Field(
+        description="Who owns the server: one workspace, or its organization"
+    )
     name: str
     url: str
     purpose_hint: str | None
@@ -463,14 +466,12 @@ class WorkspaceMcpServerPublic(BaseModel):
         those components masked. A manager sees the URL as stored, because the
         edit form restates it and would otherwise save the mask back.
         """
-        if server.workspace_id is None:
-            # This shape describes a workspace's own server; nothing lists an organization server yet.
-            raise ValueError(f"MCP server {server.id} belongs to no workspace")
         client = McpConnectionService.stored_oauth_client(server)
         own_client = client if client is not None and not client.dynamic else None
         return cls(
             id=server.id,
             workspace_id=server.workspace_id,
+            scope="workspace" if server.workspace_id is not None else "organization",
             name=server.name,
             url=redact_url_secrets(server.url) if redact_url else server.url,
             purpose_hint=server.purpose_hint,
@@ -788,6 +789,13 @@ class WorkspaceMcpConnectionEligibility:
     async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """The organization a workspace belongs to, or ``None`` for one that does not exist."""
         return await self._workspaces.get_organization_id(workspace_id)
+
+    async def may_manage_organization(self, organization_id: uuid.UUID, identity_id: uuid.UUID) -> bool:
+        """An active owner or admin of the organization, the membership locked as read."""
+        managers = await self._organization_members.active_with_roles(
+            organization_id, {identity_id}, MANAGEMENT_ROLES, lock=True
+        )
+        return identity_id in managers
 
     async def may_manage(self, workspace_id: uuid.UUID, identity_id: uuid.UUID) -> bool:
         """An owner or admin of the workspace, or of its organization, as the management routes require."""
@@ -1382,8 +1390,20 @@ class WorkspaceMcpServers:
         )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Scope:
+    """Whose servers a management call acts on: one workspace's own, or with no workspace its organization's."""
+
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None
+
+
 class WorkspaceMcpServerService:
-    """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
+    """CRUD for a workspace's MCP servers and its organization's. Writes are management-gated; the list is not.
+
+    A management method that takes ``workspace_id`` acts on that workspace's own servers, and with ``None``
+    on the caller's organization's own, which only the organization's owners and admins manage.
+    """
 
     def __init__(
         self,
@@ -1429,6 +1449,55 @@ class WorkspaceMcpServerService:
             self.db, user=user, workspace=workspace, organizations=self.organizations
         )
         return workspace.id
+
+    async def _managed(self, user: User, workspace_id: uuid.UUID | None) -> _Scope:
+        """Confirm the caller may manage a workspace's own servers, or with ``None`` their organization's.
+
+        A workspace's owners and admins, and its organization's, manage its servers. Only the
+        organization's owners and admins manage the organization's own.
+        """
+        if workspace_id is not None:
+            resolved = await self._require_management(user, workspace_id)
+            organization_id = await WorkspaceRepository(self.db).get_organization_id(resolved)
+            if organization_id is None:
+                raise WorkspaceNotFoundError(workspace_id)
+            return _Scope(organization_id, resolved)
+        organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+        return _Scope(organization.id, None)
+
+    async def _server_in(self, scope: _Scope, server_id: uuid.UUID) -> WorkspaceMcpServer:
+        """One of the servers ``scope`` covers, or a 404, as for a server of another workspace or organization."""
+        server = await self.db.get(WorkspaceMcpServer, server_id)
+        if (
+            server is None
+            or server.organization_id != scope.organization_id
+            or server.workspace_id != scope.workspace_id
+        ):
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        return server
+
+    async def _reached(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, *, all_states: bool = False
+    ) -> McpServerInWorkspace:
+        """A server the workspace reaches, its own or its organization's, as the workspace sees it.
+
+        An organization's server turned off for the workspace is a 404 unless ``all_states``, for the workspace's
+        admins, who may turn it back on.
+        """
+        server = await self.db.get(WorkspaceMcpServer, server_id)
+        if server is not None and server.workspace_id == workspace_id:
+            return McpServerInWorkspace(server)
+        if server is not None and server.workspace_id is None:
+            organization_id = await WorkspaceRepository(self.db).get_organization_id(workspace_id)
+            if organization_id == server.organization_id:
+                override = await WorkspaceMcpServerOverrideRepository(self.db).find(
+                    workspace_id=workspace_id, server_id=server.id
+                )
+                view = McpServerInWorkspace(server, override)
+                if all_states or view.visible:
+                    return view
+        raise WorkspaceMcpServerNotFoundError(server_id)
 
     async def _get_or_404(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServer:
         server = await self.db.get(WorkspaceMcpServer, server_id)
@@ -1619,6 +1688,47 @@ class WorkspaceMcpServerService:
             sign_in_unavailable=None if self.config is None else McpConnectionService.sign_in_unavailable(self.config),
         )
 
+    async def list_organization_servers(
+        self, *, user: User, skip: int = 0, limit: int = 100
+    ) -> WorkspaceMcpServersPublic:
+        """A page of the caller's organization's own servers, oldest first, plus the total. Owners and admins only."""
+        scope = await self._managed(user, None)
+        limit = min(limit, _MAX_LIST_LIMIT)
+        owned = (WorkspaceMcpServer.organization_id == scope.organization_id) & WorkspaceMcpServer.workspace_id.is_(
+            None
+        )
+        count = (await self.db.execute(select(func.count()).select_from(WorkspaceMcpServer).where(owned))).scalar_one()
+        servers = (
+            (
+                await self.db.execute(
+                    select(WorkspaceMcpServer)
+                    .where(owned)
+                    .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+                    .offset(skip)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accounts = await self._shared_accounts(servers)
+        connected = await self._connected_users(servers)
+        return WorkspaceMcpServersPublic(
+            data=[
+                WorkspaceMcpServerPublic.from_model(
+                    server, shared_account=accounts.get(server.id), connected_users=connected.get(server.id)
+                )
+                for server in servers
+            ],
+            count=count,
+            sign_in_unavailable=None if self.config is None else McpConnectionService.sign_in_unavailable(self.config),
+        )
+
+    async def get_organization_server(self, *, user: User, server_id: uuid.UUID) -> WorkspaceMcpServerPublic:
+        """One of the caller's organization's own servers. Owners and admins only."""
+        scope = await self._managed(user, None)
+        return await self._public(await self._server_in(scope, server_id))
+
     async def _shared_accounts(self, servers: Sequence[WorkspaceMcpServer]) -> dict[uuid.UUID, McpSharedAccountPublic]:
         """The shared account of each of these servers that has one, naming who signed in to it."""
         shared = [server.id for server in servers if server.credential_mode == McpCredentialMode.SHARED]
@@ -1668,56 +1778,64 @@ class WorkspaceMcpServerService:
         self,
         *,
         user: User,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         request: WorkspaceMcpServerCreate,
         growth: GrowthSignalPort | None = None,
         background_tasks: BackgroundTasks | None = None,
     ) -> WorkspaceMcpServerPublic:
         """Register a server, encrypting its token before it is stored.
 
-        With ``growth``, the server is reported as ``MCP_SERVER_CREATED`` once it commits.
+        With ``growth``, the server is reported as ``MCP_SERVER_CREATED`` once it commits. With no
+        ``workspace_id`` the server is the caller's organization's, which every one of its workspaces reaches.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
+        scope = await self._managed(user, workspace_id)
         per_user = request.credential_mode == McpCredentialMode.PER_USER
         if per_user:
             self._require_per_user_support()
         # A per-user server is held to https as one with a token is: a user's token travels to it.
         await _validate_url(request.url, has_token=per_user or bool(request.authorization_token))
 
-        # The workspace lock stops a concurrent create from invalidating the count below before this insert.
-        # The organization's is taken first, in the order a workspace's deletion takes the two: the insert
-        # checks the server's organization key, which waits on a deletion holding the organization.
+        # The workspace lock, or for an organization's server the settings lock the name check takes,
+        # stops a concurrent create from invalidating the count below before this insert. The organization's
+        # is taken first, in the order a workspace's deletion takes the two: the insert checks the server's
+        # organization key, which waits on a deletion holding the organization.
         workspaces = WorkspaceRepository(self.db)
-        organization_id = await workspaces.get_organization_id(resolved_workspace_id)
-        if organization_id is None:
-            raise WorkspaceNotFoundError(workspace_id)
+        organization_id = scope.organization_id
         await OrganizationRepository(self.db).lock_settings(organization_id)
-        await workspaces.lock(resolved_workspace_id)
-        # Read as stored: a deletion of the workspace commits before this lock is granted, and `get` would
-        # answer from this session's copy of the row instead of asking the database.
-        workspace = await workspaces.get_as_stored(resolved_workspace_id)
-        if workspace is None:
-            raise WorkspaceNotFoundError(workspace_id)
-        # Asked again under the locks: a removal from the organization that held them has committed by now.
-        if not await authorization.has_workspace_management_access(
-            self.db, user=user, workspace=workspace, organizations=self.organizations
-        ):
-            raise NotAuthorizedError
-        await self._refuse_organization_name(organization_id, request.name, except_id=None)
-
-        count = (
-            await self.db.execute(
-                select(func.count())
-                .select_from(WorkspaceMcpServer)
-                .where(WorkspaceMcpServer.workspace_id == resolved_workspace_id)
+        if scope.workspace_id is not None:
+            await workspaces.lock(scope.workspace_id)
+            # Read as stored: a deletion of the workspace commits before this lock is granted, and `get` would
+            # answer from this session's copy of the row instead of asking the database.
+            workspace = await workspaces.get_as_stored(scope.workspace_id)
+            if workspace is None:
+                raise WorkspaceNotFoundError(workspace_id)
+            still_manages = await authorization.has_workspace_management_access(
+                self.db, user=user, workspace=workspace, organizations=self.organizations
             )
-        ).scalar_one()
+        else:
+            # Read from the row: the membership `_managed` loaded is this session's copy, and would still hold
+            # a role a demotion committed while the lock was awaited.
+            role = await self.organizations.members.active_role(organization_id, user.id)
+            still_manages = role in MANAGEMENT_ROLES
+        # Asked again under the locks: a removal from the organization that held them has committed by now.
+        if not still_manages:
+            raise NotAuthorizedError
+        await self._refuse_taken_name(scope, request.name, except_id=None)
+
+        owner = (
+            WorkspaceMcpServer.workspace_id == scope.workspace_id
+            if scope.workspace_id is not None
+            else (WorkspaceMcpServer.organization_id == organization_id) & WorkspaceMcpServer.workspace_id.is_(None)
+        )
+        count = (await self.db.execute(select(func.count()).select_from(WorkspaceMcpServer).where(owner))).scalar_one()
         if count >= MAX_MCP_SERVERS_PER_WORKSPACE:
-            raise WorkspaceMcpServerLimitReachedError(workspace_id, MAX_MCP_SERVERS_PER_WORKSPACE)
+            raise WorkspaceMcpServerLimitReachedError(
+                scope.workspace_id or organization_id, MAX_MCP_SERVERS_PER_WORKSPACE
+            )
 
         server = WorkspaceMcpServer(
             organization_id=organization_id,
-            workspace_id=resolved_workspace_id,
+            workspace_id=scope.workspace_id,
             name=request.name,
             url=request.url,
             encrypted_token=_encrypted(request.authorization_token) if request.authorization_token else None,
@@ -1740,12 +1858,14 @@ class WorkspaceMcpServerService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
+            if scope.workspace_id is None:
+                raise McpServerNameTakenError(request.name) from None
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
-        if self.requests is not None:
-            workspace = await workspaces.get(resolved_workspace_id)
+        if self.requests is not None and scope.workspace_id is not None:
+            workspace = await workspaces.get(scope.workspace_id)
             await self.requests.server_added(
-                workspace_id=resolved_workspace_id,
+                workspace_id=scope.workspace_id,
                 workspace_name=workspace.name if workspace is not None else "your workspace",
                 server_id=server.id,
                 url=server.url,
@@ -1770,13 +1890,13 @@ class WorkspaceMcpServerService:
         self,
         *,
         user: User,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         server_id: uuid.UUID,
         request: WorkspaceMcpServerUpdate,
     ) -> WorkspaceMcpServerPublic:
         """Apply a partial update. See :class:`WorkspaceMcpServerUpdate` for the token's three states."""
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         # Locked and read again: an edit that moved the URL meanwhile must be what this one decides
         # against, or a secret saved here would land on a client the move had dropped.
         fields = request.model_dump(exclude_unset=True)
@@ -1786,7 +1906,7 @@ class WorkspaceMcpServerService:
             await OrganizationRepository(self.db).lock_settings(server.organization_id)
         await self.db.refresh(server, with_for_update=True)
         if "name" in fields and fields["name"] != server.name:
-            await self._refuse_organization_name(server.organization_id, fields["name"], except_id=server.id)
+            await self._refuse_taken_name(scope, fields["name"], except_id=server.id)
 
         new_token = fields.pop("authorization_token", _UNSET)
         new_client_id = fields.pop("oauth_client_id", _UNSET)
@@ -1878,6 +1998,8 @@ class WorkspaceMcpServerService:
             await self.db.flush()
         except IntegrityError:
             await self.db.rollback()
+            if scope.workspace_id is None:
+                raise McpServerNameTakenError(attempted_name) from None
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, attempted_name) from None
 
         # The users' tokens were issued for the server and the client as they were. After the flush,
@@ -1894,21 +2016,21 @@ class WorkspaceMcpServerService:
             await self.db.refresh(server)
         return await self._public(server)
 
-    async def _refuse_organization_name(
-        self, organization_id: uuid.UUID, name: str, *, except_id: uuid.UUID | None
-    ) -> None:
-        """Refuse a workspace server ``name`` an organization server already has, which its workspaces all reach.
+    async def _refuse_taken_name(self, scope: _Scope, name: str, *, except_id: uuid.UUID | None) -> None:
+        """Refuse a server ``name`` that would put two servers of one name in a workspace of the organization.
 
-        The tool loop labels tools by server name, so one workspace must never reach two of one name. The
-        organization's settings lock is held until the caller commits, as a write of an organization server
-        takes it too, so of two such writes the second sees the first.
+        The tool loop labels tools by server name, so one workspace must never reach two of one name: a
+        workspace's server may not take an organization server's name, and an organization's server may not
+        take any server's name in the organization. The organization's settings lock is held until the
+        caller commits, so of two such writes the second sees the first.
 
         Raises:
-            McpServerNameTakenError: an organization server of the organization has the name.
+            McpServerNameTakenError: the name is taken where it would collide.
         """
-        await OrganizationRepository(self.db).lock_settings(organization_id)
+        await OrganizationRepository(self.db).lock_settings(scope.organization_id)
         servers = WorkspaceMcpServerRepository(self.db)
-        if await servers.name_in_use(organization_id, name, of_workspace=True, except_id=except_id):
+        of_workspace = scope.workspace_id is not None
+        if await servers.name_in_use(scope.organization_id, name, of_workspace=of_workspace, except_id=except_id):
             raise McpServerNameTakenError(name)
 
     def _key_service(self) -> ApiKeyService:
@@ -2182,7 +2304,7 @@ class WorkspaceMcpServerService:
         return result
 
     async def check_connection(
-        self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceMcpServerCheckRequest
+        self, *, user: User, workspace_id: uuid.UUID | None, request: WorkspaceMcpServerCheckRequest
     ) -> WorkspaceMcpServerHealth:
         """Check connection details without storing anything, for a form to test before it saves.
 
@@ -2193,12 +2315,12 @@ class WorkspaceMcpServerService:
             WorkspaceMcpServerCheckOriginError: the check borrows a stored server's credential for a
                 URL on another origin than that server's.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
+        scope = await self._managed(user, workspace_id)
         token: str | None = None
         if request.authorization_token is not None:
             token = request.authorization_token or None
         elif request.server_id is not None:
-            server = await self._get_or_404(resolved_workspace_id, request.server_id)
+            server = await self._server_in(scope, request.server_id)
             if server.credential_mode == McpCredentialMode.PER_USER:
                 raise McpConnectionSetupError(
                     "A per-user server holds no token to test with: connect your account, then check the server"
@@ -2223,7 +2345,7 @@ class WorkspaceMcpServerService:
         return WorkspaceMcpServerHealth.from_check(request.allowed_tools, check)
 
     async def check_server(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID
     ) -> WorkspaceMcpServerPublic:
         """Check a server's connection now and store the outcome as its health.
 
@@ -2234,20 +2356,20 @@ class WorkspaceMcpServerService:
             McpCheckSignInRequiredError: the server is per-user, which is checked through
                 :meth:`start_check_sign_in` instead.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         if not await self._record_check(server, required=True):
             raise WorkspaceMcpServerCheckBusyError
         return await self._public(server)
 
-    async def delete_server(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
+    async def delete_server(self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID) -> None:
         """Delete a server, the token stored with it, and every user's connection to it.
 
         The connections' tokens are deleted here, and their authorization server is asked to end
         them once the deletion has committed, best effort and without waiting.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         # The server before its connections, in the order a sign-in's completion takes them.
         await self.db.refresh(server, with_for_update=True)
         revocations, unread = await self._revocations(server)
@@ -2363,7 +2485,7 @@ class WorkspaceMcpServerService:
         return McpConnectionStarted(authorization_url=url)
 
     async def start_check_sign_in(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, return_to: str | None
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID, return_to: str | None
     ) -> McpConnectionStarted:
         """Start a manager's sign-in made only to check a per-user server.
 
@@ -2371,8 +2493,8 @@ class WorkspaceMcpServerService:
         tools once with the token it returns, stores the outcome as the server's health, and drops
         the token: no connection is stored, and the manager's own connection, if any, is untouched.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         user_id = str(user.id)
         if user_id not in await provision_attribution_users(self.db, [user_id]):
             raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot sign in")
@@ -2382,20 +2504,20 @@ class WorkspaceMcpServerService:
             return_to=return_to,
             identity_id=user.id,
             for_check=True,
-            workspace_id=resolved_workspace_id,
+            workspace_id=scope.workspace_id,
         )
         return McpConnectionStarted(authorization_url=url)
 
     async def start_shared_sign_in(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, return_to: str | None
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID, return_to: str | None
     ) -> McpConnectionStarted:
         """Start a manager's sign-in for everyone, to a shared server.
 
         Finishing it stores the account the manager signed in to as the server's one credential,
         in place of a token: every caller's call then carries it.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         self._require_per_user_support()
         # A token travels to the server from here on, so it is held to https as one with a token is.
         await _validate_url(server.url, has_token=True)
@@ -2408,20 +2530,20 @@ class WorkspaceMcpServerService:
             return_to=return_to,
             identity_id=user.id,
             for_shared=True,
-            workspace_id=resolved_workspace_id,
+            workspace_id=scope.workspace_id,
         )
         return McpConnectionStarted(authorization_url=url)
 
     async def disconnect_shared(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID
     ) -> WorkspaceMcpServerPublic:
         """End a shared server's account, and check the server again without it. Workspace managers only.
 
         Raises:
             McpConnectionNotFoundError: the server has no shared account.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         await self._connection_service().disconnect_shared(server_id=server.id)
         await self.db.refresh(server)
         await self._record_check(server)
@@ -2474,8 +2596,8 @@ class WorkspaceMcpServerService:
         if done.check_token is not None:
             try:
                 # Asked again: the caller may have lost the right to manage the workspace while signing in.
-                resolved_workspace_id = await self._require_management(user, done.workspace_id)
-                server = await self._get_or_404(resolved_workspace_id, done.server_id)
+                scope = await self._managed(user, done.workspace_id)
+                server = await self._server_in(scope, done.server_id)
                 if server.url != done.server_url:
                     # The URL was edited after the sign-in was approved: its token goes nowhere else.
                     logger.info("MCP check sign-in dropped server_id=%s reason=url_changed", done.server_id)
@@ -2492,6 +2614,7 @@ class WorkspaceMcpServerService:
             server_id=done.server_id,
             workspace_id=done.workspace_id,
             server_name=done.server_name,
+            server_scope=done.server_scope,
             return_to=done.return_to,
             checked=done.check_token is not None,
             shared=done.shared,
@@ -2588,17 +2711,17 @@ class WorkspaceMcpServerService:
         )
 
     async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """End the caller's own connection to a server.
+        """End the caller's own connection to a server the workspace reaches, its own or its organization's.
 
         Raises:
             McpConnectionNotFoundError: the caller has no connection to it.
         """
         resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        server = (await self._reached(resolved_workspace_id, server_id, all_states=True)).row
         await self._connection_service().disconnect(server_id=server.id, user_id=str(user.id))
 
     async def server_connections(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, skip: int = 0, limit: int = 100
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID, skip: int = 0, limit: int = 100
     ) -> McpServerConnectionsPublic:
         """A page of who is connected to a server, plus the total. Workspace managers only.
 
@@ -2606,8 +2729,8 @@ class WorkspaceMcpServerService:
         shows is the one this returns. A connection's user is named by the dashboard account it
         belongs to, when it is one's.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         connections = McpUserConnectionRepository(self.db)
         count = await connections.count_for_server(server.id)
         rows = await connections.for_server(
@@ -2641,15 +2764,15 @@ class WorkspaceMcpServerService:
         return McpServerConnectionsPublic(data=data, count=count)
 
     async def remove_connection(
-        self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, user_id: str
+        self, *, user: User, workspace_id: uuid.UUID | None, server_id: uuid.UUID, user_id: str
     ) -> None:
         """End one user's connection to a server. Workspace managers only.
 
         Raises:
             McpConnectionNotFoundError: that user has no connection to it.
         """
-        resolved_workspace_id = await self._require_management(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        scope = await self._managed(user, workspace_id)
+        server = await self._server_in(scope, server_id)
         await self._connection_service().disconnect(server_id=server.id, user_id=user_id)
 
 

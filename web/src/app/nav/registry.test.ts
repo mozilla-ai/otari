@@ -104,6 +104,7 @@ describe("nav registry", () => {
       "Single sign-on",
       "Spend & budgets",
       "Providers",
+      "MCP servers",
       "Guardrails",
       "Org settings",
       "Settings",
@@ -255,6 +256,7 @@ describe("nav registry", () => {
     )
     expect(general?.items.map((item) => item.to)).toEqual([
       path,
+      "/organization/mcp-servers",
       "/organization",
     ])
     expect(navContextForPath(path)).toBe("organization")
@@ -489,11 +491,13 @@ describe("nav registry", () => {
     expect(general?.label).toBe("General")
     expect(general?.items.map((item) => item.to)).toEqual([
       "/organization/provider-keys",
+      "/organization/mcp-servers",
       "/organization/guardrails",
       "/organization",
     ])
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
+      "MCP servers",
       "Guardrails",
       "Org settings",
     ])
@@ -998,6 +1002,7 @@ const ORGANIZATION = [
   "/budgets",
   "/organization/provider-keys",
   "/organization/web-search-keys",
+  "/organization/mcp-servers",
   "/organization/guardrails",
   "/organization",
 ]

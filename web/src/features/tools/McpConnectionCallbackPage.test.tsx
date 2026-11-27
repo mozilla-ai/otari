@@ -43,6 +43,10 @@ function renderCallback(search: McpConnectionCallbackSearch) {
         routes: [
           { path: "/tools/mcp-servers/$serverId", element: <p>Server page</p> },
           { path: "/tools/mcp-servers", element: <p>Server list</p> },
+          {
+            path: "/organization/mcp-servers/$serverId",
+            element: <p>Organization server page</p>,
+          },
           { path: "/playground", element: <p>Playground</p> },
         ],
       }),
@@ -181,6 +185,55 @@ describe("McpConnectionCallbackPage", () => {
     expect(await screen.findByText("Server page")).toBeVisible()
   })
 
+  it("lands an organization owner's sign-in on the organization's server page when it named nowhere", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: null,
+        server_name: "drive",
+        return_to: null,
+        checked: true,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    expect(await screen.findByText("Organization server page")).toBeVisible()
+    expect(screen.queryByText("Server page")).toBeNull()
+  })
+
+  it("lands a member's own sign-in to an organization's server on the workspace's list when it named nowhere", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: "w",
+        server_name: "drive",
+        server_scope: "organization",
+        return_to: null,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    // The workspace has no page for the server, and the organization's is for its owners and admins.
+    expect(await screen.findByText("Server list")).toBeVisible()
+    expect(screen.queryByText("Server page")).toBeNull()
+    expect(screen.queryByText("Organization server page")).toBeNull()
+  })
+
+  it("lands an organization owner's sign-in on the page that started it", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: null,
+        server_name: "drive",
+        return_to: "/playground",
+        shared: true,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    expect(await screen.findByText("Playground")).toBeVisible()
+  })
+
   it("shows a refusal and offers the way back, without retrying", async () => {
     const calls = mockComplete(() =>
       Response.json(
@@ -217,6 +270,68 @@ describe("McpConnectionCallbackPage", () => {
 
     expect(await screen.findByText("Server page")).toBeVisible()
     expect(window.sessionStorage.getItem("otari.mcp-sign-in.origin")).toBeNull()
+  })
+
+  it("goes back to the page the gateway names for a cancel, with nothing noted", async () => {
+    mockComplete(() => Response.json({}))
+    renderCallback({
+      error: "access_denied",
+      state: "s",
+      return_to: `/organization/mcp-servers/${SERVER_ID}`,
+    })
+
+    expect(await screen.findByText("Organization server page")).toBeVisible()
+  })
+
+  it.each([
+    "/mcp-connections/callback",
+    "/MCP-Connections/callback/?error=access_denied",
+    "/tools/../mcp-connections/callback#top",
+  ])(
+    "never goes back to this page for a cancel naming %s, using the noted origin instead",
+    async (returnTo) => {
+      window.sessionStorage.setItem(
+        "otari.mcp-sign-in.origin",
+        `/tools/mcp-servers/${SERVER_ID}`,
+      )
+      mockComplete(() => Response.json({}))
+      renderCallback({
+        error: "access_denied",
+        state: "s",
+        return_to: returnTo,
+      })
+
+      expect(await screen.findByText("Server page")).toBeVisible()
+    },
+  )
+
+  it.each(["/\\", "/\\evil.example/tools"])(
+    "falls back to the noted origin for a cancel naming %s, which a URL reads as another host",
+    async (returnTo) => {
+      window.sessionStorage.setItem(
+        "otari.mcp-sign-in.origin",
+        `/tools/mcp-servers/${SERVER_ID}`,
+      )
+      mockComplete(() => Response.json({}))
+      renderCallback({
+        error: "access_denied",
+        state: "s",
+        return_to: returnTo,
+      })
+
+      expect(await screen.findByText("Server page")).toBeVisible()
+    },
+  )
+
+  it("goes to the list for a cancel naming this page with no origin noted", async () => {
+    mockComplete(() => Response.json({}))
+    renderCallback({
+      error: "access_denied",
+      state: "s",
+      return_to: "/mcp-connections/callback",
+    })
+
+    expect(await screen.findByText("Server list")).toBeVisible()
   })
 
   it("ignores a noted origin that would leave the dashboard", async () => {

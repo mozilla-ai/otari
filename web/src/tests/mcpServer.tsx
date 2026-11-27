@@ -37,6 +37,7 @@ export interface McpCall {
 
 export function mockMcpServerApi({
   server = workspaceMcpServer(),
+  row = server,
   access = { everyone_tools: ["*"], grants: [] },
   written,
   check,
@@ -52,6 +53,12 @@ export function mockMcpServerApi({
   myTools,
 }: {
   server?: WorkspaceMcpServer
+  /**
+   * What a read of the server answers with; `server` when left out. Apart from
+   * it so a test can answer with a row that names no workspace, while the
+   * server is still found only in `server`'s.
+   */
+  row?: WorkspaceMcpServer
   access?: WorkspaceMcpServerAccess
   /** What a grant write answers with. */
   written?: WorkspaceMcpServerAccess
@@ -130,7 +137,7 @@ export function mockMcpServerApi({
         )
       }
       if (method === "DELETE") return new Response(null, { status: 204 })
-      return Response.json(method === "PATCH" ? { ...server, ...body } : server)
+      return Response.json(method === "PATCH" ? { ...row, ...body } : row)
     }
     if (url.includes("/members")) {
       if (url.includes("/organizations/me/members")) {

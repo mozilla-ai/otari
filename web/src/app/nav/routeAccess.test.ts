@@ -145,6 +145,7 @@ const TABLE: readonly [string, readonly Access[]][] = [
   ["/organization/sso", [o, o, x, x, x, x]],
   ["/organization/provider-keys", [o, o, x, x, x, x]],
   ["/organization/web-search-keys", [o, o, x, x, x, x]],
+  ["/organization/mcp-servers", [o, o, x, x, x, x]],
   ["/organization/guardrails", [o, o, x, x, x, x]],
   ["/organization/pricing", [o, o, x, x, x, x]],
   ["/budgets", [o, o, x, x, x, x]],

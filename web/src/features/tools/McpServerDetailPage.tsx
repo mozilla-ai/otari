@@ -8,12 +8,11 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Select } from "@/design-system/forms/Select"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
 import { McpExposedTools } from "@/features/tools/McpExposedTools"
-import { McpInfoHint } from "@/features/tools/McpInfoHint"
 import { McpMemberTools } from "@/features/tools/McpMemberTools"
 import { McpModeLabel } from "@/features/tools/McpModeLabel"
 import { McpNotice } from "@/features/tools/McpNotice"
@@ -38,17 +37,15 @@ import { McpServerSignIn } from "@/features/tools/McpServerSignIn"
 import { McpSharedAccount } from "@/features/tools/McpSharedAccount"
 import {
   AVAILABILITY,
-  AVAILABILITY_OPTIONS,
-  AVAILABILITY_ORDER,
   availabilityFields,
   availabilityOf,
-  type McpAvailability,
 } from "@/features/tools/mcpAvailability"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useDeleteWorkspaceMcpServer,
-  useUpdateWorkspaceMcpServer,
+  useUpdateMcpServer,
   useWorkspaceMcpServer,
   useWorkspaceMcpServerLogos,
 } from "@/shared/api/tools"
@@ -95,7 +92,7 @@ export function McpServerDetailPage({
     : selected
   const canManage = canManageWorkspace(context.data, membership?.role)
   const query = useWorkspaceMcpServer(workspaceId, serverId)
-  const update = useUpdateWorkspaceMcpServer()
+  const update = useUpdateMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const [isDeleting, setDeleting] = useState(false)
   const [userRuleRequest, setUserRuleRequest] = useState<UserRuleRequest>()
@@ -136,7 +133,9 @@ export function McpServerDetailPage({
   )
 
   const server = query.data
-  if (!server) {
+  // The server is read only once there is a workspace to read it from, so the
+  // id is in hand whenever the server is; the narrowing says so to the types.
+  if (!server || workspaceId === null) {
     if (workspaceLoading || (query.isPending && workspaceId !== null)) {
       return <PageLoading label="Loading MCP server…" />
     }
@@ -154,7 +153,11 @@ export function McpServerDetailPage({
     )
   }
 
-  const ids = { workspaceId: server.workspace_id, serverId: server.id }
+  // This page shows a workspace's own servers, so the workspace is the one it
+  // read the server from, not the row's `workspace_id`, which an
+  // organization's server leaves empty.
+  const scope = workspaceMcpScope(workspaceId)
+  const ids = { workspaceId, serverId: server.id }
   const openDelete = () => {
     remove.reset()
     setDeleting(true)
@@ -172,7 +175,7 @@ export function McpServerDetailPage({
         leading={
           canManage ? (
             <McpServerLogoButton
-              workspaceId={server.workspace_id}
+              workspaceId={workspaceId}
               serverId={server.id}
               name={server.name}
               logo={logo}
@@ -198,32 +201,16 @@ export function McpServerDetailPage({
               // the button does not, and both are one field tall. `mb-1` is
               // the gap the select keeps under its trigger for a message.
               <div className="flex flex-wrap items-end gap-3">
-                <Select
-                  label="Availability"
+                <McpAvailabilitySelect
                   value={availability}
                   onChange={(next) =>
                     update.mutate({
-                      ...ids,
-                      body: availabilityFields(next as McpAvailability),
+                      scope,
+                      serverId: server.id,
+                      body: availabilityFields(next),
                     })
                   }
-                  options={AVAILABILITY_OPTIONS}
-                  labelAction={
-                    <McpInfoHint label="Explain the three choices">
-                      {AVAILABILITY_ORDER.map((value) => (
-                        <span key={value}>
-                          <span className="font-medium">
-                            {AVAILABILITY[value].label}:
-                          </span>{" "}
-                          {AVAILABILITY[value].help}
-                        </span>
-                      ))}
-                    </McpInfoHint>
-                  }
                   isDisabled={update.isPending}
-                  // No message line under it, so its edge is the row's edge.
-                  shouldReserveMessage={false}
-                  className="w-44"
                 />
                 <Button
                   onPress={() => openSettings()}
@@ -298,7 +285,7 @@ export function McpServerDetailPage({
       <div className="flex flex-col gap-8">
         {isPersonal ? (
           <McpServerSignIn
-            workspaceId={server.workspace_id}
+            scope={scope}
             server={server}
             canManage={canManage}
             own={own}
@@ -311,32 +298,32 @@ export function McpServerDetailPage({
           />
         ) : (
           <McpSharedAccount
-            workspaceId={server.workspace_id}
+            scope={scope}
             server={server}
             canManage={canManage}
             onOpenSettings={openSettings}
           />
         )}
         {canManage ? null : (
-          <McpMemberTools workspaceId={server.workspace_id} server={server} />
+          <McpMemberTools workspaceId={workspaceId} server={server} />
         )}
         {canManage ? (
           <>
             <McpExposedTools
               key={JSON.stringify(server.allowed_tools)}
-              workspaceId={server.workspace_id}
+              scope={scope}
               server={server}
               canManage={canManage}
               onAddClient={addClient}
             />
             <McpReadTools
               key={`${server.read_tools_from_server}:${server.read_tools.join()}`}
-              workspaceId={server.workspace_id}
+              workspaceId={workspaceId}
               server={server}
               canManage={canManage}
             />
             <McpServerAcl
-              workspaceId={server.workspace_id}
+              workspaceId={workspaceId}
               server={server}
               canManage={canManage}
               userRuleRequest={userRuleRequest}
@@ -356,7 +343,7 @@ export function McpServerDetailPage({
           onOpenChange={(isOpen) => {
             if (!isOpen) closeSettings()
           }}
-          workspaceId={server.workspace_id}
+          scope={scope}
           server={server}
           focus={settings.focus}
           onSaved={(saved) => {

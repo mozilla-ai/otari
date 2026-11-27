@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
+import type { McpConnectionCompleted } from "@/client"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -32,6 +33,22 @@ export interface McpConnectionCallbackSearch {
 }
 
 const LIST = "/tools/mcp-servers"
+
+/**
+ * Where a sign-in that named no page to go back to lands. No workspace is an
+ * organization owner's sign-in to an organization's server, whose page is
+ * under Organization. A member's own sign-in to one names the workspace it
+ * started from, which has no page for the server, so it lands on that
+ * workspace's list.
+ */
+function serverPage(done: McpConnectionCompleted): string {
+  if (done.workspace_id === null) {
+    return `/organization/mcp-servers/${done.server_id}`
+  }
+  return done.server_scope === "organization"
+    ? LIST
+    : `${LIST}/${done.server_id}`
+}
 
 // What the gateway's callback names when it lands here without a code to spend.
 // A Map: the code comes from the URL, and an object would answer `constructor` with a function.
@@ -140,7 +157,7 @@ export function McpConnectionCallbackPage({
     if (isCancelled) {
       forgetSignInOrigin()
       rememberMcpConnectionNotice({ tone: "info", message: CANCELLED_NOTICE })
-      void navigate({ to: origin ?? LIST, replace: true })
+      void navigate({ to: returnTo ?? origin ?? LIST, replace: true })
       return
     }
     if (error) {
@@ -155,10 +172,7 @@ export function McpConnectionCallbackPage({
         onSuccess: (done) => {
           forgetSignInOrigin()
           void navigate({
-            to:
-              pickDashboardPath(done.return_to) ??
-              origin ??
-              `${LIST}/${done.server_id}`,
+            to: pickDashboardPath(done.return_to) ?? origin ?? serverPage(done),
             replace: true,
           })
         },
