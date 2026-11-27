@@ -55,10 +55,13 @@ deployment.
 - **Activity, Traces and Routing** show an operator their active organization
   only. What Activity shows each role is in
   [Activity](review-usage-and-requests.md#activity).
+- **Guardrails** opens to everyone. Owners and admins see every budget with
+  what it has spent, the content moderation that runs in the selected
+  workspace, and an **Assignments** view of who is under which. Anyone else
+  sees the budgets on their workspaces and their own keys' model lists.
 - **Pages someone may not use** are left out of their menus, and opening one
   by its address goes to Activity: the organization's pages for anyone but an
-  owner or admin, the deployment's pages for anyone but its operator, the
-  workspace's guardrails for anyone but an organization owner or admin, and the
+  owner or admin, the deployment's pages for anyone but its operator, and the
   Playground for a viewer. A workspace's own page under **Workspaces** also
   opens to that workspace's owner or admin.
 
