@@ -416,23 +416,16 @@ describe("HealthChecksPage", () => {
       expect(requests.some((r) => r.method === "PATCH")).toBe(false)
     })
 
-    it.each(["none", "sends_only"] as const)(
-      "says alerts go nowhere while email reaches no recipient (mail: %s)",
-      async (mail) => {
-        // A transport that delivers to nobody tells the on-call nothing, so the
-        // warning belongs on both states rather than on an absent transport.
-        mockApi(
-          status({ settings: settings({ alert_emails: ["ops@example.com"] }) }),
-        )
-        await renderPage({ mail })
+    it("says alerts go nowhere while this deployment cannot email them", async () => {
+      mockApi(
+        status({ settings: settings({ alert_emails: ["ops@example.com"] }) }),
+      )
+      await renderPage({ mail: "none" })
 
-        expect(
-          await screen.findByText(/Alerts from this deployment aren't working/),
-        ).toBeInTheDocument()
-        expect(
-          screen.getByRole("link", { name: "Settings" }),
-        ).toBeInTheDocument()
-      },
-    )
+      expect(
+        await screen.findByText(/Alerts from this deployment aren't working/),
+      ).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument()
+    })
   })
 })

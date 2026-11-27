@@ -14,15 +14,14 @@ different one sets it explicitly. Both are plain attributes read through
 after the app has booted is enough.
 """
 
-import logging
 import re
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
@@ -499,8 +498,8 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     passkeys_configured: None,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """A registration challenge names its identity, and that is checked on the way back.
 
@@ -508,7 +507,7 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
     could complete it against their own session and attach an authenticator to
     somebody else's identity.
     """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
 
     # A second identity, signed in with its own password.
     added = client.post(
@@ -517,19 +516,10 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
         headers=master_key_header,
     )
     assert added.status_code == 201, added.text
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
     assert signed_up.status_code == 200, signed_up.text
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    assert (
-        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
-        == 200
-    )
+    token = token_in(recorded_mail.last)
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
 
     # The operator's challenge, taken while they were the caller.
     operators = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)

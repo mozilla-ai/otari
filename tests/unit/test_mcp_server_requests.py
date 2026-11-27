@@ -129,7 +129,7 @@ class _Catalog:
 
 
 class _Mail:
-    can_send_links = True
+    can_deliver_links = True
     asset_root = None
 
     def __init__(self) -> None:

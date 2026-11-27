@@ -14738,10 +14738,9 @@
         "type": "object"
       },
       "MailReadiness": {
-        "description": "How far an email carrying a link back to this deployment gets.\n\nThe members are exclusive and cover every deployment.\n``none`` means no message is sent at all.\n``sends_only`` means a message is sent and no link the recipient can open reaches them.\n``delivers`` means the recipient's mailbox receives it.",
+        "description": "Whether this deployment is configured to put a link into somebody's inbox.\n\nThe members are exclusive and cover every deployment.\n``none`` means no message is sent at all.\n``delivers`` means a message is sent to the address it names, which is what the\nconfiguration permits rather than what a mail server went on to do with it.\nWhether a send succeeds is :meth:`Mailer.send`'s answer, once.\n\nNOTE: An operator confirms a real end-to-end delivery through the mail test\nsurface. This value never stands for a send that has been tried.",
         "enum": [
           "none",
-          "sends_only",
           "delivers"
         ],
         "title": "MailReadiness",
@@ -14793,12 +14792,12 @@
             "title": "Public Base Url"
           },
           "ready": {
-            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.",
+            "description": "Whether an email carrying a link back to this deployment reaches its recipient, which is what every message the control plane sends needs.",
             "title": "Ready",
             "type": "boolean"
           },
           "transport": {
-            "description": "The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.",
+            "description": "The transport a send would use: 'smtp' or 'none'.",
             "title": "Transport",
             "type": "string"
           }

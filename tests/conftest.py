@@ -28,6 +28,7 @@ if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
 if TYPE_CHECKING:
+    from _mail_support import RecordingTransport
     from gateway.services.pricing import ModelsDevPriceIndex
 
 MODELS_DEV_MINI = ROOT / "tests" / "fixtures" / "models_dev_mini.json"
@@ -525,3 +526,28 @@ def seed_workspace_id(db: Any) -> Any:
     db.add(workspace)
     db.flush()
     return workspace.id
+
+
+@pytest.fixture
+def recorded_mail(monkeypatch: pytest.MonkeyPatch) -> "RecordingTransport":
+    """The transport a test reads its deployment's sent mail from.
+
+    Answers for the configuration under test: a deployment that configures no
+    mail still gets none, so a test about that keeps its meaning. Only the
+    delivery is replaced.
+
+    Imports inside the function: this module puts ``src`` on ``sys.path`` at
+    import time, so a top-level ``gateway`` import here would run before that.
+    """
+    from _mail_support import RecordingTransport
+    from gateway.core.config import GatewayConfig
+    from gateway.services.mail import mailer as mailer_module
+    from gateway.services.mail.transports import select_transport
+
+    transport = RecordingTransport()
+
+    def _recording_select(config: GatewayConfig) -> object | None:
+        return transport if select_transport(config) is not None else None
+
+    monkeypatch.setattr(mailer_module, "select_transport", _recording_select)
+    return transport

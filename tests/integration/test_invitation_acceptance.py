@@ -639,7 +639,7 @@ async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: Asyn
     hand_carried = generate_shared_token()
     await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
     uow = UnitOfWork(async_db)
-    link = _link(async_db, uow=uow, mail_transport="console")
+    link = _link(async_db, uow=uow, mail_transport="none")
 
     async with uow:
         opened = await link.open(hand_carried)
@@ -657,7 +657,7 @@ async def test_a_link_that_was_emailed_is_not_held_to_another_organization_prove
     emailed = generate_token()
     await _invite(async_db, inviter, email="ada@example.com", token=emailed)
 
-    link = _link(async_db, mail_transport="console")
+    link = _link(async_db, mail_transport="none")
 
     assert await link.allows_an_account(emailed, claimed_address="ada@example.com") is True
 

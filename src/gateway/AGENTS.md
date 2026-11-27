@@ -321,30 +321,29 @@ tenant.
 Features import `Mailer`, inspect the `MailDelivery` returned by `send`, and do
 not select transports or catch transport exceptions.
 
-Two predicates say what mail can do, and the choice turns on what the answer
-decides. `can_send_links` asks whether mail is configured at all, for a readiness
-check and for hiding a mail-only surface. `can_deliver_links` asks whether the
-message reaches its recipient, and is false for the console transport, which
-shows an email to the deployment operator and delivers it to nobody.
+One predicate says what mail can do. `can_deliver_links` asks whether an email
+carrying a link back to this deployment reaches its recipient, which is the only
+question a surface here has: every control-plane message puts an absolute URL
+into somebody's inbox, and a link nobody receives decides nothing.
 
-Anything whose outcome depends on the recipient receiving the message asks
-`can_deliver_links`. That covers a send no person watches, such as a background
-worker's, a flow that falls back to handing the link over, and any decision about
-what a link proves: a link the recipient's mailbox never saw is hand-carried,
-whatever the transport reported.
+That covers hiding a mail-only surface, a send no person watches such as a
+background worker's, a flow that falls back to handing the link over, and any
+decision about what a link proves: a link the recipient's mailbox never saw is
+hand-carried.
 
-`Mailer.readiness` answers both at once, as `MailReadiness`, and that is what
-`GET /api/v1/bootstrap` publishes as `mail`. A caller outside this package that
-needs both questions reads it rather than deriving the pair separately.
+`Mailer.readiness` publishes the same answer as `MailReadiness`, which is what
+`GET /api/v1/bootstrap` sends as `mail`. A caller outside this package reads that
+rather than deriving the answer again.
 
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing
 work.
 
-The console transport deliberately logs token-bearing message bodies for local
-testing, and marks its record with `CARRIES_CREDENTIAL` so the log filter that
-masks credentials leaves the links intact. Do not widen this exception. Templates live under `templates/email/`
-and use the shared renderer and header sanitization.
+**No transport writes a message body to the log.** A token in a link is a bearer
+credential, and a log is read by people a message was never addressed to, so a
+development deployment gets a real inbox instead: `make dev` starts the mail
+service in `docker-compose.yml`. Templates live under `templates/email/` and use
+the shared renderer and header sanitization.
 
 ## Activation guide
 
@@ -449,8 +448,8 @@ the route's rework is tracked in #1699. See
 ## Logging
 
 Use `gateway.log_config` with lazy `%s` formatting. Log opaque IDs, model,
-provider, status, and counts when needed. Never log credentials or user content,
-apart from the explicit local console-mail transport. The gateway's handler, uvicorn's
+provider, status, and counts when needed. Never log credentials or user content.
+The gateway's handler, uvicorn's
 (`uvicorn_log_config`) and the last-resort handler a library logger falls to
 mask credential shapes (`secret_shapes.py`) in every record as a second line of
 defense, mostly for provider errors that echo the request; it is not a license

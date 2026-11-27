@@ -58,7 +58,7 @@ def _config(*, sends_links: bool = True, open_signup: bool = False) -> GatewayCo
     return GatewayConfig(
         open_signup=open_signup,
         mail_from_email="otari@example.com",
-        mail_transport="smtp" if sends_links else "console",
+        mail_transport="smtp" if sends_links else "none",
         public_base_url="https://otari.example.com" if sends_links else None,
         smtp_host="smtp.example.com",
     )

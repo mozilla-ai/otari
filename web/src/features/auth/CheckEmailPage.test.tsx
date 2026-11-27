@@ -61,7 +61,7 @@ describe("CheckEmailPage", () => {
 
   it("promises no inbox on a deployment whose email reaches nobody", () => {
     rememberSignInAddress("ada@example.com")
-    renderPage("/check-email?type=signup", "sends_only")
+    renderPage("/check-email?type=signup", "none")
 
     expect(
       screen.queryByRole("heading", { name: "Check your email" }),
@@ -76,7 +76,7 @@ describe("CheckEmailPage", () => {
   })
 
   it("keeps the resend wording conditional where email reaches nobody", () => {
-    renderPage("/check-email?type=resend", "sends_only")
+    renderPage("/check-email?type=resend", "none")
 
     expect(
       screen.getByText(/If that address has an account waiting to be verified/),
@@ -87,8 +87,8 @@ describe("CheckEmailPage", () => {
   it.each([
     ["delivers", "signup", "If you can sign up with ada@example.com"],
     ["delivers", "resend", "If ada@example.com has an account waiting"],
-    ["sends_only", "signup", "If you can sign up with ada@example.com"],
-    ["sends_only", "resend", "If ada@example.com has an account waiting"],
+    ["none", "signup", "If you can sign up with ada@example.com"],
+    ["none", "resend", "If ada@example.com has an account waiting"],
   ] as const)(
     "opens in the conditional on every mail state (%s, %s)",
     (mail, type, clause) => {

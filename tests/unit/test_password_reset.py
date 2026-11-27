@@ -1,35 +1,27 @@
 """Password reset: request a link, then complete it with the token it carries.
 
 Unit rather than integration, the same reasoning ``test_password_sign_in.py``
-gives. Mail runs on the console transport so a reset link can be read back out
-of the log, the same pattern ``test_invitations_api.py`` uses.
+gives. Mail is recorded rather than delivered, so a reset link is read from the
+message the deployment sent.
 """
 
-import logging
-import re
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import col
 
+from _mail_support import MAIL_CONFIGURED, RecordingTransport, token_in
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.models.tenancy import DashboardSession, User, WebAuthnCredential
-from gateway.services.mail import MailEnvelope
-from gateway.services.mail.transports import SmtpTransport
 
 MASTER_KEY = "sk-test-master"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 NEW_PASSWORD = "a-recovered-password"  # pragma: allowlist secret
-
-_TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 
 def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
@@ -37,7 +29,7 @@ def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
         "database_url": f"sqlite:///{tmp_path / 'reset-test.db'}",
         "master_key": MASTER_KEY,
         "require_pricing": False,
-        "mail_transport": "console",
+        **MAIL_CONFIGURED,
         "public_base_url": "https://gw.example.com",
     }
     fields.update(overrides)
@@ -48,24 +40,7 @@ def _client(tmp_path: Path, **overrides: object) -> TestClient:
     return TestClient(create_app(_config(tmp_path, **overrides)))
 
 
-def _with_logs(client: TestClient, caplog: pytest.LogCaptureFixture, call: Callable[[], Response]) -> Response:
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    caplog.clear()
-    try:
-        return call()
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-
-
-def _extract_token(text: str) -> str:
-    """Pull the token out of a link the console transport logged, asserting it is there."""
-    match = _TOKEN_IN_LINK.search(text)
-    assert match, text
-    return match.group(1)
-
-
-def _claimed_and_verified(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> None:
+def _claimed_and_verified(client: TestClient, mail: RecordingTransport, *, email: str) -> None:
     """Get an identity onto the roster, signed up, and verified, ready to sign in."""
     assert (
         client.post(
@@ -76,17 +51,24 @@ def _claimed_and_verified(client: TestClient, caplog: pytest.LogCaptureFixture, 
         == 201
     )
 
-    signup = _with_logs(
-        client, caplog, lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
-    )
+    signup = client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
     assert signup.status_code == 200, signup.text
-    token = _extract_token(caplog.text)
+    token = token_in(mail.last)
     assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
 
 
-def _request_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> tuple[int, str]:
-    response = _with_logs(client, caplog, lambda: client.post(f"{API_ROOT}/auth/password/reset", json={"email": email}))
-    return response.status_code, caplog.text
+def _request_reset(client: TestClient, mail: RecordingTransport, *, email: str) -> tuple[int, int]:
+    """The request's status, and how many messages it sent, for a test about whether it mails at all."""
+    before = len(mail.sent)
+    response = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
+    return response.status_code, len(mail.sent) - before
+
+
+def _reset_token(client: TestClient, mail: RecordingTransport, *, email: str) -> str:
+    """Request a reset and return the token out of the one message it sent."""
+    response, envelope = mail.sent_during(lambda: client.post(f"{API_ROOT}/auth/password/reset", json={"email": email}))
+    assert response.status_code == 200, response.text
+    return token_in(envelope)
 
 
 def _sessions(tmp_path: Path, db_name: str) -> list[DashboardSession]:
@@ -95,13 +77,11 @@ def _sessions(tmp_path: Path, db_name: str) -> list[DashboardSession]:
         return list(session.execute(select(DashboardSession)).scalars().all())
 
 
-def test_reset_round_trips_end_to_end(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_reset_round_trips_end_to_end(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        assert status_code == 200
-        token = _extract_token(log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -120,7 +100,7 @@ def test_reset_round_trips_end_to_end(tmp_path: Path, caplog: pytest.LogCaptureF
         )
 
 
-def test_reset_works_before_the_address_is_verified(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_reset_works_before_the_address_is_verified(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     """Forgetting a password predates ever verifying it."""
     with _client(tmp_path) as client:
         assert (
@@ -131,16 +111,10 @@ def test_reset_works_before_the_address_is_verified(tmp_path: Path, caplog: pyte
             ).status_code
             == 201
         )
-        signup = _with_logs(
-            client,
-            caplog,
-            lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD}),
-        )
+        signup = client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
         assert signup.status_code == 200
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        assert status_code == 200
-        token = _extract_token(log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -148,28 +122,25 @@ def test_reset_works_before_the_address_is_verified(tmp_path: Path, caplog: pyte
         assert confirmed.status_code == 204, confirmed.text
 
 
-def test_reset_revokes_the_identity_s_other_sessions(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_reset_revokes_the_identity_s_other_sessions(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         assert (
             client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
         )
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        assert status_code == 200
-        token = _extract_token(log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
         client.post(f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD})
 
     assert _sessions(tmp_path, "reset-test.db") == []
 
 
-def test_a_reused_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_a_reused_reset_token_is_refused(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     """The concrete fix over the platform's stateless reset JWT: single use, enforced."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _extract_token(log_text)
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
         first = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -190,11 +161,10 @@ def test_an_unknown_reset_token_is_refused(tmp_path: Path) -> None:
         assert response.status_code == 400
 
 
-def test_an_expired_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_an_expired_reset_token_is_refused(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _extract_token(log_text)
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -211,7 +181,7 @@ def test_an_expired_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCap
 
 
 def test_a_reset_token_is_refused_once_the_identity_is_deactivated(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """A live token must not outlive the account it was issued to.
 
@@ -219,9 +189,8 @@ def test_a_reset_token_is_refused_once_the_identity_is_deactivated(
     has to end every road back in, not just sign-in.
     """
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _extract_token(log_text)
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -240,13 +209,12 @@ def _account_id(client: TestClient, *, email: str) -> str:
 
 
 def test_a_reset_link_minted_before_deactivation_stays_dead_after_reactivation(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """Deactivating an account clears its pending links, so reactivating it does not bring one back."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _extract_token(log_text)
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
         for is_active in (False, True):
             changed = client.patch(
@@ -262,7 +230,7 @@ def test_a_reset_link_minted_before_deactivation_stays_dead_after_reactivation(
 
 
 def test_a_password_change_elsewhere_invalidates_an_outstanding_reset_token(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """A reset token minted before a password change has no reason to survive it.
 
@@ -272,9 +240,8 @@ def test_a_password_change_elsewhere_invalidates_an_outstanding_reset_token(
     letting whoever holds it undo the change.
     """
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _extract_token(log_text)
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
         # The account owner changes their password through the ordinary,
         # session-authenticated channel while the reset link is still live.
@@ -292,24 +259,23 @@ def test_a_password_change_elsewhere_invalidates_an_outstanding_reset_token(
         assert confirmed.status_code == 400
 
 
-def test_request_reset_is_enumeration_safe(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_request_reset_is_enumeration_safe(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
 
-        known_status, known_text = _request_reset(client, caplog, email="ada@example.com")
-        unknown_status, unknown_text = _request_reset(client, caplog, email="nobody@example.com")
+        known_status, known_sent = _request_reset(client, recorded_mail, email="ada@example.com")
+        unknown_status, unknown_sent = _request_reset(client, recorded_mail, email="nobody@example.com")
 
         assert known_status == unknown_status == 200
-        assert "mail:console" in known_text
-        assert "mail:console" not in unknown_text
+        assert (known_sent, unknown_sent) == (1, 0)
 
 
 def test_request_reset_for_a_deactivated_identity_sends_nothing(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """Deactivation closes this road too, matching the refusal ``reset_password`` already makes."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
 
         engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
         with engine.begin() as connection:
@@ -318,14 +284,14 @@ def test_request_reset_for_a_deactivated_identity_sends_nothing(
             )
         engine.dispose()
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
+        status_code, sent = _request_reset(client, recorded_mail, email="ada@example.com")
 
         assert status_code == 200
-        assert "mail:console" not in log_text
+        assert sent == 0
 
 
 def test_request_reset_for_a_verified_identity_with_no_password_mails_how_it_signs_in_and_no_link(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """It signs in with a provider, so it gets no reset link, and a notice saying so rather than silence."""
     with _client(tmp_path) as client:
@@ -348,14 +314,15 @@ def test_request_reset_for_a_verified_identity_with_no_password_mails_how_it_sig
             )
         engine.dispose()
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        _, unknown_log_text = _request_reset(client, caplog, email="nobody@example.com")
+        status_code, sent = _request_reset(client, recorded_mail, email="ada@example.com")
+        notice = recorded_mail.last.message.text
+        _, unknown_sent = _request_reset(client, recorded_mail, email="nobody@example.com")
 
-        assert status_code == 200
-        assert "You already have an Otari account" in log_text
-        assert "signs in with GitHub" in log_text
-        assert "token=" not in log_text
-        assert "mail:console" not in unknown_log_text
+        assert (status_code, sent) == (200, 1)
+        assert "You already have an Otari account" in notice
+        assert "signs in with GitHub" in notice
+        assert "token=" not in notice
+        assert unknown_sent == 0
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -366,9 +333,9 @@ def test_request_reset_for_a_verified_identity_with_no_password_mails_how_it_sig
     assert token_hash is None
 
 
-def test_request_reset_without_mail_configured_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_request_reset_without_mail_configured_is_refused(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
 
     with _client(tmp_path, mail_transport="none", public_base_url=None) as client:
         response = client.post(f"{API_ROOT}/auth/password/reset", json={"email": "ada@example.com"})
@@ -398,10 +365,11 @@ def _reset_token_hash(tmp_path: Path, *, email: str) -> str | None:
     return token_hash
 
 
-def _complete_reset(client: TestClient, log_text: str) -> None:
+def _complete_reset(client: TestClient, token: str) -> None:
+    """Redeem a reset token for the new password, which must be accepted."""
     confirmed = client.post(
         f"{API_ROOT}/auth/password/reset/confirm",
-        json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+        json={"token": token, "new_password": NEW_PASSWORD},
     )
     assert confirmed.status_code == 204, confirmed.text
 
@@ -418,7 +386,7 @@ def _invite(client: TestClient, *, email: str) -> str:
 
 
 def test_reset_claims_an_identity_an_admin_added_and_nobody_signed_in_to(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """Forgot password is what someone added by an admin tries first, so it mails a link that claims the account."""
     with _client(tmp_path) as client:
@@ -429,9 +397,8 @@ def test_reset_claims_an_identity_an_admin_added_and_nobody_signed_in_to(
         )
         assert added.status_code == 201, added.text
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        assert status_code == 200
-        _complete_reset(client, log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
+        _complete_reset(client, token)
 
         # No separate verification: the reset link already proved the mailbox.
         signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
@@ -440,14 +407,13 @@ def test_reset_claims_an_identity_an_admin_added_and_nobody_signed_in_to(
 
 
 def test_reset_claims_an_invitee_who_then_finds_the_invitation_waiting(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path) as client:
         _invite(client, email="ada@example.com")
 
-        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
-        assert status_code == 200
-        _complete_reset(client, log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
+        _complete_reset(client, token)
 
         signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
         assert signed_in.status_code == 200, signed_in.text
@@ -455,7 +421,7 @@ def test_reset_claims_an_invitee_who_then_finds_the_invitation_waiting(
         assert pending.json()["count"] == 1
 
 
-def test_reset_before_verification_lets_the_identity_sign_in(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_reset_before_verification_lets_the_identity_sign_in(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     """A lost verification email is recovered by a reset, whose link proves the same mailbox."""
     with _client(tmp_path) as client:
         client.post(
@@ -463,14 +429,10 @@ def test_reset_before_verification_lets_the_identity_sign_in(tmp_path: Path, cap
             json={"email": "ada@example.com", "role": "member"},
             headers={"Otari-Key": MASTER_KEY},
         )
-        _with_logs(
-            client,
-            caplog,
-            lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD}),
-        )
+        client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
 
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        _complete_reset(client, log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
+        _complete_reset(client, token)
 
         assert (
             client.post(
@@ -481,7 +443,7 @@ def test_reset_before_verification_lets_the_identity_sign_in(tmp_path: Path, cap
 
 
 def test_reset_sends_nothing_for_a_revoked_invitee_where_signup_is_closed(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """The rule the signup form and a provider sign-in follow, so a reset is not a third way round it."""
     with _client(tmp_path) as client:
@@ -491,20 +453,20 @@ def test_reset_sends_nothing_for_a_revoked_invitee_where_signup_is_closed(
         )
         assert revoked.status_code == 200, revoked.text
 
-        status_code, log_text = _request_reset(client, caplog, email="eve@example.com")
+        status_code, sent = _request_reset(client, recorded_mail, email="eve@example.com")
 
         assert status_code == 200
-        assert "mail:console" not in log_text
+        assert sent == 0
     assert _reset_token_hash(tmp_path, email="eve@example.com") is None
 
 
 def test_reset_link_stops_working_once_the_invitation_is_revoked_where_signup_is_closed(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """A link mailed while the invitation was live does not claim the identity after the roster drops it."""
     with _client(tmp_path) as client:
         invitation_id = _invite(client, email="eve@example.com")
-        _, log_text = _request_reset(client, caplog, email="eve@example.com")
+        token = _reset_token(client, recorded_mail, email="eve@example.com")
         revoked = client.delete(
             f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
         )
@@ -512,7 +474,7 @@ def test_reset_link_stops_working_once_the_invitation_is_revoked_where_signup_is
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm",
-            json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+            json={"token": token, "new_password": NEW_PASSWORD},
         )
         assert confirmed.status_code == 400, confirmed.text
 
@@ -520,7 +482,7 @@ def test_reset_link_stops_working_once_the_invitation_is_revoked_where_signup_is
         assert signed_in.status_code != 200
 
 
-def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     """Open signup would let the same address sign up, so refusing the reset would protect nothing."""
     with _client(tmp_path, open_signup=True) as client:
         invitation_id = _invite(client, email="eve@example.com")
@@ -528,37 +490,38 @@ def test_reset_claims_a_revoked_invitee_where_signup_is_open(tmp_path: Path, cap
             f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
         )
 
-        status_code, log_text = _request_reset(client, caplog, email="eve@example.com")
+        status_code, sent = _request_reset(client, recorded_mail, email="eve@example.com")
 
         assert status_code == 200
-        assert "mail:console" in log_text
+        assert sent == 1
 
 
 def test_reset_request_says_the_same_thing_for_a_first_password_and_a_forgotten_one(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         _invite(client, email="ida@example.com")
 
         messages: set[str] = set()
         for email in ("nobody@example.com", "ada@example.com", "ida@example.com"):
             reply = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
             messages.add(reply.json()["message"])
-        _, mailed = _request_reset(client, caplog, email="ida@example.com")
+        _, mailed = _request_reset(client, recorded_mail, email="ida@example.com")
 
         assert len(messages) == 1
         assert "set or reset" in messages.pop()
-        assert "Set or reset your Otari password" in mailed
+        assert mailed == 1
+        assert recorded_mail.last.message.subject == "Set or reset your Otari password"
 
 
 def test_a_reset_link_stops_working_once_the_invitation_behind_it_is_revoked(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """Closed signup's rule holds when the link is used, not only when it was mailed."""
     with _client(tmp_path) as client:
         invitation_id = _invite(client, email="eve@example.com")
-        _, log_text = _request_reset(client, caplog, email="eve@example.com")
+        token = _reset_token(client, recorded_mail, email="eve@example.com")
         revoked = client.delete(
             f"{API_ROOT}/organizations/me/member-invitations/{invitation_id}", headers={"Otari-Key": MASTER_KEY}
         )
@@ -566,7 +529,7 @@ def test_a_reset_link_stops_working_once_the_invitation_behind_it_is_revoked(
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm",
-            json={"token": _extract_token(log_text), "new_password": NEW_PASSWORD},
+            json={"token": token, "new_password": NEW_PASSWORD},
         )
 
         assert confirmed.status_code == 400
@@ -588,12 +551,11 @@ def _terms_accepted_at(tmp_path: Path, *, email: str) -> object:
 
 
 def test_a_reset_that_claims_an_account_requires_the_published_terms(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path, terms_url=TERMS_URL) as client:
         _invite(client, email="ida@example.com")
-        _, log_text = _request_reset(client, caplog, email="ida@example.com")
-        token = _extract_token(log_text)
+        token = _reset_token(client, recorded_mail, email="ida@example.com")
 
         refused = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -611,7 +573,7 @@ def test_a_reset_that_claims_an_account_requires_the_published_terms(
 
 
 def test_a_reset_does_not_ask_again_for_terms_already_accepted(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path, terms_url=TERMS_URL) as client:
         client.post(
@@ -619,17 +581,13 @@ def test_a_reset_does_not_ask_again_for_terms_already_accepted(
             json={"email": "ada@example.com", "role": "member"},
             headers={"Otari-Key": MASTER_KEY},
         )
-        _with_logs(
-            client,
-            caplog,
-            lambda: client.post(
-                f"{API_ROOT}/auth/signup",
-                json={"email": "ada@example.com", "password": PASSWORD, "terms_accepted": True},
-            ),
+        client.post(
+            f"{API_ROOT}/auth/signup",
+            json={"email": "ada@example.com", "password": PASSWORD, "terms_accepted": True},
         )
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
 
-        _complete_reset(client, log_text)
+        _complete_reset(client, token)
 
 
 def _add_passkey(tmp_path: Path, *, email: str) -> None:
@@ -658,10 +616,10 @@ def _passkey_count(tmp_path: Path) -> int:
 
 
 def test_a_reset_that_replaces_an_unproved_address_removes_the_passkeys_registered_under_it(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
         with engine.begin() as connection:
             connection.execute(
@@ -671,36 +629,25 @@ def test_a_reset_that_replaces_an_unproved_address_removes_the_passkeys_register
         engine.dispose()
         _add_passkey(tmp_path, email="ada@example.com")
 
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        _complete_reset(client, log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
+        _complete_reset(client, token)
 
     assert _passkey_count(tmp_path) == 0
 
 
-def test_an_ordinary_reset_keeps_the_passkeys(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_an_ordinary_reset_keeps_the_passkeys(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         _add_passkey(tmp_path, email="ada@example.com")
 
-        _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        _complete_reset(client, log_text)
+        token = _reset_token(client, recorded_mail, email="ada@example.com")
+        _complete_reset(client, token)
 
     assert _passkey_count(tmp_path) == 1
 
 
 def _password_link(client: TestClient, account_id: str, *, headers: dict[str, str] | None = None) -> Response:
     return client.post(f"{API_ROOT}/admin/users/{account_id}/password-link", headers=headers)
-
-
-def _delivering(monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
-    """Stub the SMTP socket and collect what the transport is handed.
-
-    A deployment whose email reaches the recipient, unlike the console transport,
-    which shows a message to the deployment operator and delivers it to nobody.
-    """
-    delivered: list[MailEnvelope] = []
-    monkeypatch.setattr(SmtpTransport, "deliver", lambda self, envelope: delivered.append(envelope))
-    return delivered
 
 
 def _proven_at(tmp_path: Path, *, email: str) -> object:
@@ -714,11 +661,11 @@ def _proven_at(tmp_path: Path, *, email: str) -> object:
 
 
 def test_an_operator_hands_a_member_a_password_link_where_mail_is_off(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """The way back for a member who forgot their password on a deployment that cannot mail a link."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
 
     with _client(tmp_path, mail_transport="none", public_base_url=None) as client:
@@ -740,17 +687,18 @@ def test_an_operator_hands_a_member_a_password_link_where_mail_is_off(
 
 
 def test_an_operator_password_link_is_handed_back_where_the_transport_reaches_nobody(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
-    """The console transport shows a message to the operator and delivers it to no mailbox.
+    """A deployment that cannot deliver a link reaches no mailbox.
 
     So the link is handed back rather than claimed as sent, and the password chosen through it
     leaves the address attested rather than proven.
     """
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
 
+    with _client(tmp_path, mail_transport="none") as client:
         issued = _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
         assert issued.status_code == 201, issued.text
         assert issued.json()["mail_sent"] is False
@@ -766,22 +714,18 @@ def test_an_operator_password_link_is_handed_back_where_the_transport_reaches_no
 
 
 def test_an_operator_password_link_is_mailed_where_the_transport_reaches_the_mailbox(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """Delivered, so the link is not handed back and the mailbox proves the address."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
 
-    delivered = _delivering(monkeypatch)
-    with _client(
-        tmp_path, mail_transport="smtp", smtp_host="smtp.example.test", mail_from_email="otari@example.test"
-    ) as client:
         issued = _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
         assert issued.status_code == 201, issued.text
         assert issued.json()["mail_sent"] is True
         assert issued.json()["link"] is None
-        token = _extract_token(delivered[0].message.text)
+        token = token_in(recorded_mail.last)
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -792,10 +736,10 @@ def test_an_operator_password_link_is_mailed_where_the_transport_reaches_the_mai
 
 
 def test_an_operator_password_link_is_refused_where_it_could_not_help(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         ada = _account_id(client, email="ada@example.com")
         assert (
             client.post(
@@ -829,10 +773,10 @@ def test_an_operator_password_link_is_refused_where_it_could_not_help(
     assert _reset_token_hash(tmp_path, email="grace@example.com") is None
 
 
-def test_a_member_cannot_issue_a_password_link(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_a_member_cannot_issue_a_password_link(tmp_path: Path, recorded_mail: RecordingTransport) -> None:
     """The surface answers a non-operator as if it did not exist, like the rest of /admin."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _claimed_and_verified(client, recorded_mail, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
         signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
         assert signed_in.status_code == 200, signed_in.text
@@ -844,11 +788,11 @@ def test_a_member_cannot_issue_a_password_link(tmp_path: Path, caplog: pytest.Lo
 
 
 def test_a_shared_link_retires_the_proof_without_moving_the_verification_date(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """``email_verified_at`` records the first verification, so a link no mailbox saw must not move it."""
     with _client(tmp_path) as client:
-        _claimed_and_verified(client, caplog, email="hopper@example.com")
+        _claimed_and_verified(client, recorded_mail, email="hopper@example.com")
         account_id = _account_id(client, email="hopper@example.com")
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
@@ -879,7 +823,7 @@ def test_a_shared_link_retires_the_proof_without_moving_the_verification_date(
 
 
 def test_an_operator_password_link_claims_no_organization_until_the_mailbox_proves_the_address(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     """A shared link does not prove the address, so open signup founds an organization at the later proof."""
     with _client(tmp_path, open_signup=True) as client:
@@ -910,12 +854,10 @@ def test_an_operator_password_link_claims_no_organization_until_the_mailbox_prov
         assert signed_in.json()["active_organization_id"] is None
 
     with _client(tmp_path, open_signup=True) as client:
-        _with_logs(
-            client, caplog, lambda: client.post(f"{API_ROOT}/auth/password/reset", json={"email": "grace@example.com"})
-        )
+        client.post(f"{API_ROOT}/auth/password/reset", json={"email": "grace@example.com"})
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm",
-            json={"token": _extract_token(caplog.text), "new_password": "a-proven-password"},
+            json={"token": token_in(recorded_mail.last), "new_password": "a-proven-password"},
         )
         assert confirmed.status_code == 204, confirmed.text
         signed_in = client.post(

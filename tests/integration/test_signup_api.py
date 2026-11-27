@@ -14,16 +14,15 @@ does for the invitation routes; it exercises the same
 verify-email routes share.
 """
 
-import logging
 import re
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.core.addresses import same_address
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 
@@ -39,22 +38,10 @@ def _add_member(client: TestClient, master_key_header: dict[str, str], *, email:
     assert response.status_code == 201, response.text
 
 
-def _signed_up_token(
-    client: TestClient,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    email: str,
-) -> str:
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        response = client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+def _signed_up_token(client: TestClient, mail: RecordingTransport, *, email: str) -> str:
+    response = client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
     assert response.status_code == 200, response.text
-    match = _TOKEN_IN_LINK.search(caplog.text)
-    assert match, caplog.text
-    return match.group(1)
+    return token_in(mail.last)
 
 
 def test_signup_then_verify_then_sign_in(
@@ -62,13 +49,13 @@ def test_signup_then_verify_then_sign_in(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     _add_member(client, master_key_header, email="ada@example.com")
-    token = _signed_up_token(client, caplog, email="ada@example.com")
+    token = _signed_up_token(client, recorded_mail, email="ada@example.com")
 
     unverified = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert unverified.status_code == 403
@@ -86,7 +73,7 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """The path an invitee actually walks, which the test above does not cover.
 
@@ -105,7 +92,7 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     accept_token = _TOKEN_IN_LINK.search(invited.json()["accept_link"])
     assert accept_token, invited.json()["accept_link"]
     # Mail only from here on: a mailed invitation returns no link to share.
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     # The address the claim is bound to is the one the preview publishes, which
@@ -123,7 +110,7 @@ def test_invited_member_accepts_then_claims_the_invited_address(
     spent = client.post(f"{API_ROOT}/invitations/validate", json={"token": accept_token.group(1)})
     assert spent.status_code == 400, spent.text
 
-    verification_token = _signed_up_token(client, caplog, email=previewed_email)
+    verification_token = _signed_up_token(client, recorded_mail, email=previewed_email)
     verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": verification_token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
 
@@ -137,7 +124,7 @@ def test_signup_on_an_untouched_address_is_enumeration_safe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """200 with nothing written, not a 404: see ``test_signup.py`` for the reasoning."""
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     response = client.post(f"{API_ROOT}/auth/signup", json={"email": "nobody@example.com", "password": PASSWORD})
@@ -170,24 +157,19 @@ def test_an_invited_address_signs_up_verified_and_signs_in_at_once(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     _add_member(client, master_key_header, email="ada@example.com")
 
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        response = client.post(
-            f"{API_ROOT}/auth/signup", json={"email": "Ada@Example.com", "password": PASSWORD, "invite": "tok"}
-        )
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    response = client.post(
+        f"{API_ROOT}/auth/signup", json={"email": "Ada@Example.com", "password": PASSWORD, "invite": "tok"}
+    )
     assert response.status_code == 200, response.text
     assert response.json()["verified"] is True
     # No verification email: the invitation already reached the mailbox.
-    assert not _TOKEN_IN_LINK.search(caplog.text)
+    assert recorded_mail.sent == []
 
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert signed_in.status_code == 200, signed_in.text
@@ -199,9 +181,9 @@ def test_an_invite_for_another_address_proves_nothing(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     _add_member(client, master_key_header, email="grace@example.com")
 

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import MAIL_CONFIGURED
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
@@ -1099,7 +1100,7 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
     _, owner = await _seed_owner(async_db)
     owner_row = await UserRepository(async_db).get(owner.id)
     assert owner_row is not None
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com")
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com")  # type: ignore[arg-type]
     invited = await OrganizationService(
         async_db, **membership_writes(async_db)
     ).invite_active_organization_member_for_user(
@@ -1205,7 +1206,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
             try:
                 return await user_service.create_user_for_signup(
                     session,
-                    GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com"),
+                    GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com"),  # type: ignore[arg-type]
                     background_tasks=BackgroundTasks(),
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
                     invites=NullSignupInviteAdapter(),
@@ -1298,7 +1299,7 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
         return await verify_absent_password_async(password)
 
     monkeypatch.setattr(user_service, "verify_absent_password_async", counting_absent_password_check)
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com", open_signup=True)  # type: ignore[arg-type]
     organizations_before = await _organization_count(async_db)
 
     async def signup(session: AsyncSession) -> User | None:
@@ -1394,7 +1395,7 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
     """The losers roll back, so no organization is left behind without an owner who can sign in."""
     identity_id = await _unwanted_identity(async_db)
     _claim_together(monkeypatch)
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com", open_signup=True)  # type: ignore[arg-type]
     organizations_before = await _organization_count(async_db)
 
     async def signup(session: AsyncSession) -> User | None:

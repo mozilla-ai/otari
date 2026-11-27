@@ -91,7 +91,7 @@ class _Mail:
     """Stands in for the mailer: records what it was asked to send, and can be switched off."""
 
     def __init__(self, *, ready: bool = True) -> None:
-        self.can_send_links = ready
+        self.can_deliver_links = ready
         self.asset_root = None
         self.sent: list[tuple[str, MailMessage]] = []
 

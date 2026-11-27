@@ -16,7 +16,6 @@ from gateway.services.mail.message import (
 )
 from gateway.services.mail.templates import MailTemplateError, render_email
 from gateway.services.mail.transports import (
-    ConsoleTransport,
     MailTransport,
     SmtpTransport,
     normalized_address,
@@ -25,7 +24,6 @@ from gateway.services.mail.transports import (
 )
 
 __all__ = [
-    "ConsoleTransport",
     "MailDelivery",
     "MailDeliveryError",
     "MailEnvelope",

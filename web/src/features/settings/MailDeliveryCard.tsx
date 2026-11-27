@@ -12,7 +12,6 @@ import { useMailSettings, useSendTestMail } from "@/shared/api/settings"
 // serving a newer gateway) renders its own name instead of a wrong description.
 const TRANSPORT_LABEL: Record<string, string> = {
   smtp: "SMTP",
-  console: "Console (logged, not delivered)",
   none: "None",
 }
 
@@ -125,12 +124,7 @@ export function MailDeliveryCard() {
             aria-live="polite"
           >
             {result.ok
-              ? result.transport === "console"
-                ? // The console transport delivers to nobody, so telling an
-                  // operator to check an inbox would send them looking for a
-                  // message that was only ever written to the gateway log.
-                  "Written to the gateway log. The console transport delivers to nobody."
-                : `Sent over ${result.transport}. Check the recipient's inbox.`
+              ? `Sent over ${result.transport}. Check the recipient's inbox.`
               : `Not sent: ${result.reason ?? "the transport gave no reason."}`}
           </p>
         ) : null}

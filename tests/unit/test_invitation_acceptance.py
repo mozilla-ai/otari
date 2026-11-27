@@ -370,7 +370,7 @@ async def test_the_proven_domain_rule_is_asked_of_a_hand_carried_link_alone(stor
 
     # An emailed link is not held to another organization's proof, whether or not mail works now.
     assert (await store.acceptance().preview("emailed-token")).invited_email == "bob@proven.test"
-    undelivered = store.acceptance(mail_transport="console")
+    undelivered = store.acceptance(mail_transport="none")
     assert (await undelivered.preview("emailed-token")).invited_email == "bob@proven.test"
 
     # A hand-carried one is held to it, and configuring mail afterwards does not release it.

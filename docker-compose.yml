@@ -108,9 +108,8 @@ services:
       #
       # Passed through only where it is set, rather than defaulted or required
       # here, because the gateway owns what a missing one means: it warns and
-      # turns provider copies off. An empty value fails its length check at
-      # startup, and a required one stops every other service in this file
-      # from starting without it.
+      # turns provider copies off. Requiring it stops every other service in
+      # this file from starting without it.
       - OTARI_PROVIDER_ACCOUNT_PEPPER
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
