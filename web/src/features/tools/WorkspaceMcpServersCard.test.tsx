@@ -240,7 +240,7 @@ describe("WorkspaceMcpServersCard", () => {
   })
 
   it("draws no heading of its own and leads with its controls", async () => {
-    // The Tools tab names this view, so a heading here would say it twice.
+    // The page titles this view (`McpServersPage`), so a heading here would say it twice.
     mockApi()
     renderCard()
 

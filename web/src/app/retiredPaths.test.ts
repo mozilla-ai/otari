@@ -57,6 +57,25 @@ describe("retired paths", () => {
     expect(landed.entries).toBe(1)
   })
 
+  it("follows a sign-in's return_to that still names the old path", async () => {
+    // What the callback page does with the path a sign-in began from: it
+    // navigates to it, replacing the callback's own entry.
+    const history = createMemoryHistory({ initialEntries: ["/"] })
+    const probe = createRouter({
+      routeTree,
+      history,
+      parseSearch,
+      stringifySearch,
+    })
+    await probe.load()
+    history.replace("/tools/mcp-servers/srv-1?workspace=ws-9")
+    await probe.load()
+
+    expect(probe.state.location.pathname).toBe("/mcp-servers/srv-1")
+    expect(probe.state.location.search).toEqual({ workspace: "ws-9" })
+    expect(history.length).toBe(1)
+  })
+
   it("leaves the new MCP servers paths and the Tools pages where they are", async () => {
     expect((await open("/mcp-servers")).path).toBe("/mcp-servers")
     expect((await open("/mcp-servers/srv-1")).path).toBe("/mcp-servers/srv-1")
