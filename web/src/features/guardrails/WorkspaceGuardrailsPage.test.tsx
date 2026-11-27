@@ -116,6 +116,15 @@ describe("WorkspaceGuardrailsPage", () => {
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull()
   })
 
+  it("links back to Rules, where it opens from", async () => {
+    mockApi()
+    await renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: "← Rules" }),
+    ).toHaveAttribute("href", "/rules")
+  })
+
   it("offers nothing to change here", async () => {
     mockApi({
       definitions: [organizationGuardrailDefinition()],

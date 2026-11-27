@@ -96,6 +96,15 @@ const BASE_NAV_SECTIONS = [
         // whether it is on; each one's settings open from it, and the row
         // stays selected there (the prefix match below).
       },
+      // Servers are connectors rather than tools, so they are a row of their
+      // own. Its pages sit under `/tools/mcp-servers`, and the longest prefix
+      // wins (`navItemForPath`), so Tools is not selected there.
+      {
+        to: "/tools/mcp-servers",
+        label: "MCP servers",
+        surface: "tools",
+        icon: FiServer,
+      },
       // Create API key above the rail starts one; this lists and edits them.
       { to: "/keys", label: "API keys", surface: "keys", icon: FiKey },
     ],

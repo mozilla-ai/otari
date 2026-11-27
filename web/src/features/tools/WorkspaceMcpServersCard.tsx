@@ -152,8 +152,9 @@ function PersonalConnectionsCell({
 }
 
 /**
- * The selected workspace's MCP servers: the MCP servers view of Tools, whose
- * tab names it, so it draws no title of its own and leads with its controls.
+ * The selected workspace's MCP servers. The page titles it
+ * (`McpServersPage.tsx`), so it draws no title of its own and leads with its
+ * controls.
  */
 export function WorkspaceMcpServersCard() {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()

@@ -65,6 +65,7 @@ describe("a build that replaces the label-override module", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     expect(ORG_NAV_SECTIONS.map((section) => section.label)).toEqual([

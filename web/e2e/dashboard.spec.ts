@@ -9,9 +9,10 @@ import {
   nav,
   openAccountMenu,
   openDeployment,
+  openListed,
   openNested,
   openOrganization,
-  openTab,
+  openRow,
   pageHeading,
   pressRowAction,
 } from "./helpers"
@@ -129,11 +130,13 @@ test.describe("dashboard core flows", () => {
     // Routing is a row of its own, and each tool a view of Tools.
     await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
     await expect(pageHeading(page, "Routing")).toBeVisible()
-    await openTab(page, "Tools", "Web search")
+    await openListed(page, "Tools", "Web search")
     await expect(pageHeading(page, "Tools")).toBeVisible()
-    // The one Tools view that is not a filtered view of the settings page, so
-    // reaching it proves its own route resolves rather than that the filter did.
-    await openTab(page, "Tools", "MCP servers")
+    // A tool's settings lead back to the list, which has no tab row to do it.
+    await page.getByRole("main").getByRole("link", { name: "← Tools" }).click()
+    await expect(page).toHaveURL(/\/tools$/)
+    // A page of its own, so reaching it proves its own route resolves.
+    await openRow(page, "MCP servers")
     await expect(
       page.getByRole("button", { name: "Add MCP server" }),
     ).toBeVisible()

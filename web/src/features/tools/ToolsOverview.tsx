@@ -9,7 +9,6 @@ import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   useTools,
   useWorkspaceCodeExecutionPolicy,
-  useWorkspaceMcpServers,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -24,12 +23,6 @@ interface ToolRow {
   line: string
   to: ToolsView
   search?: { service: string }
-}
-
-/** "GitHub", "GitHub and Linear", "GitHub, Linear and 2 more". */
-function listed(names: string[]): string {
-  if (names.length <= 2) return names.join(" and ")
-  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`
 }
 
 /**
@@ -50,7 +43,6 @@ export function ToolsOverview() {
   const isManager = useIsOrganizationManager()
   const web = useWorkspaceWebSearchConfig(isManager ? workspaceId : null)
   const code = useWorkspaceCodeExecutionPolicy(isManager ? workspaceId : null)
-  const mcp = useWorkspaceMcpServers(workspaceId)
   const inWorkspace = useWorkspaceToolState()
 
   const toolBy = new Map((tools.data?.data ?? []).map((one) => [one.id, one]))
@@ -133,12 +125,6 @@ export function ToolsOverview() {
         }
   }
 
-  const mcpUnread = unread(mcp, true)
-  const servers = (mcp.data?.data ?? []).filter((server) => server.enabled)
-  const serverTools = servers.reduce(
-    (count, server) => count + (server.allowed_tools?.length ?? 0),
-    0,
-  )
   const rows: ToolRow[] = [
     managed(
       "otari_web_search",
@@ -164,19 +150,6 @@ export function ToolsOverview() {
       "Lets the model run code in a sandbox and read the result.",
       "/tools/code-execution",
     ),
-    {
-      id: "mcp",
-      name: "MCP servers",
-      state: mcpUnread ?? String(servers.length),
-      tone: mcpUnread ? "unknown" : servers.length > 0 ? "on" : "off",
-      // Unread, it says what the tool does, as the rows above do.
-      line: mcpUnread
-        ? "Lets an agent call the tools a connected server offers."
-        : servers.length > 0
-          ? `${listed(servers.map((server) => server.name))} ${servers.length === 1 ? "is" : "are"} connected${serverTools > 0 ? `: ${serverTools} ${serverTools === 1 ? "tool" : "tools"} between them` : ""}.`
-          : `No server is connected to ${workspace}. Connect one to give agents its tools.`,
-      to: "/tools/mcp-servers",
-    },
     ...(isOperator
       ? [
           {
@@ -194,9 +167,7 @@ export function ToolsOverview() {
 
   return (
     <div className="flex flex-col gap-5">
-      <ErrorBanner
-        error={tools.error ?? web.error ?? code.error ?? mcp.error}
-      />
+      <ErrorBanner error={tools.error ?? web.error ?? code.error} />
       <ul className="flex flex-col border-t border-border">
         {rows.map((row) => (
           <li key={row.id} className="border-b border-border-subtle">

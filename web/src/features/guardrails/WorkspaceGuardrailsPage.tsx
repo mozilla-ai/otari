@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import type { OrganizationGuardrail } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -89,7 +90,14 @@ export function WorkspaceGuardrailsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Guardrails" />
+      <PageIntro
+        title="Guardrails"
+        detail={
+          <Link to="/rules" className="text-link hover:text-link-hover">
+            ← Rules
+          </Link>
+        }
+      />
 
       <ErrorBanner
         error={context.error ?? definitions.error ?? mandates.error}

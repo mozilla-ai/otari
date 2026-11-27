@@ -132,23 +132,26 @@ export async function openNested(
   await nav(page).getByRole("link", { name: child, exact: true }).click()
 }
 
+/** Open a rail row. The name is spelled at the call site so the docs check sees it. */
+export async function openRow(page: Page, row: string): Promise<void> {
+  await nav(page).getByRole("link", { name: row, exact: true }).click()
+}
+
 /**
- * Open a rail row, then one of the tabs its page draws under its title: a
- * tool under Tools, Routing under Rules. The tab is current once it has
- * opened. The names are spelled at the call site so the docs check sees them.
+ * Open a rail row, then one of the entries its page lists: a tool under Tools.
+ * The names are spelled at the call site so the docs check sees them.
  */
-export async function openTab(
+export async function openListed(
   page: Page,
   row: string,
-  tab: string,
+  entry: string,
 ): Promise<void> {
-  await nav(page).getByRole("link", { name: row, exact: true }).click()
-  const link = page
+  await openRow(page, row)
+  await page
     .getByRole("main")
-    .getByRole("navigation")
-    .getByRole("link", { name: tab, exact: true })
-  await link.click()
-  await expect(link).toHaveAttribute("aria-current", "page")
+    .getByRole("link", { name: new RegExp(`^${entry}`) })
+    .first()
+    .click()
 }
 
 /**

@@ -290,6 +290,7 @@ describe("AppShell responsive layout", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
 
@@ -769,6 +770,7 @@ describe("AppShell surface gating", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     // One level: no row on this rail is a group.
@@ -920,6 +922,7 @@ describe("AppShell entitlement gating", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
   })
@@ -1720,6 +1723,7 @@ const WORKSPACE_RAIL = [
   "/routing",
   "/models",
   "/tools",
+  "/tools/mcp-servers",
   "/keys",
 ]
 

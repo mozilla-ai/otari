@@ -57,6 +57,7 @@ describe("nav registry", () => {
       "/routing",
       "/models",
       "/tools",
+      "/tools/mcp-servers",
       "/keys",
     ])
     expect(items.flatMap((item) => item.children ?? [])).toEqual([])
@@ -97,6 +98,7 @@ describe("nav registry", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
       "Workspaces",
       "Members & roles",
@@ -484,6 +486,7 @@ describe("nav registry", () => {
       "Routing",
       "Models",
       "Tools",
+      "MCP servers",
       "API keys",
     ])
     const general = ORG_NAV_SECTIONS.find(
@@ -855,11 +858,23 @@ describe("navPageForPath", () => {
   })
 
   it("files a tool's pages under Tools, the row they open from", () => {
-    expect(navPageForPath("/tools/mcp-servers/abc")).toEqual({
+    expect(navPageForPath("/tools/web-search")).toEqual({
       to: "/tools",
       label: "Tools",
     })
-    expect(pageLabelForPath("/tools/web-search")).toBe("Tools")
+    expect(pageLabelForPath("/tools/code-execution")).toBe("Tools")
+  })
+
+  it("files a server's pages under MCP servers, not under Tools", () => {
+    for (const path of ["/tools/mcp-servers", "/tools/mcp-servers/abc"]) {
+      expect(navPageForPath(path)).toEqual({
+        to: "/tools/mcp-servers",
+        label: "MCP servers",
+      })
+      expect(railPathForPath(path)).toBe("/tools/mcp-servers")
+      expect(navItemForPath(path)?.surface).toBe("tools")
+    }
+    expect(railPathForPath("/tools")).toBe("/tools")
   })
 
   it("names a destination with no row after itself, not after its row", () => {
@@ -997,6 +1012,7 @@ const WORKSPACE = [
   "/routing",
   "/models",
   "/tools",
+  "/tools/mcp-servers",
   "/keys",
   "/members",
 ]
@@ -1047,7 +1063,6 @@ describe("the rails, per role", () => {
     const OPENED_FROM: Readonly<Record<string, string>> = {
       "/tools/web-search": "/tools",
       "/tools/code-execution": "/tools",
-      "/tools/mcp-servers": "/tools",
       "/tools/guardrails": "/rules",
       "/members": "/people",
     }

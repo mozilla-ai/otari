@@ -8,7 +8,7 @@ import { AppProviders as Provider } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
 import { ToolsOverview } from "./ToolsOverview"
 
-type Read = "tools" | "web" | "mcp"
+type Read = "tools" | "web"
 
 const TOOLS = ["otari_web_search", "otari_web_fetch", "otari_code_execution"]
 
@@ -57,10 +57,6 @@ async function renderOverview(refused: Read[] = [], role = "owner") {
     if (url.endsWith("/code-execution-policy")) {
       return Response.json({ enabled: false })
     }
-    if (url.includes("/mcp-servers")) {
-      if (refused.includes("mcp")) return refuse()
-      return Response.json({ data: [], count: 0 })
-    }
     return Response.json({ data: [], count: 0 })
   })
   await renderWithRouter(<ToolsOverview />, {
@@ -83,16 +79,24 @@ describe("the Tools overview", () => {
     vi.restoreAllMocks()
   })
 
-  it("says what is off and what is connected once it has read them", async () => {
+  it("says what is off once it has read it", async () => {
     await renderOverview()
     expect(
       await within(await row("Web search")).findByText("Off"),
     ).toBeVisible()
-    expect(
-      await within(await row("MCP servers")).findByText(
-        "No server is connected to Platform. Connect one to give agents its tools.",
-      ),
-    ).toBeVisible()
+  })
+
+  it("lists the tools and not the MCP servers, which have a page of their own", async () => {
+    await renderOverview()
+    await row("Web search")
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
+      [
+        expect.stringMatching(/^Web search/),
+        expect.stringMatching(/^Web fetch/),
+        expect.stringMatching(/^Code execution/),
+      ],
+    )
+    expect(screen.queryByRole("link", { name: /^MCP servers/ })).toBeNull()
   })
 
   it("tells a member which tools their workspace has off", async () => {
@@ -120,23 +124,5 @@ describe("the Tools overview", () => {
     const code = await row("Code execution")
     expect(await within(code).findByText("Could not read")).toBeVisible()
     expect(within(code).queryByText("Unavailable")).toBeNull()
-  })
-
-  it("does not say no server is connected when the servers could not be read", async () => {
-    await renderOverview(["mcp"])
-    const mcp = await row("MCP servers")
-    expect(await within(mcp).findByText("Could not read")).toBeVisible()
-    expect(within(mcp).queryByText(/No server is connected/)).toBeNull()
-  })
-
-  it("still says what MCP servers do when they could not be read", async () => {
-    await renderOverview(["mcp"])
-    const mcp = await row("MCP servers")
-    expect(await within(mcp).findByText("Could not read")).toBeVisible()
-    expect(
-      within(mcp).getByText(
-        "Lets an agent call the tools a connected server offers.",
-      ),
-    ).toBeVisible()
   })
 })
