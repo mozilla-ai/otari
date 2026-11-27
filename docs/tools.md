@@ -783,6 +783,36 @@ model-facing function accepts exactly one field:
 {"url": "https://example.com/article"}
 ```
 
+The declaration may also bound the fetches of one request, and takes no other
+field:
+
+```json
+{
+  "type": "otari_web_fetch",
+  "max_uses": 3,
+  "allowed_domains": ["github.com"],
+  "blocked_domains": ["gist.github.com"]
+}
+```
+
+- `max_uses` caps how many fetches Otari runs for the request, across model turns
+  and routing attempts. `max_uses: 0` refuses every fetch, and a negative or
+  non-integer value is rejected with a 400. A failed fetch does not count against
+  it. It sits beside the request's `web_search_max_calls` allowance below, and
+  whichever is reached first ends the fetches. Past the cap, the model gets a `[tool error]` it can answer without, and a
+  Chat Completions client sees the fetch in `otari_tool_calls` as `failed`, with
+  the tag `call_limit`.
+- `allowed_domains` and `blocked_domains` each hold up to 100 bare hostnames, and
+  a fetch's redirects are held to them too. They narrow the workspace's
+  [domain lists](#per-workspace-web-access-policy) and never widen them: the
+  allow-list keeps only what the workspace's also allows, and the block-list is
+  added to the workspace's. An allow-list that shares no domain with the
+  workspace's is refused with a 403. Declared beside `otari_web_search`, the
+  fetch's own allow-list is used instead of the search's, and both block-lists
+  apply.
+
+The same three fields work on a [claimed Anthropic fetch keyword](#anthropics-web-fetch).
+
 Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
 extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
 or text-bearing PDF content. From an HTML page it keeps the content as light

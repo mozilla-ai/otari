@@ -36,16 +36,19 @@ from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     Choice,
     ChoiceDelta,
     ChunkChoice,
     CompletionUsage,
+    Function,
 )
 from fastapi import HTTPException, Response
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
+import gateway.services.mcp_loop as mcp_loop
 import gateway.streaming as streaming
 from _unavailable_model_support import RecordingListener, background_tasks_done, reporter_with_null_listener
 from gateway.api.deps import ToolPorts
@@ -57,6 +60,7 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     build_streaming_response,
+    dispatch_non_stream,
     log_absorbed_attempt,
     log_exhausted_plan,
     log_usage,
@@ -74,6 +78,7 @@ from gateway.exceptions.tools_exceptions import (
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceMcpServerNotFoundError,
+    WorkspaceWebSearchDomainsExcludedError,
 )
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
@@ -93,6 +98,7 @@ from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.routing import CompiledPlan
 from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools import MAX_USES_EXCEEDED_ERROR, WEB_FETCH_TOOL_NAME
 from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
     MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL,
@@ -2415,6 +2421,159 @@ async def test_combined_policy_narrows_fetch_domains() -> None:
 
     assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
     assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == ["blocked.example.com"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_request_domains_narrow_fetch_without_workspace_row() -> None:
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    tool_ctx = await _call_prepare_gateway_tools(
+        ctx,
+        tools=[
+            {
+                "type": "otari_web_fetch",
+                "allowed_domains": ["docs.example.com"],
+                "blocked_domains": ["private.docs.example.com"],
+            }
+        ],
+    )
+
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == ["private.docs.example.com"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_request_domains_narrow_the_workspaces_and_never_widen_them() -> None:
+    workspace = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=("docs.example.com",),
+        blocked_domains=("blocked.example.com",),
+        provider_options=None,
+        authorized_tools=None,
+    )
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    tool_ctx = await _call_prepare_gateway_tools(
+        ctx,
+        tools=[
+            {
+                "type": "otari_web_fetch",
+                "allowed_domains": ["example.com"],
+                "blocked_domains": ["private.docs.example.com"],
+            }
+        ],
+        web_search_policy=_Policy(workspace),
+    )
+
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == [
+        "blocked.example.com",
+        "private.docs.example.com",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_allow_list_disjoint_from_the_workspaces_is_refused() -> None:
+    workspace = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=("example.com",),
+        blocked_domains=None,
+        provider_options=None,
+        authorized_tools=None,
+    )
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            tools=[{"type": "otari_web_fetch", "allowed_domains": ["elsewhere.example"]}],
+            web_search_policy=_Policy(workspace),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == WorkspaceWebSearchDomainsExcludedError().message
+
+
+def _fetch_round(call_id: str, url: str) -> ChatCompletion:
+    """A model turn that asks for one fetch of ``url``."""
+    call = ChatCompletionMessageFunctionToolCall(
+        id=call_id, type="function", function=Function(name=WEB_FETCH_TOOL_NAME, arguments=json.dumps({"url": url}))
+    )
+    return ChatCompletion(
+        id="cmpl-1",
+        choices=[
+            Choice(
+                finish_reason="tool_calls",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content=None, tool_calls=[call]),
+            )
+        ],
+        created=0,
+        model="gpt-4",
+        object="chat.completion",
+    )
+
+
+async def _fetch_twice(monkeypatch: pytest.MonkeyPatch, *, max_uses: int) -> tuple[ToolContext, list[str]]:
+    """Run a Chat request that declares only ``otari_web_fetch`` and fetches twice; return what the model read back."""
+    config = GatewayConfig(
+        require_pricing=False,
+        web_fetch_enabled=True,
+        fetch_tools={"fake-fetch": {"provider": "fake", "options": {"text": "page"}}},
+        web_fetch_default_tool="fake-fetch",
+    )
+    ctx = _ctx(config, db=cast(Any, AsyncMock()), workspace_id=uuid.uuid4())
+    tool_ctx = await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch", "max_uses": max_uses}])
+
+    rounds = iter(
+        [
+            _fetch_round("f1", "https://docs.example.com/one"),
+            _fetch_round("f2", "https://docs.example.com/two"),
+            _completion(),
+        ]
+    )
+    sent: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(list(kwargs["messages"]))
+        return next(rounds)
+
+    monkeypatch.setattr(mcp_loop, "acompletion", fake_acompletion)
+    await dispatch_non_stream(
+        adapter=chat._ADAPTER,
+        tool_ctx=tool_ctx,
+        call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "read both"}]},
+    )
+    return tool_ctx, [message["content"] for message in sent[-1] if message.get("role") == "tool"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_uses", [0, 1])
+async def test_max_uses_caps_the_fetch_calls_of_a_fetch_only_request(
+    monkeypatch: pytest.MonkeyPatch, max_uses: int
+) -> None:
+    tool_ctx, results = await _fetch_twice(monkeypatch, max_uses=max_uses)
+
+    read, refused = results[:max_uses], results[max_uses:]
+    assert all(result.endswith("---\npage") for result in read)
+    assert refused == [MAX_USES_EXCEEDED_ERROR] * (2 - max_uses)
+    assert tool_ctx.tally.meters().get(WEB_FETCH_TOOL_NAME, {}).get("billed", 0) == max_uses
 
 
 def _web_policy(*, enabled: bool = True, authorized_tools: frozenset[str] | None = None) -> ResolvedWebSearchConfig:
