@@ -325,6 +325,46 @@ describe("buildRules, as an owner or admin reads it", () => {
     })
   })
 
+  it("lists a budget that caps only tokens or requests, with its caps and no dollar figures", () => {
+    const rules = byId(
+      buildRules(
+        sources({
+          ceilings: [
+            ceiling("tokens", {
+              max_budget: null,
+              token_limit: 1_000_000,
+              request_limit: 500,
+            }),
+            ceiling("each-tokens", {
+              scope_type: "workspace_member",
+              scope_id: "wm-wei",
+              budget_id: "tokens-each",
+              max_budget: null,
+              token_limit: 2_000,
+            }),
+          ],
+          members: [member("wei", [{ workspaceMemberId: "wm-wei" }])],
+        }),
+      ),
+    )
+    const whole = rules.get("spend-tokens")?.spend
+    expect(whole).toMatchObject({
+      max: null,
+      caps: "1,000,000 tokens + 500 requests",
+    })
+    // No dollar cap to measure against, and none for the limit dialog to change.
+    expect(whole?.used).toBeUndefined()
+    expect(whole?.usedSpent).toBeUndefined()
+    expect(whole?.target).toBeUndefined()
+    const each = rules.get("spend-each-tokens-each")?.spend
+    expect(each).toMatchObject({
+      max: null,
+      caps: "2,000 tokens",
+      isEach: true,
+    })
+    expect(each?.used).toBeUndefined()
+  })
+
   it("reads a period that ended before now as nothing spent, as Home does", () => {
     const rules = buildRules(
       sources({
@@ -633,6 +673,7 @@ describe("what each role may do and see", () => {
     type: "spend",
     spend: {
       max: 700,
+      caps: "$700.00",
       per: "a month",
       isEach: false,
       spent: 150,
@@ -652,14 +693,28 @@ describe("what each role may do and see", () => {
     id: "spend-each-d",
     name: "Each Data member, weekly",
     type: "spend",
-    spend: { max: 25, per: "a week", isEach: true, spent: 0, used: 0 },
+    spend: {
+      max: 25,
+      caps: "$25.00",
+      per: "a week",
+      isEach: true,
+      spent: 0,
+      used: 0,
+    },
     teamDefault: dataDefault,
   })
   const oldBudget = rule({
     id: "spend-each-o",
     name: "Each Platform member, weekly",
     type: "spend",
-    spend: { max: 40, per: "a week", isEach: true, spent: 1, used: 0.5 },
+    spend: {
+      max: 40,
+      caps: "$40.00",
+      per: "a week",
+      isEach: true,
+      spent: 1,
+      used: 0.5,
+    },
   })
   const none = () => false
   const dataAdmin = (id: string) => id === "ws-data"

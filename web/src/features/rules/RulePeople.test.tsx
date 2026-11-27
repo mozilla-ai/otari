@@ -25,7 +25,7 @@ const RULE: Rule = {
   scope: { kind: "each", teams: ["Platform"], count: 12, includesYou: false },
   mode: "Enforce",
   subject: {},
-  spend: { max: 40, per: "a week", isEach: true },
+  spend: { max: 40, caps: "$40.00", per: "a week", isEach: true },
   people: PEOPLE,
 }
 
@@ -75,7 +75,7 @@ describe("People under a rule", () => {
       <RulePeople
         rule={{
           ...RULE,
-          spend: { max: 10, per: "a week", isEach: true },
+          spend: { max: 10, caps: "$10.00", per: "a week", isEach: true },
           people: [ethan],
         }}
         isManager

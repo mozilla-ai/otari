@@ -251,7 +251,8 @@ function RuleBand({
       align: "end",
       allowsSorting: true,
       cell: (rule) =>
-        rule.spend?.usedSpent === undefined ? null : (
+        rule.spend?.usedSpent === undefined ||
+        rule.spend.max === null ? null : (
           <UsedCell
             spent={rule.spend.usedSpent}
             max={rule.spend.usedMax ?? rule.spend.max}

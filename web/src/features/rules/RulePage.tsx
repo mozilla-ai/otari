@@ -60,7 +60,8 @@ export function RulePage({ ruleId }: { ruleId: string }) {
   const target = spend?.target
   const teamDefault = isManager ? rule.teamDefault : undefined
   // A single ceiling's spend has no people table to live in.
-  const hasPeriod = isManager && spend !== undefined && !spend.isEach
+  const hasPeriod =
+    isManager && spend !== undefined && !spend.isEach && spend.max !== null
   const action = target ? (
     <Button onPress={() => setPending({ action: "change-limit", rule })}>
       Change spend limit
@@ -98,7 +99,7 @@ export function RulePage({ ruleId }: { ruleId: string }) {
         <Fact label="Mode">
           <ModeChip mode={rule.mode} />
         </Fact>
-        {hasPeriod && spend.spent !== undefined ? (
+        {hasPeriod && spend.spent !== undefined && spend.max !== null ? (
           <Fact label="This period">
             <span className="flex flex-col gap-1.5">
               <span className="tabular-nums">

@@ -21,6 +21,7 @@ import type {
   Workspace,
   WorkspaceBudgetDefault,
 } from "@/client"
+import { limitLabel } from "@/features/budgets/organizationBudget"
 import { keyState } from "@/features/keys/keyList"
 import { attributionId } from "@/features/organization/attribution"
 import { memberLabel } from "@/features/organization/roles"
@@ -91,7 +92,10 @@ export interface RulePerson {
 }
 
 interface SpendFigures {
-  max: number
+  /** The dollar cap, or null for a budget that caps only tokens or requests. */
+  max: number | null
+  /** Every cap it holds, in words: "$50.00", "1,000,000 tokens + 500 requests". */
+  caps: string
   /** "a week", "a month", "every 10 days", or "" where it is not known. */
   per: string
   /** A limit each person has to themselves, rather than one shared. */
@@ -359,8 +363,8 @@ export function buildRules(sources: RuleSources): Rule[] {
   const perPersonGroups = new Map<string, OrganizationSpendCeiling[]>()
 
   for (const ceiling of ceilings) {
-    // A $0 limit is a limit: it refuses every request.
-    if (typeof ceiling.max_budget !== "number") continue
+    // Every ceiling is listed, a $0 one and one capping only tokens or
+    // requests included: each refuses requests.
     if (ceiling.scope_type === "workspace_member") {
       const group = perPersonGroups.get(ceiling.budget_id) ?? []
       group.push(ceiling)
@@ -414,13 +418,22 @@ export function buildRules(sources: RuleSources): Rule[] {
       subject,
       spend: {
         max: ceiling.max_budget,
+        caps: limitLabel(ceiling),
         spent: ceiling.current_spend,
-        used: shareOf(ceiling.current_spend, ceiling.max_budget),
-        usedSpent: ceiling.current_spend,
+        ...(ceiling.max_budget === null
+          ? {}
+          : {
+              used: shareOf(ceiling.current_spend, ceiling.max_budget),
+              usedSpent: ceiling.current_spend,
+            }),
         per: perWords(ceiling),
         isEach: false,
+        // The limit dialog writes a dollar amount, so a ceiling without one
+        // is not changed from here: it would gain a cap it never had.
         target:
-          limitScope && ceiling.provider_key_id === null
+          limitScope &&
+          ceiling.provider_key_id === null &&
+          ceiling.max_budget !== null
             ? {
                 scope: limitScope,
                 scopeId: ceiling.scope_id,
@@ -437,12 +450,18 @@ export function buildRules(sources: RuleSources): Rule[] {
 
   for (const [budgetId, group] of perPersonGroups) {
     const [first] = group
-    if (typeof first?.max_budget !== "number") continue
+    if (!first) continue
     const max = first.max_budget
     const placed = group.flatMap((one): Placement[] => {
       const found = byPlacement.get(one.scope_id)
       return found
-        ? [{ ...found, spent: one.current_spend, max: one.max_budget ?? max }]
+        ? [
+            {
+              ...found,
+              spent: one.current_spend,
+              max: one.max_budget ?? max ?? undefined,
+            },
+          ]
         : []
     })
     const people = peopleOf(placed, undefined)
@@ -472,12 +491,17 @@ export function buildRules(sources: RuleSources): Rule[] {
       },
       spend: {
         max,
+        caps: limitLabel(first),
         per: perWords(first),
         isEach: true,
         spent: people.reduce((sum, one) => sum + (one.spent ?? 0), 0),
-        used: highest ? shareOf(highest.spent, highest.max) : 0,
-        usedSpent: highest?.spent ?? 0,
-        usedMax: highest?.max ?? max,
+        ...(max === null
+          ? {}
+          : {
+              used: highest ? shareOf(highest.spent, highest.max) : 0,
+              usedSpent: highest?.spent ?? 0,
+              usedMax: highest?.max ?? max,
+            }),
       },
       people,
       formerCount: group.length - placed.length,
@@ -560,7 +584,12 @@ export function buildMemberRules(sources: MemberRuleSources): Rule[] {
       subject: {
         userIds: people.flatMap((one) => (one.userId ? [one.userId] : [])),
       },
-      spend: { max, per: policy ? perWords(policy) : "", isEach: true },
+      spend: {
+        max,
+        caps: formatUsd(max),
+        per: policy ? perWords(policy) : "",
+        isEach: true,
+      },
       people,
       teamDefault: defaultFor(
         sources.defaults,
@@ -592,7 +621,7 @@ const SORT_VALUE: Record<
   Exclude<RuleSortColumn, "name">,
   (rule: Rule) => number | undefined
 > = {
-  limit: (rule) => rule.spend?.max,
+  limit: (rule) => rule.spend?.max ?? undefined,
   spent: (rule) => rule.spend?.spent,
   used: (rule) => rule.spend?.used,
 }
