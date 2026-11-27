@@ -652,6 +652,14 @@ describe("the invitations page in the chrome", () => {
     window.localStorage.clear()
   })
 
+  it("draws no breadcrumb trail over the page", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/invitations" })
+
+    await screen.findByRole("navigation", { name: "Sidebar" })
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull()
+  })
+
   it("titles the tab", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap(), { url: "/invitations" })
