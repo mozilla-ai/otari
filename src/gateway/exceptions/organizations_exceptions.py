@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from fastapi import status
 
+from gateway.core.error_codes import MEMBER_ADDRESS_UNPROVEN
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -142,13 +143,19 @@ class OrganizationMemberAddressUnprovenError(TenancyConflictError):
     second organization take it as a member would hand them its access.
 
     The message says what would lift the refusal and nothing about the other
-    organization, which is another tenant's business.
+    organization, which is another tenant's business. It names the address rather
+    than the caller, because the refusal is about somebody else's account: an
+    admin who reads it otherwise tries to reset their own password.
     """
+
+    error_code = MEMBER_ADDRESS_UNPROVEN
 
     def __init__(self, identifier: object):
         super().__init__(
-            f"{identifier} cannot be added to or invited into this organization until whoever holds it proves "
-            "the address, by signing in with a provider or by resetting its password by email"
+            f"{identifier} has an account here whose address nobody has proved yet, so this organization "
+            "cannot add or invite it. Nothing about your own account needs to change: ask the person who "
+            f'holds {identifier} to sign in with a provider, or to choose a password through "Forgot your '
+            'password?", and then invite them again.'
         )
 
 

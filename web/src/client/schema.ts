@@ -11552,6 +11552,8 @@ export interface components {
          * @description An address the bulk invite could not invite, and why.
          */
         BulkInvitationFailurePublic: {
+            /** Code */
+            code?: string | null;
             /** Detail */
             detail: string;
             /** Email */

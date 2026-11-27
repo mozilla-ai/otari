@@ -90,6 +90,8 @@ PROVIDER_ERROR = "provider_error"
 PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 # Creating or first claiming an account needs the terms of service the deployment publishes.
 TERMS_NOT_ACCEPTED = "terms_not_accepted"
+# An address only another organization recorded, so this one cannot add or invite it until its holder proves it.
+MEMBER_ADDRESS_UNPROVEN = "member_address_unproven"
 # A workspace with web access (fetch or search) turned off refused a request that declared a web tool.
 WEB_ACCESS_DISABLED = "web_access_disabled"
 
