@@ -18,7 +18,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNeedsSsoSignInError,
     InvitationNoLongerValidError,
 )
-from gateway.models.organizations import WorkspaceAssignment
+from gateway.models.organizations import OrganizationInvitation, WorkspaceAssignment
 from gateway.models.tenancy import (
     Organization,
     OrganizationDomain,
@@ -26,6 +26,7 @@ from gateway.models.tenancy import (
     WorkspaceAssignmentRequest,
 )
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
+from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
@@ -290,6 +291,31 @@ async def test_a_decline_that_lands_after_an_earlier_read_closes_the_link(store:
         assert declined is not None
 
         assert await link.open("plain-token") is None
+
+
+async def test_a_link_that_expires_while_the_lookup_waits_opens_nothing(
+    monkeypatch: pytest.MonkeyPatch, store: _Store
+) -> None:
+    """Expiry is decided on the clock read after the lookup, which waits where a writer holds the row.
+
+    A clock read before the lookup judges the link by the time before that wait, so one that expired
+    during it would still open.
+    """
+    organization = await store.organization()
+    await store.invitation(organization, expires_in=timedelta(seconds=30))
+    real_lookup = OrganizationInvitationRepository.get_by_token_hash
+
+    async def lookup_that_outlasts_the_link(
+        self: OrganizationInvitationRepository, token_hash: str, *, lock: bool = False
+    ) -> OrganizationInvitation | None:
+        found = await real_lookup(self, token_hash, lock=lock)
+        store.clock.now += timedelta(minutes=1)
+        return found
+
+    monkeypatch.setattr(OrganizationInvitationRepository, "get_by_token_hash", lookup_that_outlasts_the_link)
+
+    async with store.uow:
+        assert await store.link().open("plain-token") is None
 
 
 async def test_preview_refuses_a_blocked_address(store: _Store) -> None:

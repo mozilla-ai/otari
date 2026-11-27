@@ -50,8 +50,9 @@ class InvitationLink(SignupInvitePort):
 
         NOTE: Callers must call this inside an open Unit of Work block.
         """
-        now = self._clock()
         invitation = await self._invitations.get_by_token_hash(hash_token(token), lock=lock)
+        # Read after the lookup, because that waits where a writer holds the row.
+        now = self._clock()
         if invitation is None or now >= invitation.expires_at or invitation.declined_at is not None:
             return None
         if await self._refuses_the_address(invitation, hand_carried=is_shared_token(token), now=now):
