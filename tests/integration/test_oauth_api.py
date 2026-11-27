@@ -12,8 +12,6 @@ nothing here can stand in for it.
 """
 
 import json
-import logging
-import re
 import uuid
 from base64 import urlsafe_b64encode
 from collections.abc import Generator
@@ -35,11 +33,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col, delete, update
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.api.routes import auth_oauth
 from gateway.api.routes._flow_cookies import MAX_LIVE_FLOWS
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthProviderUnavailableError
-from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import OAuthPendingState, Organization, User, WebAuthnCredential
 from gateway.repositories.identity import DashboardSessionRepository
@@ -56,8 +54,6 @@ from .conftest import build_test_client
 ORIGIN = "https://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 UNPROVEN_PASSWORD = "set-before-verification"  # pragma: allowlist secret
-
-_TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 
 @pytest.fixture
@@ -1072,9 +1068,14 @@ def test_a_session_that_cannot_be_stored_leaves_the_account_and_its_links_as_the
 
 
 @pytest.fixture
-def signup_configured(test_config: GatewayConfig, oauth_configured: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def signup_configured(
+    test_config: GatewayConfig,
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
+) -> None:
     """Let signup mail its verification link, on a deployment that also offers both providers."""
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
 
 
 def sign_up(client: TestClient, *, email: str, password: str) -> None:
@@ -1155,23 +1156,14 @@ def test_a_password_on_an_already_verified_address_survives_linking_a_provider(
     master_key_header: dict[str, str],
     signup_configured: None,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     db_session: Session,
+    recorded_mail: RecordingTransport,
 ) -> None:
     # The mailed link proved that the password belongs to the owner of the address.
     add_member(client, master_key_header, email="ada@example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        sign_up(client, email="ada@example.com", password=PASSWORD)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    assert (
-        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
-        == 200
-    )
+    sign_up(client, email="ada@example.com", password=PASSWORD)
+    token = token_in(recorded_mail.last)
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
     stub_exchange(monkeypatch)
 
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
@@ -1188,21 +1180,15 @@ def test_a_linked_sign_in_proves_an_address_an_operator_link_left_unproved(
     test_config: GatewayConfig,
     signup_configured: None,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     db_session: Session,
+    recorded_mail: RecordingTransport,
 ) -> None:
     # A password chosen through a shared operator link never reached the mailbox, so the owner signing in
     # through their existing provider link takes the account back, as a first sign-in would.
     add_member(client, master_key_header, email="ada@example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        sign_up(client, email="ada@example.com", password=PASSWORD)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD})
+    sign_up(client, email="ada@example.com", password=PASSWORD)
+    token = token_in(recorded_mail.last)
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     stub_exchange(monkeypatch)
     linked = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -1248,18 +1234,12 @@ def test_a_linked_sign_in_keeps_a_proven_password(
     master_key_header: dict[str, str],
     signup_configured: None,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
     add_member(client, master_key_header, email="ada@example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        sign_up(client, email="ada@example.com", password=PASSWORD)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD})
+    sign_up(client, email="ada@example.com", password=PASSWORD)
+    token = token_in(recorded_mail.last)
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     stub_exchange(monkeypatch)
     for _ in range(2):
@@ -1581,19 +1561,13 @@ def test_a_provider_sign_in_keeps_the_access_a_proven_password_opened(
     master_key_header: dict[str, str],
     signup_configured: None,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     db_session: Session,
+    recorded_mail: RecordingTransport,
 ) -> None:
     add_member(client, master_key_header, email="ada@example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        sign_up(client, email="ada@example.com", password=PASSWORD)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD})
+    sign_up(client, email="ada@example.com", password=PASSWORD)
+    token = token_in(recorded_mail.last)
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     proven_cookie = _signed_in_cookie(client, email="ada@example.com", password=PASSWORD)
     identity = _identity(db_session, "ada@example.com")
@@ -1786,24 +1760,18 @@ def test_a_claimed_account_links_a_provider_without_the_terms(
     signup_configured: None,
     terms_published: None,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     db_session: Session,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """An account someone already claimed with a password is not a new one, whatever provider it adds."""
     add_member(client, master_key_header, email="ada@example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        signed_up = client.post(
-            f"{API_ROOT}/auth/signup",
-            json={"email": "ada@example.com", "password": PASSWORD, "terms_accepted": True},
-        )
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    signed_up = client.post(
+        f"{API_ROOT}/auth/signup",
+        json={"email": "ada@example.com", "password": PASSWORD, "terms_accepted": True},
+    )
     assert signed_up.status_code == 200, signed_up.text
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD})
+    token = token_in(recorded_mail.last)
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
     assert verified.status_code == 200, verified.text
     accepted_at = _identity(db_session, "ada@example.com").terms_accepted_at
     assert accepted_at is not None

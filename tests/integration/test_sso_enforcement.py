@@ -16,6 +16,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.core.tokens import hash_token
@@ -1559,8 +1560,9 @@ async def test_requesting_a_password_reset_cannot_be_told_apart_from_an_unknown_
     async_db: AsyncSession,
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     organization = await create_organization(async_db, slug="acme")
     organization.sso_required = True

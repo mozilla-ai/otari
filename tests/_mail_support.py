@@ -8,9 +8,22 @@ than on the text of a log line.
 import re
 from collections.abc import Callable
 
+import pytest
+
 from gateway.services.mail import MailEnvelope
 
 _TOKEN_IN_LINK = re.compile(r"token=([A-Za-z0-9_.~-]+)")
+
+MAIL_CONFIGURED = {
+    "mail_transport": "smtp",
+    "smtp_host": "smtp.example.com",
+    "mail_from_email": "otari@example.com",
+}
+"""The settings a deployment needs before a send is attempted at all.
+
+Spread into a test's own config. Paired with ``recorded_mail``, which is what
+keeps the send off a socket.
+"""
 
 
 class RecordingTransport:
@@ -50,6 +63,15 @@ class RecordingTransport:
 
     def deliver(self, envelope: MailEnvelope) -> None:
         self.sent.append(envelope)
+
+
+def configure_mail(monkeypatch: pytest.MonkeyPatch, config: object) -> None:
+    """Point a shared test config at a transport, for a suite that cannot build its own.
+
+    NOTE: The caller must also use the ``recorded_mail`` fixture, or the send is attempted for real.
+    """
+    for name, value in MAIL_CONFIGURED.items():
+        monkeypatch.setattr(config, name, value)
 
 
 def token_in(envelope: MailEnvelope) -> str:

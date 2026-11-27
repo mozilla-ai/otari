@@ -9,9 +9,8 @@ body instead of on a log line's text.
 import pytest
 
 from _mail_support import RecordingTransport, token_in
-
 from gateway.core.config import GatewayConfig
-from gateway.services.mail import MailEnvelope, MailMessage, Mailer
+from gateway.services.mail import MailEnvelope, Mailer, MailMessage
 
 SMTP_CONFIGURED = {"smtp_host": "smtp.example.com", "mail_from_email": "otari@example.com"}
 

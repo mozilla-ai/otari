@@ -1,9 +1,8 @@
 """The operator's email blocklist (`/api/v1/admin/blocked-emails`) and every flow it gates, end to end."""
 
-import logging
 import re
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -13,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
@@ -24,20 +23,9 @@ _BLOCKED = f"{API_ROOT}/admin/blocked-emails"
 
 
 @pytest.fixture
-def mail(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+def mail(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, recorded_mail: RecordingTransport) -> None:
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
-
-
-@pytest.fixture
-def mail_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
-    """Capture the console transport's messages, which carry the links a test follows."""
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        yield caplog
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture
@@ -98,18 +86,15 @@ def _session_count(session_factory: Callable[[], Session], user_id: uuid.UUID) -
 
 
 def _signed_up_and_verified(
-    client: TestClient, master_key_header: dict[str, str], mail_log: pytest.LogCaptureFixture, *, email: str
+    client: TestClient, master_key_header: dict[str, str], mail: RecordingTransport, *, email: str
 ) -> None:
     """An account added by an admin, claimed through signup and verified, so it can sign in by password."""
     added = client.post(
         f"{API_ROOT}/organizations/me/members", json={"email": email, "role": "member"}, headers=master_key_header
     )
     assert added.status_code == 201, added.text
-    mail_log.clear()
     assert client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD}).status_code == 200
-    match = _TOKEN_IN_LINK.search(mail_log.text)
-    assert match, mail_log.text
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": match.group(1), "password": PASSWORD})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token_in(mail.last), "password": PASSWORD})
     assert verified.status_code == 200, verified.text
 
 
@@ -207,9 +192,9 @@ def test_blocking_a_domain_ends_the_sessions_of_the_accounts_under_it_and_no_oth
 
 
 def test_a_blocked_account_cannot_sign_in_until_it_is_unblocked(
-    client: TestClient, master_key_header: dict[str, str], mail: None, mail_log: pytest.LogCaptureFixture
+    client: TestClient, master_key_header: dict[str, str], mail: None, recorded_mail: RecordingTransport
 ) -> None:
-    _signed_up_and_verified(client, master_key_header, mail_log, email="ada@example.com")
+    _signed_up_and_verified(client, master_key_header, recorded_mail, email="ada@example.com")
     entry = _block(client, master_key_header, "ada@example.com")
 
     refused = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
@@ -222,7 +207,7 @@ def test_a_blocked_account_cannot_sign_in_until_it_is_unblocked(
 
 
 def test_signup_resend_and_reset_send_nothing_to_a_blocked_address(
-    client: TestClient, master_key_header: dict[str, str], mail: None, mail_log: pytest.LogCaptureFixture
+    client: TestClient, master_key_header: dict[str, str], mail: None, recorded_mail: RecordingTransport
 ) -> None:
     added = client.post(
         f"{API_ROOT}/organizations/me/members",
@@ -231,7 +216,7 @@ def test_signup_resend_and_reset_send_nothing_to_a_blocked_address(
     )
     assert added.status_code == 201, added.text
     _block(client, master_key_header, "spam.example")
-    mail_log.clear()
+    already_sent = len(recorded_mail.sent)
 
     signup = client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@spam.example", "password": PASSWORD})
     resend = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "ada@spam.example"})
@@ -241,7 +226,7 @@ def test_signup_resend_and_reset_send_nothing_to_a_blocked_address(
     assert signup.status_code == 200, signup.text
     assert resend.status_code == 200, resend.text
     assert reset.status_code in (200, 202), reset.text
-    assert not _TOKEN_IN_LINK.search(mail_log.text), mail_log.text
+    assert len(recorded_mail.sent) == already_sent
 
 
 def test_a_blocked_address_cannot_be_added_or_invited(
@@ -289,7 +274,7 @@ def test_an_invitation_sent_before_the_block_cannot_be_accepted(
 
 
 def test_a_verification_link_mailed_before_the_block_verifies_nothing(
-    client: TestClient, master_key_header: dict[str, str], mail: None, mail_log: pytest.LogCaptureFixture
+    client: TestClient, master_key_header: dict[str, str], mail: None, recorded_mail: RecordingTransport
 ) -> None:
     added = client.post(
         f"{API_ROOT}/organizations/me/members",
@@ -297,16 +282,14 @@ def test_a_verification_link_mailed_before_the_block_verifies_nothing(
         headers=master_key_header,
     )
     assert added.status_code == 201, added.text
-    mail_log.clear()
-    assert (
-        client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@spam.example", "password": PASSWORD}).status_code
-        == 200
+    signed_up, signup_mail = recorded_mail.sent_during(
+        lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@spam.example", "password": PASSWORD})
     )
-    match = _TOKEN_IN_LINK.search(mail_log.text)
-    assert match, mail_log.text
+    assert signed_up.status_code == 200, signed_up.text
+    token = token_in(signup_mail)
     _block(client, master_key_header, "spam.example")
 
-    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": match.group(1), "password": PASSWORD})
+    verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD})
 
     assert verified.status_code == 400, verified.text
 

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from _mail_support import configure_mail
 from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -81,7 +82,7 @@ class _Clock:
 
 
 def _mail_on(config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "mail_transport", "console")
+    configure_mail(monkeypatch, config)
     monkeypatch.setattr(config, "public_base_url", "https://otari.example.com")
 
 
@@ -94,7 +95,7 @@ class _Outbox:
 
     async def __call__(self, *, to: str, message: MailMessage) -> MailDelivery:
         self.sent.append((to, message))
-        return MailDelivery(delivered=self.delivered, transport="console", reason=None if self.delivered else "down")
+        return MailDelivery(delivered=self.delivered, transport="smtp", reason=None if self.delivered else "down")
 
     @property
     def subjects(self) -> list[str]:

@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import Invitation, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -91,9 +92,10 @@ def test_invite_is_not_emailed_without_a_public_base_url(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """A relative accept link is useless in an inbox, so a transport alone is not enough."""
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", None)
 
     result = _invite(client, master_key_header, email="relative@example.com")
@@ -377,6 +379,7 @@ def test_an_unverified_signup_is_not_sent_to_a_verification_link_no_mailbox_rece
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """The console transport shows the signup's link to the operator, so naming it would strand the invitee."""
     result = _invite(client, master_key_header, email="hedy@example.com")
