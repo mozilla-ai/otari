@@ -15,9 +15,12 @@ Otari to put its requests under your budgets, usage tracking and traces.
    ```bash
    export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
    export ANTHROPIC_AUTH_TOKEN="<your-otari-key>"
-   export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
    claude
    ```
+
+   Claude Code keeps the model you already use (`/model`, or `model` in its
+   settings file). To pick a different one, see
+   [Choosing a model](#choosing-a-model).
 
 `ANTHROPIC_BASE_URL` ends in `/api`, not `/api/v1`, because Claude Code adds
 `/v1/messages` itself. Accounts in otari.ai's EU region use
@@ -114,6 +117,16 @@ without a user gets no link. See
 Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
 name as the model's [catalog id](models.md#catalog-spellings), whether the
 catalog writes its version `5-5` or `5.5`, so no alias is needed. An alias of the same name wins, which is how to send it elsewhere.
+
+Setting `ANTHROPIC_MODEL` is optional. Every session that sees the variable
+starts on that model instead of the one saved with `/model` or in a settings
+file; `/model` still switches it within a session. Put it in a shell profile or
+a user-level `env` block only if that is what you want, and if an earlier
+version of this guide had you export it, `unset` it and remove it from your
+profile to get your saved model back. Use a bare id there too: Claude Code does
+not recognize a `provider:model` name such as `anthropic:claude-opus-5-5`, and
+on a model it does not know it asks for up to 32,000 output tokens, which Otari
+holds against the budget (see [Budgets](#budgets)).
 
 Otari can also serve Claude Code from non-Anthropic models. Keep that setup in a
 settings file of its own, such as `~/.claude/otari.json`, so a plain `claude`
