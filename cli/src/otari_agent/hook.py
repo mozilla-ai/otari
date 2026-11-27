@@ -2587,8 +2587,8 @@ def hook(
     `--repo-only` is for a person whose own rules do not suit one repository.
     It means what it does on `otari guardrails validate`, so a dry run there
     agrees with this. Pass it to `otari hook setup` rather than editing the
-    settings file: a later `setup` run rewrites the registered command, so a
-    flag added by hand does not survive one.
+    settings file: a later `setup` run rewrites the registered command, keeping
+    `--repo-only` and dropping any other flag added by hand.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
@@ -3181,6 +3181,8 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     if settings_path.is_file():
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError as exc:
+            raise click.ClickException(f"{settings_path} is not valid UTF-8: {exc}") from exc
         except json.JSONDecodeError as exc:
             raise click.ClickException(f"{settings_path} is not valid JSON: {exc}") from exc
         if not isinstance(settings, dict):
@@ -3268,23 +3270,22 @@ _HOOK_SETUP_BY_HARNESS = {
 }
 
 
-def _hook_global_registration_without_repo_only() -> Path | None:
-    """Claude Code's user settings file, if it registers otari hook there without `--repo-only`.
+def _registered_otari_hook_argvs(settings_path: Path, event: str | None = None) -> list[list[str]]:
+    """The argv of every otari hook registration in a harness settings file, in `event` or across all events.
 
-    That registration runs in every repository on this machine, so it would still enforce the
-    person's own gates in a repository whose own entry just turned them off.
+    A missing or unreadable file, or one not shaped like a settings file, registers nothing.
     """
-    settings_path = claude_user_settings_path()
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(settings, dict):
-        return None
-    hooks_section = settings.get("hooks")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    hooks_section = settings.get("hooks") if isinstance(settings, dict) else None
     if not isinstance(hooks_section, dict):
-        return None
-    for entries in hooks_section.values():
+        return []
+    argvs = []
+    for name, entries in hooks_section.items():
+        if event is not None and name != event:
+            continue
         if not isinstance(entries, list):
             continue
         for entry in entries:
@@ -3293,8 +3294,20 @@ def _hook_global_registration_without_repo_only() -> Path | None:
             for hook_item in entry["hooks"]:
                 command = hook_item.get("command") if isinstance(hook_item, dict) else None
                 argv = _otari_hook_argv(command) if isinstance(command, str) else None
-                if argv is not None and "--repo-only" not in argv:
-                    return settings_path
+                if argv is not None:
+                    argvs.append(argv)
+    return argvs
+
+
+def _hook_global_registration_without_repo_only() -> Path | None:
+    """Claude Code's user settings file, if it registers otari hook there without `--repo-only`.
+
+    That registration runs in every repository on this machine, so it would still enforce the
+    person's own gates in a repository whose own entry just turned them off.
+    """
+    settings_path = claude_user_settings_path()
+    if any("--repo-only" not in argv for argv in _registered_otari_hook_argvs(settings_path)):
+        return settings_path
     return None
 
 
@@ -3487,15 +3500,14 @@ def _offer_starter_guardrail(root: Path, repo_only: bool = False) -> None:
     help="Agent integration to configure.",
 )
 @click.option(
-    "--repo-only",
-    is_flag=True,
-    default=False,
+    "--repo-only/--no-repo-only",
+    default=None,
     help=(
         "Register the hook to enforce this repo's guardrail alone, leaving out your own in "
-        f"{GuardrailOrigin.USER.directory}."
+        f"{GuardrailOrigin.USER.directory}. Without either flag, an existing registration keeps its choice."
     ),
 )
-def hook_setup(harness: str, repo_only: bool) -> None:
+def hook_setup(harness: str, repo_only: bool | None) -> None:
     """Register otari hook in this repository, in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
@@ -3515,6 +3527,8 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     not run invokes it on every such tool call for nothing. On claude-code, it
     also warns when `~/.claude/settings.json` registers the hook for every
     repository without the flag, since that registration still runs here.
+    A re-run without either flag keeps `--repo-only` when the existing
+    PreToolUse registration has it; `--no-repo-only` removes it.
     pi registers through its extension, which has no such flag, so the
     combination is refused rather than silently ignored.
     """
@@ -3531,9 +3545,15 @@ def hook_setup(harness: str, repo_only: bool) -> None:
     if root is None:
         raise click.ClickException("Not inside a Git repository.")
 
+    setup = _HOOK_SETUP_BY_HARNESS[harness]
+    settings_path = root / setup.settings_dir / setup.settings_name
+    if repo_only is None:
+        repo_only = any("--repo-only" in argv for argv in _registered_otari_hook_argvs(settings_path, "PreToolUse"))
+        if repo_only:
+            click.echo("Keeping --repo-only from the existing registration; pass --no-repo-only to remove it.")
+
     _offer_starter_guardrail(root, repo_only)
 
-    setup = _HOOK_SETUP_BY_HARNESS[harness]
     needs = _guardrail_matcher_needs(_hook_guardrail_spec(root, repo_only=repo_only))
     matcher_parts = [setup.edit_matcher]
     if needs.read and setup.read_matcher is not None:
@@ -3549,7 +3569,6 @@ def hook_setup(harness: str, repo_only: bool) -> None:
         argv.append("--repo-only")
     command = shlex.join(argv)
 
-    settings_path = root / setup.settings_dir / setup.settings_name
     _refuse_write_outside_repo(root, settings_path)
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
