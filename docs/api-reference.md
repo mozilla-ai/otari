@@ -1079,7 +1079,8 @@ Decisions API:
 as the provider returned it, keyed like the questions, with `probabilities`,
 `confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
 as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a
-vision decision model served by llama-server or Gemini; other providers refuse it.
+vision decision model served by llama-server, OpenRouter or Gemini; Otari sends them
+to OpenRouter as `image_url` parts of the state and to Gemini as image blocks.
 
 `POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works against Otari with its

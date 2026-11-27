@@ -2,11 +2,14 @@
 
 TypeSafe's ``/v1/systemone`` defined the shape, and OpenRouter's alpha
 ``/api/alpha/decisions`` and llama-server's ``/v1/systemone`` adopted it, so one
-request body reaches any of them. Gemini's ``/v1beta/decisions`` asks the same
-three question types in its own words, so its body and answer are translated
-here. None is an any-llm provider, so this module is the client for all of them:
-it resolves a ``<name>:<model>`` selector against ``decision_providers``, sends
-the body to that upstream, and returns its answer in TypeSafe's shape.
+request body reaches any of them. Images are the exception: llama-server takes
+them as a top-level ``images`` field, which OpenRouter refuses, so OpenRouter is
+sent them as ``image_url`` parts of the state. Gemini's ``/v1beta/decisions``
+asks the same three question types in its own words, so its body and answer are
+translated here. None is an any-llm provider, so this module is the client for
+all of them: it resolves a ``<name>:<model>`` selector against
+``decision_providers``, sends the body to that upstream, and returns its answer
+in TypeSafe's shape.
 """
 
 from __future__ import annotations
@@ -141,8 +144,8 @@ def reported_charge(response: DecisionResponse) -> Decimal | None:
     return quantize_cost(Decimal(str(usage.cost))) if usage is not None and usage.cost is not None else None
 
 
-def _gemini_text(content: object) -> str:
-    """Gemini takes text where TypeSafe also takes structured JSON, which its guide says to serialize."""
+def _as_text(content: object) -> str:
+    """Content TypeSafe takes as text or structured JSON, as text: structured JSON is serialized."""
     return content if isinstance(content, str) else json.dumps(content)
 
 
@@ -152,20 +155,45 @@ def _gemini_image(data_url: str) -> dict[str, str]:
     return {"type": "image", "mime_type": header.removeprefix("data:").split(";", 1)[0], "data": data}
 
 
+def _openrouter_body(body: dict[str, Any]) -> dict[str, Any]:
+    """``body`` as OpenRouter's Decisions API takes it: its images as ``image_url`` parts of the state.
+
+    The state becomes a text part, followed by an image part per inline image.
+    A body with no images is sent as it is.
+    """
+    images = cast("list[str]", body.get("images") or [])
+    if not images:
+        return body
+    parts = [
+        {"type": "text", "text": _as_text(body["state"])},
+        *({"type": "image_url", "image_url": {"url": image}} for image in images),
+    ]
+    return {**{key: value for key, value in body.items() if key != "images"}, "state": parts}
+
+
+def _wire_body(provider: DecisionProvider, body: dict[str, Any]) -> dict[str, Any]:
+    """``body``, in TypeSafe's shape, as ``provider`` is sent it."""
+    if provider.provider == "gemini":
+        return _gemini_body(body)
+    if provider.provider == "openrouter":
+        return _openrouter_body(body)
+    return body
+
+
 def _gemini_question(question: dict[str, Any]) -> dict[str, Any]:
     """One question in Gemini's words. Fields TypeSafe allows beyond these have no Gemini counterpart."""
     kind = question["type"]
-    out: dict[str, Any] = {"type": kind, "instructions": _gemini_text(question["instructions"])}
+    out: dict[str, Any] = {"type": kind, "instructions": _as_text(question["instructions"])}
     criteria = question.get("criteria")
     if kind == "noul" and isinstance(criteria, dict):
         named = {"true_description": criteria.get("true"), "false_description": criteria.get("false")}
-        described = {key: _gemini_text(value) for key, value in named.items() if value is not None}
+        described = {key: _as_text(value) for key, value in named.items() if value is not None}
         if described:
             out["criteria"] = described
     elif kind == "choice" and isinstance(criteria, dict):
-        out["criteria"] = {option: "" if text is None else _gemini_text(text) for option, text in criteria.items()}
+        out["criteria"] = {option: "" if text is None else _as_text(text) for option, text in criteria.items()}
     elif kind == "score" and isinstance(criteria, list):
-        out["criteria"] = [_gemini_text(level) for level in criteria]
+        out["criteria"] = [_as_text(level) for level in criteria]
     return out
 
 
@@ -174,7 +202,7 @@ def _gemini_body(body: dict[str, Any]) -> dict[str, Any]:
 
     The state becomes ``input``: text, followed by an image block per inline image.
     """
-    text = _gemini_text(body["state"])
+    text = _as_text(body["state"])
     images = cast("list[str]", body.get("images") or [])
     payload: str | list[dict[str, str]] = (
         [{"type": "text", "text": text}, *(_gemini_image(image) for image in images)] if images else text
@@ -252,7 +280,7 @@ async def request_decision(
     try:
         response = await http.post(
             provider.url,
-            json=_gemini_body(body) if gemini else body,
+            json=_wire_body(provider, body),
             headers=_auth_headers(provider),
             timeout=provider.timeout_s,
             # A redirect would carry the provider's key to wherever it points.
