@@ -1,4 +1,4 @@
-"""Whether an invitation a deployment sent allows an account for the address it names."""
+"""Whether an invitation allows an account for the address somebody claims."""
 
 from typing import Protocol
 

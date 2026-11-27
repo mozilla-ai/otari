@@ -51,7 +51,7 @@ class InvitationLink(SignupInvitePort):
         NOTE: Callers must call this inside an open Unit of Work block.
         """
         invitation = await self._invitations.get_by_token_hash(hash_token(token), lock=lock)
-        # Read after the lookup, because that waits where a writer holds the row.
+        # The clock is read after the lookup, which waits when another transaction holds the row.
         now = self._clock()
         if invitation is None or now >= invitation.expires_at or invitation.declined_at is not None:
             return None
@@ -72,17 +72,16 @@ class InvitationLink(SignupInvitePort):
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
                 return False
-            # Taken before the enforcement is read, because turning it on takes the same lock.
+            # The lock comes before the read, because turning the requirement on takes the same lock.
             await self._organizations.lock_settings(invitation.organization_id)
             settings = await self._organizations.sso_settings(invitation.organization_id)
-            # Asked again under the invitation's own lock, which the caller holds from here, so a
-            # cancellation cannot be honored against a link this already allowed. Taken after the
-            # organization, which is the order every writer of these rows takes.
+            # The second read takes a row lock the caller holds until it commits, so a cancellation
+            # cannot be honored against a link this already allowed. The organization lock comes
+            # first, because every writer of these rows takes them in that order.
             if await self.open(token, lock=True) is None:
                 return False
-        # The requirement alone, which is all ``_sso_would_block`` can weigh here: an account this
-        # allows holds no link to the connection and claims no exemption. Where one already exists
-        # this answers stricter, and acceptance asks the full rule again.
+        # Only the requirement itself can apply here. The account does not exist yet, so it holds
+        # no link to the connection and claims no exemption. Acceptance asks the whole rule again.
         return settings is None or not settings.required
 
     async def _refuses_the_address(

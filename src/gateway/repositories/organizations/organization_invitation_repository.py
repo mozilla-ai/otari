@@ -392,8 +392,9 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         ``lock`` holds the row until the caller's transaction ends, so a cancellation or a decline
         of it waits.
 
-        NOTE: ``populate_existing`` so a caller sees what another transaction committed, rather than
-        an instance this session loaded earlier. A session does not expire its instances on commit.
+        NOTE: The read refreshes an instance this session loaded earlier, because a session does
+        not expire its instances on commit. A caller therefore sees what another transaction
+        committed rather than the values it already held.
 
         NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
         """

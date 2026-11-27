@@ -400,7 +400,7 @@ class _SignupRefused(Exception):
 
 
 class _SignupRaceLostError(Exception):
-    """Another write claimed the address while this one was hashing its password."""
+    """Another write claimed the address while this signup was hashing its password."""
 
 
 async def create_user_for_signup(
@@ -503,12 +503,12 @@ async def create_user_for_signup(
                     raise _SignupRefused
                 account = registration.identity
             else:
-                # An identity no organization still wants gets what a new address gets.
+                # An identity no organization still wants is treated as a new address would be.
                 await organizations.provision_tenancy_for_claim(
                     identity, open_signup=config.open_signup, full_name=full_name
                 )
-                # Locked before the rule below is asked, so nothing can drop the identity between
-                # the answer and the write it admits.
+                # The lock comes before the rule below, so nothing can drop the identity between
+                # that answer and the write depending on it.
                 await organizations.lock_identity(identity.id)
                 if not invited and not await unverified_identity_is_claimable(
                     organizations, identity, open_signup=config.open_signup
@@ -538,7 +538,7 @@ async def create_user_for_signup(
             if not claimed:
                 raise _SignupRaceLostError
     except _SignupRefused:
-        # Every refusal inside the block pays one hash, so it takes about as long as a claim.
+        # Every refusal here hashes a password it will not store, so it takes about as long as a claim.
         await verify_absent_password_async(password)
         return None
     except _SignupRaceLostError:
