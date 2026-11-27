@@ -6,6 +6,8 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services import catalog as selectors
+from gateway.services.catalog import _overrides, _served
+from gateway.services.catalog._overrides import MetadataOverride
 from gateway.services.merged_catalog_service import ALIAS_OWNED_BY, ModelObject, ModelPricingInfo
 from gateway.services.model_identity import group_offerings
 from gateway.services.selector_index_service import answered_by_listing, models_by_identity, seed_for
@@ -301,6 +303,129 @@ def test_an_organization_key_offering_is_read_whichever_ranking_it_gets(config: 
     # The row still takes its limits from the offering it is named after, as the org key's own are unread.
     assert (row.context_window, row.max_output_tokens) == (1000000, 384000)
     assert org.release_date is None
+
+
+def _deepseek_catalog() -> ModelsDevCatalog:
+    """DeepSeek's own entry and a reseller's, both named DeepSeek V4.1 Flash 1017; no ``openai`` entry for it."""
+    own = ModelsDevModel(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash 1017",
+        release_date="2026-10-17",
+        context_window=1048576,
+        max_output_tokens=393216,
+        tool_call=True,
+        reasoning=True,
+    )
+    resold = ModelsDevModel(
+        id="deepseek-ai/DeepSeek-V4.1-Flash-1017", name="DeepSeek V4.1 Flash 1017", context_window=1000000
+    )
+    return ModelsDevCatalog(
+        providers={
+            "deepinfra": ModelsDevProvider(id="deepinfra", name="DeepInfra", doc=None, models={resold.id: resold}),
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={own.id: own}),
+        }
+    )
+
+
+def test_an_openai_compatible_key_offering_is_described_as_the_model_it_groups_under(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """A proxy key is stored under ``openai``, which lists no DeepSeek model, so the vendor's own entry describes it."""
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert row.id == "deepseek/deepseek-v4.1-flash-1017"
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.type == "chat"
+    assert row.supported_parameters == ["tools", "tool_choice", "reasoning"]
+    assert (row.context_window, row.max_output_tokens) == (1048576, 393216)
+    assert row.release_date == "2026-10-17"
+    assert org.name is None
+
+
+def test_a_limit_another_offering_reports_wins_over_the_identitys_entry(config: GatewayConfig, no_index: None) -> None:
+    """The fallback only fills what the model's offerings leave unknown, capped at the window they report."""
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    engine = _offering("vllm:deepseek-v4.1-flash-1017", 0.5)
+    engine.context_window = 262144
+
+    (row,) = models_by_identity(config, catalog, [org, engine], slug_providers={"chat-proxy": "openai"})
+
+    assert row.pricing is not None
+    assert row.pricing.input_price_per_million == 0.3
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.context_window == 262144
+    assert row.max_output_tokens == 262144
+
+
+def test_a_named_row_still_takes_what_it_leaves_unknown_from_the_identitys_entry(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """A reseller's entry names the model but gives no output limit, which the vendor's own entry fills."""
+    catalog = _deepseek_catalog()
+    resold = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.5)
+    selectors.apply_model_metadata(config, catalog, resold)
+    assert (resold.name, resold.max_output_tokens) == ("DeepSeek V4.1 Flash 1017", None)
+
+    (row,) = models_by_identity(config, catalog, [resold])
+
+    assert row.name == "DeepSeek V4.1 Flash 1017"
+    assert row.max_output_tokens == 393216
+
+
+def test_an_override_of_the_vendors_own_selector_does_not_describe_the_row(
+    config: GatewayConfig, no_index: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fill reads the entry, not what this deployment says about a selector the row is not served by."""
+    monkeypatch.setattr(_served, "_served", {})
+    monkeypatch.setattr(
+        _overrides, "_overrides", {(None, "deepseek"): {"deepseek-flash": MetadataOverride(context_window=131072)}}
+    )
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert row.context_window == 1048576
+
+
+def test_a_capability_another_offering_reports_wins_over_the_identitys_entry(
+    config: GatewayConfig, no_index: None
+) -> None:
+    """An offering's own report wins over models.dev's entry, as its price and limits do."""
+    own = ModelsDevModel(id="deepseek-flash", name="DeepSeek V4.1 Flash 1017")
+    resold = ModelsDevModel(id="deepseek-ai/DeepSeek-V4.1-Flash-1017", name="DeepSeek V4.1 Flash 1017", tool_call=True)
+    catalog = ModelsDevCatalog(
+        providers={
+            "deepseek": ModelsDevProvider(id="deepseek", name="DeepSeek", doc=None, models={own.id: own}),
+            "deepinfra": ModelsDevProvider(id="deepinfra", name="DeepInfra", doc=None, models={resold.id: resold}),
+        }
+    )
+    org = _offering("chat-proxy:deepseek-v4.1-flash-1017", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+    engine = _offering("deepinfra:deepseek-ai/DeepSeek-V4.1-Flash-1017", 0.5)
+    selectors.apply_model_metadata(config, catalog, engine)
+    assert (org.supported_parameters, engine.supported_parameters) == (None, ["tools", "tool_choice"])
+
+    (row,) = models_by_identity(config, catalog, [org, engine], slug_providers={"chat-proxy": "openai"})
+
+    assert row.supported_parameters == ["tools", "tool_choice"]
+
+
+def test_a_model_models_dev_does_not_list_stays_undescribed(config: GatewayConfig, no_index: None) -> None:
+    catalog = _deepseek_catalog()
+    org = _offering("chat-proxy:house-model-7b", 0.3)
+    selectors.apply_model_metadata(config, catalog, org)
+
+    (row,) = models_by_identity(config, catalog, [org], slug_providers={"chat-proxy": "openai"})
+
+    assert (row.name, row.type, row.context_window) == (None, None, None)
 
 
 @pytest.mark.parametrize(

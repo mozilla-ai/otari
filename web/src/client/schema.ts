@@ -3317,10 +3317,13 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate; a token limit that offering does not know is the smallest
-         *     the model's other offerings report, and an output limit filled that way is
-         *     capped at the entry's context window. A value nobody knows is omitted rather
-         *     than sent as null.
+         *     caller's own rate; a token limit or capability that offering does not know
+         *     comes from the model's other offerings, the smallest limit or the parameters
+         *     the first of them reports, and an output limit filled that way is capped at
+         *     the entry's context window. A field no offering reports is read
+         *     from models.dev's entry for the model, preferring the vendor's own, so a
+         *     model reached on an organization's key to an OpenAI-compatible endpoint is
+         *     described too. A value nobody knows is omitted rather than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
