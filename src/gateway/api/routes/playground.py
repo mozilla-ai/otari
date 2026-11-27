@@ -321,7 +321,12 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
     "/files",
     dependencies=_PLAYGROUND_FILES,
     responses={
-        413: {"description": "The upload exceeds the configured maximum size."},
+        413: {
+            "description": (
+                "The upload exceeds the configured maximum size, or would take its workspace past "
+                "the number of files or bytes the deployment allows."
+            )
+        },
         422: {
             "description": "Validation Error",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},

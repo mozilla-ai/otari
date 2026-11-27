@@ -98,6 +98,49 @@ def test_upload_too_large_rejected(
     assert resp.status_code == 413
 
 
+def test_a_full_workspace_refuses_uploads_until_a_file_is_deleted(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    test_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "files_workspace_max_files", 1)
+    monkeypatch.setattr(test_config, "files_workspace_max_bytes", 8)
+
+    def upload(payload: bytes) -> Any:
+        return client.post(
+            f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", payload, "text/plain")}
+        )
+
+    first = upload(b"abcd")
+    assert first.status_code == 200, first.text
+    full = upload(b"efgh")
+    assert full.status_code == 413
+    assert "storage limit" in full.json()["detail"]
+    # The refused upload deleted nothing.
+    kept = client.get(f"{API_ROOT}/files/{first.json()['id']}/content", headers=api_key_header)
+    assert kept.status_code == 200
+    assert kept.content == b"abcd"
+
+    assert client.delete(f"{API_ROOT}/files/{first.json()['id']}", headers=api_key_header).status_code == 200
+    assert upload(b"x" * 9).status_code == 413
+    assert upload(b"efgh").status_code == 200
+
+
+def test_an_upload_cannot_claim_the_code_execution_output_purpose(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        data={"purpose": "code_execution_output"},
+        files={"file": ("a.txt", b"abcd", "text/plain")},
+    )
+    assert resp.status_code == 400
+    assert "reserved" in resp.json()["detail"]
+
+
 def test_upload_body_over_the_route_limit_is_refused_before_parsing(
     client: TestClient,
     api_key_header: dict[str, str],
