@@ -23,7 +23,6 @@ import type {
 } from "@/client"
 import { useOpenCreateKey } from "@/features/keys/openCreateKey"
 import { API_ROOT } from "@/shared/api/client"
-import { useBreadcrumbLeaf } from "@/shared/hooks/BreadcrumbLeaf"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -651,14 +650,11 @@ describe("the invitations page in the chrome", () => {
     window.localStorage.clear()
   })
 
-  it("titles the tab and the breadcrumb", async () => {
+  it("titles the tab", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap(), { url: "/invitations" })
 
-    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
-      "Invitations",
-    )
-    expect(document.title).toBe("Invitations · Otari")
+    await waitFor(() => expect(document.title).toBe("Invitations · Otari"))
   })
 
   it("closes the mobile drawer when the switcher opens the inbox", async () => {
@@ -1395,27 +1391,13 @@ describe("AppShell entitlement gating", () => {
     expect(guideRow).toHaveClass("md:hidden")
   })
 
-  it("names the scope and the page, leaving out an organization there is one of", async () => {
-    mockMatchMedia(false)
-    await renderShell()
-
-    // First boot provisions one organization and most deployments keep exactly
-    // that, so naming it on every page is a segment that never disambiguates
-    // anything; the scope switcher names the active one where it matters.
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Home")
-    expect(crumb).not.toHaveTextContent(/organization/i)
-  })
-
-  it("names a nested destination after itself, not after its group", async () => {
+  it("titles a nested destination after itself, not after its group", async () => {
     mockMatchMedia(false)
     // `navItemForPath` answers with the entry that gates a path, which for a
-    // child is its parent; a breadcrumb wants the leaf.
+    // child is its parent; the title wants the leaf.
     await renderShell(bootstrap(), { url: "/organization/web-search-keys" })
 
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Web search")
-    expect(crumb).not.toHaveTextContent("Providers")
+    await waitFor(() => expect(document.title).toBe("Web search · Otari"))
   })
 
   it("offers no way into the deployment rail to a caller who operates nothing there", async () => {
@@ -1463,14 +1445,10 @@ describe("AppShell entitlement gating", () => {
     expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
   })
 
-  it("names the deployment as the scope of its own pages", async () => {
+  it("shows the deployment's own rail on its pages", async () => {
     mockMatchMedia(false)
-    // The deployment has no name to show, unlike the other two scopes, which
-    // are data. The word is the scope, and it is the same word the control that
-    // reaches these pages carries.
-    // With a workspace selected, so the scope crumb is one this case could
-    // fail on: with none, "does not name a scope" is trivially true and the
-    // assertion proves nothing.
+    // With a workspace selected, so "neither of the other rails" is one this
+    // case could fail on.
     const inWorkspace = {
       workspace_memberships: [
         {
@@ -1486,11 +1464,6 @@ describe("AppShell entitlement gating", () => {
       context: inWorkspace,
     })
 
-    const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Deployment")
-    expect(crumb).toHaveTextContent("Settings")
-    expect(crumb).not.toHaveTextContent(/workspace/i)
-    expect(crumb).not.toHaveTextContent(/organization/i)
     // Its own rail, and the row is marked: these are ordinary rail rows now, so
     // the highlight comes from the path every other row is on rather than from
     // anything built here.
@@ -1505,29 +1478,6 @@ describe("AppShell entitlement gating", () => {
     expect(
       within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
-  })
-
-  it("still names the workspace on an ordinary page, which is what the case above turns off", async () => {
-    mockMatchMedia(false)
-    // The control for the assertion above. Same fixture, a page a rail does own,
-    // and the scope is in the trail: without this, "the trail names no scope"
-    // could pass because the harness never produces one.
-    await renderShell(bootstrap(), {
-      url: "/usage",
-      context: {
-        workspace_memberships: [
-          {
-            name: "Default workspace",
-            role: "owner",
-            workspace_id: "44444444-4444-4444-4444-444444444444",
-          },
-        ],
-      },
-    })
-
-    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
-      "Default workspace",
-    )
   })
 
   it("answers a page with no row with the panel when its own surface is gone", async () => {
@@ -1830,12 +1780,12 @@ describe("the workspace rail, per role", () => {
 
   // The workspace's guardrails open to owners and admins only, so that page is
   // checked as an owner.
-  for (const [path, page, role] of [
-    ["/routing", "Routing", "member"],
-    ["/routing/coding", "Routing", "member"],
-    ["/tools/guardrails", "Guardrails", "owner"],
+  for (const [path, role] of [
+    ["/routing", "member"],
+    ["/routing/coding", "member"],
+    ["/tools/guardrails", "owner"],
   ] as const) {
-    it(`selects Rules on ${path} and names it in the breadcrumb`, async () => {
+    it(`selects Rules on ${path}`, async () => {
       mockMatchMedia(false)
       await renderShell(bootstrap(), { url: path, ...asRole(role) })
       const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
@@ -1849,15 +1799,6 @@ describe("the workspace rail, per role", () => {
       expect(tools.className).toBe(
         `${navRowClass({ isActive: false, isCollapsed: false })} w-full`,
       )
-      const trail = within(
-        screen.getByRole("navigation", { name: "Breadcrumb" }),
-      ).getAllByRole("listitem")
-      expect(
-        trail
-          .map((item) => item.textContent)
-          .filter((text) => text !== "/")
-          .slice(-2),
-      ).toEqual(["Rules", page])
     })
   }
 
@@ -1880,29 +1821,6 @@ describe("the workspace rail, per role", () => {
       ).toHaveLength(1)
     })
   }
-
-  it("ends the breadcrumb on the record a page names, after a link back to where it sits", async () => {
-    function ServerPage() {
-      useBreadcrumbLeaf("notion")
-      return <div>PAGE CONTENT</div>
-    }
-    mockMatchMedia(false)
-    await renderShell(bootstrap(), {
-      url: "/tools/mcp-servers/srv-1",
-      page: <ServerPage />,
-      ...asRole("member"),
-    })
-    const trail = screen.getByRole("navigation", { name: "Breadcrumb" })
-
-    expect(await within(trail).findByText("notion")).toHaveAttribute(
-      "aria-current",
-      "page",
-    )
-    expect(within(trail).getByRole("link", { name: "Tools" })).toHaveAttribute(
-      "href",
-      "/tools",
-    )
-  })
 })
 
 /** The openings so far; the shell's page views share the same recorder. */

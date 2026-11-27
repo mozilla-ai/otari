@@ -21,7 +21,6 @@ import {
 import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
-import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
 import { CreateKeyRailButton } from "@/app/nav/CreateKeyRailButton"
 import {
   lastLocation,
@@ -79,7 +78,6 @@ import { UpdateCheckPrompt } from "@/features/updateCheck/UpdateCheckPrompt"
 import { UpdateNotice } from "@/features/updateCheck/UpdateNotice"
 import { useSessionCaller } from "@/shared/api/auth"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { BreadcrumbLeafProvider } from "@/shared/hooks/BreadcrumbLeaf"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
@@ -495,9 +493,7 @@ export function AppShell() {
       <PostSignInGate>
         {/* The Create API key dialog, opened from any page that offers a key. */}
         <CreateKeyHost>
-          <BreadcrumbLeafProvider>
-            <AppShellChrome />
-          </BreadcrumbLeafProvider>
+          <AppShellChrome />
         </CreateKeyHost>
       </PostSignInGate>
     </EntitlementResolver>
@@ -825,8 +821,7 @@ function AppShellChrome() {
   // While the mobile drawer is open, the page behind it is inert: that is what
   // keeps an AT virtual cursor and Tab out of controls nobody can see. The top
   // bar is deliberately not included, because the control that closes the drawer
-  // is in it, and the trail beside that control is the one thing worth reading
-  // while the drawer is open.
+  // is in it.
   const backgroundInert = isMobile && mobileNavOpen ? true : undefined
 
   return (
@@ -1020,9 +1015,8 @@ function AppShellChrome() {
               />
             ) : null}
             <nav
-              // Named because the header's breadcrumb is a navigation landmark
-              // too, and two unnamed ones give a screen-reader user no way to tell
-              // the rail from the trail.
+              // Named so a screen-reader user can tell the rail from any other
+              // navigation landmark on the page (a tab row, a pager).
               aria-label="Sidebar"
               // Expanded, one 2px rhythm runs through rows *and* between groups:
               // the 32px heading block is what separates one group from the next.
@@ -1264,7 +1258,6 @@ function AppShellChrome() {
               >
                 <FiSidebar aria-hidden="true" className="size-4" />
               </button>
-              <Breadcrumbs pathname={pathname} />
             </div>
             {/* The phone's balance: `TopBarActions` and the wallet slot in it
                 are hidden below `md`. `empty:` keeps an empty slot out of the

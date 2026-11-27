@@ -372,7 +372,7 @@ export function applyNavLabelOverrides(
           const label = disclosureLabels[item.to]
           // Groups only, which is what the platform's single `NavDisclosure`
           // label maps to. A group is a destination here as well as a heading,
-          // so renaming one also renames what the breadcrumbs and the shell's
+          // so renaming one also renames what the tab title and the shell's
           // gated-off panel call that page; the group and the page sharing a
           // name is why that reads correctly rather than as a bug.
           // A plain link's label and a `NavChild`'s are outside the seam, as
@@ -591,18 +591,6 @@ export function railPathForPath(pathname: string): NavPath | undefined {
 }
 
 /**
- * The rail row a destination with no row of its own sits under, by name, for
- * the breadcrumb ("Rules" for Routing), or nothing.
- */
-export function railLabelForPath(pathname: string): string | undefined {
-  const item = navItemForPath(pathname)
-  const railPath = OFF_RAIL_ITEMS.find(
-    (one) => one.item.to === item?.to,
-  )?.railPath
-  return railPath ? navItemForPath(railPath)?.label : undefined
-}
-
-/**
  * Every nested destination, paired with the entry it is gated by.
  *
  * A child has no gating of its own, so `navItemForPath` has to answer with the
@@ -641,11 +629,11 @@ const DEPLOYMENT_PATHS: readonly string[] = DEPLOYMENT_NAV_SECTIONS.flatMap(
 )
 
 /**
- * What to call the destination at this pathname, as a breadcrumb would.
+ * What to call the destination at this pathname.
  *
  * Distinct from `navItemForPath`, which answers with the entry that *gates* a
  * path: for a nested destination that is the parent, so it would name
- * `/tools/web-search` "Tools". A breadcrumb wants the leaf.
+ * `/tools/web-search` "Tools". A page's name is the leaf's.
  */
 export function navLabelForPath(pathname: string): string | undefined {
   return navPageForPath(pathname)?.label
@@ -655,7 +643,8 @@ export function navLabelForPath(pathname: string): string | undefined {
  * The rail destination a pathname is, or sits under, as `{ to, label }`.
  *
  * A child wins over its parent for its own subpages too, so a server's page at
- * `/tools/mcp-servers/<id>` is under "MCP servers" rather than "Tools".
+ * `/organization/web-search-keys/<id>` is under "Web search" rather than
+ * "Providers".
  */
 export function navPageForPath(
   pathname: string,
@@ -675,7 +664,7 @@ const CHROME_PAGE_LABELS: Readonly<Record<string, string | undefined>> = {
 
 /**
  * What to call the page at this pathname, rail or chrome, for the tab title
- * and the breadcrumb alike, so the two cannot name one page differently.
+ * and the gated-off panel alike, so the two cannot name one page differently.
  */
 export function pageLabelForPath(pathname: string): string | undefined {
   return navLabelForPath(pathname) ?? CHROME_PAGE_LABELS[pathname]

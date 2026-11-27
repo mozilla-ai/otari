@@ -50,7 +50,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   // which is an organization owner's or admin's.
   const isManager = useIsOrganizationManager()
   const back = isManager ? (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <Link to="/workspaces" className="text-link hover:text-link-hover">
         ← Workspaces
       </Link>

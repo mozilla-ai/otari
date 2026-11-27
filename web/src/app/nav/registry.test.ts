@@ -20,7 +20,6 @@ import {
   ORG_NAV_SECTIONS,
   PLAYGROUND_NAV_ITEM,
   pageLabelForPath,
-  railLabelForPath,
   railPathForPath,
   visibleNavSections,
 } from "./registry"
@@ -875,7 +874,6 @@ describe("destinations with no row", () => {
   it("selects Rules on the Routing pages and the workspace's guardrails", () => {
     for (const path of ["/routing", "/routing/coding", "/tools/guardrails"]) {
       expect(railPathForPath(path)).toBe("/rules")
-      expect(railLabelForPath(path)).toBe("Rules")
       expect(navContextForPath(path)).toBe("workspace")
     }
     // Gated as their own entries, not as Rules.
@@ -888,7 +886,6 @@ describe("destinations with no row", () => {
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navItemForPath("/members")?.surface).toBe("workspaces")
     expect(railPathForPath("/members")).toBe("/people")
-    expect(railLabelForPath("/members")).toBe("People")
   })
 
   it("draws none of them as a row", () => {
@@ -912,8 +909,6 @@ describe("destinations with no row", () => {
     expect(railPathForPath("/tools/web-search")).toBe("/tools")
     expect(railPathForPath("/people/some-person")).toBe("/people")
     expect(railPathForPath("/rules/some-rule")).toBe("/rules")
-    expect(railLabelForPath("/rules")).toBeUndefined()
-    expect(railLabelForPath("/tools/web-search")).toBeUndefined()
     expect(railPathForPath("/account")).toBeUndefined()
   })
 })

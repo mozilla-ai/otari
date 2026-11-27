@@ -283,7 +283,7 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
     (`{isConfirming && <ConfirmDialog isOpen … />}`) rather than kept in the tree behind a
     prop, so its subtree, listeners and queries do not exist while it is closed. A skeleton is
     the height of what it replaces, or everything below it jumps on swap. Global chrome
-    (sidebar, header, breadcrumbs) belongs to `AppShell` and not to a route component, which
+    (sidebar, header) belongs to `AppShell` and not to a route component, which
     remounts it on every navigation. `window.location.reload()` is not a refresh button:
     invalidate the affected keys instead. Its callers are the root error boundary and
     `AutoUpdate`, which loads a new build on the next page change. A pre-paint decision,

@@ -44,7 +44,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   )
 
   const back = (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <Link to="/routing" className="text-link hover:text-link-hover">
         ← Routing
       </Link>

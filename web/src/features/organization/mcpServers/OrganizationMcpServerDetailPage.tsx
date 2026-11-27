@@ -38,7 +38,6 @@ import {
 } from "@/shared/api/organizationMcpServers"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUpdateMcpServer } from "@/shared/api/tools"
-import { useBreadcrumbLeaf } from "@/shared/hooks/BreadcrumbLeaf"
 
 import { OrganizationMcpServerWorkspaces } from "./OrganizationMcpServerWorkspaces"
 
@@ -94,10 +93,9 @@ export function OrganizationMcpServerDetailPage({
   // A disabled query still hands back what it cached, so a viewer who loses
   // the role while the page is open would otherwise keep seeing the server.
   const server = canEdit ? query.data : undefined
-  useBreadcrumbLeaf(server?.name ?? "")
 
   const back = (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <Link
         to="/organization/mcp-servers"
         className="text-link hover:text-link-hover"

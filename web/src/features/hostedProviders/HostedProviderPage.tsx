@@ -45,7 +45,7 @@ import { formatCountries } from "./supportedCountries"
 
 function BackLink() {
   return (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <Link
         to="/admin/hosted-providers"
         className="text-link hover:text-link-hover"

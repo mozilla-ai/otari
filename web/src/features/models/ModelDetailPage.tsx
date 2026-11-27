@@ -606,7 +606,7 @@ export function ModelDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <nav aria-label="Breadcrumb" className="text-caption">
+      <nav aria-label="Back" className="text-caption">
         {publicView ? (
           <a
             href={publicCatalogHref()}

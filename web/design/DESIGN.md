@@ -181,7 +181,7 @@ places and a wrapper adds nothing), a generic `Alert` (`ErrorBanner` and
 `InfoBanner` already are it), `Stack` (it would fight the `gap-*` on the parent
 rule that responsiveness.md sets), a `Link` (HeroUI's is a full page reload for
 an internal route, so a wrapper would be a trap, and the working answer is
-TanStack's), and `Breadcrumbs` (`app/nav/Breadcrumbs` is chrome and reads the
+TanStack's), and `Breadcrumbs` (it would have to read the
 router). Ask for one when something needs it.
 
 ## What these docs do not cover

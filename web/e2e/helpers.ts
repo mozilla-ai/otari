@@ -25,8 +25,8 @@ export function expectedKeyFingerprint(key: string): string {
 // page has tile-links whose names substring-collide with sidebar items
 // ("Providers healthy", "No budgets configured"), so an unscoped
 // getByRole("link", { name }) is ambiguous there.
-// The sidebar specifically: the header's breadcrumb is a navigation landmark
-// too, so an unnamed query now matches both.
+// The sidebar specifically: a page's tab row is a navigation landmark too, so
+// an unnamed query matches both.
 export const nav = (page: Page): Locator =>
   page.getByRole("navigation", { name: "Sidebar" })
 

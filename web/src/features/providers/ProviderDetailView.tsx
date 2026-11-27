@@ -99,7 +99,7 @@ const rowKey = (row: CatalogProviderModel) => row.id
 
 function BackLink() {
   return (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <a
         href={publicProvidersHref()}
         onClick={followInAppLink}

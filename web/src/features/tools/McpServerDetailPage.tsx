@@ -55,7 +55,6 @@ import {
   useWorkspaceMcpServer,
   useWorkspaceMcpServerLogos,
 } from "@/shared/api/tools"
-import { useBreadcrumbLeaf } from "@/shared/hooks/BreadcrumbLeaf"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
@@ -133,11 +132,10 @@ export function McpServerDetailPage({
     onLeave,
     openWindow,
   })
-  useBreadcrumbLeaf(query.data?.name ?? "")
   const logo = useWorkspaceMcpServerLogos(workspaceId).get(serverId)
 
   const back = (
-    <nav aria-label="Breadcrumb" className="text-caption">
+    <nav aria-label="Back" className="text-caption">
       <Link to="/tools/mcp-servers" className="text-link hover:text-link-hover">
         ← MCP servers
       </Link>
