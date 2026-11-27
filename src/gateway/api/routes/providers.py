@@ -13,12 +13,13 @@ at all.
 import asyncio
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
     get_config,
+    refuse_access_tokens,
     require_deployment_operator,
     verify_catalog_reader,
 )
@@ -263,6 +264,7 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
 
 @router.get("/providers/health")
 async def provider_health(
+    request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     hosted: HostedProviderServiceDep,
     refresh: bool = False,
@@ -279,13 +281,15 @@ async def provider_health(
     when its credentials can list models. Results are served from the discovery
     cache (cheap enough to poll), so ``checked_at`` reflects when each provider
     was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
-    provider.
+    provider. An access token may not, as on the other reads that dial a provider.
 
     A provider whose backend serves no model-listing endpoint cannot be verified
     this way, but it is not unreachable either: it is reported with
     ``discovery_unsupported`` and counted under ``degraded`` rather than as a
     reachability failure.
     """
+    if refresh:
+        refuse_access_tokens(request)
     results = await check_all_provider_health(
         config,
         hosted=hosted.discovery_dials,
