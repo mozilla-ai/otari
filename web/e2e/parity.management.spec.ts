@@ -8,7 +8,7 @@ import {
   login,
   nav,
   openAccountMenu,
-  openOrganization,
+  openDeployment,
   openTab,
   pageHeading,
   pressRowAction,
@@ -372,8 +372,8 @@ test.describe("budgets", () => {
     page,
   }) => {
     await login(page)
-    await openOrganization(page)
-    await openPage(page, "Spend & budgets", "Budgets")
+    await openDeployment(page)
+    await openPage(page, "Deployment budgets", "Deployment budgets")
 
     await page.getByRole("button", { name: "Create budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create

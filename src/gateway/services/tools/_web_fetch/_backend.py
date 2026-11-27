@@ -196,7 +196,14 @@ class WebFetchBackend:
                 cost=page.cost if page is not None else None,
                 deployment_paid=not resolved.on_credential,
             )
-        self._spans.record(started, ok=not is_tool_error(text), arguments=arguments, result=text)
+        failure = self._last_failure
+        self._spans.record(
+            started,
+            ok=not is_tool_error(text),
+            arguments=arguments,
+            result=text,
+            **(failure.as_span_error() if failure is not None else {}),
+        )
         return text
 
     async def _fetch(self, arguments: dict[str, Any]) -> str:

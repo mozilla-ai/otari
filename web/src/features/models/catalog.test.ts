@@ -11,8 +11,10 @@ import {
   catalogRequest,
   catalogUrlChanges,
   credentialLabel,
+  dataLocationOptions,
   EMPTY_CATALOG_LIST,
   EMPTY_FILTERS,
+  hostedInLabel,
   listedPrices,
   listedRate,
   makerKeyOf,
@@ -110,6 +112,7 @@ describe("catalogRequest", () => {
           pricing: "custom",
           source: "discovered",
           zeroDataRetention: true,
+          dataLocations: ["US", "EU"],
           releasedWithinDays: 365,
         },
         "input",
@@ -130,6 +133,7 @@ describe("catalogRequest", () => {
       pricing: "custom",
       source: "discovered",
       zero_data_retention: true,
+      data_location: ["EU", "US"],
       released_within_days: 365,
       sort: "input",
       direction: "desc",
@@ -146,6 +150,7 @@ describe("catalogRequest", () => {
     expect(params.max_input).toBeUndefined()
     expect(params.released_within_days).toBeUndefined()
     expect(params.zero_data_retention).toBeUndefined()
+    expect(params.data_location).toEqual([])
   })
 })
 
@@ -186,6 +191,7 @@ describe("the list's URL", () => {
         pricing: "priced",
         source: "discovered",
         zeroDataRetention: true,
+        dataLocations: ["DE", "EU", "GLOBAL"],
         releasedWithinDays: 365,
       },
       sort: "name",
@@ -194,6 +200,43 @@ describe("the list's URL", () => {
       pageSize: 50,
     }
     expect(catalogListFromUrl(readQuery(writeQuery(list)))).toEqual(list)
+  })
+
+  it("drops a data location the rail does not offer, so it never reaches the query", () => {
+    const list = catalogListFromUrl(
+      readQuery(new URLSearchParams("data_location=DE&data_location=Atlantis")),
+    )
+    expect(list.filters.dataLocations).toEqual(["DE"])
+  })
+
+  it("reads a hand-typed data location in any case, trimmed", () => {
+    const list = catalogListFromUrl(
+      readQuery(new URLSearchParams("data_location=de&data_location=%20eu%20")),
+    )
+    expect(list.filters.dataLocations).toEqual(["DE", "EU"])
+  })
+
+  it("removes a hand-typed data location from the URL when it is cleared", () => {
+    const seen = {
+      ...EMPTY_CATALOG_LIST,
+      filters: { ...EMPTY_FILTERS, dataLocations: ["DE", "SG"] },
+    }
+    const cleared = {
+      ...seen,
+      filters: { ...seen.filters, dataLocations: ["SG"] },
+    }
+    // The URL spells the pick `de`, with padding, and a location added elsewhere.
+    expect(
+      catalogUrlChanges(seen, cleared, {
+        data_location: [" de ", "SG", "fr"],
+      }),
+    ).toEqual({ data_location: ["SG", "FR"] })
+  })
+
+  it("counts each picked data location as a narrowing choice", () => {
+    expect(
+      activeFilterCount({ ...EMPTY_FILTERS, dataLocations: ["DE", "US"] }),
+    ).toBe(2)
   })
 
   it("names only the params that changed", () => {
@@ -378,5 +421,69 @@ describe("the listed price", () => {
     }
     expect(listedPrices(unpriced)).toEqual(["unpriced"])
     expect(listedRate(unpriced, "input")).toBe("—")
+  })
+})
+
+describe("dataLocationOptions", () => {
+  const codes = (...args: Parameters<typeof dataLocationOptions>) =>
+    dataLocationOptions(...args).map((option) => option.value)
+
+  it("offers the catalog's locations by name, Global and the union first", () => {
+    expect(codes(["US", "GLOBAL", "DE", "JP"], [])).toEqual([
+      "GLOBAL",
+      "EU",
+      "DE",
+      "JP",
+      "US",
+    ])
+    expect(dataLocationOptions(["JP"], []).map((o) => o.label)).toEqual([
+      "Japan",
+    ])
+  })
+
+  it("adds the European Union whenever a member state is in the catalog", () => {
+    expect(codes(["DE"], [])).toEqual(["EU", "DE"])
+    expect(codes(["EU"], [])).toEqual(["EU"])
+    expect(codes(["US", "JP"], [])).toEqual(["JP", "US"])
+  })
+
+  it("keeps a pick the catalog no longer has, so it can be unticked", () => {
+    expect(codes(["US"], ["FR"])).toEqual(["EU", "FR", "US"])
+  })
+
+  it("treats a missing facet as empty", () => {
+    expect(codes(undefined, [])).toEqual([])
+  })
+})
+
+describe("hostedInLabel", () => {
+  it("names nothing for a model with no declared location", () => {
+    expect(hostedInLabel([], [])).toBeNull()
+    expect(hostedInLabel(undefined, [])).toBeNull()
+  })
+
+  it("lists up to three by name, in the rail's order", () => {
+    expect(hostedInLabel(["US", "DE"], [])).toBe(
+      "Hosted in Germany, United States",
+    )
+    expect(hostedInLabel(["US", "FR", "EU", "GLOBAL"], [])).toBe(
+      "Hosted in Global, European Union, France +1 more",
+    )
+  })
+
+  it("counts the rest past three", () => {
+    expect(hostedInLabel(["US", "DE", "FR", "EU", "JP"], [])).toBe(
+      "Hosted in European Union, France, Germany +2 more",
+    )
+  })
+
+  it("leads with the locations a filter picked", () => {
+    expect(hostedInLabel(["US", "DE", "FR", "EU", "JP"], ["JP"])).toBe(
+      "Hosted in Japan, European Union, France +2 more",
+    )
+    // The union picked leads with every member state it admits.
+    expect(hostedInLabel(["US", "DE", "JP"], ["EU"])).toBe(
+      "Hosted in Germany, Japan, United States",
+    )
   })
 })

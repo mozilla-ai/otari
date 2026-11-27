@@ -139,8 +139,6 @@ async def _execute_function_calls(
         owner = owning_backend(pool, item.name)
         try:
             text = await owner.call_tool(item.name, args)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, item.name)
             log_tool_failure(item.name, detail, exc)
@@ -337,8 +335,6 @@ async def _execute_stream_owned(
         owner = owning_backend(pool, call.name)
         try:
             text = await owner.call_tool(call.name, args)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
             detail = tool_failure_detail(owner, call.name)
             log_tool_failure(call.name, detail, exc)
@@ -828,7 +824,7 @@ def _strategy_for(
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed a tool's native items, has anything
+    Only a request with a budget, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
@@ -875,6 +871,7 @@ async def responses_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         round_gate=round_gate,
+        use_budget=use_budget,
     )
 
 
@@ -916,6 +913,7 @@ async def responses_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for event in inner:

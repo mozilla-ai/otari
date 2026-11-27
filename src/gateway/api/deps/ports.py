@@ -212,10 +212,15 @@ def account_country_port_on(request: Request, db: AsyncSession) -> AccountCountr
 
 def get_signup_invite_port(
     db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
     container: ContainerDep,
 ) -> SignupInvitePort:
-    """Resolve the signup-invite adapter this build bound at startup."""
-    return container.resolve(SignupInvitePort, db)
+    """Resolve the signup-invite adapter this build bound at startup, on the request's session and Unit of Work.
+
+    The port's obligations require an implementation to read through the request's own Unit of Work
+    and hold the invitation it answers for, so a build that binds one needs it reachable.
+    """
+    return container.resolve(SignupInvitePort, db, uow=uow)
 
 
 SignupInvitePortDep = Annotated[SignupInvitePort, Depends(get_signup_invite_port)]

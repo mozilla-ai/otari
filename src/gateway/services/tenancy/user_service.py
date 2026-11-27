@@ -32,7 +32,7 @@ Departures from the port, each for a reason that belongs to this edition:
   organization; a deployment with no overlay is one tenant with several people in
   it (`organization_service`'s own docstring), so this edition's signup
   completes an identity `organization_service.create_active_organization_member_for_user`
-  or ``invite_active_organization_member_for_user`` already put on the roster,
+  or ``invite_active_organization_member_for_user`` already added to an organization,
   password-less. An address nobody has touched is refused rather than
   onboarded from nothing.
 - **Verification and reset tokens are opaque and hashed at rest, not JWTs.**
@@ -45,17 +45,19 @@ Departures from the port, each for a reason that belongs to this edition:
   until it expires; this port closes that gap rather than carrying it over.
 
 An identity with an address and no password is the normal state for someone an
-admin added to the roster (`organization_service`); ``create_user_for_signup``
+admin added to an organization (`organization_service`); ``create_user_for_signup``
 below is what gives it a way to sign in.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.address_proof import address_values, mark_address_usable, record_address
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import generate_token, hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
@@ -73,9 +75,10 @@ from gateway.exceptions.identity_exceptions import (
     VerificationPasswordIncorrectError,
     VerificationTokenInvalidError,
 )
-from gateway.models.tenancy import CallerIdentityPublic, User
+from gateway.models.identity import AddressAuthority
+from gateway.models.tenancy import CallerIdentityPublic, SignInMeans, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
-from gateway.ports.signup_invite_port import AddressProof
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -155,11 +158,16 @@ async def update_password(
         raise CurrentPasswordIncorrectError
     if current_password == new_password:
         raise UnmodifiedPasswordError
+    # NOTE: This records no address, since it supplies none and the identity already
+    # holds a password. Stated rather than defaulted, so a change that makes this record
+    # one cannot inherit a proof it never earned: proving a password says the caller owns
+    # the account, not that they receive mail at the address.
     await set_password(
         db,
         identity,
         new_password=new_password,
         sso_enforcement=sso_enforcement,
+        authority=AddressAuthority.SESSION,
         keep_session_token_hash=keep_session_token_hash,
     )
 
@@ -170,26 +178,37 @@ async def set_password(
     *,
     new_password: str,
     sso_enforcement: SsoEnforcement,
+    authority: AddressAuthority,
     email: str | None = None,
     keep_session_token_hash: str | None = None,
 ) -> None:
     """Set a password without proof of the previous one, and commit.
 
-    Reachable only by a caller who has already proved deployment authority: the
-    master key in a header, or a session on a deployment where no password has
-    been set yet, which is a session the master key must have minted. The route
-    owns that gate (`gateway.api.routes.auth_password`); this function does not
-    re-derive it, and must not be called from anywhere that has not applied it.
+    Set a password where no proof of a previous one is available: the master key
+    in a header, a session on a deployment nobody has claimed, or an identity that
+    holds no password yet. The route owns that gate
+    (`gateway.api.routes.auth_password`); this function does not re-derive it.
+
+    NOTE: Holding no password is not evidence of deployment authority. An account
+    provisioned by an organization's own connection holds none either, so callers
+    must state ``authority`` from what the caller proved rather than from the state
+    of the identity.
 
     ``email`` claims a sign-in address for an identity that has none, which is
     the state first boot leaves the operator in. It is refused if another
     identity already holds it, because the column is unique and the address is
     the handle sign-in matches on.
 
+    ``authority`` says what established the address, and only one that proves the
+    holder sets ``email_proven_at``. A session proves who is calling and nothing
+    about who receives mail at the address, so a claim made with one leaves the
+    address usable and unproved: auto-join skips it and another organization can
+    neither add nor invite it.
+
     ``email_verified_at`` is stamped when this call is the one that makes the
     identity able to sign in at all: a first password, or a newly supplied
-    address. Both are reachable only through deployment authority, which is what
-    the stamp records, and both are what the module docstring promises #650 will
+    address. It records that the address became usable rather than that anyone
+    proved it, and both are what the module docstring promises #650 will
     find already satisfied. It deliberately covers the identity adopted from an
     existing tenancy (`docs/access-control.md`), which arrives *with* an address,
     so a claim on it supplies no ``email`` and would otherwise leave the column
@@ -216,13 +235,13 @@ async def set_password(
         raise PasswordLinkUnavailableError(
             "Every organization this account belongs to requires sign-in through its own connection."
         )
-    vouches_for_the_address = email is not None or identity.hashed_password is None
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
+        record_address(identity, now=datetime.now(UTC), authority=authority)
     elif identity.email is None:
         raise SignInAddressRequiredError
-    if vouches_for_the_address:
-        identity.email_verified_at = datetime.now(UTC)
+    elif identity.hashed_password is None:
+        mark_address_usable(identity, now=datetime.now(UTC))
     identity.hashed_password = await hash_password_async(new_password)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
@@ -256,7 +275,7 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     """Set the name an identity goes by, or clear it, and commit.
 
     Whitespace is collapsed to single spaces and a value that holds nothing else
-    becomes NULL, which is the same state an identity starts in: a roster entry
+    becomes NULL, which is the same state an identity starts in: a member
     added by address has no name until somebody supplies one, and going back to
     that has to be reachable from the surface that supplies it. Every reader
     already falls back to the address, so clearing is a choice rather than a
@@ -303,8 +322,8 @@ async def unverified_identity_is_claimable(
     A verified identity is not this rule's business. Where signup is closed, an
     unverified one is claimable only while it has an active membership or an
     invitation it can still accept: revoking, declining or outliving an
-    invitation, or removing the member, leaves the identity behind, and nobody
-    on the roster still wants it. Every way into an unverified identity asks
+    invitation, or removing the member, leaves the identity behind, and no
+    organization still wants it. Every way into an unverified identity asks
     this at the moment it would let someone in, so a link minted while the
     identity was wanted stops working once it is not.
     """
@@ -316,9 +335,9 @@ async def unverified_identity_is_claimable(
 async def forget_unproven_access(db: AsyncSession, user_id: uuid.UUID) -> None:
     """Stage the end of the sessions and passkeys set up before an address was proven.
 
-    For when a proof of the mailbox replaces an unverified or only vouched
-    address: whoever chose the password before then may not be the person who
-    holds the mailbox. The caller clears the tokens it holds and commits.
+    For when a proof of the mailbox replaces an address that was unverified, or verified
+    on an organization's word alone: whoever chose the password before then may not be the
+    person who holds the mailbox. The caller clears the tokens it holds and commits.
     """
     await revoke_user_dashboard_sessions(db, user_id)
     await WebAuthnCredentialRepository(db).delete_for_user(user_id)
@@ -365,8 +384,23 @@ async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SignupSubmission:
+    """The fields one signup submits."""
+
+    email: str
+    password: str
+    full_name: str | None = None
+    invite_token: str | None = None
+    terms_accepted: bool = False
+
+
+class _SignupRefused(Exception):
+    """A refusal raised inside the signup's block, so the block rolls back and writes nothing."""
+
+
 class _SignupRaceLostError(Exception):
-    """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
+    """Another write claimed the address while this signup was hashing its password."""
 
 
 async def create_user_for_signup(
@@ -374,19 +408,17 @@ async def create_user_for_signup(
     config: GatewayConfig,
     *,
     background_tasks: BackgroundTasks,
-    email: str,
-    password: str,
-    uow: UnitOfWork,
-    organizations: OrganizationService,
     blocked_addresses: BlockedAddresses,
-    full_name: str | None = None,
-    terms_accepted: bool = False,
-    proof: AddressProof | None = None,
+    invites: SignupInvitePort,
+    organizations: OrganizationService,
+    submission: SignupSubmission,
+    uow: UnitOfWork,
 ) -> User | None:
-    """Claim an identity ``organization_service`` already put on the roster, register a new
-    one where the deployment allows it, or do nothing.
+    """Claim an identity ``organization_service`` already added to an organization, create the one
+    an invitation allows, register a new one where the deployment allows it, or do nothing.
 
-    Which of the three depends on ``open_signup`` (otari-ai#2100). Off, the
+    An invitation that allows an account answers ahead of the other three, which depend on
+    ``open_signup`` (otari-ai#2100). Off, the
     default and the single-tenant posture, this only ever completes an identity
     an admin already added or invited by address (password-less, per
     ``organization_service``'s own docstrings) and creates nothing from nothing,
@@ -402,6 +434,7 @@ async def create_user_for_signup(
     An unknown address is registered where ``open_signup`` is on, and refused otherwise.
     An identity ``unverified_identity_is_claimable`` refuses is refused too.
     So is an address the deployment's email blocklist matches, before its identity is looked up.
+    An invitation that allows an account for the address answers ahead of both of those rules.
     A verified address is refused because a password set on it would sign in with no proof of the mailbox.
     A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
     ``password`` is validated before the lookup, so a policy violation answers the same for every address.
@@ -416,11 +449,12 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
-    ``proof`` says the caller already proved the address (an invitation naming it,
-    through ``SignupInvitePort``): the identity is then verified as it is claimed, and
-    no verification email is sent, so the caller can sign in at once. A vouched proof is
-    recorded as such, because an organization vouching for an address is weaker than the
-    address answering and does not satisfy every rule a verified address does.
+    ``submission.invite_token`` is the invitation the caller named, and None where they named
+    none. Where ``invites`` allows an account for it, the address is recorded as proved by the
+    mailbox the link reached, no verification email is sent, and the caller can sign in at once.
+    That answer is read in the transaction that writes the account, so the two commit together.
+    An invitation registers an address this deployment would otherwise refuse. It decides nothing
+    about the organization the account lands in, which is settled as it is for any other signup.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -430,21 +464,20 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
-    if proof is None:
-        mailer.require_ready()
+    # Asked before anything reads the address, so the refusal cannot differ by address.
+    mailer.require_ready()
+    password = submission.password
     validate_new_password(password)
-    if config.terms_url is not None and not terms_accepted:
+    if config.terms_url is not None and not submission.terms_accepted:
         raise TermsNotAcceptedError
-    full_name = _normalized_full_name(full_name)
+    full_name = _normalized_full_name(submission.full_name)
 
-    address = validated_email(email)
+    address = validated_email(submission.email)
     if await blocked_addresses.blocked_among([address]):
         await verify_absent_password_async(password)
         return None
     identity = await UserRepository(db).get_by_email(address)
-    if identity is not None and (
-        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
-    ):
+    if identity is not None and (identity.sign_in_means is not SignInMeans.NONE or not identity.is_active):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
         # early return would be. Not a full equalization (the claim path also
@@ -457,60 +490,64 @@ async def create_user_for_signup(
         return None
     try:
         async with uow:
-            if identity is not None:
-                # An identity no organization still wants gets what a new address gets, and a lost race rolls it back.
+            invited = submission.invite_token is not None and await invites.allows_an_account(
+                submission.invite_token, claimed_address=address
+            )
+            if identity is None:
+                if not invited and not config.open_signup:
+                    raise _SignupRefused
+                # An invited address is not a stranger, so an invitation registers it where this
+                # deployment refuses an open signup.
+                registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
+                if not registration.created:
+                    raise _SignupRefused
+                account = registration.identity
+            else:
+                # An identity no organization still wants is treated as a new address would be.
                 await organizations.provision_tenancy_for_claim(
                     identity, open_signup=config.open_signup, full_name=full_name
                 )
-            if identity is None:
-                if not config.open_signup:
-                    # The same bcrypt cost as the branch above, for the same reason: an
-                    # address this deployment will not register has to answer in about
-                    # the time one it would register takes.
-                    await verify_absent_password_async(password)
-                    return None
-                # The registration, the password and the verification token below are committed together.
-                registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
-                if not registration.created:
-                    # This answers like every other enumeration-safe refusal.
-                    await verify_absent_password_async(password)
-                    raise _SignupRaceLostError
-                identity = registration.identity
-            else:
+                # The lock comes before the rule below, so nothing can drop the identity between
+                # that answer and the write depending on it.
                 await organizations.lock_identity(identity.id)
-                if not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup):
-                    # Checked in the block that writes the claim, so the roster cannot drop the identity in between.
-                    await verify_absent_password_async(password)
-                    return None
+                if not invited and not await unverified_identity_is_claimable(
+                    organizations, identity, open_signup=config.open_signup
+                ):
+                    raise _SignupRefused
+                account = identity
 
             token = generate_token()
-            values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
-            if proof is not None:
-                values["email_verified_at"] = datetime.now(UTC)
-                if proof is AddressProof.VOUCHED:
-                    values["email_vouched_at"] = datetime.now(UTC)
+            values: dict[str, str | datetime | None] = {"full_name": account.full_name or full_name}
+            if invited:
+                # The address is recorded as proved by its own mailbox. Only the port's obligation
+                # to answer for a delivered link makes that truthful.
+                values.update(address_values(AddressAuthority.MAILBOX, now=datetime.now(UTC)))
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
                     hours=config.email_verification_expiry_hours
                 )
-            if terms_accepted:
+            if submission.terms_accepted:
                 values["terms_accepted_at"] = datetime.now(UTC)
             # NOTE: A provider sign-in or another first password can commit after the check above.
             # The condition in this write decides.
             claimed = await UserRepository(db).claim_first_password(
-                identity.id,
+                account.id,
                 hashed_password=await hash_password_async(password),
                 require_unverified=True,
                 values=values,
             )
             if not claimed:
                 raise _SignupRaceLostError
+    except _SignupRefused:
+        # Every refusal here hashes a password it will not store, so it takes about as long as a claim.
+        await verify_absent_password_async(password)
+        return None
     except _SignupRaceLostError:
         return None
-    await db.refresh(identity)
-    if proof is not None:
-        return identity
+    await db.refresh(account)
+    if invited:
+        return account
 
     background_tasks.add_task(
         mailer.send,
@@ -521,7 +558,7 @@ async def create_user_for_signup(
             asset_root=mailer.asset_root,
         ),
     )
-    return identity
+    return account
 
 
 async def verify_email(
@@ -600,7 +637,7 @@ async def verify_email(
         ):
             raise VerificationTokenInvalidError
 
-    identity.email_verified_at = datetime.now(UTC)
+    record_address(identity, now=datetime.now(UTC), authority=AddressAuthority.MAILBOX)
     identity.email_verification_token_hash = None
     identity.email_verification_token_expires_at = None
     db.add(identity)
@@ -644,8 +681,7 @@ async def resend_verification_email(
     )
     if (
         identity is None
-        or identity.hashed_password is None
-        or identity.email_verified_at is not None
+        or identity.sign_in_means is not SignInMeans.UNVERIFIED_PASSWORD
         or not identity.is_active
         or not await unverified_identity_is_claimable(organizations, identity, open_signup=config.open_signup)
     ):
@@ -706,7 +742,7 @@ async def request_password_reset(
     identity = (
         None if await blocked_addresses.blocked_among([address]) else await UserRepository(db).get_by_email(address)
     )
-    if identity is not None and identity.is_active and _signs_in_only_without_password(identity):
+    if identity is not None and identity.is_active and identity.sign_in_means is SignInMeans.WITHOUT_PASSWORD:
         await verify_absent_password_async(_TIMING_EQUALIZER)
         _schedule_account_exists_notice(mailer, identity, background_tasks=background_tasks, to=address)
         return
@@ -755,8 +791,8 @@ async def reset_password(
 
     A reset on an unverified identity is a claim, so it is held to
     ``unverified_identity_is_claimable`` when it completes, not only when the
-    link was mailed. Under ``open_signup``, a reset that proves an unverified or
-    vouched address of an identity no organization still wants gives it an
+    link was mailed. Under ``open_signup``, a reset that proves an unproved
+    address of an identity no organization still wants gives it an
     organization and workspace of its own, as signup and a provider sign-in do.
     A reset that takes over an unverified address also drops the name whoever
     signed up chose, and renames the organization that signup founded. Both are
@@ -767,12 +803,12 @@ async def reset_password(
     ``terms_accepted`` is required, because the reset may be what makes the
     account usable at all.
 
-    The mailbox proof replaces an unverified or vouched address, so the
+    The mailbox proof replaces an unproved address, so the
     passkeys registered before it go as well as the sessions
     (``forget_unproven_access``).
 
     A shared token (``is_shared_token``) reached the person through an operator rather than the mailbox, so it
-    proves nothing about the address: completing it records the address as vouched for, the way a password
+    proves nothing about the address: completing it leaves ``email_proven_at`` null, the way a password
     chosen through an invitation link does. A later provider sign-in or emailed reset then proves it.
 
     No current password to prove, unlike ``update_password``: that is the
@@ -791,7 +827,7 @@ async def reset_password(
     as ``organization_service.accept_invitation`` and ``verify_email`` above.
 
     Where ``open_signup`` is off, an unverified identity is held to signup's
-    rule again here, because the roster can drop it after the link was mailed.
+    rule again here, because an organization can drop it after the link was mailed.
     A link mailed before its address was blocked is refused as invalid, and so
     is one whose identity some organization's own SSO enforcement now refuses.
     """
@@ -817,28 +853,26 @@ async def reset_password(
     if needs_terms:
         identity.terms_accepted_at = now
 
-    first_claim = identity.hashed_password is None and identity.email_verified_at is None
-    if identity.email_verified_at is None or identity.email_vouched_at is not None:
+    first_claim = identity.sign_in_means is SignInMeans.NONE
+    if identity.email_proven_at is None:
         await forget_unproven_access(db, identity.id)
     else:
         await revoke_user_dashboard_sessions(db, identity.id)
     identity.hashed_password = await hash_password_async(new_password)
     identity.password_reset_token_hash = None
     identity.password_reset_token_expires_at = None
-    # A mailed link proves the address as well as what a vouch only asserted; a shared one proves neither.
-    identity.email_vouched_at = now if is_shared_token(token) else None
-    if identity.email_verified_at is None:
-        identity.email_verified_at = now
+    unverified = identity.email_verified_at is None
+    record_address(
+        identity,
+        now=now,
+        authority=AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX,
+    )
+    if unverified:
         identity.email_verification_token_hash = None
         identity.email_verification_token_expires_at = None
     db.add(identity)
     await db.commit()
     return identity if first_claim else None
-
-
-def _signs_in_only_without_password(identity: User) -> bool:
-    """Whether a verified identity has no password, so it signs in with a provider or a passkey."""
-    return identity.hashed_password is None and identity.email_verified_at is not None
 
 
 def _schedule_account_exists_notice(
@@ -971,6 +1005,7 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 
 
 __all__ = [
+    "SignupSubmission",
     "authenticate",
     "create_user_for_signup",
     "describe_caller",

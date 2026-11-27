@@ -77,6 +77,7 @@ describe("a build that replaces the nav-item module", () => {
       "Accounts",
       "Hosted providers",
       "Subagent router",
+      "Deployment budgets",
       "Web search",
       "Code execution pricing",
       "Health",
@@ -95,7 +96,7 @@ describe("a build that replaces the nav-item module", () => {
     ])
     expect(
       section(ORG_NAV_SECTIONS, "org-general")?.items.map((item) => item.label),
-    ).toEqual(["Providers", "Guardrails", "Org settings"])
+    ).toEqual(["Providers", "MCP servers", "Guardrails", "Org settings"])
   })
 
   it("leaves a contributed row ungated unless it says otherwise", () => {

@@ -49,8 +49,10 @@ def _rendering() -> Any:
     return rendering
 
 
-def _call(*, failed: bool = False) -> NativeCall:
-    return NativeCall(WEB_FETCH_TOOL_NAME, "toolu_1", {"url": "https://example.com/a?token=secret"}, failed=failed)
+def _call(*, failed: bool = False, raised: bool = False) -> NativeCall:
+    return NativeCall(
+        WEB_FETCH_TOOL_NAME, "toolu_1", {"url": "https://example.com/a?token=secret"}, failed=failed, raised=raised
+    )
 
 
 @pytest.mark.parametrize(
@@ -164,6 +166,33 @@ def test_a_failed_chat_fetch_on_a_pool_that_keeps_no_failure_has_no_error() -> N
 
     assert ended["status"] == "failed"
     assert "error" not in ended
+
+
+def test_a_chat_fetch_that_raised_on_a_pool_that_keeps_no_failure_is_an_internal_error() -> None:
+    [ended] = _chat_rendering().ran(_call(failed=True, raised=True), _McpPoolLike())
+
+    assert ended["status"] == "failed"
+    assert ended["error"] == {"provider": None, "status": None, "tag": "internal_error", "retryable": False}
+
+
+def test_a_chat_fetch_that_raised_carries_the_failure_the_backend_kept_over_internal_error() -> None:
+    backend = _FetchBackendLike(failure=WebToolFailure.of("builtin", 404, "http_status"))
+
+    [ended] = _chat_rendering().ran(_call(failed=True, raised=True), backend)
+
+    assert ended["error"] == {"provider": "builtin", "status": 404, "tag": "http_status", "retryable": False}
+    assert backend.take_last_failure() is None
+
+
+def test_a_completed_chat_fetch_takes_the_failure_the_backend_kept() -> None:
+    """Otherwise a later failed fetch on a pool keeping nothing new would show this call's failure."""
+    backend = _FetchBackendLike(_page(), failure=WebToolFailure.of("builtin", 503, "http_status"))
+
+    [ended] = _chat_rendering().ran(_call(), backend)
+
+    assert ended["status"] == "completed"
+    assert "error" not in ended
+    assert backend.take_last_failure() is None
 
 
 @pytest.mark.parametrize(

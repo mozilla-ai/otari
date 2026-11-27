@@ -7,7 +7,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Never, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -82,6 +82,20 @@ class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never])
     async def cancel(self, copy_id: uuid.UUID) -> None:
         """Stage the removal of a copy the provider will not hold."""
         await self.db.execute(delete(FileProviderCopy).where(FileProviderCopy.id == copy_id))
+
+    async def has_removable(self, *, pending_before: datetime, expired_before: datetime) -> bool:
+        """Whether any copy is one ``remove_stale_pending`` or ``remove_expired`` would take out."""
+        removable = (
+            select(FileProviderCopy.id)
+            .where(
+                or_(
+                    FileProviderCopy.pending_since < pending_before,
+                    and_(FileProviderCopy.pending_since.is_(None), FileProviderCopy.expires_at < expired_before),
+                )
+            )
+            .limit(1)
+        )
+        return (await self.db.execute(removable)).first() is not None
 
     async def remove_expired(self, *, expired_before: datetime, limit: int) -> int:
         """Stage the removal of up to ``limit`` confirmed copies that expired before ``expired_before``.

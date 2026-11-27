@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { routeSearchParams } from "@/shared/helpers/appLocation"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 import { readSignInAddress } from "./signInAddress"
 
@@ -13,39 +15,56 @@ import { readSignInAddress } from "./signInAddress"
  * client, the fact the server declined to state. Naming the typed address
  * tells the visitor nothing the server said, only which inbox to open.
  *
+ * Reading the deployment's mail state leaks nothing, because it is not a fact
+ * about the address. Where email reaches no recipient, the page says to ask for
+ * the link rather than telling the visitor to watch an inbox.
+ *
  * `?type=resend` only changes which of the two sentences reads naturally; a
  * missing or unrecognized value falls back to the signup wording rather than
  * being validated, since the page is correct either way and a visitor who
  * hand-edited the URL should still get a page.
  */
 export function CheckEmailPage({ route }: { route: string }) {
+  const { mail } = useDeployment()
   const type = routeSearchParams(route).get("type")
   const [email] = useState(readSignInAddress)
   const address = email === "" ? "that address" : email
+  const delivers = mailDelivers(mail)
+  const link =
+    type === "resend" ? "a new verification link" : "a verification link"
+  // One clause for both states, so neither says more about the address than the
+  // other.
+  const condition =
+    type === "resend"
+      ? `If ${address} has an account waiting to be verified`
+      : `If you can sign up with ${address}`
 
   return (
     <PublicAuthLayout
-      title="Check your email"
+      title={delivers ? "Check your email" : "Ask for your link"}
       description={
-        type === "resend"
-          ? `If ${address} has an account waiting to be verified, we have sent it a new verification link.`
-          : `If you can sign up with ${address}, we have sent it a verification link.`
+        delivers
+          ? `${condition}, we have sent it ${link}.`
+          : `${condition}, ${link} was created for it. This deployment cannot email you a link that works, so ask whoever runs it for yours.`
       }
       footer={
         <>
           <PublicAuthLink to="/resend-verification">
-            Didn't get it? Send another link
+            {delivers
+              ? "Didn't get it? Send another link"
+              : "Create another link"}
           </PublicAuthLink>
           <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       }
     >
       <p className="text-body">
-        Open the link in that message to confirm the address. Signing in is
-        blocked until you do.
+        Open {delivers ? "the link in that message" : "the link"} to confirm the
+        address. Signing in is blocked until you do.
       </p>
       <p className="text-caption">
-        The link expires, and a new one can be sent at any time.
+        The link expires, and a new one can be {delivers ? "sent" : "created"}{" "}
+        at any time.
       </p>
     </PublicAuthLayout>
   )

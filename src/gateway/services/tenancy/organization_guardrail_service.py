@@ -65,6 +65,7 @@ from gateway.exceptions.guardrails_exceptions import (
     OrganizationGuardrailCheckFailedError,
     OrganizationGuardrailCredentialNeedsUrlError,
     OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailKwargsUnreadableError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNoEndpointError,
     OrganizationGuardrailNotFoundError,
@@ -86,15 +87,22 @@ from gateway.models.guardrails import (
     OrganizationGuardrailWorkspace,
     distinct_directions,
 )
-from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
+from gateway.models.secret_fields import (
+    redact_secret_like_values,
+    restore_is_unsafe,
+    restore_redacted_values,
+)
 from gateway.models.tenancy import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, require_base_url, run_input_guardrails
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
@@ -378,8 +386,13 @@ class OrganizationGuardrailPublic(BaseModel):
 
     @classmethod
     def from_model(
-        cls, guardrail: OrganizationGuardrail, *, workspace_ids: list[uuid.UUID]
+        cls,
+        guardrail: OrganizationGuardrail,
+        *,
+        validate_kwargs: dict[str, Any] | None,
+        workspace_ids: list[uuid.UUID],
     ) -> OrganizationGuardrailPublic:
+        """``validate_kwargs`` is passed in decrypted, because the row holds it sealed."""
         return cls(
             id=guardrail.id,
             organization_id=guardrail.organization_id,
@@ -390,7 +403,7 @@ class OrganizationGuardrailPublic(BaseModel):
             mode=guardrail.mode,
             on=_stored_directions(guardrail.on),
             on_unavailable=guardrail.on_unavailable,
-            validate_kwargs=redact_secret_like_values(guardrail.validate_kwargs),
+            validate_kwargs=redact_secret_like_values(validate_kwargs),
             enabled=guardrail.enabled,
             applies_to_all_workspaces=guardrail.applies_to_all_workspaces,
             workspace_ids=[] if guardrail.applies_to_all_workspaces else workspace_ids,
@@ -510,7 +523,7 @@ async def resolve_organization_guardrails(
                 mode=_stored_mode(row.mode),
                 on=_stored_directions(row.on),
                 on_unavailable=_stored_mode(row.on_unavailable),
-                validate_kwargs=row.validate_kwargs or {},
+                validate_kwargs=decrypt_mapping(row.encrypted_validate_kwargs) or {},
             ),
             credential=decrypt_secret(row.encrypted_credential) if row.encrypted_credential else None,
             definition_id=row.definition_id,
@@ -592,6 +605,14 @@ async def _validate_url(url: str, *, has_credential: bool) -> None:
         await validate_mcp_url(url, has_authorization_token=has_credential)
     except UnsafeURLError as exc:
         raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc
+
+
+def _encrypted_kwargs(validate_kwargs: dict[str, Any] | None) -> str | None:
+    """Encrypt a mandate's per-check arguments for storage. Nothing to store stays None."""
+    try:
+        return encrypt_mapping(validate_kwargs or None)
+    except SecretBoxUnavailableError:
+        raise SecretBoxUnavailableTenancyError("organization guardrail credentials") from None
 
 
 def _encrypted(credential: str) -> str:
@@ -680,7 +701,11 @@ class OrganizationGuardrailService:
 
     async def _public(self, guardrail: OrganizationGuardrail) -> OrganizationGuardrailPublic:
         scoped = await self._scope_ids([guardrail.id])
-        return OrganizationGuardrailPublic.from_model(guardrail, workspace_ids=scoped.get(guardrail.id, []))
+        return OrganizationGuardrailPublic.from_model(
+            guardrail,
+            validate_kwargs=readable_mapping(guardrail.encrypted_validate_kwargs),
+            workspace_ids=scoped.get(guardrail.id, []),
+        )
 
     async def _require_workspaces_in_organization(
         self, organization_id: uuid.UUID, workspace_ids: list[uuid.UUID]
@@ -750,7 +775,14 @@ class OrganizationGuardrailService:
         )
         scoped = await self._scope_ids([row.id for row in rows])
         return OrganizationGuardrailsPublic(
-            data=[OrganizationGuardrailPublic.from_model(row, workspace_ids=scoped.get(row.id, [])) for row in rows],
+            data=[
+                OrganizationGuardrailPublic.from_model(
+                    row,
+                    validate_kwargs=readable_mapping(row.encrypted_validate_kwargs),
+                    workspace_ids=scoped.get(row.id, []),
+                )
+                for row in rows
+            ],
             count=total,
         )
 
@@ -806,7 +838,7 @@ class OrganizationGuardrailService:
             # a ``***`` on a create is a literal the caller typed. Written as
             # the restore anyway, so the column's rule is visible at both writes
             # rather than only at the one where it has an effect.
-            validate_kwargs=restore_redacted_values(request.validate_kwargs, None) or None,
+            encrypted_validate_kwargs=_encrypted_kwargs(restore_redacted_values(request.validate_kwargs, None)),
             enabled=request.enabled,
             applies_to_all_workspaces=request.applies_to_all_workspaces,
         )
@@ -911,8 +943,13 @@ class OrganizationGuardrailService:
             # ``from_model`` masks a credential-shaped entry, so an editor
             # resubmitting the whole set sends ``***`` for the ones it was never
             # shown; those keep their stored value.
-            restored = restore_redacted_values(request.validate_kwargs, guardrail.validate_kwargs)
-            guardrail.validate_kwargs = restored or None
+            stored_kwargs = readable_mapping(guardrail.encrypted_validate_kwargs)
+            if restore_is_unsafe(
+                stored_kwargs, request.validate_kwargs, sealed=guardrail.encrypted_validate_kwargs is not None
+            ):
+                raise OrganizationGuardrailKwargsUnreadableError
+            restored = restore_redacted_values(request.validate_kwargs, stored_kwargs)
+            guardrail.encrypted_validate_kwargs = _encrypted_kwargs(restored)
         if request.enabled is not None:
             guardrail.enabled = request.enabled
         if request.applies_to_all_workspaces is not None:
@@ -970,7 +1007,7 @@ class OrganizationGuardrailService:
             raise OrganizationGuardrailNoEndpointError()
         profile = guardrail.profile
         credential = decrypt_secret(guardrail.encrypted_credential) if guardrail.encrypted_credential else None
-        stored_kwargs = guardrail.validate_kwargs
+        stored_kwargs = readable_mapping(guardrail.encrypted_validate_kwargs)
         validate_kwargs = (
             restore_redacted_values(request.validate_kwargs, stored_kwargs)
             if "validate_kwargs" in request.model_fields_set

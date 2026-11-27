@@ -92,7 +92,9 @@ async def _workspace(db: AsyncSession, organization: Organization, *members: tup
 
 
 async def _server(db: AsyncSession, workspace: Workspace, url: str, name: str = "server") -> uuid.UUID:
-    server = WorkspaceMcpServer(workspace_id=workspace.id, name=name, url=url)
+    server = WorkspaceMcpServer(
+        organization_id=workspace.organization_id, workspace_id=workspace.id, name=name, url=url
+    )
     db.add(server)
     await db.commit()
     return server.id

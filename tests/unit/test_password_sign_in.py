@@ -23,10 +23,11 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+from _roster_support import SeededMember, seed_member_for_the_operator
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.tenancy import DashboardSession
+from gateway.models.tenancy import DashboardSession, OrganizationMemberRole
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, hash_password
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
@@ -48,6 +49,19 @@ def _config(tmp_path: Path) -> GatewayConfig:
 
 def _client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(_config(tmp_path)))
+
+
+def _add_member(
+    client: TestClient, tmp_path: Path, *, email: str, role: OrganizationMemberRole = "member"
+) -> SeededMember:
+    """Put a member on the roster holding the address and no way to sign in."""
+    return seed_member_for_the_operator(
+        client,
+        {"Otari-Key": MASTER_KEY},
+        f"sqlite:///{tmp_path / 'password-test.db'}",
+        email=email,
+        role=role,
+    )
 
 
 def _sign_in_with_master_key(client: TestClient) -> dict[str, object]:
@@ -119,6 +133,23 @@ def test_claiming_sets_the_address_and_retires_master_key_sign_in(tmp_path: Path
         assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["password"]
 
 
+def test_claiming_the_deployment_proves_the_operator_address(tmp_path: Path) -> None:
+    """Deployment authority sits above every organization, so its claim proves the address.
+
+    A handover target is refused while ``email_proven_at`` is NULL, and a deployment with no
+    mail configured has no other way to stamp it, so the operator would never hand the role on.
+    """
+    with _client(tmp_path) as client:
+        _claim(client, email=EMAIL)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        row = connection.execute(text('SELECT email_verified_at, email_proven_at FROM "user"')).one()
+    verified, proven = row
+    assert verified is not None
+    assert proven is not None
+
+
 def test_the_claimed_address_is_normalized(tmp_path: Path) -> None:
     """The unique index is case-sensitive, so the stored form has to be settled here."""
     with _client(tmp_path) as client:
@@ -182,8 +213,7 @@ def test_claiming_an_address_another_identity_holds_is_refused(tmp_path: Path) -
     """
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
-        added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": EMAIL}, headers=headers)
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email=EMAIL)
 
         response = client.put(
             f"{API_ROOT}/auth/password",
@@ -322,10 +352,7 @@ def test_a_second_identity_without_a_password_cannot_be_given_one_by_anyone(tmp_
     """
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
-        added = client.post(
-            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
-        )
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email="member@example.com")
         _claim(client)
 
         # The master key acts as the bootstrap operator, never as the member, so
@@ -842,12 +869,8 @@ def test_a_member_s_password_leaves_an_unclaimed_deployment_on_the_master_key(tm
     and the screen used to offer them the master-key box alone.
     """
     with _client(tmp_path) as client:
-        headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)  # provisions the operator identity
-        added = client.post(
-            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
-        )
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email="member@example.com")
 
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
@@ -864,12 +887,8 @@ def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(
     password on an unclaimed deployment must not be the thing that reports it.
     """
     with _client(tmp_path) as client:
-        headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)
-        added = client.post(
-            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
-        )
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email="member@example.com")
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
         client.cookies.clear()
@@ -895,12 +914,8 @@ def test_a_member_on_an_unclaimed_deployment_is_offered_the_form_that_works(tmp_
     no key for as the only thing on the page.
     """
     with _client(tmp_path) as client:
-        headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)
-        added = client.post(
-            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
-        )
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email="member@example.com")
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
         client.cookies.clear()
 
@@ -917,12 +932,8 @@ def test_deactivating_the_only_password_holder_withdraws_the_form(tmp_path: Path
     a refusal.
     """
     with _client(tmp_path) as client:
-        headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)
-        added = client.post(
-            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
-        )
-        assert added.status_code == 201, added.text
+        _add_member(client, tmp_path, email="member@example.com")
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
         engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")

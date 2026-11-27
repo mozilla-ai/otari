@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from gateway.core.config import REGION_SEPARATOR, GatewayConfig
+from gateway.core.settings.inference import data_location_admitted
 from gateway.core.settings.providers import HostedProviderEntry
 from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
@@ -23,6 +24,7 @@ from gateway.services.providers._hosted_credentials import (
     lookup_name,
     region_credential_of,
 )
+from gateway.services.providers._hosted_name_index import serving_data_locations, serving_region_data_locations
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
@@ -35,6 +37,33 @@ class HostedProviderProfile:
     implementation: str
     terms_url: str | None
     privacy_url: str | None
+
+
+@dataclass(frozen=True)
+class HostedDataLocations:
+    """Where hosted providers keep request data, as a viewer may use them.
+
+    ``providers`` is by the provider's name, one entry per place it may serve
+    from. ``regions`` is by a region's name (``tokenhub@sg``), for an offering
+    pinned to it, built from the region rows and never by splitting a name.
+    ``None`` stands for a connection that declares nothing.
+    """
+
+    providers: dict[str, tuple[str | None, ...]]
+    regions: dict[str, tuple[str | None, ...]]
+
+    def within(self, allowed: frozenset[str] | None) -> "HostedDataLocations":
+        """Only the locations ``allowed`` admits, as dispatch serves a workspace; ``None`` for any location."""
+        if allowed is None:
+            return self
+
+        def kept(found: dict[str, tuple[str | None, ...]]) -> dict[str, tuple[str | None, ...]]:
+            return {
+                name: tuple(each for each in locations if data_location_admitted(each, allowed))
+                for name, locations in found.items()
+            }
+
+        return HostedDataLocations(providers=kept(self.providers), regions=kept(self.regions))
 
 
 @dataclass(frozen=True)
@@ -177,6 +206,37 @@ class HostedSource:
         return self.entry
 
 
+def _region_selector(name: str) -> tuple[str, str] | None:
+    """``name`` read as ``<provider>@<slug>``, or None when it names no region."""
+    base, separator, slug = name.rpartition(REGION_SEPARATOR)
+    return (base, slug) if separator and slug else None
+
+
+@dataclass(frozen=True)
+class HostedSnapshot:
+    """Every hosted provider by name, read once, on rows no session holds."""
+
+    by_name: dict[str, HostedSource]
+
+    def provider_named(self, name: str) -> bool:
+        """Whether a hosted provider goes by exactly ``name``, rather than a region of one."""
+        return name in self.by_name
+
+    def get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
+        """What :meth:`HostedSources.get_serving` answers, from the snapshot."""
+        source = self.by_name.get(lookup_name(name))
+        if source is not None:
+            return source, None
+        selector = _region_selector(name)
+        if selector is None:
+            return None
+        base, slug = selector
+        source = self.by_name.get(lookup_name(base))
+        if source is None or source.region(slug) is None:
+            return None
+        return source, slug
+
+
 class HostedSources:
     """Read the merged view. Called inside the caller's Unit of Work, for the rows."""
 
@@ -204,6 +264,21 @@ class HostedSources:
             merged.setdefault(name, HostedSource(entry=entry))
         return [merged[name] for name in sorted(merged)]
 
+    async def snapshot(self) -> HostedSnapshot | None:
+        """Every hosted provider by name on detached rows, or None when there are more than a listing holds."""
+        rows = await self.providers.list_all_detached()
+        if rows is None:
+            return None
+        entries = self.entries()
+        regions = await self.regions.list_for_providers_detached([row.id for row in rows])
+        merged = {
+            row.name: HostedSource(row=row, shadows_config=row.name in entries, regions=tuple(regions.get(row.id, ())))
+            for row in rows
+        }
+        for name, entry in entries.items():
+            merged.setdefault(name, HostedSource(entry=entry))
+        return HostedSnapshot(merged)
+
     async def zero_data_retention_names(self, organization_id: uuid.UUID | None) -> frozenset[str]:
         """The enabled hosted providers ``organization_id`` may use that declare zero data retention, by name."""
         return frozenset(
@@ -211,6 +286,24 @@ class HostedSources:
             for source in await self.all()
             if source.enabled and source.zero_data_retention and not source.withheld_from(organization_id)
         )
+
+    async def data_locations(self, organization_id: uuid.UUID | None) -> HostedDataLocations:
+        """Where each enabled hosted provider ``organization_id`` may use keeps request data, and each region of one.
+
+        Read from the declarations themselves, as the workspace narrowing
+        reads them (:func:`serving_data_locations`), with no key decrypted.
+        """
+        everything = await self.all()
+        names = {source.name for source in everything}
+        providers: dict[str, tuple[str | None, ...]] = {}
+        regions: dict[str, tuple[str | None, ...]] = {}
+        for source in everything:
+            if not source.enabled or source.withheld_from(organization_id):
+                continue
+            providers[source.name] = serving_data_locations(source.name, source.data_location, source.regions, names)
+            for instance, location in serving_region_data_locations(source.name, source.regions, names).items():
+                regions[instance] = (location,)
+        return HostedDataLocations(providers=providers, regions=regions)
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""
@@ -245,9 +338,10 @@ class HostedSources:
         source = await self.get(name)
         if source is not None:
             return source, None
-        base, separator, slug = name.rpartition(REGION_SEPARATOR)
-        if not separator or not slug:
+        selector = _region_selector(name)
+        if selector is None:
             return None
+        base, slug = selector
         source = await self.get(base)
         if source is None or source.region(slug) is None:
             return None

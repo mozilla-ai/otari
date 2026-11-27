@@ -414,7 +414,19 @@ describe("SettingsPage", () => {
     expect(
       screen.getByRole("alertdialog", { name: "Regenerate master key?" }),
     ).toBeInTheDocument()
+    // Regeneration hands this session the deployment master key, so the gateway
+    // asks for the caller's password and the dialog will not submit without it.
+    await user.type(
+      screen.getByLabelText("Your current password"),
+      "hunter2-hunter2",
+    )
     await user.click(screen.getByRole("button", { name: "Regenerate key" }))
+    const rotateCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("master-key/rotate"),
+    )
+    expect(JSON.parse(String(rotateCall?.[1]?.body))).toEqual({
+      current_password: "hunter2-hunter2",
+    })
 
     // Concealed until it is asked for, so the replacement key is not on screen
     // for anyone who happens to be looking at it (otari-ai#2111).

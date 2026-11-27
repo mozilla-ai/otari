@@ -11,7 +11,6 @@ import httpx
 import pytest
 
 from gateway.services.web_fetch_service import WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_network import (
     PinnedAsyncHTTPTransport,
     PinnedTransportError,
@@ -164,36 +163,6 @@ async def test_environment_proxy_routing(
     assert request.headers["Host"] == httpx.Request("GET", url).headers["Host"]
     assert request.headers["Accept-Encoding"] == "gzip, deflate"
     assert all(transport.closed for transport in transports)
-
-
-@pytest.mark.parametrize("trusted", [False, True])
-@pytest.mark.asyncio
-async def test_backend_selects_proxy_transport_only_with_opt_in(
-    monkeypatch: pytest.MonkeyPatch, transports: list[RecordingTransport], trusted: bool
-) -> None:
-    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
-    async with WebRetrievalBackend(base_url="http://searxng:8080", trust_env_proxy=trusted) as backend:
-        assert backend._retrieval_service is not None
-        backend._retrieval_service._resolver = PublicResolver()
-        result = await backend._retrieval_service.fetch("https://example.com/")
-    assert result.text == "page"
-    assert (transports[0].proxy is not None) is trusted
-    assert all(transport.closed for transport in transports)
-
-
-@pytest.mark.asyncio
-async def test_backend_closes_search_client_when_proxy_setup_fails(
-    monkeypatch: pytest.MonkeyPatch, transports: list[RecordingTransport]
-) -> None:
-    def fail() -> TrustedProxyAsyncHTTPTransport:
-        raise ValueError("invalid proxy configuration")
-
-    monkeypatch.setattr("gateway.services.web_retrieval_backend.TrustedProxyAsyncHTTPTransport", fail)
-    backend = WebRetrievalBackend(base_url="http://searxng:8080", trust_env_proxy=True)
-    with pytest.raises(ValueError, match="invalid proxy"):
-        await backend.__aenter__()
-    assert backend._client is not None
-    assert backend._client.is_closed
 
 
 @pytest.mark.asyncio

@@ -1,21 +1,26 @@
 """Masking credential-shaped entries in a free-form settings dict.
 
-Four tables carry arbitrary operator-supplied JSON that something downstream is
-handed as keyword arguments: ``org_provider_keys.client_args``,
-``provider_credentials.client_args`` and ``search_tool_credentials.options``,
-which reach a provider SDK, and ``organization_guardrails.validate_kwargs``,
-which reaches the guardrails service. All four are places a real credential
-legitimately lives (Bedrock needs ``aws_secret_access_key`` in ``client_args``,
-because any-llm never forwards ``api_key`` into its boto3 client; a guardrail
-class can take its vendor key as a parameter), and none of them may echo one
-back over the API. A leaf module rather than a helper on one of the models, so
-the later serializers share the first's rules instead of carrying a copy that
-drifts.
+Six columns carry arbitrary settings that something downstream is handed as
+keyword arguments or as request fields: ``org_provider_keys.client_args``,
+``provider_credentials.client_args``, ``provider_endpoints.default_params``,
+``search_tool_credentials.options`` and ``org_web_search_keys.options``, which
+reach a provider SDK, and ``organization_guardrails.validate_kwargs``, which
+reaches the guardrails service. Each is a place a real credential legitimately
+lives (Bedrock needs ``aws_secret_access_key`` in ``client_args``, because
+any-llm never forwards ``api_key`` into its boto3 client; a guardrail class can
+take its vendor key as a parameter), so each is sealed with ``OTARI_SECRET_KEY``
+at rest and none of them may echo a credential back over the API.
+
+Masking is what keeps a decrypted value off the wire; it is not what protects
+the value in the database. A leaf module rather than a helper on one of the
+models, so the later serializers share the first's rules instead of carrying a
+copy that drifts.
 
 Masking keys off the entry's *name*, which is what lets it hold for a guardrail
 parameter whose catalog entry cannot be read at all: the guardrails service is
 what says which parameters are secret, and the mask has to apply while it is
-down.
+down. NOTE: a credential whose name matches no marker is returned unmasked, so
+masking alone must never be relied on as the protection for a column.
 """
 
 from typing import Any, cast
@@ -23,8 +28,24 @@ from typing import Any, cast
 from gateway.exceptions.shared_exceptions import UnresolvedRedactionError
 
 # Substrings (matched case-insensitively against a key name) that a
-# credential-bearing field is expected to contain.
-_SECRET_LOOKING_KEY_SUBSTRINGS = ("key", "secret", "token", "password", "authorization", "credential")
+# credential-bearing field is expected to contain, A-Z. A marker has to be
+# narrow enough that no ordinary setting contains it: "auth" would mask
+# auth_type and auth_url, and an operator cannot read back a setting the mask
+# covers.
+_SECRET_LOOKING_KEY_SUBSTRINGS = (
+    "authorization",
+    "bearer",
+    "credential",
+    "jwt",
+    "key",
+    "passphrase",
+    "password",
+    "private",
+    "pwd",
+    "salt",
+    "secret",
+    "token",
+)
 REDACTED_VALUE = "***"
 # Past this, a nested value is masked wholesale rather than walked. See _redact_node.
 _MAX_NESTING_DEPTH = 16
@@ -149,6 +170,17 @@ def stored_secrets_survive(stored: dict[str, Any] | None, submitted: dict[str, A
     if sent:
         return carries_redaction(submitted)
     return stored is not None and redact_secret_like_values(stored) != stored
+
+
+def restore_is_unsafe(stored: dict[str, Any] | None, submitted: dict[str, Any] | None, *, sealed: bool) -> bool:
+    """Whether a submitted object cannot be restored against a stored one that was not read back.
+
+    ``stored`` is the decrypted value, None when nothing could be read, and
+    ``sealed`` says whether the row holds ciphertext. With nothing read back,
+    either the mask would be stored as the value, or the write would drop
+    ciphertext that the right key could still open.
+    """
+    return stored is None and (sealed or carries_redaction(submitted))
 
 
 def restore_redacted_values(

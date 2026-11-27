@@ -19,12 +19,14 @@ import {
   healthDetail,
   healthNeedsAttention,
 } from "@/features/tools/mcpServerHealth"
+import { mcpServerPagePath } from "@/features/tools/mcpServerPage"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
 import {
   PERSONAL_CHECK_HELP,
   useMcpServerCheck,
 } from "@/features/tools/useMcpServerCheck"
-import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
+import type { McpServerScope } from "@/shared/api/mcpServerScope"
+import { useUpdateMcpServer } from "@/shared/api/tools"
 import { formatDateTime } from "@/shared/helpers/format"
 
 type Exposure = "all" | "some"
@@ -55,21 +57,21 @@ function exposedSummary(
  * closes the editor.
  */
 export function McpExposedTools({
-  workspaceId,
+  scope,
   server,
   canManage,
   onAddClient,
 }: {
-  workspaceId: string
+  scope: McpServerScope
   server: WorkspaceMcpServer
   canManage: boolean
   /** Opens Settings on the OAuth client ID, when a check's sign-in asked for one. */
   onAddClient?: () => void
 }) {
-  const update = useUpdateWorkspaceMcpServer()
+  const update = useUpdateMcpServer()
   const check = useMcpServerCheck({
-    workspaceId,
-    returnTo: `/tools/mcp-servers/${server.id}`,
+    scope,
+    returnTo: mcpServerPagePath(scope, server.id),
   })
   const isPersonal = server.credential_mode === "per_user"
   const stored = server.allowed_tools
@@ -193,7 +195,7 @@ export function McpExposedTools({
                 variant="primary"
                 onPress={() =>
                   update.mutate({
-                    workspaceId,
+                    scope,
                     serverId: server.id,
                     body: { allowed_tools: next },
                   })

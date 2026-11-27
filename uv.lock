@@ -313,7 +313,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.53.1"
+version = "1.55.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -324,9 +324,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/17/9eb88ac898e1f5eeebf8b8bca895543a6d458ea0b68fa877b6cb0c548e2b/any_llm_sdk-1.53.1.tar.gz", hash = "sha256:44e3489c4dee839bb53d331bdadd238c60480df3248b40c7d87792c95afbecd4", size = 349080, upload-time = "2026-11-19T13:51:02.604Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/b7/b94ad1e770a04441f8203b01163bda4a67a9e3bbe9db500d8bd4727e22f9/any_llm_sdk-1.55.0.tar.gz", hash = "sha256:9918bf1572a0e3504e9ac18cb33bfc25a3333b70c37f4669560747d9c1a15aaa", size = 354681, upload-time = "2026-11-25T20:56:51.913Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/65/dc621e48fc3289ee69a67bd4207e5224e15813b18d6c18c0ffcb0dfba3ed/any_llm_sdk-1.53.1-py3-none-any.whl", hash = "sha256:80cf9ed6079a658a675da00779f58055105199f452e135978bc7f4d9ea873cc8", size = 421105, upload-time = "2026-11-19T13:51:01.036Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/4a/a77b6e4523acd3c0fcd34a743964030a8777840ed2ea4a01fef511c7f7f6/any_llm_sdk-1.55.0-py3-none-any.whl", hash = "sha256:547a16520c1d44216bf176001c80ad848c474f1bde9dc076acd693973f3ea2a1", size = 428075, upload-time = "2026-11-25T20:56:50.392Z" },
 ]
 
 [package.optional-dependencies]
@@ -349,6 +349,7 @@ all = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "otari" },
+    { name = "sarvamai" },
     { name = "tinfoil" },
     { name = "together" },
     { name = "typesafe-sdk" },
@@ -666,11 +667,11 @@ wheels = [
 
 [[package]]
 name = "bracex"
-version = "3.0.1"
+version = "3.2.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ac/01/5f394b8bcd6e5b92f73130990960423bbb19711f906bd9fe9ea5557c667c/bracex-3.0.1.tar.gz", hash = "sha256:4e38e32392e4a4780fe15d644bfc7c8514057cfc3861e060b11814ce829c25e4", size = 44019, upload-time = "2026-07-20T13:43:00.335Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/6f/95a6fcb1c430007cda4122c77aace4541fba297f08e2be791ab235a4c548/bracex-3.2.4.tar.gz", hash = "sha256:c1e67eb59f81445dee15b2c588b7c81352b697cfbd6c4931a2943ea6b71eb5ea", size = 35456, upload-time = "2026-11-20T13:05:37.452Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/8f/6f7273a7adb8d73fc8d21ede4376a3e475e52f98435c6007f69100dec8ca/bracex-3.0.1-py3-none-any.whl", hash = "sha256:6523ad83aeb5098a4ee597cff0f964442ff74e460bd3fafaffab6a013ff2288c", size = 11940, upload-time = "2026-07-20T13:42:59.268Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/5b/7b404360cc0946686cae68ee564d859a7c57379d190c88edec18fcdc9396/bracex-3.2.4-py3-none-any.whl", hash = "sha256:82e9e738b63fca213c33211d30b0b1ca330896a1091736e78da2c1bcda93ab30", size = 14207, upload-time = "2026-11-20T13:05:35.996Z" },
 ]
 
 [[package]]
@@ -1448,7 +1449,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.53.1" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.55.0" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.24.0,<0.25.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
@@ -4107,6 +4108,22 @@ wheels = [
 ]
 
 [[package]]
+name = "sarvamai"
+version = "0.1.49"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/05/f8/998207f0a4ab564d319b234873ca4cae02f07d0e26db449eaca4875dce92/sarvamai-0.1.49.tar.gz", hash = "sha256:121c5302583da4c8a5914204df92eeeebfe4bccc7a97bc11974c7d6125998f6b", size = 331370, upload-time = "2026-11-23T18:23:04.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/2b/74ba23985b683b1ea609f90c93f9bd1e2605b47a985e4aeb519916177d5b/sarvamai-0.1.49-py3-none-any.whl", hash = "sha256:3fd349d523862324185432e24d4f645046e6d6769fa4d4edcbd1095ac580a7e6", size = 695701, upload-time = "2026-11-23T18:23:02.987Z" },
+]
+
+[[package]]
 name = "securesystemslib"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4757,14 +4774,14 @@ wheels = [
 
 [[package]]
 name = "wcmatch"
-version = "11.0.1"
+version = "11.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bracex" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/57/43/30e407989e313677dbb9d5f045f966549a7254834571e342eaa4b55cc67b/wcmatch-11.0.1.tar.gz", hash = "sha256:1ea2b4fa678b8ca268253798d5963935df39132d47c3e241c0a0732224005e7d", size = 144662, upload-time = "2026-08-14T15:20:40.477Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/07/b7a9162a804bc0f7d03fe84c93e374d3e1c4d828043d5f9b797f7d4e30e0/wcmatch-11.2.tar.gz", hash = "sha256:1605bde546fbde4c063628c7d89eda486909fd4337e51d73a873987fbcb2554c", size = 134939, upload-time = "2026-10-22T00:37:57.622Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/77/7a02b0f05b3ffcdbef9719ce3ee0b508d6a29b58e95299f1580055671db3/wcmatch-11.0.1-py3-none-any.whl", hash = "sha256:fd149ecddb9f0a88ea780017d6dde17c994e494e7f7303d4e3c9d6251f978f4b", size = 43449, upload-time = "2026-08-14T15:20:39.379Z" },
+    { url = "https://files.pythonhosted.org/packages/34/96/b6cebd4bd75320743a291fed494c79f07c01b58fa9b187d12aeb5110f002/wcmatch-11.2-py3-none-any.whl", hash = "sha256:952bab83c75c233836007a69550a3a8753cf06964c1eb3b84ff11ad5bff1c272", size = 44361, upload-time = "2026-10-22T00:37:56.293Z" },
 ]
 
 [[package]]

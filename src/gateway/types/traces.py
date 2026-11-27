@@ -126,6 +126,7 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.guardrail.event": str,
     "otari.guardrail.tool": str,
     "otari.guardrail.action": str,
+    "otari.guardrail.categories": str,
     "otari.mcp.server": str,
     "otari.mcp.server_id": str,
     "otari.mcp.tool_count": int,
@@ -150,6 +151,8 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.tool.decision": str,
     "otari.tool.decision_source": str,
     "otari.tool.succeeded": bool,
+    # The provider a gateway-run tool's failed call reached, beside its failure tag in the error class.
+    "otari.tool.provider": str,
     "otari.gate.id": str,
     "otari.gate.type": str,
     "otari.gate.origin": str,
@@ -158,10 +161,10 @@ SPAN_ATTRIBUTES: Mapping[str, type] = {
     "otari.gate.blocked": bool,
     "otari.policy.digest": str,
 }
-# The allowlisted attributes OTel defines as an array of strings. Each is stored as
-# its elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar,
-# and each element is held to the identifier rule on its own.
-LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons"})
+# The allowlisted attributes that are an array of strings. Each is stored as its
+# elements joined by LIST_SEPARATOR, so every stored attribute stays a scalar, and
+# each element is held to the identifier rule on its own.
+LIST_ATTRIBUTES = frozenset({"gen_ai.response.finish_reasons", "otari.guardrail.categories"})
 LIST_SEPARATOR = ","
 
 

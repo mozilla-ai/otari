@@ -119,6 +119,17 @@ async def get_or_create_attribution_user(db: AsyncSession, *, user_id: str, alia
         return await _revive(winner)
 
 
+async def is_attribution_user_revoked(db: AsyncSession, user_id: str) -> bool:
+    """Whether the request-plane owner a tenancy identity bills through exists and is soft-deleted.
+
+    That is the operator's revocation of the identity's spend, which
+    :func:`get_or_create_attribution_user` would undo by reviving the row, so a
+    member's own key surface asks this first and refuses.
+    """
+    deleted_at = (await db.execute(select(User.deleted_at).where(User.user_id == user_id))).scalar_one_or_none()
+    return deleted_at is not None
+
+
 async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
     """Return which of ``user_ids`` name a usable request-plane owner.
 
@@ -239,8 +250,12 @@ def _on_roster_of(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     foreign key. This is what puts a member who has not minted a key yet in
     their own organization's scope.
     """
+    # SQLite stores a UUID column as CHAR(32) hex while ``users.user_id`` holds the
+    # hyphenated string form, so the two only compare equal once the hyphens are
+    # dropped from both sides. Comparing the raw text matched on PostgreSQL alone.
+    stored = func.replace(cast(col(OrganizationMember.user_id), String), "-", "")
     condition = select(col(OrganizationMember.id)).where(
-        cast(col(OrganizationMember.user_id), String) == User.user_id,
+        stored == func.replace(User.user_id, "-", ""),
     )
     if organization_id is not None:
         condition = condition.where(col(OrganizationMember.organization_id) == organization_id)

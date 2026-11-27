@@ -5,7 +5,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  AccessTokensResponse,
   CallerIdentity,
+  CreateAccessTokenRequest,
+  CreatedAccessToken,
   DeleteAccountRequest,
   MailedLinkStatusResponse,
   OrganizationContext,
@@ -31,6 +34,7 @@ import {
   useOrganizationContext,
 } from "@/shared/api/organizations"
 import {
+  ACCESS_TOKENS,
   MAILED_LINK_STATUS,
   NO_RETRY,
   ORGANIZATION_MEMBERS,
@@ -42,9 +46,10 @@ import { createPasskey } from "@/shared/helpers/webauthn"
 
 export function useRotateMasterKey() {
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (currentPassword: string) =>
       apiFetch<RotateMasterKeyResponse>("/settings/master-key/rotate", {
         method: "POST",
+        body: JSON.stringify({ current_password: currentPassword }),
       }),
   })
 }
@@ -315,14 +320,41 @@ export function useDeletePasskey() {
   })
 }
 
-/**
- * The deployment's outgoing-mail configuration, for the Settings page.
- *
- * Distinct from `useDeployment().mail_ready`, which the shell already carries:
- * that one boolean gates a mail-dependent affordance anywhere in the app, while
- * this reports *why* mail is (un)available and is worth a request only on the
- * page that shows it.
- */
+/** The signed-in identity's own access tokens. Never a token itself. */
+export function useAccessTokens() {
+  return useQuery({
+    queryKey: [ACCESS_TOKENS],
+    queryFn: () => apiFetch<AccessTokensResponse>("/auth/access-tokens"),
+    staleTime: 60_000,
+  })
+}
+
+/** Mint an access token. The answer carries the token, which no later read does. */
+export function useCreateAccessToken() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateAccessTokenRequest) =>
+      apiFetch<CreatedAccessToken>("/auth/access-tokens", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACCESS_TOKENS] })
+    },
+  })
+}
+
+/** Revoke one of the caller's access tokens. */
+export function useDeleteAccessToken() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/auth/access-tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACCESS_TOKENS] })
+    },
+  })
+}
 
 export function useSignup() {
   return useMutation({

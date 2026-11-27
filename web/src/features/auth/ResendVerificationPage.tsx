@@ -3,6 +3,8 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useResendVerification } from "@/shared/api/auth"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -28,6 +30,8 @@ import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
  * typed on the page before is filled in, and goes on to the check-email page.
  */
 export function ResendVerificationPage() {
+  const { mail } = useDeployment()
+  const delivers = mailDelivers(mail)
   const resend = useResendVerification()
   const { recordEvent } = useTelemetry()
   const [email, setEmail] = useState(readSignInAddress)
@@ -62,8 +66,16 @@ export function ResendVerificationPage() {
   return (
     <PublicAuthLayout
       isBusy={resend.isPending}
-      title="Send a new verification link"
-      description="Enter the address you signed up with and we will mail a fresh link."
+      title={
+        delivers
+          ? "Send a new verification link"
+          : "Create a new verification link"
+      }
+      description={
+        delivers
+          ? "Enter the address you signed up with and we will mail a fresh link."
+          : "Enter the address you signed up with to create a fresh link. This deployment cannot email it, so ask whoever runs it for the link."
+      }
       footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <form
@@ -92,7 +104,7 @@ export function ResendVerificationPage() {
           isPending={resend.isPending}
           isDisabled={email.trim() === ""}
         >
-          Send link
+          {delivers ? "Send link" : "Create link"}
         </Button>
       </form>
     </PublicAuthLayout>

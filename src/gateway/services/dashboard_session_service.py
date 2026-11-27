@@ -42,6 +42,7 @@ from gateway.core.database import create_session, describe_database_error
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import DashboardSession, User
+from gateway.repositories.identity import PersonalAccessTokenRepository
 from gateway.services.master_key_service import hash_master_key
 
 SESSION_COOKIE_NAME = "otari_dashboard_session"
@@ -143,14 +144,18 @@ async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:
 
 
 async def revoke_all_dashboard_sessions(db: AsyncSession) -> None:
-    """Stage removal of every session (master-key rotation). The caller commits."""
+    """Stage removal of every session and access token (master-key rotation). The caller commits.
+
+    An access token is minted from a session, so it goes with them.
+    """
     await db.execute(delete(DashboardSession))
+    await PersonalAccessTokenRepository(db).delete_all()
 
 
 async def revoke_user_dashboard_sessions(
     db: AsyncSession, user_id: uuid.UUID, *, keep_token_hash: str | None = None
 ) -> None:
-    """Stage removal of one identity's sessions, optionally sparing one.
+    """Stage removal of one identity's sessions and access tokens, optionally sparing one session.
 
     A password change ends the sessions minted under the old password, the way
     master-key rotation ends the ones minted under the old key. It is scoped to
@@ -166,6 +171,7 @@ async def revoke_user_dashboard_sessions(
     if keep_token_hash is not None:
         statement = statement.where(DashboardSession.token_hash != keep_token_hash)
     await db.execute(statement)
+    await PersonalAccessTokenRepository(db).delete_all_for_users({user_id})
 
 
 async def record_session_key_marker(db: AsyncSession, key_hash: str) -> None:

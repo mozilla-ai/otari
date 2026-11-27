@@ -27,7 +27,7 @@ import type { SetupSnippetId } from "@/features/onboarding/setupSnippets"
 export type SetupHint =
   | {
       label: string
-      to: "/models" | "/budgets" | "/requests"
+      to: "/models" | "/rules" | "/requests"
       tab?: never
     }
   | { label: string; tab: SetupSnippetId; to?: never }
@@ -55,7 +55,10 @@ const FAILURES: Record<ActivationErrorCategory, SetupFailure> = {
   policy: {
     cause:
       "A budget, a model allow-list, or a rate limit rejected the request.",
-    hint: { label: "Open budgets", to: "/budgets" },
+    // Rules lists all three for whoever is asking. Spend & budgets is the
+    // organization's page, which a member may not open, and an operator's
+    // own budgets are on the deployment rail.
+    hint: { label: "Open rules", to: "/rules" },
   },
   upstream: {
     // No hint on purpose: nothing in this dashboard fixes a provider outage, and

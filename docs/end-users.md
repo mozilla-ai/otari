@@ -17,6 +17,9 @@ Create one budget per feature in **Spend & budgets**, as in
 - `end-user-budget-ai`, $0.10 a day
 - `end-user-budget-memories`, with its own limit
 
+A budget's id, which the end-user API takes as `budget_id`, is in the **ID**
+column of **Spend & budgets**, with a button to copy it.
+
 Each end user gets a copy of the budget it starts on: the full limit and its own
 reset period. An organization's budget can limit spend, tokens and requests per
 period, but not requests or tokens per minute.

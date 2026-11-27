@@ -34,6 +34,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import get_db, release_session
+from gateway.core.error_codes import USER_MISMATCH, error_headers
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work_with_session
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
@@ -50,10 +51,13 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
+    McpServerAliasRepository,
     McpUserConnectionRepository,
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerOverrideRepository,
+    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.usage_and_telemetry import (
@@ -102,7 +106,10 @@ from gateway.services.tools import (
     DirectToolRate,
     DirectToolService,
     DirectToolUsage,
+    McpToolListings,
     McpUserTokens,
+    McpWorkspaceServers,
+    OrganizationMcpServerWorkspaceService,
     SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
@@ -201,6 +208,15 @@ async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
 
 
+def get_mcp_tool_listings(request: Request) -> McpToolListings | None:
+    """The app's kept MCP tool listings, or ``None`` outside the app's lifespan, where discovery keeps nothing."""
+    listings: McpToolListings | None = getattr(request.app.state, "mcp_tool_listings", None)
+    return listings
+
+
+McpToolListingsDep = Annotated[McpToolListings | None, Depends(get_mcp_tool_listings)]
+
+
 def get_web_provider_client(request: Request) -> httpx.AsyncClient:
     """The client the web tools' providers are called through, which the app's lifespan builds and closes."""
     client: httpx.AsyncClient | None = getattr(request.app.state, "web_provider_client", None)
@@ -248,6 +264,25 @@ def get_web_search_key_service(
 
 
 WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_key_service)]
+
+
+def get_organization_mcp_server_workspaces(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrganizationMcpServerWorkspaceService:
+    """Build the service showing an organization's MCP server across its workspaces, on the request's Unit of Work."""
+    return OrganizationMcpServerWorkspaceService(
+        uow,
+        servers=WorkspaceMcpServerRepository(uow),
+        overrides=WorkspaceMcpServerOverrideRepository(uow),
+        organizations=OrganizationService(db, membership_listener=None),
+        lock_workspace=WorkspaceRepository(db).lock,
+    )
+
+
+OrganizationMcpServerWorkspacesDep = Annotated[
+    OrganizationMcpServerWorkspaceService, Depends(get_organization_mcp_server_workspaces)
+]
 
 
 def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:
@@ -464,7 +499,11 @@ class _DirectToolAccounts:
             no_user_error=DirectToolCallError(
                 API_KEY_NO_USER_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ),
-            forbidden_user_error=DirectToolCallError(USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN),
+            forbidden_user_error=DirectToolCallError(
+                f"{USER_MISMATCH_DETAIL} To bill each end user separately, use a service key.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                headers=error_headers(USER_MISMATCH),
+            ),
             reject_mismatch=self._config.reject_user_mismatch,
         )
 
@@ -642,3 +681,13 @@ def get_direct_tool_availability(
 
 
 DirectToolAvailabilityDep = Annotated[DirectToolAvailability, Depends(get_direct_tool_availability)]
+
+
+def get_mcp_workspace_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> McpWorkspaceServers:
+    """Build the reader of the MCP servers a workspace reaches, its organization's too, on the request's session."""
+    return McpWorkspaceServers(
+        WorkspaceMcpServerRepository(db), WorkspaceMcpServerOverrideRepository(db), McpServerAliasRepository(db)
+    )
+
+
+McpWorkspaceServersDep = Annotated[McpWorkspaceServers, Depends(get_mcp_workspace_servers)]

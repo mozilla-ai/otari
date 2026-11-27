@@ -797,14 +797,14 @@ async def test_taking_back_a_squatted_address_keeps_the_name_of_an_organization_
     assert await _organization_name(async_db, organization.id) == "Mallory Squat's organization"
 
 
-async def _former_member(db: AsyncSession, email: str, *, vouched: bool) -> tuple[User, Organization]:
-    """An account an organization added and then removed, whose address was proven, or only vouched for."""
+async def _former_member(db: AsyncSession, email: str, *, proved: bool) -> tuple[User, Organization]:
+    """An account an organization added and then removed, whose address its owner proved, or did not."""
     organization = await create_organization(db, slug="acme")
     account = await UserRepository(db).create_local_identity(
         email=email, full_name="Ada", active_organization_id=organization.id
     )
     account.email_verified_at = datetime.now(UTC)
-    account.email_vouched_at = account.email_verified_at if vouched else None
+    account.email_proven_at = account.email_verified_at if proved else None
     account.hashed_password = "member-hash"  # pragma: allowlist secret
     db.add(account)
     await OrganizationMemberRepository(db).create_membership(
@@ -814,11 +814,11 @@ async def _former_member(db: AsyncSession, email: str, *, vouched: bool) -> tupl
     return account, organization
 
 
-async def test_proving_a_vouched_address_nobody_still_wants_founds_its_own_organization(
+async def test_proving_an_unproved_address_nobody_still_wants_founds_its_own_organization(
     async_db: AsyncSession,
 ) -> None:
-    """A provider proves an address an organization only vouched for, which is when open signup claims it."""
-    account, former = await _former_member(async_db, "ada@example.com", vouched=True)
+    """A provider proves an address an organization only recorded, which is when open signup claims it."""
+    account, former = await _former_member(async_db, "ada@example.com", proved=False)
 
     signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(
         _named("google", "ada@example.com", "Ada Lovelace")
@@ -839,7 +839,7 @@ async def test_a_proven_address_that_lost_its_last_membership_signs_in_to_no_org
     async_db: AsyncSession,
 ) -> None:
     """An address is claimed once, so a later sign-in leaves founding an organization to the person."""
-    _, former = await _former_member(async_db, "ada@example.com", vouched=False)
+    _, former = await _former_member(async_db, "ada@example.com", proved=True)
     organizations_before = await _count(async_db, Organization)
 
     signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(

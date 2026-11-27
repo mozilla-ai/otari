@@ -3,6 +3,7 @@ import { CopyableValue } from "@/design-system/actions/CopyField"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useIssuePasswordLink } from "@/shared/api/deployment"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime } from "@/shared/helpers/format"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -13,10 +14,10 @@ import { accountLabel } from "./accounts"
  * Give one account a single-use link that sets its password.
  *
  * The way back for somebody who forgot their password where "Forgot your
- * password?" cannot help, which is every deployment that sends no mail. Where
- * mail goes out the link goes to the account's own address, the same as that
- * flow; otherwise, or when the send failed, the link is shown here to pass on,
- * the way an invitation's accept link is.
+ * password?" cannot help, which is every deployment whose email reaches no
+ * inbox. Where it does reach one the link goes to the account's own address,
+ * the same as that flow. Otherwise, or when the send failed, the link is shown
+ * here to pass on, the way an invitation's accept link is.
  */
 export function PasswordLinkDialog({
   account,
@@ -26,7 +27,8 @@ export function PasswordLinkDialog({
   account: DeploymentUser | undefined
   onClose: () => void
 }) {
-  const { mail_ready } = useDeployment()
+  const { mail } = useDeployment()
+  const delivers = mailDelivers(mail)
   const issue = useIssuePasswordLink()
   const result = issue.data
   const name = account ? accountLabel(account) : ""
@@ -89,7 +91,7 @@ export function PasswordLinkDialog({
         if (!open) close()
       }}
       title="Send a password link"
-      submitLabel={mail_ready ? "Email the link" : "Create the link"}
+      submitLabel={delivers ? "Email the link" : "Create the link"}
       onSubmit={() => {
         if (account) issue.mutate(account.id)
       }}
@@ -99,9 +101,9 @@ export function PasswordLinkDialog({
       <p className="text-body">
         Give <strong>{name}</strong> a single-use link that sets a new password,
         for when they cannot sign in.{" "}
-        {mail_ready
+        {delivers
           ? `It is emailed to ${account?.email ?? ""}.`
-          : "This deployment sends no mail, so you get the link to share with them yourself."}{" "}
+          : "Nothing this deployment emails reaches an inbox, so you get the link to share with them yourself."}{" "}
         Any earlier reset link for this account stops working.
       </p>
     </FormDialog>

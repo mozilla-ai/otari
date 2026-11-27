@@ -26,7 +26,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
+            "description": "Sets the invited identity's password in the same step, where the preview answered a next_step of 'set_password'. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
             "title": "Password"
           },
           "terms_accepted": {
@@ -47,36 +47,22 @@
         "type": "object"
       },
       "AcceptInvitationResultPublic": {
-        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
+        "description": "What accepting through the link produced, and what it leaves the invitee to do.\n\nNo session and no token: ``next_step`` is the whole of what comes next.",
         "properties": {
-          "can_sign_in": {
-            "default": true,
-            "description": "Whether the invited address can sign in now, with a password (this accept's included) or through a provider. False when it accepted without one and has never signed in.",
-            "title": "Can Sign In",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does now that it has accepted."
           },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
           },
-          "password_set": {
-            "default": false,
-            "description": "Whether this accept set the identity's password.",
-            "title": "Password Set",
-            "type": "boolean"
-          },
           "role": {
             "title": "Role",
             "type": "string"
           },
-          "verification_pending": {
-            "default": false,
-            "description": "Whether the invited address chose a password through signup and has not verified it yet, so it has to open its verification link before it can sign in.",
-            "title": "Verification Pending",
-            "type": "boolean"
-          },
           "ways_in": {
-            "description": "When can_sign_in is false, what this deployment offers instead, as the preview's ways_in says.",
+            "description": "What this deployment offers instead, where next_step names them, as the preview's ways_in says.",
             "items": {
               "enum": [
                 "provider",
@@ -90,9 +76,30 @@
         },
         "required": [
           "organization_name",
-          "role"
+          "role",
+          "next_step",
+          "ways_in"
         ],
         "title": "AcceptInvitationResultPublic",
+        "type": "object"
+      },
+      "AcceptedMembershipPublic": {
+        "description": "The membership an accepted invitation produced.",
+        "properties": {
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_name",
+          "role"
+        ],
+        "title": "AcceptedMembershipPublic",
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
@@ -124,6 +131,205 @@
           "model_count"
         ],
         "title": "AcceptedSnapshotResponse",
+        "type": "object"
+      },
+      "AccessTokenCreate": {
+        "properties": {
+          "expiration": {
+            "default": "90-days",
+            "description": "How long the token lives from now, at most a year.",
+            "enum": [
+              "1-hour",
+              "1-day",
+              "7-days",
+              "30-days",
+              "90-days",
+              "180-days",
+              "1-year"
+            ],
+            "title": "Expiration",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the token is for.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccessTokenCreate",
+        "type": "object"
+      },
+      "AccessTokenCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accurate to about a minute. Null until first used.",
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
+          "token": {
+            "description": "The token itself. Shown once: only its hash is stored.",
+            "title": "Token",
+            "type": "string"
+          },
+          "token_suffix": {
+            "description": "The token's last characters, to tell it apart from the account's others.",
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "organization_id",
+          "token"
+        ],
+        "title": "AccessTokenCreated",
+        "type": "object"
+      },
+      "AccessTokenPublic": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ends. For an MCP client's sign-in, when renewing its access token stops working.",
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accurate to about a minute. Null until first used.",
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization it reads, whichever one the dashboard has switched to since.",
+            "title": "Organization Id"
+          },
+          "token_suffix": {
+            "description": "The token's last characters, to tell it apart from the account's others.",
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "organization_id"
+        ],
+        "title": "AccessTokenPublic",
+        "type": "object"
+      },
+      "AccessTokensPublic": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AccessTokenPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AccessTokensPublic",
         "type": "object"
       },
       "ActivationApiKeyPublic": {
@@ -710,6 +916,7 @@
       "AgentModelRecommendation": {
         "description": "The model recommended for the subagent.",
         "example": {
+          "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11",
           "model": "sonnet",
           "probabilities": {
             "haiku": 0.21,
@@ -719,6 +926,19 @@
           "reason": "sonnet with 72%"
         },
         "properties": {
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The gateway's record of this recommendation. Absent where the record could not be kept.",
+            "title": "Decision Id"
+          },
           "model": {
             "description": "A model alias or id the harness can start the subagent on.",
             "title": "Model",
@@ -2136,6 +2356,19 @@
             "description": "The key's spending limit in USD over its whole life. Null sets none.",
             "title": "Limit"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization an access token reads: the one the consent screen showed. Required when the app is given an access token, and refused unless the person is acting in it.",
+            "title": "Organization Id"
+          },
           "redirect_uri": {
             "maxLength": 2048,
             "title": "Redirect Uri",
@@ -2163,9 +2396,17 @@
             "type": "string"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace the key bills. Required unless the app is given an access token.",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -2174,7 +2415,6 @@
           "state",
           "code_challenge",
           "code_challenge_method",
-          "workspace_id",
           "scopes"
         ],
         "title": "AppAuthorizationRequest",
@@ -2196,6 +2436,16 @@
       "AppDetails": {
         "description": "What the consent screen shows about an app before a person approves it.",
         "properties": {
+          "credential": {
+            "default": "api_key",
+            "description": "What the app is given: an API key billed to a workspace the person picks, or, for a client that registered itself such as an MCP client, the person's own read-only access token.",
+            "enum": [
+              "api_key",
+              "access_token"
+            ],
+            "title": "Credential",
+            "type": "string"
+          },
           "issuer": {
             "title": "Issuer",
             "type": "string"
@@ -2266,7 +2516,7 @@
         "type": "object"
       },
       "AppTokenRequest": {
-        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.",
+        "description": "Unrecognized parameters, such as a public client's empty ``client_secret``, are ignored.\n\nAn authorization code is redeemed with its callback and verifier; a refresh token, which\nonly a client that registered itself holds, on its own.",
         "properties": {
           "client_id": {
             "maxLength": 128,
@@ -2275,53 +2525,118 @@
             "type": "string"
           },
           "code": {
-            "maxLength": 128,
-            "minLength": 43,
-            "title": "Code",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 43,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           },
           "code_verifier": {
-            "pattern": "^[A-Za-z0-9._~-]{43,128}$",
-            "title": "Code Verifier",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Verifier"
           },
           "grant_type": {
-            "const": "authorization_code",
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ],
             "title": "Grant Type",
             "type": "string"
           },
           "redirect_uri": {
-            "maxLength": 2048,
-            "title": "Redirect Uri",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
           }
         },
         "required": [
           "grant_type",
-          "client_id",
-          "redirect_uri",
-          "code",
-          "code_verifier"
+          "client_id"
         ],
         "title": "AppTokenRequest",
         "type": "object"
       },
       "AppTokenResponse": {
-        "description": "A minted app key, as RFC 6749 section 5.1 shapes it.",
+        "description": "A minted app key or access token, as RFC 6749 section 5.1 shapes it.",
         "properties": {
           "access_token": {
             "title": "Access Token",
             "type": "string"
+          },
+          "expires_in": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds until an access token expires, where it does.",
+            "title": "Expires In"
           },
           "manage_url": {
             "description": "The absolute URL of the page where the person sees this key, and revokes it.",
             "title": "Manage Url",
             "type": "string"
           },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Renews an MCP client's access token at this endpoint, and is replaced on each use. Using one a second time ends the sign-in.",
+            "title": "Refresh Token"
+          },
           "scope": {
-            "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.",
-            "title": "Scope",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it. Absent for an access token.",
+            "title": "Scope"
           },
           "token_type": {
             "const": "Bearer",
@@ -2332,7 +2647,6 @@
         },
         "required": [
           "access_token",
-          "scope",
           "manage_url"
         ],
         "title": "AppTokenResponse",
@@ -3371,6 +3685,17 @@
       "BulkInvitationFailurePublic": {
         "description": "An address the bulk invite could not invite, and why.",
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "detail": {
             "title": "Detail",
             "type": "string"
@@ -3902,6 +4227,14 @@
       "CatalogFacets": {
         "description": "The filter rail's choices, from the caller's whole authorized catalog rather than one page.",
         "properties": {
+          "data_locations": {
+            "description": "Every data location a hosted provider declares for an authorized model, as listed, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "providers": {
             "description": "Every provider instance offering an authorized model, sorted.",
             "items": {
@@ -3978,6 +4311,14 @@
             ],
             "description": "The largest any offering serves.",
             "title": "Context Window"
+          },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "default_pricing": {
             "description": "Whether an unpriced model is metered at the models.dev default.",
@@ -4282,6 +4623,14 @@
             "description": "The largest any offering serves.",
             "title": "Context Window"
           },
+          "data_locations": {
+            "description": "Where the hosted providers offering it keep request data, as the operator declares it: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`, distinct and sorted. One entry per place a provider may serve it from, so a provider with several regions gives several. Providers that declare nothing, and every `providers:` instance and organization key, add none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "deprecated": {
             "default": false,
             "description": "True only when every offering with metadata says so.",
@@ -4569,6 +4918,14 @@
           "credential": {
             "$ref": "#/components/schemas/CatalogCredential",
             "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key."
+          },
+          "data_locations": {
+            "description": "Where a `hosted` offering's provider keeps request data, one entry per place it may serve from, distinct and sorted; empty where it declares none and for every other offering.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",
@@ -5604,6 +5961,58 @@
           "criteria"
         ],
         "title": "ChoiceQuestion",
+        "type": "object"
+      },
+      "ClientRegistrationResponse": {
+        "description": "RFC 7591 section 3.2.1: the registration as recorded. Every client registered here is public.",
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_id_issued_at": {
+            "title": "Client Id Issued At",
+            "type": "integer"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "grant_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Grant Types",
+            "type": "array"
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Redirect Uris",
+            "type": "array"
+          },
+          "response_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Response Types",
+            "type": "array"
+          },
+          "token_endpoint_auth_method": {
+            "const": "none",
+            "default": "none",
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_id_issued_at",
+          "client_name",
+          "redirect_uris"
+        ],
+        "title": "ClientRegistrationResponse",
         "type": "object"
       },
       "CodeExecuteRequest": {
@@ -7911,10 +8320,9 @@
             "title": "Feedback Enabled",
             "type": "boolean"
           },
-          "mail_ready": {
-            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this deployment sends carries such a link, which is why this is one flag and not one per feature.",
-            "title": "Mail Ready",
-            "type": "boolean"
+          "mail": {
+            "$ref": "#/components/schemas/MailReadiness",
+            "description": "How far an email this deployment sends gets. Signing up without an invitation, a verification resend and a password reset are accepted wherever this is not 'none', and anything whose outcome depends on somebody receiving the message needs 'delivers'. Every message this deployment sends carries a link back to itself and needs its own public URL to build one, so one value answers for every feature rather than one per feature."
           },
           "maintenance_mode": {
             "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the API is unaffected.",
@@ -7932,6 +8340,11 @@
           "open_signup": {
             "description": "Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches.",
             "title": "Open Signup",
+            "type": "boolean"
+          },
+          "organization_oidc_enabled": {
+            "description": "Whether this deployment offers organizations their own OIDC sign-in connection (the organization_oidc_enabled setting). False means those routes are not mounted, so the sign-in screen renders no option to continue through an organization's provider. Additive to sign_in_methods rather than part of it, the way oauth_providers is: whether a given address resolves to a connection is answered per address, not published here.",
+            "title": "Organization Oidc Enabled",
             "type": "boolean"
           },
           "passkeys_enabled": {
@@ -8025,10 +8438,11 @@
           "passkeys_enabled",
           "passkeys_ready",
           "oauth_providers",
+          "organization_oidc_enabled",
           "open_signup",
           "feedback_enabled",
           "federation_member_rules",
-          "mail_ready"
+          "mail"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"
@@ -9017,6 +9431,103 @@
         ],
         "title": "EndUsersDeleted",
         "type": "object"
+      },
+      "EndpointAuthMethod": {
+        "description": "How the credential for one endpoint is produced.",
+        "enum": [
+          "static_header"
+        ],
+        "title": "EndpointAuthMethod",
+        "type": "string"
+      },
+      "EndpointAuthPublic": {
+        "description": "What an endpoint credential reports. Never carries the value, only its last four characters.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "title": "Header Name",
+            "type": "string"
+          },
+          "last4": {
+            "description": "The last four characters of the stored value.",
+            "title": "Last4",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced."
+          },
+          "state": {
+            "$ref": "#/components/schemas/EndpointAuthState",
+            "description": "How the credential stands against its own expiry. Reported so every reader draws the line in the same place. No value of it refuses a request: the proxy answers that on every request."
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "last4",
+          "expires_at",
+          "state"
+        ],
+        "title": "EndpointAuthPublic",
+        "type": "object"
+      },
+      "EndpointAuthRequest": {
+        "description": "The credential an edge proxy in front of a key's base URL requires.\n\n``method`` is a closed set of ways to produce request headers. TLS client\nauthentication is not one of them: it is presented when the connection is\nmade, so it would be a field of its own rather than a method here.",
+        "properties": {
+          "expires_at": {
+            "description": "When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "header_name": {
+            "description": "The header the value is sent in. Letters, digits and hyphens only. A header a provider sends its own credential in, one reserved for the connection, `Host`, and Otari's own namespace are all refused.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Header Name",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/EndpointAuthMethod",
+            "description": "How the credential is produced. `static_header` sends one stored value as one header."
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value to send, at least 8 characters. Write-only: responses report only its last four characters. Required when the credential is first set, and on any change of base URL. Omit it to keep the value already stored; an empty string is refused rather than read as keeping it.",
+            "title": "Secret"
+          }
+        },
+        "required": [
+          "method",
+          "header_name",
+          "expires_at"
+        ],
+        "title": "EndpointAuthRequest",
+        "type": "object"
+      },
+      "EndpointAuthState": {
+        "description": "How a stored credential stands against its own expiry.\n\nReported so every reader draws the line in the same place. None of the\nmembers refuses a request.",
+        "enum": [
+          "expired",
+          "expiring_soon",
+          "valid"
+        ],
+        "title": "EndpointAuthState",
+        "type": "string"
       },
       "ExecutionState": {
         "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
@@ -13314,14 +13825,20 @@
         "title": "InFlightResponse",
         "type": "object"
       },
+      "InvitationNextStep": {
+        "description": "What an invitee does to get in, as Otari decides it.\n\nThe members are exclusive and cover every pending invitation.\n``set_password`` means accepting may choose this address's first password.\n``sign_in`` means the address's credentials open a session.\n``verify_email`` means a password chosen at signup is waiting on a verification link this deployment can deliver.\n``use_another_way_in`` means none of those hold, and ``ways_in`` says what this deployment offers instead.\n\nNOTE: ``ways_in`` is filled only for ``use_another_way_in`` and ``verify_email``.\nThe other two leave it empty.",
+        "enum": [
+          "set_password",
+          "sign_in",
+          "use_another_way_in",
+          "verify_email"
+        ],
+        "title": "InvitationNextStep",
+        "type": "string"
+      },
       "InvitationPreviewPublic": {
-        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
+        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nthe role on offer, and what to do next.\nThe token is the caller's only credential here, not a session, so this\ncarries nothing that identifies who sent it or any other member.",
         "properties": {
-          "can_sign_in": {
-            "description": "Whether the invited address can already sign in, with a password or through a provider.",
-            "title": "Can Sign In",
-            "type": "boolean"
-          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -13331,10 +13848,9 @@
             "title": "Expires At",
             "type": "string"
           },
-          "needs_password": {
-            "description": "Whether accepting should also set the invited address's first password. False when the address already has a way in, and also when another organization has it as a member or invitee, since this link may not choose a password for it then; can_sign_in tells the two apart. Accept refuses a password whenever this is false.",
-            "title": "Needs Password",
-            "type": "boolean"
+          "next_step": {
+            "$ref": "#/components/schemas/InvitationNextStep",
+            "description": "What the invited address does to get in. Accept refuses a password unless this is 'set_password'."
           },
           "organization_name": {
             "title": "Organization Name",
@@ -13345,7 +13861,7 @@
             "type": "string"
           },
           "ways_in": {
-            "description": "When the address cannot sign in yet and this link will not set its password, what this deployment offers instead once it has accepted: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty otherwise, and empty when the deployment offers neither, in which case whoever administers it has to help.",
+            "description": "What this deployment offers instead, where next_step names them: 'provider' (sign in with Google or GitHub) and 'password_reset' (choose a password with \"Forgot your password?\"). Empty for the other steps, and empty where the deployment offers neither, in which case whoever administers it has to help.",
             "items": {
               "enum": [
                 "provider",
@@ -13362,8 +13878,7 @@
           "organization_name",
           "role",
           "expires_at",
-          "needs_password",
-          "can_sign_in",
+          "next_step",
           "ways_in"
         ],
         "title": "InvitationPreviewPublic",
@@ -14222,6 +14737,16 @@
         "title": "ListedSearchToolSchema",
         "type": "object"
       },
+      "MailReadiness": {
+        "description": "How far an email carrying a link back to this deployment gets.\n\nThe members are exclusive and cover every deployment.\n``none`` means no message is sent at all.\n``sends_only`` means a message is sent and no link the recipient can open reaches them.\n``delivers`` means the recipient's mailbox receives it.",
+        "enum": [
+          "none",
+          "sends_only",
+          "delivers"
+        ],
+        "title": "MailReadiness",
+        "type": "string"
+      },
       "MailSettings": {
         "description": "What this deployment can send, and what stands in the way if it cannot.",
         "properties": {
@@ -14268,7 +14793,7 @@
             "title": "Public Base Url"
           },
           "ready": {
-            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /api/v1/bootstrap.",
+            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.",
             "title": "Ready",
             "type": "boolean"
           },
@@ -14840,6 +15365,16 @@
             "title": "Server Name",
             "type": "string"
           },
+          "server_scope": {
+            "default": "workspace",
+            "description": "Whose the server is: one workspace's own, or its organization's, which a member signs in to from a workspace that reaches it",
+            "enum": [
+              "workspace",
+              "organization"
+            ],
+            "title": "Server Scope",
+            "type": "string"
+          },
           "shared": {
             "default": false,
             "description": "The sign-in was a manager's for everyone: it is now the shared server's account",
@@ -14847,9 +15382,17 @@
             "type": "boolean"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace the sign-in started from; null for an owner's sign-in to an organization's server",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -15655,6 +16198,72 @@
           "purpose_hint"
         ],
         "title": "McpServerSummary",
+        "type": "object"
+      },
+      "McpServerWorkspaceSettings": {
+        "description": "One workspace's settings on its organization's server, and whether the workspace reaches it.",
+        "properties": {
+          "attach_by_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the workspace attaches it; null takes the server's own",
+            "title": "Attach By Default"
+          },
+          "enabled": {
+            "description": "The workspace's own switch",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "everyone_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What every key of the workspace may call; null takes the server's own",
+            "title": "Everyone Tools"
+          },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's limit for the workspace, which caps every rule set here; null sets none",
+            "title": "Organization Tools"
+          },
+          "reached": {
+            "description": "The workspace's requests reach the server: neither the organization nor the workspace turned it off here, and the server itself is on",
+            "title": "Reached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reached",
+          "enabled",
+          "everyone_tools",
+          "attach_by_default",
+          "organization_tools"
+        ],
+        "title": "McpServerWorkspaceSettings",
         "type": "object"
       },
       "McpServersResponse": {
@@ -16822,9 +17431,31 @@
             "title": "Deployment Managed",
             "type": "boolean"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
           },
           "max_output_tokens": {
             "anyOf": [
@@ -16871,6 +17502,17 @@
             "default": "none",
             "title": "Pricing Source",
             "type": "string"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
           },
           "supported_parameters": {
             "anyOf": [
@@ -17834,6 +18476,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Only valid with an `api_base`."
+          },
           "name": {
             "maxLength": 255,
             "title": "Name",
@@ -18132,6 +18785,22 @@
             "title": "Created At",
             "type": "string"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endpoint_auth_unreadable": {
+            "default": false,
+            "description": "True where the key stores an endpoint credential this deployment cannot read, so `endpoint_auth` is absent while the key still carries one. Holding one that cannot be read is a third state, distinct from holding none: it is what a client needs to report it and offer to remove it.",
+            "title": "Endpoint Auth Unreadable",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -18200,7 +18869,7 @@
             "title": "Updated At"
           },
           "usable": {
-            "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
+            "description": "False when the key cannot be served as stored, so it supplies nothing at dispatch and the catalog withholds its provider: a credential this deployment cannot decrypt or read, a provider that cannot take a custom base URL, or an endpoint credential the key may not carry. Such a row is still listed, because deleting or replacing it is what fixes it.",
             "title": "Usable",
             "type": "boolean"
           },
@@ -18262,6 +18931,17 @@
             ],
             "title": "Client Args"
           },
+          "endpoint_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndpointAuthRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credential an edge proxy in front of `api_base` requires. Send it to set or replace one; send an explicit null to remove one. Leave it out to keep what is stored."
+          },
           "name": {
             "anyOf": [
               {
@@ -18308,6 +18988,30 @@
           "count"
         ],
         "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
+      "OrgProviderKeysReencryptPublic": {
+        "description": "What re-encrypting the stored organization provider credentials did.\n\nEach count is keys, not values, because a key holding one value no\nconfigured secret reads has to be re-entered whole: it serves nothing until\nit is. ``unreadable`` counts those, left exactly as they were;\n``skipped`` those edited while the rotation ran, already written under the\nprimary secret.",
+        "properties": {
+          "reencrypted": {
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable",
+          "skipped"
+        ],
+        "title": "OrgProviderKeysReencryptPublic",
         "type": "object"
       },
       "OrgProviderModelsRefreshPublic": {
@@ -19859,6 +20563,100 @@
         "title": "OrganizationGuardrailsPublic",
         "type": "object"
       },
+      "OrganizationMcpServerLimit": {
+        "description": "The organization's limit on one workspace's callers of one of its servers.",
+        "properties": {
+          "tools": {
+            "description": "Tool patterns ('*', a name, 'prefix*', '@read') the workspace's callers may reach at most; [] turns the server off for the workspace, and its admins cannot turn it back on",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "OrganizationMcpServerLimit",
+        "type": "object"
+      },
+      "OrganizationMcpServerWorkspace": {
+        "description": "One workspace of the organization, as one of its servers reaches it.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "narrowed": {
+            "description": "The workspace's admins changed something of their own: turned the server off, or set its default access or whether it is attached",
+            "title": "Narrowed",
+            "type": "boolean"
+          },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's limit for the workspace; null sets none, [] turns the server off there",
+            "title": "Organization Tools"
+          },
+          "reached": {
+            "description": "The workspace's requests reach the server: neither the organization nor the workspace turned it off there, and the server itself is on",
+            "title": "Reached",
+            "type": "boolean"
+          },
+          "workspace_enabled": {
+            "description": "The workspace's own switch, which its admins set",
+            "title": "Workspace Enabled",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "name",
+          "reached",
+          "organization_tools",
+          "workspace_enabled",
+          "narrowed"
+        ],
+        "title": "OrganizationMcpServerWorkspace",
+        "type": "object"
+      },
+      "OrganizationMcpServerWorkspaces": {
+        "description": "Every workspace of the organization, as one of its servers reaches each, by name.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationMcpServerWorkspaces",
+        "type": "object"
+      },
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
@@ -20977,7 +21775,7 @@
                 "type": "null"
               }
             ],
-            "description": "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it records the address as vouched for rather than proven, since the mailbox never saw the link.",
+            "description": "The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it leaves the address verified rather than proved, since the mailbox never saw the link.",
             "title": "Link"
           },
           "mail_sent": {
@@ -24680,6 +25478,26 @@
         "title": "ResponsesRequest",
         "type": "object"
       },
+      "RotateMasterKeyRequest": {
+        "description": "The proof a session-authenticated master-key rotation has to supply.\n\nOnly read when the caller authenticated with the dashboard session cookie. A request\ncarrying the master key is the deployment credential already, so it needs no further proof.",
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's current password. Required for a session-authenticated rotation.",
+            "title": "Current Password"
+          }
+        },
+        "title": "RotateMasterKeyRequest",
+        "type": "object"
+      },
       "RotateMasterKeyResponse": {
         "description": "A newly generated dashboard master key, returned once.",
         "properties": {
@@ -24765,6 +25583,212 @@
         ],
         "title": "SandboxProvider",
         "type": "string"
+      },
+      "SavingsAmounts": {
+        "description": "What a group of subagent decisions comes to, in USD.\n\nThe two costs sum only the decisions whose outcome is priced on both\nsides, which `measured` and `estimated` count. `router_cost` sums every\ndecision in the group, so `net_saved` can be negative.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved"
+        ],
+        "title": "SavingsAmounts",
+        "type": "object"
+      },
+      "SavingsByAgentType": {
+        "description": "One subagent type.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "agent_type": {
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "agent_type"
+        ],
+        "title": "SavingsByAgentType",
+        "type": "object"
+      },
+      "SavingsBySwap": {
+        "description": "Reported outcomes with one baseline model and one model run on.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "baseline_model": {
+            "description": "The priced model the baseline was read as, or the harness's name for it where it was read as none.",
+            "title": "Baseline Model",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "ran_on": {
+            "description": "The model the subagent ran on, as the harness named it.",
+            "title": "Ran On",
+            "type": "string"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "baseline_model",
+          "ran_on"
+        ],
+        "title": "SavingsBySwap",
+        "type": "object"
       },
       "ScopedBudgetResponse": {
         "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
@@ -26812,6 +27836,290 @@
           }
         },
         "title": "StoredSearchToolTestRequest",
+        "type": "object"
+      },
+      "SubagentOutcomeReport": {
+        "additionalProperties": false,
+        "description": "What the subagent a recommendation started has consumed so far, in total.\n\nEach report replaces the one before it, so a harness sends running totals\nand may send them more than once.",
+        "example": {
+          "usage": [
+            {
+              "cache_read_tokens": 42000,
+              "cache_write_tokens": 9000,
+              "input_tokens": 1200,
+              "model": "claude-haiku-5-5",
+              "output_tokens": 800
+            }
+          ]
+        },
+        "properties": {
+          "usage": {
+            "description": "One line per model the subagent ran on.",
+            "items": {
+              "$ref": "#/components/schemas/SubagentUsageLine"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Usage",
+            "type": "array"
+          }
+        },
+        "required": [
+          "usage"
+        ],
+        "title": "SubagentOutcomeReport",
+        "type": "object"
+      },
+      "SubagentSavingsPoint": {
+        "description": "One time bucket, by when the recommendation was made.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "bucket_start": {
+            "description": "Canonical ISO-8601 UTC.",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "bucket_start"
+        ],
+        "title": "SubagentSavingsPoint",
+        "type": "object"
+      },
+      "SubagentSavingsPublic": {
+        "description": "What the subagent router saved in a window, within the caller's scope.",
+        "properties": {
+          "by_agent_type": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsByAgentType"
+            },
+            "title": "By Agent Type",
+            "type": "array"
+          },
+          "by_swap": {
+            "description": "Largest saving first, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/SavingsBySwap"
+            },
+            "title": "By Swap",
+            "type": "array"
+          },
+          "estimated": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is the harness's own count."
+          },
+          "measured": {
+            "$ref": "#/components/schemas/SavingsAmounts",
+            "description": "The decisions whose outcome is metered."
+          },
+          "recommender_available": {
+            "description": "Whether anything answers a recommendation on this deployment.",
+            "title": "Recommender Available",
+            "type": "boolean"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SubagentSavingsPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SubagentSavingsTotals"
+          }
+        },
+        "required": [
+          "recommender_available",
+          "totals",
+          "measured",
+          "estimated",
+          "series",
+          "by_agent_type",
+          "by_swap"
+        ],
+        "title": "SubagentSavingsPublic",
+        "type": "object"
+      },
+      "SubagentSavingsTotals": {
+        "description": "The whole window.",
+        "properties": {
+          "actual_cost": {
+            "description": "The same tokens priced at the models they ran on.",
+            "title": "Actual Cost",
+            "type": "number"
+          },
+          "baseline_cost": {
+            "description": "The subagents' tokens priced at the models they would have started on.",
+            "title": "Baseline Cost",
+            "type": "number"
+          },
+          "decisions": {
+            "description": "Recommendations answered.",
+            "title": "Decisions",
+            "type": "integer"
+          },
+          "estimated": {
+            "description": "Priced outcomes read from the harness's own token counts.",
+            "title": "Estimated",
+            "type": "integer"
+          },
+          "gross_saved": {
+            "description": "`baseline_cost` less `actual_cost`.",
+            "title": "Gross Saved",
+            "type": "number"
+          },
+          "measured": {
+            "description": "Priced outcomes read from metered usage.",
+            "title": "Measured",
+            "type": "integer"
+          },
+          "net_saved": {
+            "description": "`gross_saved` less `router_cost`.",
+            "title": "Net Saved",
+            "type": "number"
+          },
+          "no_outcome": {
+            "description": "Decisions with no consumption reported. Their router cost still counts.",
+            "title": "No Outcome",
+            "type": "integer"
+          },
+          "router_cost": {
+            "description": "What the recommendations themselves were charged.",
+            "title": "Router Cost",
+            "type": "number"
+          },
+          "router_unanswered": {
+            "description": "Recommendation requests the router failed to answer.",
+            "title": "Router Unanswered",
+            "type": "integer"
+          },
+          "unpriced": {
+            "description": "Reported outcomes left out of the costs because a side has no price.",
+            "title": "Unpriced",
+            "type": "integer"
+          },
+          "with_outcome": {
+            "description": "Decisions whose subagent's consumption was reported.",
+            "title": "With Outcome",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "with_outcome",
+          "measured",
+          "estimated",
+          "baseline_cost",
+          "actual_cost",
+          "router_cost",
+          "gross_saved",
+          "net_saved",
+          "no_outcome",
+          "unpriced",
+          "router_unanswered"
+        ],
+        "title": "SubagentSavingsTotals",
+        "type": "object"
+      },
+      "SubagentUsageLine": {
+        "additionalProperties": false,
+        "description": "What a subagent consumed on one model, as its harness counted it.\n\nThe cache counts are beside `input_tokens`, not inside it.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "description": "Input tokens that were neither read from nor written to a cache.",
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "description": "The model, as the harness names it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_tokens": {
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "SubagentUsageLine",
         "type": "object"
       },
       "SwitchActiveOrganizationRequest": {
@@ -29305,6 +30613,17 @@
             "title": "By Filter",
             "type": "boolean"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -29622,6 +30941,11 @@
             "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
             "title": "Data Location"
           },
+          "deployment_paid": {
+            "default": false,
+            "title": "Deployment Paid",
+            "type": "boolean"
+          },
           "endpoint": {
             "title": "Endpoint",
             "type": "string"
@@ -29760,6 +31084,17 @@
               }
             ],
             "title": "Request Group Id"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
           },
           "selection_reason": {
             "anyOf": [
@@ -30373,6 +31708,17 @@
             ],
             "title": "Cache Write Price Per Million"
           },
+          "deployment_paid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Paid"
+          },
           "end_date": {
             "anyOf": [
               {
@@ -30773,6 +32119,11 @@
           },
           "cost": {
             "title": "Cost",
+            "type": "number"
+          },
+          "deployment_paid_cost": {
+            "default": 0.0,
+            "title": "Deployment Paid Cost",
             "type": "number"
           },
           "error_count": {
@@ -31595,12 +32946,12 @@
             "description": "The first request that succeeded, which is the guide's receipt. Null until one does."
           },
           "dismissed": {
-            "description": "Whether someone skipped the guide for this workspace.",
+            "description": "Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member.",
             "title": "Dismissed",
             "type": "boolean"
           },
           "experience_eligible": {
-            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
+            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, and the caller may run requests there. For someone who manages the workspace, nobody dismissed it and no request in the workspace has succeeded yet; for a member who does not, they have not dismissed it and no request of their own has succeeded yet.",
             "title": "Experience Eligible",
             "type": "boolean"
           },
@@ -31627,7 +32978,7 @@
             "description": "The most recent request, so a failure can be reported while the guide keeps waiting."
           },
           "status": {
-            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.",
+            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all. For a member who does not manage the workspace, only their own requests count.",
             "enum": [
               "waiting",
               "failed",
@@ -32106,12 +33457,13 @@
             "type": "boolean"
           },
           "decided_by": {
-            "description": "The key's own grant, its owner's, the server's everyone_tools, or the server itself (disabled, or its allowed_tools leaves the tool out)",
+            "description": "The key's own grant, its owner's, the server's everyone_tools, the server itself (disabled, or its allowed_tools leaves the tool out), or on an organization's server the organization's limit for the workspace",
             "enum": [
               "key",
               "user",
               "everyone",
-              "server"
+              "server",
+              "organization"
             ],
             "title": "Decided By",
             "type": "string"
@@ -32628,6 +33980,21 @@
             "title": "Name",
             "type": "string"
           },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On an organization's server, its limit for this workspace, which caps every rule; null sets none",
+            "title": "Organization Tools"
+          },
           "read_tools": {
             "description": "The server's tools labeled read, which '@read' in tools stands for",
             "items": {
@@ -32903,6 +34270,17 @@
             "title": "Id",
             "type": "string"
           },
+          "in_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpServerWorkspaceSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On an organization's server read through a workspace: that workspace's own settings on it, and the organization's limit there. The fields above are the organization's definition"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -32949,6 +34327,15 @@
             "title": "Read Tools From Server",
             "type": "boolean"
           },
+          "scope": {
+            "description": "Who owns the server: one workspace, or its organization",
+            "enum": [
+              "workspace",
+              "organization"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
           "shared_account": {
             "anyOf": [
               {
@@ -32969,14 +34356,23 @@
             "type": "string"
           },
           "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace that owns the server; null for an organization's",
+            "title": "Workspace Id"
           }
         },
         "required": [
           "id",
           "workspace_id",
+          "scope",
           "name",
           "url",
           "purpose_hint",
@@ -32995,6 +34391,45 @@
           "updated_at"
         ],
         "title": "WorkspaceMcpServerPublic",
+        "type": "object"
+      },
+      "WorkspaceMcpServerSettingsUpdate": {
+        "description": "A change to a workspace's own settings on its organization's server. A field left out keeps what is stored.",
+        "properties": {
+          "attach_by_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether every request of the workspace gets the server; null takes the server's",
+            "title": "Attach By Default"
+          },
+          "enabled": {
+            "description": "The workspace's own switch: false turns the server off for this workspace",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "everyone_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool patterns every key of the workspace may call; [] denies everyone; null takes the server's",
+            "title": "Everyone Tools"
+          }
+        },
+        "title": "WorkspaceMcpServerSettingsUpdate",
         "type": "object"
       },
       "WorkspaceMcpServerUpdate": {
@@ -34648,7 +36083,7 @@
     },
     "/api/v1/admin/users/{user_id}/bootstrap-operator": {
       "post": {
-        "description": "Make another operator the deployment's bootstrap operator.\n\nThe bootstrap operator is the account the master key acts as: master-key sign-in\nand requests carrying the master key resolve to it, and it cannot be deactivated or\nlose operator access. Only the current bootstrap operator, or a request carrying the\nmaster key, may hand the role on, and from a dashboard session it takes the caller's\n``current_password``. The previous bootstrap operator stays an operator, which the new\none may remove afterwards.\n\nRefused with 400 when the caller is another operator, when the current password is\nmissing or wrong, for a session whose account has no password, and for a target that\nis the caller, deactivated, not an operator, or without an unblocked email address that\nis verified rather than only vouched for, and a password.\n\nThe master key keeps working and now acts as the new bootstrap operator, including\nresetting their password, so rotate it when whoever held it should no longer.",
+        "description": "Make another operator the deployment's bootstrap operator.\n\nThe bootstrap operator is the account the master key acts as: master-key sign-in\nand requests carrying the master key resolve to it, and it cannot be deactivated or\nlose operator access. Only the current bootstrap operator, or a request carrying the\nmaster key, may hand the role on, and from a dashboard session it takes the caller's\n``current_password``. The previous bootstrap operator stays an operator, which the new\none may remove afterwards.\n\nRefused with 400 when the caller is another operator, when the current password is\nmissing or wrong, for a session whose account has no password, and for a target that\nis the caller, deactivated, not an operator, or without an unblocked email address the\nowner proved rather than one an organization recorded, and a password.\n\nThe master key keeps working and now acts as the new bootstrap operator, including\nresetting their password, so rotate it when whoever held it should no longer.",
         "operationId": "admin-hand_over_bootstrap_operator",
         "parameters": [
           {
@@ -34710,7 +36145,7 @@
     },
     "/api/v1/admin/users/{user_id}/password-link": {
       "post": {
-        "description": "Give an account a single-use link that sets its password, for someone who cannot sign in.\n\nWhere this deployment can mail links, the link goes to the account's address and is not returned, the\nsame as \"Forgot your password?\". Where it cannot, or the send fails, the response carries the link for\nyou to pass on, which is how a member who forgot their password gets back in on a deployment without\nmail. A password chosen through a link that was not mailed records the address as vouched for rather\nthan proven. A new link replaces any earlier reset link for the account.\n\nRefused with 409 for a deactivated account, one with no address, one that has no password and signs in\nwith a provider or a passkey (its owner adds a password once signed in), and, where open_signup is\ndisabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's\naccount is refused too unless the request carries the master key.",
+        "description": "Give an account a single-use link that sets its password, for someone who cannot sign in.\n\nWhere this deployment can mail links, the link goes to the account's address and is not returned, the\nsame as \"Forgot your password?\". Where it cannot, or the send fails, the response carries the link for\nyou to pass on, which is how a member who forgot their password gets back in on a deployment without\nmail. A password chosen through a link that was not mailed leaves the address verified rather\nthan proved. A new link replaces any earlier reset link for the account.\n\nRefused with 409 for a deactivated account, one with no address, one that has no password and signs in\nwith a provider or a passkey (its owner adds a password once signed in), and, where open_signup is\ndisabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's\naccount is refused too unless the request carries the master key.",
         "operationId": "admin-issue_password_link",
         "parameters": [
           {
@@ -35712,6 +37147,129 @@
         ],
         "x-otari-key-scopes": [
           "inference:run"
+        ]
+      }
+    },
+    "/api/v1/auth/access-tokens": {
+      "get": {
+        "description": "The caller's own access tokens, newest first. Never anybody else's, and never a token itself.",
+        "operationId": "auth-list_access_tokens",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokensPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Access Tokens",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Mint an access token that reads what the caller can see on the dashboard, as them.\n\nIt reads the organization the caller is acting in now, even after the dashboard switches\nto another. It authenticates `GET` requests to the management API and the MCP server at\n`/mcp`, is refused on every write, and lives a year at most. The token is in this response only.",
+        "operationId": "auth-create_access_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Access Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/access-tokens/{token_id}": {
+      "delete": {
+        "description": "Revoke one of the caller's access tokens at once.",
+        "operationId": "auth-delete_access_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Access Token",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -37858,6 +39416,21 @@
             }
           },
           {
+            "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+            "in": "query",
+            "name": "data_location",
+            "required": false,
+            "schema": {
+              "description": "Only models a hosted provider serves from one of these data locations: ISO 3166-1 alpha-2 country codes, `EU` or `GLOBAL`. Matched as a workspace's `allowed_data_locations` is, so `EU` also matches each EU member state and `GLOBAL` only `GLOBAL`. A model whose location is undeclared matches none.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Data Location",
+              "type": "array"
+            }
+          },
+          {
             "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
             "in": "query",
             "name": "released_within_days",
@@ -39684,7 +41257,7 @@
             "description": "Successful Response"
           },
           "413": {
-            "description": "The upload exceeds the configured maximum size."
+            "description": "The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows."
           },
           "422": {
             "content": {
@@ -40640,7 +42213,7 @@
     },
     "/api/v1/hosted-providers/reencrypt": {
       "post": {
-        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nRun after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
+        "description": "Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/search-tools/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``.\nA provider no configured key reads is left as it is, to be re-entered.",
         "operationId": "hosted-providers-reencrypt_hosted_providers",
         "responses": {
           "200": {
@@ -42235,6 +43808,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -42543,6 +44134,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -44319,7 +45928,7 @@
     },
     "/api/v1/mcp/servers/{mcp_server_id}/tools": {
       "get": {
-        "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nCall this once per server when preparing a model or workflow run, and reuse\nthe answer for every tool from that server for the length of the run: there\nis no cross-run cache in this version, so a later run rediscovers and\nstaleness stays bounded without any invalidation state to keep.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
+        "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nOtari keeps each server's own tool listing for up to five minutes and answers\nfrom it, so calling this at the start of every run costs no connection to the\nserver. The `Age` response header says how many seconds old the listing is,\nand `Cache-Control: no-cache` on the request asks the server again. A kept\nlisting is never served across an edit to the server (its `server_revision`\nchanges) or to a different credential, so each user of a per-user server is\nanswered from a listing read with their own token. The key's access rule is\napplied on every call, never kept.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
         "operationId": "mcp-list_mcp_tools",
         "parameters": [
           {
@@ -44729,7 +46338,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
+        "description": "List all available models, one entry per model however many providers serve it.\n\nEach `id` is the model's catalog id (`deepseek/deepseek-v4.1-flash`), which a\nrequest sends as `model` to let the gateway choose the provider: it tries the\nmodel's offerings best first and falls back down the list. An entry's price,\ntoken limits and capabilities are those of the offering tried first, at the\ncaller's own rate; a token limit or capability that offering does not know\ncomes from the model's other offerings, the smallest limit or the parameters\nthe first of them reports, and an output limit filled that way is capped at\nthe entry's context window. A field no offering reports is read\nfrom models.dev's entry for the model, preferring the vendor's own, so a\nmodel reached on an organization's key to an OpenAI-compatible endpoint is\ndescribed too. A value nobody knows is omitted rather than sent as null.\n\nAliases and routing policies are listed beside the models. An\n`instance:model` selector still pins a request to one provider, and\nGET /api/v1/catalog/models/{model_id} lists the offerings of a model.",
         "operationId": "models-list_models",
         "parameters": [
           {
@@ -45258,6 +46867,78 @@
         ]
       }
     },
+    "/api/v1/oauth/apps/register": {
+      "post": {
+        "description": "Register a public OAuth client that names itself (RFC 7591), as an MCP client does on first connect.\n\nWhat it is approved for redeems only to the approving person's read-only access token, and\nthe consent screen names it as unverified. Served where the MCP server is on.",
+        "operationId": "oauth-apps-register_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "RFC 7591 client metadata. Only what Otari uses is read; anything else is ignored.",
+                "properties": {
+                  "client_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The name the consent screen shows, marked unverified.",
+                    "title": "Client Name"
+                  },
+                  "redirect_uris": {
+                    "items": {
+                      "maxLength": 2048,
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "title": "Redirect Uris",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "redirect_uris"
+                ],
+                "title": "ClientRegistrationRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [],
+        "summary": "Register Client",
+        "tags": [
+          "oauth-apps"
+        ]
+      }
+    },
     "/api/v1/oauth/apps/revoke": {
       "post": {
         "description": "Revoke the presented app token. Unknown or previously revoked tokens also succeed (RFC 7009).",
@@ -45311,7 +46992,7 @@
     },
     "/api/v1/oauth/apps/token": {
       "post": {
-        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key.",
+        "description": "Exchange a form-encoded single-use authorization code and S256 verifier for a revocable credential.\n\nA registered or open app is given an API key. A client that registered itself is given a\nread-only access token good for an hour through the MCP server, and a refresh token that\nrenews it here (``grant_type=refresh_token``) until the sign-in the person approved ends.",
         "operationId": "oauth-apps-exchange",
         "requestBody": {
           "content": {
@@ -45515,6 +47196,36 @@
         "summary": "Exchange Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/v1/organization-provider-keys/reencrypt": {
+      "post": {
+        "description": "Re-encrypt every organization's stored provider credentials with the primary ``OTARI_SECRET_KEY``.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Covers all three of a key's\nencrypted values: the provider API key, the stored client arguments and the\nendpoint credential. A key holding one no configured secret reads is left\nas it is and counted, to be re-entered.",
+        "operationId": "provider-keys-reencrypt_org_provider_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeysReencryptPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Org Provider Keys",
+        "tags": [
+          "provider-keys"
         ]
       }
     },
@@ -47678,6 +49389,887 @@
         ]
       }
     },
+    "/api/v1/organizations/me/mcp-servers": {
+      "get": {
+        "description": "List the organization's own MCP servers, oldest first. Organization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_servers",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Servers",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Add an MCP server every workspace of the organization reaches. Organization owners and admins only.\n\nIts access rules, attach setting and tool list are the defaults each workspace starts from, and its tool\nlist is the most any workspace's callers reach. A name another server of the organization has, its own or a\nworkspace's, is refused with a 409.",
+        "operationId": "mcp-servers-create_organization_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "Another server of the organization, its own or a workspace's, already has this name."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/check": {
+      "post": {
+        "description": "Check connection details without storing anything. Organization owners and admins only.",
+        "operationId": "mcp-servers-check_organization_mcp_server_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "The URL failed the SSRF or TLS check"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Organization Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}": {
+      "delete": {
+        "description": "Delete one of the organization's own MCP servers, from every workspace. Organization owners and admins only.\n\nEvery sign-in to it ends, and its authorization server is asked to end their tokens once the deletion commits.",
+        "operationId": "mcp-servers-delete_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "get": {
+        "description": "One of the organization's own MCP servers. Organization owners and admins only.",
+        "operationId": "mcp-servers-get_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "patch": {
+        "description": "Change one of the organization's own MCP servers. Organization owners and admins only.",
+        "operationId": "mcp-servers-update_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check": {
+      "post": {
+        "description": "Check the server's connection now and store the outcome as `health`. Organization owners and admins only.",
+        "operationId": "mcp-servers-check_organization_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Every check slot on this gateway was busy; nothing was recorded. Try again shortly."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Organization Mcp Server",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/check/sign-in": {
+      "post": {
+        "description": "Start a sign-in made only to check a per-user server. Organization owners and admins only.",
+        "operationId": "mcp-servers-start_organization_mcp_server_check_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Organization Mcp Server Check Sign In",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections": {
+      "get": {
+        "description": "Everyone signed in to the server, from any workspace. Organization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_server_connections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerConnectionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Server Connections",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/connections/{user_id}": {
+      "delete": {
+        "description": "End one person's sign-in to the server. Organization owners and admins only.",
+        "operationId": "mcp-servers-remove_organization_mcp_server_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Organization Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/shared-account": {
+      "delete": {
+        "description": "End the server's shared account, and check it again without one. Organization owners and admins only.",
+        "operationId": "mcp-servers-end_organization_mcp_server_shared_account",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "End Organization Mcp Server Shared Account",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "post": {
+        "description": "Start a sign-in for everyone, which every workspace's calls then carry. Organization owners and admins only.",
+        "operationId": "mcp-servers-start_organization_mcp_server_shared_sign_in",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConnectionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConnectionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Start Organization Mcp Server Shared Sign In",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces": {
+      "get": {
+        "description": "Each workspace of the organization, whether it reaches the server, and the limit set for it.\n\nOrganization owners and admins only.",
+        "operationId": "mcp-servers-list_organization_mcp_server_workspaces",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspaces"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Server Workspaces",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/{server_id}/workspaces/{workspace_id}": {
+      "delete": {
+        "description": "Lift the organization's limit in a workspace. Organization owners and admins only. Idempotent.",
+        "operationId": "mcp-servers-clear_organization_mcp_server_workspace_limit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Organization Mcp Server Workspace Limit",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "put": {
+        "description": "Limit the tools a workspace's callers reach on the server. Organization owners and admins only.\n\nThe workspace's own rules still apply under the limit, and its admins can narrow it but never raise it.\n`[]` turns the server off for the workspace.",
+        "operationId": "mcp-servers-set_organization_mcp_server_workspace_limit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationMcpServerLimit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMcpServerWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Organization Mcp Server Workspace Limit",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
     "/api/v1/organizations/me/member-invitations": {
       "post": {
         "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). When the\nemail did not go out (``mail_sent`` is false: mail is not configured, the\nsend failed, or the invitation mail limit was reached), the response\ncarries the accept link so the caller can share it themselves, except under\n``open_signup`` to a caller who is not a deployment operator, whose invitee\naccepts from their pending invitations once signed in. An address whose\ninvitation is still pending is refused; reissue that invitation to send a\nnew link.",
@@ -48379,7 +50971,7 @@
     },
     "/api/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
       "post": {
-        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time. Addressed by membership id\nrather than by token: the caller is already the addressee, so a token would\nadd nothing their session does not carry. It answers the membership alone,\nbecause the next step that route carries is for a visitor whose only\ncredential is a link.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
         "operationId": "organizations-accept_caller_pending_membership",
         "parameters": [
           {
@@ -48398,7 +50990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                  "$ref": "#/components/schemas/AcceptedMembershipPublic"
                 }
               }
             },
@@ -50419,6 +53011,143 @@
         ]
       }
     },
+    "/api/v1/organizations/me/subagent-savings": {
+      "get": {
+        "description": "What the subagent router saved, within what the caller's membership lets them see.\n\nEach recommendation records the model the subagent would have started on\nwithout it: the model the caller asked for, else the parent's. When the\nharness reports what the subagent consumed, those tokens are priced at the\nmodels it ran on and at that baseline. The saving is the difference, less\nwhat the recommendations themselves cost, so it can be negative.\n\nThe costs count only the outcomes priced on both sides. `router_cost`\ncounts every recommendation in the window, also one whose subagent was\nnever reported or could not be priced. The figures are estimates unless\ncounted under `measured`. With no dates, the last 30 days.",
+        "operationId": "organization-usage-read_subagent_savings",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "The grain of `series`.",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "The grain of `series`.",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubagentSavingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Read Subagent Savings",
+        "tags": [
+          "organization-usage"
+        ]
+      }
+    },
     "/api/v1/organizations/me/switch": {
       "post": {
         "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists, and for one whose own SSO enforcement refuses the caller.",
@@ -52214,6 +54943,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -52618,6 +55365,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -53012,6 +55777,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -53380,6 +56163,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -54875,7 +57676,7 @@
             "description": "Successful Response"
           },
           "413": {
-            "description": "The upload exceeds the configured maximum size."
+            "description": "The upload exceeds the configured maximum size, or would take its workspace past the number of files or bytes the deployment allows."
           },
           "422": {
             "content": {
@@ -56462,6 +59263,74 @@
         ]
       }
     },
+    "/api/v1/routing/decisions/{decision_id}/outcome": {
+      "put": {
+        "description": "Report what the subagent a recommendation started has consumed.\n\nThe harness sends the token counts it holds for the subagent, one line per\nmodel it ran on, as running totals: each report replaces the one before\nit. The gateway prices those tokens twice, at the models named and at the\nmodel the subagent would have started on without the recommendation, and\nkeeps both amounts as an estimate. No content is sent, nothing is charged\nand no usage row is written.\n\nAuthentication modes:\n- Master key: any decision.\n- API key: a decision made for the key's own user in the key's workspace.",
+        "operationId": "routing-report_subagent_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubagentOutcomeReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationRefusal"
+                }
+              }
+            },
+            "description": "No decision of the caller's has this id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Report Subagent Outcome",
+        "tags": [
+          "routing"
+        ],
+        "x-otari-key-scopes": [
+          "agents:write"
+        ]
+      }
+    },
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force in your organization, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
@@ -56708,7 +59577,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nBy default the deployment asks the subagent router an operator switched on\nin the dashboard to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a bootstrap may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate. `decision_id` names the record of\nthis answer, and is absent where the record could not be kept.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {
@@ -57569,7 +60438,7 @@
     },
     "/api/v1/search-tools/reencrypt": {
       "post": {
-        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/hosted-providers/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nPart of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside\n``POST /api/v1/hosted-providers/reencrypt`` and\n``POST /api/v1/organization-provider-keys/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
         "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
@@ -58236,6 +61105,23 @@
       "post": {
         "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",
         "operationId": "settings-rotate_master_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RotateMasterKeyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -58246,6 +61132,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -60172,6 +63068,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
             "in": "query",
             "name": "request_group_id",
@@ -60573,6 +63487,24 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -61108,6 +64040,24 @@
             }
           },
           {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
+            }
+          },
+          {
             "description": "Only usage recorded in this workspace.",
             "in": "query",
             "name": "workspace_id",
@@ -61526,6 +64476,24 @@
               ],
               "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+            "in": "query",
+            "name": "deployment_paid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by who paid the provider: true = only rows served on a credential the deployment pays for (a hosted provider), false = every other row",
+              "title": "Deployment Paid"
             }
           },
           {
@@ -62619,7 +65587,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/dismiss": {
       "post": {
-        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nFor a member who does not manage the workspace, for them alone; a viewer is\nrefused. It retires the card and nothing else: the key the guide issued\nkeeps working, because the operator asked for it and may well have pasted it\nsomewhere already. Revoking one is the Keys page's job.",
         "operationId": "workspace-activation-dismiss_workspace_activation",
         "parameters": [
           {
@@ -62671,7 +65639,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/activation/key": {
       "post": {
-        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "description": "Issue the setup API key, rotating the one the guide already issued.\n\nThe workspace's for its owners and admins, the caller's own for a member who\ndoes not manage it; a viewer is refused. The plaintext is returned once and\nnever stored, so a reopened guide rotates the same key row rather than\ncollecting a second one, and answers 409 once the guide is finished or was\ndismissed.",
         "operationId": "workspace-activation-create_workspace_activation_key",
         "parameters": [
           {
@@ -65180,6 +68148,144 @@
           }
         ],
         "summary": "Get My Workspace Mcp Server Tools",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override": {
+      "delete": {
+        "description": "Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.\n\nOrganization owners/admins or this workspace's owners/admins. The organization's limit for the workspace stays.",
+        "operationId": "mcp-servers-clear_workspace_mcp_server_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Workspace Mcp Server Override",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "patch": {
+        "description": "Change this workspace's own settings on its organization's server.\n\nOrganization owners/admins or this workspace's owners/admins. Sets only the fields sent; one left out\nkeeps what is stored, so two admins changing different settings do not undo each other. `enabled` is\nthe workspace's switch and is never null. `everyone_tools` and `attach_by_default` take null to follow\nthe server's own again. The organization's limit for the workspace stays, and caps what is set here.",
+        "operationId": "mcp-servers-set_workspace_mcp_server_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Mcp Server Override",
         "tags": [
           "mcp-servers"
         ]

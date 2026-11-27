@@ -528,7 +528,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/organization_keys.py",
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
-    "gateway/api/routes/organization_usage.py",
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",
@@ -1117,7 +1116,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/provider_metadata_service.py",
     "gateway/services/runtime_settings_service.py",
     "gateway/services/sandbox_backend.py",
-    "gateway/services/search_backend.py",
     "gateway/services/secret_box.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tool_format.py",
@@ -1129,10 +1127,8 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/vision.py",
     "gateway/services/web_extraction.py",
     "gateway/services/web_fetch_service.py",
-    "gateway/services/web_retrieval_backend.py",
     "gateway/services/web_retrieval_network.py",
     "gateway/services/web_retrieval_policy.py",
-    "gateway/services/web_search_providers.py",
     "gateway/services/workspace_scope.py",
 )
 
@@ -1346,7 +1342,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 67,
+    "tenancy": 66,
 }
 
 
@@ -1430,7 +1426,7 @@ COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
 # back three hundred lines of what a split had moved out. A fall must be recorded
 # here, so the room made cannot be spent again. The count says nothing about where
 # a builder belongs, which is a judgment no check can make.
-COMPOSITION_ROOT_SIZE_BASELINE = 89
+COMPOSITION_ROOT_SIZE_BASELINE = 87
 
 
 def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
@@ -2575,8 +2571,16 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.OAuthDynamicClient": {
+        "repository": "gateway/repositories/identity/oauth_dynamic_client_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthIdentityLink": {
         "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.identity.PersonalAccessToken": {
+        "repository": "gateway/repositories/identity/personal_access_token_repository.py",
         "baseline": (),
     },
     "gateway.models.identity.OIDCConnection": {
@@ -2773,6 +2777,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),
     },
+    "gateway.models.routing.SubagentDecision": {
+        "repository": "gateway/repositories/routing/subagent_decision_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.RoutingPolicy": {
         "repository": "gateway/repositories/routing/routing_policy_repository.py",
         "baseline": (
@@ -2842,7 +2850,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/api/routes/keys.py",
             "gateway/api/routes/organization_keys.py",
             "gateway/api/routes/organization_routing.py",
-            "gateway/api/routes/organization_usage.py",
             "gateway/api/routes/scoped_budgets.py",
             "gateway/repositories/budgets/workspace_budget_default_repository.py",
             "gateway/repositories/overview/overview_repository.py",
@@ -2857,6 +2864,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.WorkspaceActivationState": {
         "repository": None,
         "baseline": ("gateway/services/tenancy/workspace_activation_service.py",),
+    },
+    "gateway.models.tenancy.WorkspaceMemberActivationState": {
+        "repository": "gateway/repositories/organizations/workspace_member_activation_repository.py",
+        "baseline": (),
     },
     "gateway.models.tenancy.WorkspaceMember": {
         "repository": "gateway/repositories/tenancy/workspace_repository.py",
@@ -2887,6 +2898,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/mcp_sign_in_link_use_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.McpServerAlias": {
+        "repository": "gateway/repositories/tools/mcp_server_alias_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.McpServerRequest": {
         "repository": "gateway/repositories/tools/mcp_server_request_repository.py",
         "baseline": (),
@@ -2909,10 +2924,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.WorkspaceMcpServer": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_repository.py",
-        "baseline": (
-            "gateway/services/playground_service.py",
-            "gateway/services/tenancy/workspace_mcp_server_service.py",
-        ),
+        "baseline": ("gateway/services/tenancy/workspace_mcp_server_service.py",),
     },
     "gateway.models.tools.WorkspaceMcpServerGrant": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",
@@ -2920,6 +2932,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.WorkspaceMcpServerLogo": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_logo_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.WorkspaceMcpServerOverride": {
+        "repository": "gateway/repositories/tools/workspace_mcp_server_override_repository.py",
         "baseline": (),
     },
     "gateway.models.tools.WorkspaceWebSearchConfig": {
@@ -3231,6 +3247,90 @@ def _ambiguous_model_names(
     ]
 
 
+# The two columns that say an identity's address is usable and that somebody proved its
+# holder. Domain auto-join and the add-or-invite refusals read the second to grant access
+# across organizations, so what may write either is a rule rather than a preference.
+# Each entry names the modules that may write the column. A module that stops writing one
+# fails the check until its entry goes, so a consolidation is proved rather than asserted.
+# Deliberately not a baseline: a baseline records debt and only shrinks, and this records the
+# design, which changes when the design does. Freezing it would block the move DOMAINS.md
+# schedules for these modules.
+COLUMN_WRITERS: dict[str, tuple[str, ...]] = {
+    "email_proven_at": ("gateway/core/address_proof.py",),
+    "email_verified_at": ("gateway/core/address_proof.py",),
+}
+
+
+def _assigned_column_names(node: ast.AST) -> Iterator[str]:
+    """Yield the column name each node writes, by any spelling that reaches the database.
+
+    A write is an attribute store, a subscript store under a string key, a key in a mapping
+    literal, a keyword argument, or a ``setattr`` naming the column. All of them land the same
+    value in the same column, so a rule that reads one spelling is not a rule. A store is what the
+    parser marks as one, so a loop target and a context manager's target count, and a column read
+    to build a key does not. The mark is the grammar's, so a declaration carrying no value counts
+    as well, which fails a build rather than letting a writer through.
+
+    NOTE: The name is what this matches, not the type, so a field of the same name on anything
+    else counts. Modules outside ``src/gateway``, including the migrations, are out of scope.
+
+    NOTE: A function's own parameter named for a column is not a write. It is a conduit, and
+    whatever it conducts into is one of the forms above.
+    """
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+        yield node.attr
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+        if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            yield node.slice.value
+    if isinstance(node, ast.Dict):
+        for key in node.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                yield key.value
+    if isinstance(node, ast.Call):
+        for keyword in node.keywords:
+            if keyword.arg is not None:
+                yield keyword.arg
+        if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 2:
+            named = node.args[1]
+            if isinstance(named, ast.Constant) and isinstance(named.value, str):
+                yield named.value
+
+
+def check_column_writers(src_root: Path) -> list[str]:
+    """Check that only the listed modules write each address-proof column.
+
+    What counts as a write is in :func:`_assigned_column_names`. Reading a column, naming it
+    in a docstring and comparing against it are not writes.
+
+    NOTE: This watches writes, not calls. It says nothing about which authority a caller
+    names, only about who may turn one into a column value.
+    """
+    violations: list[str] = []
+    seen: dict[str, set[str]] = {column: set() for column in COLUMN_WRITERS}
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for node in ast.walk(tree):
+            for column in _assigned_column_names(node):
+                if column not in COLUMN_WRITERS:
+                    continue
+                seen[column].add(relative_path)
+                if relative_path not in COLUMN_WRITERS[column]:
+                    line = getattr(node, "lineno", 0)
+                    violations.append(
+                        f"{relative_path}:{line} assigns {column}; "
+                        f"only {', '.join(COLUMN_WRITERS[column])} may, so that what an address "
+                        f"proves is decided in one place"
+                    )
+    for column, writers in COLUMN_WRITERS.items():
+        # A listed module that is gone wrote nothing because it does not exist, which is a
+        # different thing from one that stopped, and is plain in the diff that removed it.
+        still_there = {writer for writer in writers if (src_root / writer).is_file()}
+        violations.extend(
+            f"{stale} no longer assigns {column}; remove it from COLUMN_WRITERS"
+            for stale in sorted(still_there - seen[column])
+        )
+    return violations
+
+
 def check_model_access(src_root: Path) -> list[str]:
     """Check that only an ORM model's repository and the modules on its baseline use it.
 
@@ -3349,6 +3449,7 @@ def main() -> int:
     non_domain_import_violations = check_non_domain_service_imports(SRC_ROOT, domains) if domains else []
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
+    column_writer_violations = check_column_writers(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
     composition_root_violations = check_composition_root_behavior(SRC_ROOT)
     composition_root_size_violations = check_composition_root_size(SRC_ROOT)
@@ -3450,6 +3551,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal composition root behavior violations: {len(composition_root_violations)}")
 
+    if column_writer_violations:
+        print("\n❌ Address column writer violations:\n")
+        for violation in column_writer_violations:
+            print(f"  {violation}")
+        print(f"\nTotal address column writer violations: {len(column_writer_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -3470,6 +3577,7 @@ def main() -> int:
         or service_package_import_violations
         or service_root_export_violations
         or model_access_violations
+        or column_writer_violations
         or import_cycle_violations
         or composition_root_violations
         or composition_root_size_violations

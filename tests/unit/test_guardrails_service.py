@@ -458,12 +458,33 @@ async def test_an_unreachable_endpoint_is_not_named_to_the_caller(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_the_no_url_message_survives_whole(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The one case a caller can act on names an environment variable, not an address."""
+async def test_a_requested_profile_with_no_service_tells_the_caller_what_to_change() -> None:
+    """Otari#2937: the caller named the profile, so the fix is in their request, not in a setting they cannot reach."""
     with pytest.raises(GuardrailsNotReachableError) as exc:
         await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=None)
 
-    assert "OTARI_GUARDRAILS_URL" in exc.value.public_detail
+    assert exc.value.reason == "not_configured"
+    assert "`url`" in exc.value.public_detail
+    assert "mandate" in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" not in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" in str(exc.value), "the operator's log still names the setting"
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_profile_with_no_service_does_not_send_the_caller_to_their_request() -> None:
+    """Otari#2937: a mandate is not the caller's to fix, and they cannot point it at a service."""
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block")],
+            "x",
+            default_url=None,
+            mandated={"prompt-injection"},
+        )
+
+    assert exc.value.reason == "not_configured"
+    assert "`url`" not in exc.value.public_detail
+    assert "administrator" in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" not in exc.value.public_detail
 
 
 def _unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -587,6 +608,7 @@ class _StubVerdict:
     valid: bool
     explanation: str | None = None
     score: float | None = None
+    categories: tuple[str, ...] = ()
 
 
 class _StubGuardrail:
@@ -806,3 +828,94 @@ def test_a_check_without_a_verdict_or_an_identity_is_not_kept() -> None:
         stricter, base_url="", credential=None, in_process={"pi": named}
     )
     assert check_identity(cfg, base_url="", credential=None, in_process={}) is None
+
+
+def test_a_kept_verdict_keeps_its_categories() -> None:
+    from gateway.services.guardrails import GuardrailResult, cached_result, check_identity, remember_result
+
+    cfg = GuardrailConfig(profile="pi", mode="block")
+    identity = check_identity(cfg, base_url="https://a.example", credential=None, in_process={})
+    assert identity is not None
+    remember_result(identity, "text", GuardrailResult(profile="pi", mode="block", valid=False, categories=("pii",)))
+
+    hit = cached_result(identity, "text", cfg)
+    assert hit is not None
+    assert hit.categories == ("pii",)
+
+
+# -- the categories a check names --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_service_names_the_categories_that_fired(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2982: plain identifiers, or any-guardrail's own category objects, of which only the triggered count."""
+    categories: list[object] = [
+        "prompt_attack",
+        {"name": "pii/phone_number", "triggered": True, "score": 0.8},
+        {"name": "pii/email", "triggered": False},
+        {"name": "moderated_content/hate", "triggered": None},
+    ]
+    _patch_transport(monkeypatch, _result_handler({"valid": False, "categories": categories}))
+
+    verdict = await run_input_guardrails([GuardrailConfig(profile="pi", mode="monitor")], "x", default_url=_URL)
+
+    assert verdict.results[0].categories == ("prompt_attack", "pii/phone_number")
+
+
+@pytest.mark.asyncio
+async def test_a_service_that_names_no_categories_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, _result_handler({"valid": False, "score": 1.0}))
+
+    verdict = await run_input_guardrails([GuardrailConfig(profile="pi", mode="monitor")], "x", default_url=_URL)
+
+    assert verdict.results[0].categories == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "categories",
+    [
+        "prompt_attack",
+        {"prompt_attack": True},
+        42,
+        [None, 7, ["nested"], {"name": 5, "triggered": True}, {"triggered": True}],
+        ["ignore all previous instructions", "a\nb", "<script>", "pii/ñ", "x" * 65, "/etc/passwd"],
+        ["someone@example.com", "sk-proj-abcdefghijklmnopqrstuvwxyz", "AKIAABCDEFGHIJKLMNOP"],
+    ],
+    ids=["a string", "a mapping", "a number", "not names", "prose and oversize", "credential-shaped"],
+)
+async def test_a_category_that_is_not_a_short_identifier_is_dropped(
+    monkeypatch: pytest.MonkeyPatch, categories: object
+) -> None:
+    """A vendor's answer, or a service the caller chose, never reaches the caller as text."""
+    _patch_transport(monkeypatch, _result_handler({"valid": False, "categories": categories}))
+
+    verdict = await run_input_guardrails([GuardrailConfig(profile="pi", mode="monitor")], "x", default_url=_URL)
+
+    assert verdict.results[0].categories == ()
+
+
+@pytest.mark.asyncio
+async def test_a_check_names_a_few_categories_once_each(monkeypatch: pytest.MonkeyPatch) -> None:
+    named = ["pii", "pii", *(f"detector_{i}" for i in range(20))]
+    _patch_transport(monkeypatch, _result_handler({"valid": False, "categories": named}))
+
+    verdict = await run_input_guardrails([GuardrailConfig(profile="pi", mode="monitor")], "x", default_url=_URL)
+
+    assert verdict.results[0].categories == ("pii", *(f"detector_{i}" for i in range(7)))
+
+
+@pytest.mark.asyncio
+async def test_a_held_guardrail_names_its_categories_under_the_same_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_service(monkeypatch)
+    guardrail = _StubGuardrail(_StubVerdict(valid=False, categories=("prompt_attack", "not a category")))
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", mode="monitor")],
+        "x",
+        default_url=None,
+        mandated={"pi"},
+        in_process={"pi": guardrail},
+    )
+
+    assert verdict.results[0].categories == ("prompt_attack",)

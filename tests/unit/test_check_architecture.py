@@ -2703,3 +2703,65 @@ def test_a_nested_definition_does_not_count(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
     _root_with(tmp_path, "def get_one() -> None:\n    def inner() -> None: ...\n\n    return inner()\n")
     assert check.check_composition_root_size(tmp_path) == []
+
+
+# ---------- rule 29: who may write an address-proof column ----------
+
+
+def _writers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str, *, allowed: str = "gateway/own.py"
+) -> list[str]:
+    monkeypatch.setattr(check, "COLUMN_WRITERS", {"email_proven_at": (allowed,)})
+    _write(tmp_path, "gateway/own.py", "x.email_proven_at = 1\n")
+    _write(tmp_path, "gateway/other.py", content)
+    violations: list[str] = check.check_column_writers(tmp_path)
+    return violations
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "x.email_proven_at = 1\n",
+        'values["email_proven_at"] = 1\n',
+        'values = {"email_proven_at": 1}\n',
+        "statement.values(email_proven_at=1)\n",
+        'setattr(x, "email_proven_at", 1)\n',
+        "x.email_proven_at, y = 1, 2\n",
+        "for x.email_proven_at in stamps:\n    pass\n",
+        "with stamped() as x.email_proven_at:\n    pass\n",
+    ],
+)
+def test_a_module_outside_the_list_may_not_write_the_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    """Every spelling reaches the same column, so a rule that reads one of them is not a rule."""
+    violations = _writers(tmp_path, monkeypatch, spelling)
+    assert [v for v in violations if "other.py" in v], spelling
+
+
+@pytest.mark.parametrize(
+    "not_a_write",
+    [
+        "def f(*, email_proven_at: int) -> None: ...\n",
+        "y = x.email_proven_at\n",
+        "if x.email_proven_at is None:\n    pass\n",
+        '"""A docstring naming email_proven_at."""\n',
+        "cache[x.email_proven_at] = 1\n",
+    ],
+)
+def test_naming_the_column_without_writing_it_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, not_a_write: str
+) -> None:
+    assert _writers(tmp_path, monkeypatch, not_a_write) == []
+
+
+def test_a_listed_module_that_stopped_writing_must_leave_the_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The list only shrinks, so a consolidation is proved rather than asserted."""
+    monkeypatch.setattr(check, "COLUMN_WRITERS", {"email_proven_at": ("gateway/own.py", "gateway/stale.py")})
+    _write(tmp_path, "gateway/own.py", "x.email_proven_at = 1\n")
+    _write(tmp_path, "gateway/stale.py", "pass\n")
+    assert check.check_column_writers(tmp_path) == [
+        "gateway/stale.py no longer assigns email_proven_at; remove it from COLUMN_WRITERS"
+    ]

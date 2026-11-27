@@ -74,6 +74,21 @@ class OrganizationGuardrailUnsafeUrlError(TenancyValidationError):
         super().__init__(reason)
 
 
+class OrganizationGuardrailKwargsUnreadableError(TenancyValidationError):
+    """A masked per-check argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    guardrail. Refused so the admin enters the arguments in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked guardrail argument keeps the stored value, and there is none that can be read back. "
+            "Enter the arguments in full."
+        )
+
+
 class OrganizationGuardrailLimitReachedError(TenancyValidationError):
     """The organization already mandates as many guardrails as it may.
 
@@ -308,6 +323,7 @@ __all__ = [
     "OrganizationGuardrailDefinitionNotFoundError",
     "OrganizationGuardrailDefinitionNotRunningError",
     "OrganizationGuardrailDefinitionUnsafeUrlError",
+    "OrganizationGuardrailKwargsUnreadableError",
     "OrganizationGuardrailLimitReachedError",
     "OrganizationGuardrailNoEndpointError",
     "OrganizationGuardrailNotBuildableError",

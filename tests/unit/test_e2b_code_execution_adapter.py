@@ -124,9 +124,11 @@ class _Sandbox:
         self._execution = execution or _Execution(stdout=["ok\n"])
         self.files = _Files(tree if tree is not None else {})
         self.killed = False
+        self.languages: list[str | None] = []
 
-    async def run_code(self, code: str, timeout: int, request_timeout: int) -> _Execution:
+    async def run_code(self, code: str, language: str | None, timeout: int, request_timeout: int) -> _Execution:
         del code, timeout, request_timeout
+        self.languages.append(language)
         if isinstance(self._execution, Exception):
             raise self._execution
         return self._execution
@@ -222,14 +224,17 @@ async def test_stdout_stderr_and_a_bare_expression_become_one_result_block(monke
     # Jupyter carries the value of a trailing expression as a result rather
     # than on stdout, and a terminal would have shown it.
     execution = _Execution(stdout=["counting\n"], stderr=["a warning\n"], results=[_Result("42")])
-    sdk = _stub_sdk(_Sandbox(execution))
+    sandbox = _Sandbox(execution)
+    sdk = _stub_sdk(sandbox)
     async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=120) as session:
-        block = await session.execute("6 * 7", timeout_s=30)
+        block = await session.execute("6 * 7", language="python", timeout_s=30)
     assert block.content.stdout == "counting\n42\n"
     assert block.content.stderr == "a warning\n"
     assert block.content.return_code == 0
     # Which files a run produced is worked out above the port, by diffing.
     assert block.content.content == []
+    # Python runs in the sandbox's default context, which no ``language`` names.
+    assert sandbox.languages == [None]
 
 
 @pytest.mark.asyncio
@@ -237,7 +242,7 @@ async def test_a_program_that_raises_is_a_successful_execution(monkeypatch: pyte
     execution = _Execution(error=_Error("ValueError", "boom", "Traceback...\nValueError: boom\n"))
     sdk = _stub_sdk(_Sandbox(execution))
     async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=120) as session:
-        block = await session.execute("raise ValueError('boom')", timeout_s=30)
+        block = await session.execute("raise ValueError('boom')", language="python", timeout_s=30)
     assert block.content.return_code == 1
     assert "ValueError: boom" in block.content.stderr
 
@@ -246,7 +251,7 @@ async def test_a_program_that_raises_is_a_successful_execution(monkeypatch: pyte
 async def test_a_timeout_is_reported_in_the_block_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     sdk = _stub_sdk(_Sandbox(_TimeoutException()))
     async with _adapter(monkeypatch, sdk).open_session(timeout_s=5, session_ttl_s=20) as session:
-        block = await session.execute("while True: pass", timeout_s=5)
+        block = await session.execute("while True: pass", language="python", timeout_s=5)
     assert block.content.return_code == 124
     assert "timed out" in block.content.stderr
 
@@ -381,6 +386,7 @@ def test_the_deployment_picks_its_adapter_and_e2b_needs_no_url() -> None:
 
     hosted = GatewayConfig(sandbox_provider=SandboxProvider.E2B)
     assert build_code_execution_port(hosted).label == "e2b"
+    assert build_code_execution_port(hosted).languages == protocol.languages == ("python",)
     # No URL, and code execution is still configured: that is the whole point.
     assert hosted.sandbox_configured()
 

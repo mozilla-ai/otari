@@ -34,6 +34,7 @@ export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 // knows whether it can authenticate at all.
 // ---------------------------------------------------------------------------
 export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
+export type MailReadiness = Schemas["MailReadiness"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -99,6 +100,13 @@ export type MailedLinkStatusResponse = Schemas["MailedLinkStatusResponse"]
 export type Passkey = Schemas["WebAuthnCredentialPublic"]
 export type PasskeysResponse = Schemas["WebAuthnCredentialsPublic"]
 export type RenamePasskeyRequest = Schemas["WebAuthnCredentialUpdate"]
+
+// Personal access tokens: a person's own read-only credential for the
+// management API and the MCP server.
+export type AccessToken = Schemas["AccessTokenPublic"]
+export type AccessTokensResponse = Schemas["AccessTokensPublic"]
+export type CreateAccessTokenRequest = Schemas["AccessTokenCreate"]
+export type CreatedAccessToken = Schemas["AccessTokenCreated"]
 
 // ---------------------------------------------------------------------------
 // Usage and analytics
@@ -343,6 +351,8 @@ export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 // tenant and every workspace in it inherits it. The deployment's own keys are
 // `HostedProvider` below.
 export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
+// The credential an edge proxy in front of a key's own address requires.
+export type EndpointAuth = Schemas["EndpointAuthPublic"]
 // No alias for the list wrapper: this surface is read through `fetchAllPaged`,
 // which types the envelope itself, so a name for it would have no consumer.
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
@@ -437,6 +447,15 @@ export type AgentRecommender = Schemas["AgentRecommenderPublic"]
 export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
 export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
 export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
+
+// What the subagent router saved: the tokens routed subagents consumed, priced
+// at the models they ran on and at the models they would have started on.
+export type SubagentSavings = Schemas["SubagentSavingsPublic"]
+export type SavingsAmounts = Schemas["SavingsAmounts"]
+export type SubagentSavingsTotals = Schemas["SubagentSavingsTotals"]
+export type SubagentSavingsPoint = Schemas["SubagentSavingsPoint"]
+export type SavingsByAgentType = Schemas["SavingsByAgentType"]
+export type SavingsBySwap = Schemas["SavingsBySwap"]
 export type HostedModels = Schemas["HostedModelsPublic"]
 export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
 export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
@@ -667,6 +686,9 @@ export type AcceptInvitationRequest = Defaulted<
   "terms_accepted"
 >
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
+// Accepting from the invitee's own inbox answers the membership alone: that
+// caller is already signed in, so there is no next step to carry.
+export type AcceptedMembership = Schemas["AcceptedMembershipPublic"]
 
 // The invitee's side of the same flow: what is waiting on the signed-in
 // identity, rather than what this organization has sent out. Addressed by
@@ -802,6 +824,12 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+// On an organization's server read through a workspace: that workspace's own
+// settings on it and the organization's limit there, and the body that sets
+// them (`PATCH .../override`). A field left out of the body keeps the one stored.
+export type McpServerWorkspaceSettings = Schemas["McpServerWorkspaceSettings"]
+export type SetWorkspaceMcpServerOverrideRequest =
+  Schemas["WorkspaceMcpServerSettingsUpdate"]
 export type McpCredentialMode = Schemas["McpCredentialMode"]
 export type McpConnection = Schemas["McpConnectionPublic"]
 export type McpConnections = Schemas["McpConnectionsPublic"]
@@ -809,6 +837,15 @@ export type McpConnectionStarted = Schemas["McpConnectionStarted"]
 export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
 export type McpServerConnection = Schemas["McpServerConnectionPublic"]
 export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+// The organization's own servers share the shapes above (`scope` says whose a
+// server is). These say how each workspace reaches one, and set the
+// organization's limit for a workspace.
+export type OrganizationMcpServerWorkspace =
+  Schemas["OrganizationMcpServerWorkspace"]
+export type OrganizationMcpServerWorkspaces =
+  Schemas["OrganizationMcpServerWorkspaces"]
+export type OrganizationMcpServerLimitRequest =
+  Schemas["OrganizationMcpServerLimit"]
 
 // The catalog of remote MCP servers a workspace can add, the logos it knows,
 // and the sync that fills it from the MCP Registry.

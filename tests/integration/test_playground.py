@@ -1452,7 +1452,7 @@ def test_an_upload_resolves_in_the_caller_s_own_completion(
 
 @pytest.fixture
 def files_off_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
-    yield from build_test_client(test_config.model_copy(update={"files_enabled": False}))
+    yield from build_test_client(test_config.model_copy(update={"files_api_enabled": False}))
 
 
 def test_files_switched_off_answer_404_and_report_why(
@@ -1515,7 +1515,11 @@ def _store_servers(db_session_factory: Callable[[], Session], world: _World) -> 
     with db_session_factory() as db:
         rows = {
             name: WorkspaceMcpServer(
-                workspace_id=world.workspaces["alpha_one"], name=name, url=_MCP_URL, everyone_tools=everyone
+                organization_id=world.alpha,
+                workspace_id=world.workspaces["alpha_one"],
+                name=name,
+                url=_MCP_URL,
+                everyone_tools=everyone,
             )
             for name, everyone in (("open", ["*"]), ("locked", []))
         }
@@ -1542,6 +1546,7 @@ def test_the_menu_marks_a_per_user_server_the_caller_has_not_signed_in_to(
     with db_session_factory() as db:
         db.add(
             WorkspaceMcpServer(
+                organization_id=world.alpha,
                 workspace_id=world.workspaces["alpha_one"],
                 name="drive",
                 url=_MCP_URL,

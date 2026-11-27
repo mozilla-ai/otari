@@ -287,13 +287,6 @@ async def _run_owned_calls(
         raised = False
         try:
             text = await owner.call_tool(name, args)
-        except MaxToolIterationsExceeded:
-            # The old backend's shared search and fetch limit refused the call inside the
-            # backend, after its started entry went out, so the entry ends before the
-            # request fails. On the libraries, a call past the limit returns a tool error.
-            if rendering is not None:
-                yield True, rendering.refused(call, Refusal.CALL_LIMIT)
-            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, name)
             log_tool_failure(name, detail, exc)
@@ -837,7 +830,7 @@ _CHAT_STRATEGY = _ChatToolLoopStrategy()
 def _strategy_for(
     budget: ToolUseBudget | None, native_tools: frozenset[str] = frozenset(), *, emit_activity: bool = False
 ) -> _ChatToolLoopStrategy:
-    """The shared strategy, or a per-request one when the caller capped searches, is owed a report or wants activity.
+    """The shared strategy, or a per-request one when the request has a budget, is owed a report or wants activity.
 
     Only such a request has anything per-request to hold, so every other request
     keeps reusing the single module-level instance.
@@ -891,6 +884,7 @@ async def mcp_tool_loop_stream(
             max_iterations=max_iterations,
             on_first_response=on_first_response,
             round_gate=round_gate,
+            use_budget=use_budget,
         )
     ) as inner:
         async for chunk in inner:
@@ -926,4 +920,5 @@ async def mcp_tool_loop(
         on_first_response=on_first_response,
         check_first_response=require_choices,
         round_gate=round_gate,
+        use_budget=use_budget,
     )

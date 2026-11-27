@@ -12,6 +12,7 @@ from gateway.services.tools import (
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
     ToolUseBudget,
+    WebToolCallCap,
     is_capped_call,
 )
 
@@ -120,3 +121,34 @@ def test_a_call_the_backend_does_not_own_is_not_capped() -> None:
 
 def test_the_gateway_search_backend_is_capped() -> None:
     assert is_capped_call(_budget(1), _search_backend(), "web_search")
+
+
+def test_search_and_fetch_are_used_up_once_the_shared_call_limit_is_reached() -> None:
+    """The shared limit stops both tools from being offered, while the refusal stays the backend's."""
+    call_cap = WebToolCallCap(1)
+    budget = ToolUseBudget({}, call_cap=call_cap, call_capped=frozenset({WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME}))
+    assert not budget.used_up(WEB_SEARCH_TOOL_NAME)
+
+    assert call_cap.claim()
+
+    assert budget.used_up(WEB_SEARCH_TOOL_NAME)
+    assert budget.used_up(WEB_FETCH_TOOL_NAME)
+    assert not budget.used_up("read_file"), "the limit bounds only search and fetch"
+    assert not budget.exhausted(WEB_SEARCH_TOOL_NAME), "a call past the limit is refused by the backend, not here"
+
+
+def test_a_spent_max_uses_is_used_up_without_a_call_limit() -> None:
+    budget = _budget(0)
+    assert budget.used_up(WEB_SEARCH_TOOL_NAME)
+    assert not budget.used_up(WEB_FETCH_TOOL_NAME)
+
+
+def test_the_shared_call_limit_leaves_out_a_web_tool_the_request_does_not_run() -> None:
+    """A request running only Fetch may take ``web_search`` from an MCP server, which the limit does not bound."""
+    call_cap = WebToolCallCap(1)
+    budget = ToolUseBudget({}, call_cap=call_cap, call_capped=frozenset({WEB_FETCH_TOOL_NAME}))
+
+    assert call_cap.claim()
+
+    assert budget.used_up(WEB_FETCH_TOOL_NAME)
+    assert not budget.used_up(WEB_SEARCH_TOOL_NAME)

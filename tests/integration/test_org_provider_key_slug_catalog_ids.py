@@ -125,6 +125,19 @@ def test_the_listing_names_the_model_by_the_catalog_id_the_index_builds(
     assert detail.json()["id"] == _CATALOG_ID
 
 
+def test_the_listing_describes_a_model_the_organizations_key_serves(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """The key is a slug, so only the slug map names the provider models.dev describes the model under."""
+    listed = client.get(f"{API_ROOT}/models", headers=api_key_header)
+    assert listed.status_code == status.HTTP_200_OK, listed.text
+    (row,) = [model for model in listed.json()["data"] if model["id"] == _CATALOG_ID]
+
+    assert row["name"] == "DeepSeek V4.1 Flash 1017"
+    assert row["type"] == "chat"
+    assert row["context_window"] is not None
+
+
 def test_every_listed_id_is_served_on_the_organizations_key(client: TestClient, api_key_header: dict[str, str]) -> None:
     listed = client.get(f"{API_ROOT}/models", headers=api_key_header)
     assert listed.status_code == status.HTTP_200_OK, listed.text

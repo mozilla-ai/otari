@@ -21,10 +21,10 @@ from starlette.types import Receive, Send
 from gateway.api.trace_capture import TRACE_SCOPE_KEY, TraceCaptureMiddleware
 from gateway.models.usage import UsageLog
 from gateway.services.log_writer import TracingLogWriter, _llm_call
+from gateway.services.tools import WEB_FETCH_TOOL_NAME, WebFetchBackend, builtin_fetch_resolved
 from gateway.services.traces import RequestTrace, RequestTraces, TraceWriter
 from gateway.services.traces._writer import SPANS_DROPPED
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WebRetrievalBackend
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_web_url
 from gateway.types.traces import SpanRecord, TraceWrite, WriteResult
 
@@ -197,6 +197,44 @@ def test_an_mcp_tool_call_names_the_server_that_owns_the_tool() -> None:
     assert [span.attributes.get("otari.mcp.server") for span in trace.spans] == ["github", None, None]
 
 
+def test_a_failed_tool_call_records_why_and_a_working_one_records_nothing() -> None:
+    trace = _trace()
+
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=False,
+        arguments=None,
+        error_type="http_status",
+        error_status=403,
+        error_provider="exa",
+    )
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=False,
+        arguments=None,
+        error_type="not safe!",
+    )
+    trace.record_tool_call(tool_name="web_fetch", tool_type="otari_web_fetch", started=_T0, ok=False, arguments=None)
+    trace.record_tool_call(
+        tool_name="web_fetch",
+        tool_type="otari_web_fetch",
+        started=_T0,
+        ok=True,
+        arguments=None,
+        error_type="timeout",
+        error_status=504,
+        error_provider="exa",
+    )
+
+    assert [span.error_class for span in trace.spans] == ["http_status", "tool_error", "tool_error", None]
+    assert trace.spans[0].attributes == {"http.response.status_code": 403, "otari.tool.provider": "exa"}
+    assert trace.spans[3].attributes == {}
+
+
 def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
     trace = _trace()
     trace.record_guardrail(
@@ -218,6 +256,39 @@ def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
         "otari.guardrail.tool": "web_search",
         "otari.guardrail.action": "withheld",
     }
+
+
+def test_a_guardrail_span_names_what_fired() -> None:
+    trace = _trace()
+    trace.record_guardrail(
+        profile="lakera",
+        mode="block",
+        valid=False,
+        started=_T0,
+        ended=_T0,
+        categories=("prompt_attack", "pii/phone_number"),
+    )
+
+    [span] = trace.spans
+    assert span.attributes["otari.guardrail.categories"] == "prompt_attack,pii/phone_number"
+
+
+def test_a_guardrail_span_keeps_the_categories_that_fit_and_the_span() -> None:
+    """A stored list attribute is capped as a whole, so the categories past the cap are left off, not the span."""
+    named = tuple(f"{'x' * 60}_{i}" for i in range(4))
+    trace = _trace()
+    trace.record_guardrail(profile="pi", mode="block", valid=False, started=_T0, ended=_T0, categories=named)
+
+    [span] = trace.spans
+    assert span.attributes["otari.guardrail.categories"] == ",".join(named[:2])
+
+
+def test_a_guardrail_span_that_names_nothing_has_no_categories() -> None:
+    trace = _trace()
+    trace.record_guardrail(profile="pi", mode="block", valid=False, started=_T0, ended=_T0)
+
+    [span] = trace.spans
+    assert "otari.guardrail.categories" not in span.attributes
 
 
 def test_spans_past_the_cap_are_counted_not_kept() -> None:
@@ -679,8 +750,7 @@ async def test_a_web_fetch_records_a_timed_tool_span() -> None:
         redirect_count=0,
     )
     trace = _trace()
-    # The old backend hands the fetch to the fetch backend, which records the span; it records none itself.
-    backend = WebRetrievalBackend(enable_search=False, enable_fetch=True, fetch_policy=DomainPolicy(), trace=trace)
+    backend = WebFetchBackend(builtin_fetch_resolved(), policy=DomainPolicy(), trace=trace)
     with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=page)):
         async with backend:
             await backend.call_tool(WEB_FETCH_TOOL_NAME, {"url": "https://example.com"})

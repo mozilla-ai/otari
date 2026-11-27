@@ -37,7 +37,8 @@
 
 /* =============================================================
  * Brand fonts — self-hosted woff2 (no runtime CDN request).
- *   Mozilla Text — UI / body (variable)
+ *   Inter        — UI / body (variable)
+ *   Mozilla Text — fallback for body (variable)
  *   Mozilla Headline — display / headings (variable)
  *   Fira Code    — mono / keys / IDs / code (variable)
  *
@@ -56,6 +57,20 @@
   font-family: "Mozilla Text";
   src: url("/fonts/MozillaTextItalic-Variable.woff2") format("woff2");
   font-weight: 200 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+  font-weight: 100 900;
   font-style: italic;
   font-display: swap;
 }
@@ -734,7 +749,7 @@
 @theme {
   /* Brand font stacks — generate font-sans / font-mono / font-display
    * utilities and back the typography roles + base resets below. */
-  --font-sans: "Mozilla Text", Arial, sans-serif;
+  --font-sans: "Inter", "Mozilla Text", Arial, sans-serif;
   --font-mono: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
   --font-display: "Mozilla Headline", "Mozilla Text", Arial, sans-serif;
   --color-background-alt: var(--color-background-muted);
@@ -2508,7 +2523,7 @@ body {
    table's width, the column order is wrong and the order is the fix, so the pin
    doubles as a detector. */
 .otari-breakdown .table__column:first-child,
-.otari-breakdown .table__row .table__cell:first-child {
+.otari-breakdown .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2569,27 +2584,23 @@ body {
     white-space: nowrap;
   }
 }
-/* The identity lane holds while the rest scrolls, as everywhere else. */
+/* The identity lane holds while the rest scrolls, as everywhere else. No
+   `.table__row` in the cell selector: at the hover fill's specificity this
+   later rule would win and keep the pinned lane unlit on a hovered row. */
 .otari-models-table .table__column:first-child,
-.otari-models-table .table__row .table__cell:first-child,
+.otari-models-table .table__cell:first-child,
 .otari-offerings-table .table__column:first-child,
-.otari-offerings-table .table__row .table__cell:first-child,
+.otari-offerings-table .table__cell:first-child,
 .otari-domains-table .table__column:first-child,
-.otari-domains-table .table__row .table__cell:first-child,
+.otari-domains-table .table__cell:first-child,
 .otari-providers-table .table__column:first-child,
-.otari-providers-table .table__row .table__cell:first-child,
+.otari-providers-table .table__cell:first-child,
 .otari-routing-table .table__column:first-child,
-.otari-routing-table .table__row .table__cell:first-child {
+.otari-routing-table .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
-}
-/* The offerings table sits on the model page's surface frame rather than on
-   the page ground, so its held lane takes the frame's fill. */
-.otari-offerings-table .table__column:first-child,
-.otari-offerings-table .table__row .table__cell:first-child {
-  background-color: var(--color-surface);
 }
 .otari-models-table[data-scrolled="true"] .table__column:first-child,
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,
@@ -2886,7 +2897,7 @@ body {
 }
 /* The identity pins so the lanes scroll under it. */
 .otari-budgets-table .table__column:first-child,
-.otari-budgets-table .table__row .table__cell:first-child {
+.otari-budgets-table .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;

@@ -797,6 +797,7 @@ describe("AppShell surface gating", () => {
       "Email domains",
       "Single sign-on",
       "Spend & budgets",
+      "MCP servers",
       "Guardrails",
       "Org settings",
     ])
@@ -833,14 +834,20 @@ describe("AppShell surface gating", () => {
     expect(
       within(sidebar).getByRole("link", { name: "Web search" }),
     ).toHaveAttribute("href", "/organization/web-search-keys")
-    // Guardrails then Org settings after them, read off the rendered order
-    // rather than off the registry.
+    // MCP servers, Guardrails then Org settings after them, read off the
+    // rendered order rather than off the registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
         .map((link) => link.textContent)
-        .slice(-4),
-    ).toEqual(["Inference", "Web search", "Guardrails", "Org settings"])
+        .slice(-5),
+    ).toEqual([
+      "Inference",
+      "Web search",
+      "MCP servers",
+      "Guardrails",
+      "Org settings",
+    ])
 
     await user.click(inference)
 
@@ -1815,6 +1822,7 @@ describe("the workspace rail, per role", () => {
       "/budgets",
       "/organization/provider-keys",
       "/organization/web-search-keys",
+      "/organization/mcp-servers",
       "/organization/guardrails",
       "/organization",
     ])

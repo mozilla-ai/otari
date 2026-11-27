@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import any_fetch
 import any_search
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
@@ -94,7 +95,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "exa",
-            "runner": "library",
             "api_key": "exa-instance-key",
             "api_base": "https://api.exa.ai",
             "label": "exa:exa",
@@ -125,7 +125,6 @@ _SEARCH_CASES = [
         {
             "name": "tavily",
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-deploy",
             "api_base": "",
             "label": "otari:web_search",
@@ -140,7 +139,6 @@ _SEARCH_CASES = [
         {
             "name": "searxng",
             "provider": "searxng",
-            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "otari:web_search",
             "rate_keys": ("otari:web_search",),
@@ -153,10 +151,8 @@ _SEARCH_CASES = [
         {"provider": "searxng"},
         options={"engines": "brave,wikipedia"},
     ),
-    _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
-    _SearchCase(
-        "the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local", "runner": "library"}
-    ),
+    _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test"}),
+    _SearchCase("the one instance, on SearXNG", {"search_tools": {"local": _SEARXNG}}, {"name": "local"}),
     _SearchCase("several instances and no default", {"search_tools": {"exa": _EXA, "test": _FAKE}}, None),
     _SearchCase("nothing configured", {}, None),
     # The policy's credential wins over the in-loop default.
@@ -166,7 +162,6 @@ _SEARCH_CASES = [
         {
             "name": None,
             "provider": "exa",
-            "runner": "library",
             "api_key": "exa-org-key",
             "api_base": "https://api.exa.ai",
             "label": "org:exa",
@@ -196,7 +191,6 @@ _SEARCH_CASES = [
         {"search_tools": {"test": _FAKE}},
         {
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-org",
             "api_base": "https://api.tavily.com",
             "label": "org:tavily",
@@ -208,7 +202,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
         {"web_search_url": "http://deployment-searxng:8080", "web_search_engines": "brave"},
-        {"provider": "searxng", "runner": "library", "api_key": "", "api_base": "https://org-searxng.example"},
+        {"provider": "searxng", "api_key": "", "api_base": "https://org-searxng.example"},
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
@@ -241,7 +235,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "fake",
-            "runner": "library",
             "api_key": "",
             "api_base": "",
             "label": "org:fake",
@@ -258,7 +251,6 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "tavily",
-            "runner": "library",
             "api_key": "tvly-org",
             "timeout": 30.0,
             "label": "org:tavily",
@@ -277,7 +269,6 @@ _SEARCH_CASES = [
         {
             "name": "local",
             "provider": "searxng",
-            "runner": "library",
             "api_base": "http://searxng:8080",
             "label": "searxng:local",
         },
@@ -294,7 +285,7 @@ _SEARCH_CASES = [
     _SearchCase(
         "a SearXNG instance that sends its searches by POST",
         {"search_tools": {"local": {**_SEARXNG, "options": {"method": "post"}}}},
-        {"runner": "library"},
+        {"name": "local", "provider": "searxng"},
         requested="local",
         options={"method": "post"},
     ),
@@ -347,6 +338,16 @@ def test_a_name_no_search_instance_has_is_not_found() -> None:
         resolve_search(GatewayConfig(search_tools={"exa": _EXA}), None, requested="gone", request_options=None)
 
 
+def test_an_instance_on_a_provider_the_library_does_not_serve_is_misconfigured() -> None:
+    """The provider's metadata has no answer to give, so the refusal comes before it is asked."""
+    config = GatewayConfig(search_tools={"mine": {"provider": "nonesuch"}})
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="mine", request_options=None)
+    assert refused.value.status_code == 400
+    assert refused.value.message == "Search tool 'mine' is not configured correctly."
+
+
 def test_a_searxng_instance_with_no_address_to_search_is_misconfigured() -> None:
     config = GatewayConfig(search_tools={"local": {"provider": "searxng"}})
 
@@ -384,7 +385,7 @@ def _named(config: GatewayConfig, name: str) -> ResolvedSearch:
 
 def test_a_library_instance_takes_its_providers_endpoint_and_its_name_as_its_provider() -> None:
     resolved = _named(GatewayConfig(search_tools={"exa": {"api_key": "k"}}), "exa")
-    assert (resolved.provider, resolved.api_base, resolved.runner) == ("exa", "https://api.exa.ai", "library")
+    assert (resolved.provider, resolved.api_base) == ("exa", "https://api.exa.ai")
 
 
 @pytest.mark.parametrize(
@@ -403,7 +404,7 @@ def test_a_searxng_instance_needs_no_key() -> None:
     resolved = _named(
         GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
     )
-    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("library", "", "http://searxng:8080")
+    assert (resolved.api_key, resolved.api_base) == ("", "http://searxng:8080")
 
 
 @pytest.mark.parametrize(
@@ -815,7 +816,6 @@ _FETCH_CASES = [
         {
             "name": "builtin_fetch",
             "provider": "builtin",
-            "runner": "library",
             "api_key": "",
             "api_base": "",
             "label": "builtin:builtin_fetch",
@@ -917,6 +917,39 @@ def test_a_fetch_key_without_the_key_its_provider_needs_is_refused(monkeypatch: 
 
     with pytest.raises(WebSearchCredentialRefusedError):
         resolve_fetch(GatewayConfig(), _policy(fetch_credential=credential), requested=None, for_search=None)
+
+
+def _with_an_optional_key(monkeypatch: pytest.MonkeyPatch, provider: type[Any]) -> None:
+    """Make a provider at a public address of its own take a key without requiring one."""
+    monkeypatch.setattr(provider, "METADATA", provider.METADATA.model_copy(update={"requires_api_key": False}))
+
+
+@pytest.mark.parametrize(("provider", "needs_key"), [("exa", True), ("searxng", False), ("fake", False)])
+def test_an_organization_key_brings_an_api_key_or_its_own_server(provider: str, needs_key: bool) -> None:
+    assert _resolve.credential_needs_api_key(any_search.AnySearch.get_provider_metadata(provider)) is needs_key
+
+
+def test_a_provider_with_a_default_address_takes_the_account_whatever_it_requires() -> None:
+    """A required address with a default runs on the default, so the key still brings the account."""
+    metadata = any_search.AnySearch.get_provider_metadata("brave")
+    keyless = metadata.model_copy(update={"requires_api_key": False, "requires_api_base": True})
+    assert _resolve.credential_needs_api_key(keyless) is True
+    assert _resolve.credential_needs_api_key(keyless.model_copy(update={"default_api_base": ""})) is False
+
+
+def test_a_key_on_a_public_address_needs_an_api_key_its_provider_does_not_require(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never run on the deployment's address, under the allowance the provider gives it."""
+    _with_an_optional_key(monkeypatch, any_search.AnySearch.get_provider_class("brave"))
+    _with_an_optional_key(monkeypatch, any_fetch.AnyFetch.get_provider_class("exa"))
+    search = WebSearchCredential(provider="brave", source=_ORG)
+    fetch = WebFetchCredential(provider="exa", source=_ORG)
+
+    with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
+        resolve_search(GatewayConfig(), _policy(credential=search), requested=None, request_options=None)
+    with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
+        resolve_fetch(GatewayConfig(), _policy(fetch_credential=fetch), requested=None, for_search=None)
 
 
 def test_fetch_options_layer_the_instances_and_take_out_the_count(caplog: pytest.LogCaptureFixture) -> None:

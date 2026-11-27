@@ -88,15 +88,21 @@ limits under [Mail](configuration.md#invitations).
   cannot set a password either, and the accept page says so. The person accepts,
   then signs in with Google or GitHub, uses "Forgot your password?", or asks the
   gateway's administrator, whichever the deployment offers.
+- If the address signed up with a password and has not verified itself yet, the
+  link cannot set a password either. The person accepts, then opens the
+  verification link emailed at signup. Whoever signed up may not be the invitee,
+  so the page names whatever else the deployment offers as well. Where the
+  deployment cannot deliver email, that verification link reached nobody, so
+  the page names only the other ways in.
 - An invitee does not need the link. Signing up, or signing in with Google or
   GitHub, with the invited address completes the account, and pending invitations
   are listed under **Invitations** in the dashboard to accept or decline. Someone
   with no organization yet is taken there after signing in.
 
-**Vouched addresses.** A password chosen through an invitation link counts as
-verified for signing in, but Otari records that the organization vouched for the
+**Addresses an organization recorded.** A password chosen through an invitation link counts as
+verified for signing in, but Otari records that the organization supplied the
 address rather than that the person proved it. Until the person proves it, by a
-Google or GitHub sign-in or a password reset by email, a vouched address does not
+Google or GitHub sign-in or a password reset by email, such an address does not
 trigger [email-domain auto-join](#email-domain-auto-join), and other
 organizations cannot add or invite it.
 
@@ -142,8 +148,8 @@ so it is deliberately limited.
   Verifying is refused while another organization's proof is current. An
   unproven claim therefore cannot stop the domain's real owner from proving it.
 - **Only Member and Viewer** can be granted, never organization management.
-- **Only verified addresses** join. An unverified address, or one only vouched
-  for through an invitation link, is skipped.
+- **Only proved addresses** join. An unverified address, or one an organization
+  only supplied through an invitation link, is skipped.
 - **Existing memberships are left alone.** A suspended membership is not revived,
   an existing role is not overwritten, and no workspace is granted, so somebody
   taken off a workspace on purpose is not put back by signing in.

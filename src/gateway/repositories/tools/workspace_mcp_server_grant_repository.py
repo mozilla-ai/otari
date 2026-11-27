@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.tools import WorkspaceMcpServerGrant
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -24,12 +24,18 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         super().__init__(db, WorkspaceMcpServerGrant)
 
     async def for_caller(
-        self, api_key_id: str | None, user_id: str | None, server_ids: Collection[uuid.UUID] | None
+        self,
+        api_key_id: str | None,
+        user_id: str | None,
+        server_ids: Collection[uuid.UUID] | None,
+        *,
+        workspace_id: uuid.UUID | None = None,
     ) -> list[WorkspaceMcpServerGrant]:
-        """Every grant naming this key or this user, on these servers; a session passes no key.
+        """Every grant naming this key or user, on these servers, applying in ``workspace_id``; a session passes no key.
 
         A request passes its workspace's servers, so a user every keyless key shares (``default``) holding grants in
-        many workspaces costs a request in one of them only that one's grants. ``None`` reads every server.
+        many workspaces costs a request in one of them only that one's grants. ``None`` reads every server. An
+        organization's server holds a grant per workspace, so one read for a workspace passes it.
         """
         subjects = []
         if api_key_id is not None:
@@ -41,73 +47,105 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         query = select(WorkspaceMcpServerGrant).where(or_(*subjects))
         if server_ids is not None:
             query = query.where(WorkspaceMcpServerGrant.server_id.in_(list(server_ids)))
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
         return list((await self.db.execute(query)).scalars().all())
 
-    async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerGrant]:
-        """A server's grants, oldest first."""
-        return list(
-            (
-                await self.db.execute(
-                    select(WorkspaceMcpServerGrant)
-                    .where(WorkspaceMcpServerGrant.server_id == server_id)
-                    .order_by(WorkspaceMcpServerGrant.created_at, WorkspaceMcpServerGrant.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
+    async def for_server(
+        self, server_id: uuid.UUID, workspace_id: uuid.UUID | None = None
+    ) -> list[WorkspaceMcpServerGrant]:
+        """A server's grants, oldest first; with ``workspace_id`` only those applying there."""
+        query = select(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.server_id == server_id)
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
+        query = query.order_by(WorkspaceMcpServerGrant.created_at, WorkspaceMcpServerGrant.id)
+        return list((await self.db.execute(query)).scalars().all())
 
-    async def get_on_server(self, server_id: uuid.UUID, grant_id: uuid.UUID) -> WorkspaceMcpServerGrant | None:
-        """One grant of a server, or ``None`` when the id names none on it."""
-        grant = await self.db.get(WorkspaceMcpServerGrant, grant_id)
-        return grant if grant is not None and grant.server_id == server_id else None
+    async def get_on_server(
+        self, server_id: uuid.UUID, grant_id: uuid.UUID, workspace_id: uuid.UUID | None = None
+    ) -> WorkspaceMcpServerGrant | None:
+        """One grant of a server, applying in ``workspace_id`` when given, or ``None`` when the id names none."""
+        query = select(WorkspaceMcpServerGrant).where(
+            WorkspaceMcpServerGrant.id == grant_id, WorkspaceMcpServerGrant.server_id == server_id
+        )
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
+        return (await self.db.execute(query)).scalar_one_or_none()
 
     async def put(
         self,
-        server_id: uuid.UUID,
+        server: WorkspaceMcpServer,
         *,
+        workspace_id: uuid.UUID,
         api_key_ids: Collection[str],
         user_ids: Collection[str],
         tools: list[str],
     ) -> None:
-        """Stage one grant per key and per user with ``tools``, replacing the tools of any they already hold.
+        """Stage one grant in ``workspace_id`` per key and per user with ``tools``, replacing any they hold there.
+
+        A workspace's own server takes grants in that workspace only. On an organization's server the caller
+        has checked that the workspace is one of the organization's.
 
         A concurrent put can insert a grant for the same key or user between this one's read and its insert,
         where nothing locks the server (SQLite), and the unique constraint refuses the second. The write runs
         in a SAVEPOINT, so losing rolls back this write alone, and it runs once more, now updating the
         winner's row instead.
         """
+        if server.workspace_id is not None and server.workspace_id != workspace_id:
+            raise ValueError(f"MCP server {server.id} takes grants in its own workspace only")
+        server_id = server.id
         try:
             async with self.db.begin_nested():
-                await self._put(server_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools)
+                await self._put(
+                    server_id, workspace_id=workspace_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools
+                )
         except IntegrityError:
-            await self._put(server_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools)
+            await self._put(
+                server_id, workspace_id=workspace_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools
+            )
 
     async def _existing(
-        self, server_id: uuid.UUID, api_key_ids: Collection[str], user_ids: Collection[str]
+        self, server_id: uuid.UUID, workspace_id: uuid.UUID, api_key_ids: Collection[str], user_ids: Collection[str]
     ) -> dict[tuple[str | None, str | None], WorkspaceMcpServerGrant]:
-        """The grants these keys and users already hold on a server, by ``(api_key_id, user_id)``."""
-        return {
-            (grant.api_key_id, grant.user_id): grant
-            for grant in await self.for_server(server_id)
-            if grant.api_key_id in api_key_ids or grant.user_id in user_ids
-        }
+        """The grants these keys and users already hold on a server in a workspace, by ``(api_key_id, user_id)``."""
+        subjects = []
+        if api_key_ids:
+            subjects.append(WorkspaceMcpServerGrant.api_key_id.in_(list(api_key_ids)))
+        if user_ids:
+            subjects.append(WorkspaceMcpServerGrant.user_id.in_(list(user_ids)))
+        if not subjects:
+            return {}
+        rows = await self.db.execute(
+            select(WorkspaceMcpServerGrant).where(
+                WorkspaceMcpServerGrant.server_id == server_id,
+                WorkspaceMcpServerGrant.workspace_id == workspace_id,
+                or_(*subjects),
+            )
+        )
+        return {(grant.api_key_id, grant.user_id): grant for grant in rows.scalars().all()}
 
     async def _put(
         self,
         server_id: uuid.UUID,
         *,
+        workspace_id: uuid.UUID,
         api_key_ids: Collection[str],
         user_ids: Collection[str],
         tools: list[str],
     ) -> None:
-        existing = await self._existing(server_id, api_key_ids, user_ids)
+        existing = await self._existing(server_id, workspace_id, api_key_ids, user_ids)
         subjects = [(key_id, None) for key_id in api_key_ids] + [(None, user_id) for user_id in user_ids]
         for subject in subjects:
             grant = existing.get(subject)
             if grant is None:
                 self.db.add(
-                    WorkspaceMcpServerGrant(server_id=server_id, api_key_id=subject[0], user_id=subject[1], tools=tools)
+                    WorkspaceMcpServerGrant(
+                        server_id=server_id,
+                        workspace_id=workspace_id,
+                        api_key_id=subject[0],
+                        user_id=subject[1],
+                        tools=tools,
+                    )
                 )
             else:
                 grant.tools = tools
@@ -131,12 +169,13 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         """
         await self.db.execute(delete(WorkspaceMcpServerGrant).where(WorkspaceMcpServerGrant.user_id == user_id))
 
-    async def remove_for_user_on_servers(self, user_id: str, server_ids: Collection[uuid.UUID]) -> None:
-        """Stage the removal of a user's grants on these servers."""
-        if not server_ids:
+    async def remove_for_user_in_workspaces(self, user_id: str, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of a user's grants that apply in these workspaces, on any server."""
+        if not workspace_ids:
             return
         await self.db.execute(
             delete(WorkspaceMcpServerGrant).where(
-                WorkspaceMcpServerGrant.user_id == user_id, WorkspaceMcpServerGrant.server_id.in_(list(server_ids))
+                WorkspaceMcpServerGrant.user_id == user_id,
+                WorkspaceMcpServerGrant.workspace_id.in_(list(workspace_ids)),
             )
         )

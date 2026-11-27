@@ -9,6 +9,7 @@ import {
   sharedAccountState,
 } from "@/features/tools/McpSharedAccount"
 import { forgetMcpConnectionNotice } from "@/features/tools/mcpConnectionNotice"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { workspaceMcpServer, workspaceMcpServerHealth } from "@/tests/fixtures"
 
 const NOT_SET_UP = workspaceMcpServer({
@@ -62,7 +63,7 @@ function renderAccount(server: WorkspaceMcpServer, canManage = true) {
       }
     >
       <McpSharedAccount
-        workspaceId={server.workspace_id}
+        scope={workspaceMcpScope(server.workspace_id ?? "")}
         server={server}
         canManage={canManage}
         onOpenSettings={onOpenSettings}

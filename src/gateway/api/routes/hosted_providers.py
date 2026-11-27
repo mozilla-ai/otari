@@ -31,6 +31,7 @@ from gateway.api.deps import (
     HostedCatalogUpdateDep,
     HostedProviderServiceDep,
     SelectorReindexDep,
+    refuse_access_tokens,
     require_deployment_operator_or_absent,
     verify_master_key,
 )
@@ -127,7 +128,9 @@ async def test_hosted_provider(
 async def reencrypt_hosted_providers(service: HostedProviderServiceDep) -> HostedProvidersReencryptPublic:
     """Re-encrypt every stored key and set of client arguments with the primary ``OTARI_SECRET_KEY``.
 
-    Run after rotating the key, alongside ``POST /api/v1/search-tools/reencrypt``.
+    Part of the ``OTARI_SECRET_KEY`` rotation procedure; run it alongside
+    ``POST /api/v1/search-tools/reencrypt`` and
+    ``POST /api/v1/organization-provider-keys/reencrypt``.
     A provider no configured key reads is left as it is, to be re-entered.
     """
     return await service.reencrypt()
@@ -377,7 +380,7 @@ async def refresh_hosted_models(
     return refreshed
 
 
-@router.get("/{provider}/available-models")
+@router.get("/{provider}/available-models", dependencies=[Depends(refuse_access_tokens)])
 async def list_available_models(service: HostedProviderServiceDep, provider: str) -> HostedAvailableModelsPublic:
     """Ask the provider what it serves on its credential.
 

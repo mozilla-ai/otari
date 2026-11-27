@@ -69,9 +69,9 @@ with a fixed `forbidden` error that names none):
 - the inference routes (`inference:run`), files, batches, search, fetch, code
   execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
   scope of its own;
-- `GET /api/v1/usage/requests/{request_id}` and
-  [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
-  usage (`usage:read`);
+- `GET /api/v1/usage/requests/{request_id}` for its own requests, and
+  `GET /api/v1/key/budget`, `/key/usage/summary` and `/key/usage/series` for its
+  own [budget and usage](#a-keys-own-budget-and-usage) (`usage:read`);
 - for a [service key](end-users.md), the end-user routes (the `end-users`
   scopes).
 
@@ -122,7 +122,12 @@ through `extra_body={"input_type": "search_query"}`.
 a chat completion and translates the answer back, streamed or not, so the client
 sees an ordinary Responses object or event stream. A provider with its own
 Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
-natively.
+natively. When such a provider refuses one model with a `400` saying the model does
+not support the Responses API (Nebius does this for some models), Otari serves that
+same request as a chat completion on the same provider. That is still one attempt:
+`Otari-Attempt-Count` stays `1` and `Otari-Fallback` stays `false`. A request the
+translation cannot carry (for example one with `previous_response_id`) gets the
+provider's `400` instead, and so does a `400` that names a request field.
 
 The translation covers text, image and file input, `instructions`, function
 tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
@@ -161,8 +166,8 @@ refusals as well, and records it on the request's usage rows, so
 finds the request's cost by it.
 
 The `Otari-Provider`, `Otari-Model`, `Otari-Attempt-Count`, `Otari-Fallback`,
-`Otari-Response-Duration-Ms` and `Server-Timing` headers say what served the
-request and how long it took; see
+`Otari-Deployment-Paid`, `Otari-Response-Duration-Ms` and `Server-Timing` headers
+say what served the request, who paid for it and how long it took; see
 [What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
@@ -383,8 +388,8 @@ GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
 often fill it with one. In Otari it names the user a request is billed to, so it
 is not free-form. A request made with an API key may name only that key's own
-user: any other value is refused with
-`403 'user' field does not match the authenticated API key's user`. A key's
+user: any other value is refused with `403` and code `user_mismatch`, whose detail
+begins `'user' field does not match the authenticated API key's user`. A key's
 `reject_user_mismatch` (see [Mismatched `user` fields](api-keys.md#mismatched-user-fields)), or the
 deployment-wide setting of the same name, can accept other values instead, in
 which case the value is ignored and spend stays with the key's user. A
@@ -715,7 +720,7 @@ for it works against Otari with its base URL changed. `include_raw` and
   a call that names it runs on it in any case; any other name is a 400 listing
   it. The deployment pays: it is priced under `otari:web_search`, and an
   `allowed_tools` grants it by that name. Once any search tool exists, the
-  legacy backend is neither served nor listed here.
+  search the legacy settings describe is neither served nor listed here.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search
@@ -1152,7 +1157,8 @@ Anthropic itself and resolves the alias on its side; it may not send
 {
   "model": "haiku",
   "reason": "haiku with 81%",
-  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 },
+  "decision_id": "0b0e8a52-6d0e-4c0f-9a57-0c7f6a4f3a11"
 }
 ```
 
@@ -1161,12 +1167,50 @@ Anthropic itself and resolves the alias on its side; it may not send
 | `model` | One of the candidates: a model alias or id the harness can start the subagent on. |
 | `reason` | One short sentence the harness may show, or `null`. |
 | `probabilities` | The decision model's probability for each candidate, or `null` when it reports none. |
+| `decision_id` | The gateway's record of this recommendation, or `null` where the record could not be kept. The record holds the subagent type and the model names, never the task. |
 
 **Errors.** No [subagent router](routing.md#subagent-routers) stored, or every
 stored one switched off, is a `400`. The decision model's refusal of the request (400, 422, or 501) is a
 `400`, its rate limit a `429`, its refusal of the gateway's credential (401 or
 403) a `424` with `provider_credential_rejected`, and any other failure, or an
 answer that names no candidate, a `502`.
+
+### Report what the subagent consumed
+
+`PUT /api/v1/routing/decisions/{decision_id}/outcome` tells Otari what the
+subagent a recommendation started has consumed, with a key holding the
+`agents` scope. Send it when the subagent finishes, or more than once as it
+runs: each report holds running totals and replaces the one before it.
+
+```bash
+curl -X PUT "$OTARI_URL/api/v1/routing/decisions/$DECISION_ID/outcome" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usage": [
+      {
+        "model": "claude-haiku-5-5",
+        "input_tokens": 1200,
+        "output_tokens": 800,
+        "cache_read_tokens": 42000,
+        "cache_write_tokens": 9000
+      }
+    ]
+  }'
+```
+
+| Field | Meaning |
+|---|---|
+| `usage` | One to 16 lines, one per model the subagent ran on. |
+| `usage[].model` | The model, as the harness names it. |
+| `usage[].input_tokens` | Input tokens that were neither read from nor written to a cache. |
+| `usage[].output_tokens` | Output tokens. |
+| `usage[].cache_read_tokens`, `usage[].cache_write_tokens` | Cache tokens, counted beside `input_tokens`. Zero when left out. |
+
+The answer is a `204` with no body. Nothing is charged and no usage row is
+written. An id that is not a decision of the caller's own is a `404`: an API
+key reaches the decisions made for its user in its workspace, and the master
+key reaches any.
 
 ## Provider error details
 
@@ -1264,7 +1308,9 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](end-users.md#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
+| `user_mismatch` | 403 | A key's request named another user than the key's own in `user` (`metadata.user_id` on Messages), and the key's [mismatched `user` field](api-keys.md#mismatched-user-fields) choice rejects that. Set the key's `reject_user_mismatch` to `false` to accept the value and bill the key's own user. On chat completions, Responses, Messages, file uploads and direct tool calls, a [service key](end-users.md) bills each end user it names instead, and chat completions and Responses take a free-form ID in `metadata`. The message names the ways the route offers | |
 | `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch. The message says where an owner or admin of the workspace allows it: Tools > Web search in the dashboard | |
+| `request_mcp_servers_disallowed` | 400 | The request named an MCP server by URL (`mcp_servers`, or a provider MCP tool), and the workspace's `request_mcp_servers_allowed` is off. Register the server and name it in `mcp_server_ids`, or have a workspace admin turn the switch on; see [Servers named in a request](mcp.md#servers-named-in-a-request) | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
@@ -1284,6 +1330,8 @@ at the top level of the body.
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](hosted-providers.md) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
+| `guardrail_not_configured` | 424 | A `block` guardrail that fails closed has no guardrails service configured for its profile (the entry names no `url` and the deployment has no `guardrails_url`), so the request was refused unchecked. Not a 5xx, so a client does not retry it. `detail` says what to change: for a profile the request named, a `url` on its entry or removing the entry; for a mandated one, an administrator configuring it. See [Guardrails](guardrails-reference.md#when-the-guardrails-service-is-unreachable) | `Otari-Guardrails`, with `reason: not_configured` |
+| `guardrail_unavailable` | 502 | A `block` guardrail that fails closed could not be evaluated for any other reason (its service failed, answered something malformed or gave no verdict, or its guardrail definition could not run), so the request was refused unchecked. `detail` names the profile and nothing about its endpoint | `Otari-Guardrails`, whose `reason` says why: `http_<status>` or `evaluation_failed` |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `end_user_budget_without_end_user` | 400 | The request sent `Otari-End-User-Budget` but its `user` field (`metadata.user_id` on Messages) names no end user of a service key (the key is not a service key, or the request names no one or the key's own user), so the budget would apply to no one | |
 | `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |

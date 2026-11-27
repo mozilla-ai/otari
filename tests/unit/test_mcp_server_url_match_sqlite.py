@@ -33,7 +33,7 @@ async def db() -> AsyncIterator[AsyncSession]:
 @pytest.mark.parametrize("stored", [f"{URL}\n", f"\t{URL}/", f" {URL}/\r\n", URL])
 async def test_a_stored_url_matches_whatever_whitespace_surrounds_it(db: AsyncSession, stored: str) -> None:
     workspace_id = uuid.uuid4()
-    db.add(WorkspaceMcpServer(workspace_id=workspace_id, name="drive", url=stored))
+    db.add(WorkspaceMcpServer(organization_id=uuid.uuid4(), workspace_id=workspace_id, name="drive", url=stored))
     await db.commit()
 
     servers = WorkspaceMcpServerRepository(db)

@@ -294,6 +294,35 @@ def test_a_monitor_check_with_no_service_says_why_it_has_no_verdict(
     ]
 
 
+@pytest.mark.parametrize("route", list(_ROUTES))
+def test_a_block_check_with_no_service_is_refused_as_a_configuration_gap(
+    route: str,
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otari#2937: still refused, but as a 424 with a code, not a 502 that reads like an outage."""
+    monkeypatch.delenv("OTARI_GUARDRAILS_URL", raising=False)
+    path, provider_symbol, body = _ROUTES[route]
+    provider = AsyncMock()
+
+    with patch(provider_symbol, new=provider):
+        resp = client.post(
+            path,
+            json={**body, "guardrails": [{"profile": "lakera-guard", "mode": "block"}]},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 424, resp.text
+    assert resp.headers["Otari-Error-Code"] == "guardrail_not_configured"
+    assert resp.json()["code"] == "guardrail_not_configured"
+    message = resp.json()["error"]["message"] if route == "messages" else resp.json()["detail"]
+    assert "'lakera-guard'" in message
+    assert "OTARI_GUARDRAILS_URL" not in resp.text
+    assert json.loads(resp.headers[GUARDRAILS_RESULT_HEADER])[0]["reason"] == "not_configured"
+    provider.assert_not_awaited()
+
+
 def test_valid_input_passes_through_and_field_is_stripped(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -421,3 +450,34 @@ def test_a_credentialed_profile_named_twice_is_refused_without_echoing_it(
     assert resp.status_code == 422, resp.text
     assert "tok-secret" not in resp.text
     runner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+def test_a_block_names_what_fired_on_every_endpoint(
+    route: str,
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Otari#2982: a 403 says which detector fired, so a false positive can be told apart from a real one."""
+    path, provider_symbol, body = _ROUTES[route]
+    verdict = GuardrailVerdict(
+        results=[
+            GuardrailResult(
+                profile="lakera", mode="block", valid=False, score=1.0, categories=("prompt_attack", "pii/phone_number")
+            )
+        ]
+    )
+
+    with (
+        patch("gateway.api.routes._guardrails.run_input_guardrails", new=AsyncMock(return_value=verdict)),
+        patch(provider_symbol, new=AsyncMock()),
+    ):
+        resp = client.post(
+            path, json={**body, "guardrails": [{"profile": "lakera", "mode": "block"}]}, headers=api_key_header
+        )
+
+    assert resp.status_code == 403, resp.text
+    detail = resp.json()["error"] if route == "messages" else resp.json()["detail"]
+    [entry] = detail["guardrails"]
+    assert entry["categories"] == ["prompt_attack", "pii/phone_number"]
+    assert entry["explanation"] is None

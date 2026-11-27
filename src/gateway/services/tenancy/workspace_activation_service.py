@@ -18,21 +18,22 @@ than a simplification:
   the workspace *is* the evidence, queried through the index the migration adds
   for it. Nothing to backfill, and nothing that can disagree with the Activity
   page.
-- **Nothing is per-viewer.** The platform keys its state on the user, because
-  activation there is a person's first request on a hosted account. This
-  guide is about the workspace, so the state is one row
-  per workspace and dismissing it says "this workspace is set up" for everyone
-  who can manage it.
+- **Per workspace for its managers.** The platform keys its state on the user,
+  because activation there is a person's first request on a hosted account.
+  For the people who manage a workspace the guide is about the workspace, so
+  dismissing it says "this workspace is set up" for all of them. A member who
+  does not manage it is the exception (``WorkspaceMemberActivationState``).
 - **No profile survey, and no analytics.** The platform's success screen
   carries a questionnaire whose answers exist to be mapped onto CRM properties,
   which is permanently hosted-only (otari-ai#1749), and its presentation counter
   feeds a product-analytics funnel this dashboard deliberately does not have.
   Neither crosses.
 
-The guide never invents a credential quietly: issuing a key is a workspace
-management action, authorized exactly like renaming the workspace, and the key
-it mints is an ordinary ``api_keys`` row that shows up on the Keys page under
-its own name.
+The guide never invents a credential quietly: a manager's setup key is a
+workspace management action, authorized exactly like renaming the workspace,
+and a member's is authorized exactly like a key they create for themselves.
+Either is an ordinary ``api_keys`` row that shows up on the Keys page under its
+own name.
 """
 
 from __future__ import annotations
@@ -50,17 +51,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import utc_iso
+from gateway.exceptions import TenancyConflictError
 from gateway.exceptions.organizations_exceptions import (
+    NotAuthorizedError,
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
+from gateway.models.tenancy import User, Workspace, WorkspaceActivationState, WorkspaceMemberActivationState
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
-from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.repositories.organizations import WorkspaceMemberActivationRepository
+from gateway.repositories.users_repository import (
+    get_or_create_attribution_user,
+    is_attribution_user_revoked,
+    lock_live_users,
+)
 from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -76,6 +84,9 @@ ACTIVATION_KEY_NAME = "Setup guide"
 # ``success`` or ``error`` row that says what happened. Counting it would report
 # a failure for a request that succeeded on its next candidate.
 _ATTEMPT_STATUSES = ("success", "error")
+
+# As the member key surface and the Playground say it.
+_SPEND_IDENTITY_REVOKED = "Your spend identity has been deactivated on this deployment; ask an operator to restore it."
 
 # The one classification that is offered the guide. The column is the platform's
 # and nothing else in this edition reads it; an operator who marks a workspace
@@ -148,6 +159,10 @@ def _integration_traffic() -> ColumnElement[bool]:
     return UsageLog.endpoint != PLAYGROUND_USAGE_ENDPOINT
 
 
+# Either row the guide keeps: the workspace's, for its managers, or one member's.
+type _GuideState = WorkspaceActivationState | WorkspaceMemberActivationState
+
+
 class ActivationAttemptPublic(BaseModel):
     """One gateway request in this workspace, as the guide reports it."""
 
@@ -181,7 +196,8 @@ class WorkspaceActivationPublic(BaseModel):
     status: ActivationStatus = Field(
         description=(
             "'activated' once a gateway request in this workspace has succeeded, 'failed' when the "
-            "last one failed and none has yet succeeded, 'waiting' when there has been none at all."
+            "last one failed and none has yet succeeded, 'waiting' when there has been none at all. "
+            "For a member who does not manage the workspace, only their own requests count."
         )
     )
     activation_attempt: ActivationAttemptPublic | None = Field(
@@ -195,11 +211,17 @@ class WorkspaceActivationPublic(BaseModel):
     experience_eligible: bool = Field(
         description=(
             "Whether the dashboard should offer the guide to this caller right now: the deployment "
-            "has it enabled, the workspace is classified for it, nobody dismissed it, no request has "
-            "succeeded yet, and the caller may manage the workspace."
+            "has it enabled, the workspace is classified for it, and the caller may run requests "
+            "there. For someone who manages the workspace, nobody dismissed it and no request in the "
+            "workspace has succeeded yet; for a member who does not, they have not dismissed it and "
+            "no request of their own has succeeded yet."
         )
     )
-    dismissed: bool = Field(description="Whether someone skipped the guide for this workspace.")
+    dismissed: bool = Field(
+        description=(
+            "Whether the guide was skipped: for the workspace, or for a member who does not manage it, by that member."
+        )
+    )
     issued_key: ActivationIssuedKeyPublic | None = Field(
         default=None,
         description=(
@@ -252,6 +274,8 @@ class WorkspaceActivationService:
             workspace_id=workspace_id,
             organizations=self.organizations,
         )
+        if await self._is_member_not_manager(user=user, workspace=workspace):
+            return await self._member_status(user=user, workspace=workspace)
         state = await self.db.get(WorkspaceActivationState, workspace.id)
         dismissed = state is not None and state.dismissed_at is not None
 
@@ -300,9 +324,25 @@ class WorkspaceActivationService:
 
         With ``growth``, a key this call inserted is reported as
         ``API_KEY_CREATED`` once it commits. A rotation creates no key, so it
-        reports nothing.
+        reports nothing. A member who does not manage the workspace gets their
+        own instead (:meth:`_issue_member_key`).
         """
-        workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
+        workspace = await authorization.resolve_visible_workspace(
+            self.db,
+            user=user,
+            workspace_id=workspace_id,
+            organizations=self.organizations,
+        )
+        if await self._is_member_not_manager(user=user, workspace=workspace):
+            return await self._issue_member_key(
+                user=user, workspace=workspace, growth=growth, background_tasks=background_tasks
+            )
+        await authorization.require_workspace_management_access(
+            self.db,
+            user=user,
+            workspace=workspace,
+            organizations=self.organizations,
+        )
         state = await self._state_for_update(workspace.id)
         self._require_offerable(workspace=workspace, state=state)
         if await self._first_successful_request(workspace.id) is not None:
@@ -363,9 +403,211 @@ class WorkspaceActivationService:
         state.last_presented_at = now
         state.api_key_id = record.id
         await self.db.commit()
-        if inserted and growth is not None and background_tasks is not None:
+        return await self._issued(
+            plaintext, record, inserted=inserted, user=user, workspace=workspace, growth=growth, tasks=background_tasks
+        )
+
+    async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
+        """Retire the guide for this workspace, or for one member who does not manage it. Permanent, and idempotent.
+
+        The key the guide issued is left as it is. It is minted only on a press,
+        so an unused one means "not used *yet*": revoking it would break the
+        likeliest sequence in the flow, which is copy the key, Skip, and have the
+        first request answer 401. A key's lifecycle belongs to the Keys page.
+        """
+        workspace = await authorization.resolve_visible_workspace(
+            self.db,
+            user=user,
+            workspace_id=workspace_id,
+            organizations=self.organizations,
+        )
+        if await self._is_member_not_manager(user=user, workspace=workspace):
+            await self._dismiss_for_member(user=user, workspace=workspace)
+            return
+        await authorization.require_workspace_management_access(
+            self.db,
+            user=user,
+            workspace=workspace,
+            organizations=self.organizations,
+        )
+        state = await self._state_for_update(workspace.id)
+        if state is None:
+            state = await self._create_state(workspace.id)
+        if state.dismissed_at is None:
+            state.dismissed_at = datetime.now(UTC)
+        await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    async def _is_member_not_manager(self, *, user: User, workspace: Workspace) -> bool:
+        """Whether the caller may run requests in the workspace without managing it.
+
+        The contributor rule is the member key surface's, so an organization
+        viewer holding ``member`` in the workspace is not one.
+        """
+        if await authorization.has_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        ):
+            return False
+        try:
+            await self.organizations.require_workspace_contributor_access(
+                user=user, organization_id=workspace.organization_id, workspace_id=workspace.id
+            )
+        except NotAuthorizedError:
+            return False
+        return True
+
+    async def _member_status(self, *, user: User, workspace: Workspace) -> WorkspaceActivationPublic:
+        """Where a member stands on their own first successful request in the workspace."""
+        state = await WorkspaceMemberActivationRepository(self.db).get(workspace.id, user.id)
+        dismissed = state is not None and state.dismissed_at is not None
+        attribution = str(user.id)
+
+        first_success = await self._first_successful_request(workspace.id, user_id=attribution)
+        if first_success is not None:
+            return WorkspaceActivationPublic(
+                status="activated",
+                activation_attempt=_attempt_public(first_success),
+                experience_eligible=False,
+                dismissed=dismissed,
+            )
+
+        latest = await self._latest_request(workspace.id, user_id=attribution)
+        eligible = (
+            self.config.activation_guide
+            and workspace.activation_classification == _ELIGIBLE_CLASSIFICATION
+            and not dismissed
+            # Its only action would be refused: `_issue_member_key` mints nothing for a revoked identity.
+            and not await is_attribution_user_revoked(self.db, attribution)
+        )
+        return WorkspaceActivationPublic(
+            status="failed" if latest is not None else "waiting",
+            latest_attempt=_attempt_public(latest) if latest is not None else None,
+            experience_eligible=eligible,
+            dismissed=dismissed,
+            issued_key=await self._usable_issued_key(state, user=user) if eligible else None,
+        )
+
+    async def _issue_member_key(
+        self,
+        *,
+        user: User,
+        workspace: Workspace,
+        growth: GrowthSignalPort | None,
+        background_tasks: BackgroundTasks | None,
+    ) -> ActivationApiKeyPublic:
+        """Mint a member's own setup key, rotating the one the guide already issued them.
+
+        Held to what the member key surface holds a key a member creates for
+        themselves to: the workspace's write lock and contributor check, the
+        refusal of a revoked spend identity, and a key that inherits its owner's
+        model and tool access rather than granting more (no allow-list of its own).
+        It is marked ``self_service``, so demoting the member to viewer switches
+        it off with their other keys.
+        """
+        await self.organizations.hold_workspace_write_access(
+            user=user, organization_id=workspace.organization_id, workspace_id=workspace.id, revoking=False
+        )
+        repository = WorkspaceMemberActivationRepository(self.db)
+        state = await repository.get_for_update(workspace.id, user.id)
+        self._require_offerable(workspace=workspace, state=state)
+        if await self._first_successful_request(workspace.id, user_id=str(user.id)) is not None:
+            raise WorkspaceAlreadyActivatedError
+        # Locked as the user's deletion locks it, so a revocation either commits
+        # first and is refused here or waits for this key and then disables it.
+        await lock_live_users(self.db, [str(user.id)])
+        if await is_attribution_user_revoked(self.db, str(user.id)):
+            raise TenancyConflictError(_SPEND_IDENTITY_REVOKED)
+        if state is None:
+            state = await self._create_member_state(repository, workspace_id=workspace.id, user_id=user.id)
+            self._require_offerable(workspace=workspace, state=state)
+
+        plaintext = self.key_format.mint()
+        owner = await get_or_create_attribution_user(
+            self.db,
+            user_id=str(user.id),
+            alias=user.full_name or user.email,
+        )
+        record = await self._existing_key(state)
+        # Rotated only where the member could switch the key back on themselves:
+        # theirs, and not disabled for a reason an owner cannot clear (an
+        # operator's, or a revocation). Any other row is left as it is and a
+        # fresh one minted, so the guide is never the way round that refusal.
+        if record is not None and (record.user_id != owner.user_id or record.disabled_reason is not None):
+            record = None
+        inserted = record is None
+        if record is None:
+            record = APIKey(
+                id=str(uuid.uuid4()),
+                workspace_id=workspace.id,
+                key_hash=hash_key(plaintext),
+                key_prefix=self.key_format.fingerprint(plaintext),
+                key_suffix=key_suffix(plaintext),
+                key_name=ACTIVATION_KEY_NAME,
+                user_id=owner.user_id,
+                scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
+                exclude_from_budget=False,
+                self_service=True,
+            )
+            self.db.add(record)
+        else:
+            record.key_hash = hash_key(plaintext)
+            record.key_prefix = self.key_format.fingerprint(plaintext)
+            record.key_suffix = key_suffix(plaintext)
+            record.is_active = True
+            record.expires_at = None
+
+        now = datetime.now(UTC)
+        if state.first_presented_at is None:
+            state.first_presented_at = now
+        state.last_presented_at = now
+        state.api_key_id = record.id
+        await self.db.commit()
+        return await self._issued(
+            plaintext, record, inserted=inserted, user=user, workspace=workspace, growth=growth, tasks=background_tasks
+        )
+
+    async def _dismiss_for_member(self, *, user: User, workspace: Workspace) -> None:
+        """Retire the guide for this member alone."""
+        repository = WorkspaceMemberActivationRepository(self.db)
+        state = await repository.get_for_update(workspace.id, user.id)
+        if state is None:
+            state = await self._create_member_state(repository, workspace_id=workspace.id, user_id=user.id)
+        if state.dismissed_at is None:
+            state.dismissed_at = datetime.now(UTC)
+        await self.db.commit()
+
+    async def _create_member_state(
+        self, repository: WorkspaceMemberActivationRepository, *, workspace_id: uuid.UUID, user_id: uuid.UUID
+    ) -> WorkspaceMemberActivationState:
+        """Insert a member's row, adopting a concurrent creator's, as :meth:`_create_state` does."""
+        try:
+            async with self.db.begin_nested():
+                state = repository.stage(workspace_id, user_id)
+        except IntegrityError:
+            winner = await repository.get_for_update(workspace_id, user_id)
+            if winner is None:
+                raise
+            return winner
+        return state
+
+    async def _issued(
+        self,
+        plaintext: str,
+        record: APIKey,
+        *,
+        inserted: bool,
+        user: User,
+        workspace: Workspace,
+        growth: GrowthSignalPort | None,
+        tasks: BackgroundTasks | None,
+    ) -> ActivationApiKeyPublic:
+        """Report a key this call inserted once it committed, and return its plaintext once."""
+        if inserted and growth is not None and tasks is not None:
             await growth.record_action(
-                background_tasks=background_tasks,
+                background_tasks=tasks,
                 action=GrowthAction.API_KEY_CREATED,
                 user_id=user.id,
                 email=user.email,
@@ -378,48 +620,6 @@ class WorkspaceActivationService:
             key_suffix=record.key_suffix,
             key_name=record.key_name,
         )
-
-    async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
-        """Retire the guide for this workspace. Permanent, and idempotent.
-
-        The key the guide issued is left as it is. It is minted only on a press,
-        so an unused one means "not used *yet*": revoking it would break the
-        likeliest sequence in the flow, which is copy the key, Skip, and have the
-        first request answer 401. A key's lifecycle belongs to the Keys page.
-        """
-        workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
-        state = await self._state_for_update(workspace.id)
-        if state is None:
-            state = await self._create_state(workspace.id)
-        if state.dismissed_at is None:
-            state.dismissed_at = datetime.now(UTC)
-        await self.db.commit()
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
-    async def _resolve_manageable(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:
-        """Resolve a workspace this caller may manage, or raise 404/403.
-
-        Both writes here are management actions: one mints a credential, the
-        other retires a workspace-wide offer. A member who may only see the
-        workspace is refused, which is also why ``get_status`` reports
-        eligibility rather than assuming the reader may act.
-        """
-        workspace = await authorization.resolve_visible_workspace(
-            self.db,
-            user=user,
-            workspace_id=workspace_id,
-            organizations=self.organizations,
-        )
-        await authorization.require_workspace_management_access(
-            self.db,
-            user=user,
-            workspace=workspace,
-            organizations=self.organizations,
-        )
-        return workspace
 
     async def _is_eligible(self, *, user: User, workspace: Workspace, dismissed: bool) -> bool:
         """Whether this caller is being offered the guide for this workspace.
@@ -438,7 +638,7 @@ class WorkspaceActivationService:
             organizations=self.organizations,
         )
 
-    def _require_offerable(self, *, workspace: Workspace, state: WorkspaceActivationState | None) -> None:
+    def _require_offerable(self, *, workspace: Workspace, state: _GuideState | None) -> None:
         """Refuse a write when the guide is not on offer for this workspace."""
         if not self.config.activation_guide:
             raise WorkspaceActivationUnavailableError("The first-request setup guide is disabled on this deployment")
@@ -483,7 +683,7 @@ class WorkspaceActivationService:
             return winner
         return state
 
-    async def _existing_key(self, state: WorkspaceActivationState | None) -> APIKey | None:
+    async def _existing_key(self, state: _GuideState | None) -> APIKey | None:
         """The key the guide issued for this workspace, if the row still exists.
 
         Null after someone deleted it from the Keys page, which is a legitimate
@@ -494,9 +694,7 @@ class WorkspaceActivationService:
             return None
         return await self.db.get(APIKey, state.api_key_id)
 
-    async def _usable_issued_key(
-        self, state: WorkspaceActivationState | None, *, user: User
-    ) -> ActivationIssuedKeyPublic | None:
+    async def _usable_issued_key(self, state: _GuideState | None, *, user: User) -> ActivationIssuedKeyPublic | None:
         """The issued key, offered back only to the caller holding its plaintext while it still authenticates.
 
         Rotation moves the row to whoever asked last, so another manager is
@@ -509,7 +707,9 @@ class WorkspaceActivationService:
             return None
         return ActivationIssuedKeyPublic(key_id=record.id, key_prefix=record.key_prefix, key_suffix=record.key_suffix)
 
-    async def _first_successful_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
+    async def _first_successful_request(
+        self, workspace_id: uuid.UUID, *, user_id: str | None = None
+    ) -> UsageLog | None:
         """The oldest successful gateway request in the workspace, which is the activation.
 
         Only requests this deployment served count, migrated hosted history
@@ -525,6 +725,10 @@ class WorkspaceActivationService:
         into the product is the demo rather than the integration, and closing on
         one would retire the guide for a workspace that has not integrated
         anything. See :func:`_integration_traffic`.
+
+        With ``user_id``, only requests billed to that attribution owner count,
+        which is a member's own key: spend binds to the key's user, whatever a
+        request's ``user`` field says.
         """
         statement = (
             select(UsageLog)
@@ -533,6 +737,7 @@ class WorkspaceActivationService:
                 UsageLog.source == SERVED_HERE_SLUG,
                 _integration_traffic(),
                 UsageLog.status == "success",
+                *_billed_to(user_id),
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
             # winner, rather than the receipt changing between two page loads.
@@ -541,7 +746,7 @@ class WorkspaceActivationService:
         )
         return (await self.db.execute(statement)).scalars().first()
 
-    async def _latest_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
+    async def _latest_request(self, workspace_id: uuid.UUID, *, user_id: str | None = None) -> UsageLog | None:
         """The most recent gateway request in the workspace, successful or not.
 
         Scoped the same two ways as :meth:`_first_successful_request`, and the
@@ -557,11 +762,17 @@ class WorkspaceActivationService:
                 UsageLog.source == SERVED_HERE_SLUG,
                 _integration_traffic(),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
+                *_billed_to(user_id),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())
             .limit(1)
         )
         return (await self.db.execute(statement)).scalars().first()
+
+
+def _billed_to(user_id: str | None) -> tuple[ColumnElement[bool], ...]:
+    """Narrow a usage read to one attribution owner's rows, or leave it workspace-wide."""
+    return () if user_id is None else (UsageLog.user_id == user_id,)
 
 
 def _attempt_public(row: UsageLog) -> ActivationAttemptPublic:

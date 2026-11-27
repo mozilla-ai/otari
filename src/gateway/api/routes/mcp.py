@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
+    McpToolListingsDep,
     WorkspaceMcpServersDep,
     get_config,
     get_db,
@@ -107,6 +108,7 @@ from gateway.services.mcp_stateless import (
 )
 from gateway.services.model_access import (
     McpAccess,
+    clip_mcp_tool_patterns,
     expand_mcp_tool_patterns,
     is_mcp_tool_allowed,
     resolve_request_mcp_access,
@@ -121,8 +123,6 @@ from gateway.types.key_scope import KeyScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
-
-    from fastapi import Response
 
     from gateway.models.mcp import ResolvedMcpServer
 
@@ -401,22 +401,30 @@ async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
         raise McpExecutionError(CODE_AUTHENTICATION_FAILED, ExecutionState.NOT_STARTED, 401)
 
 
-def _sign_in_url(config: GatewayConfig | None, server_id: uuid.UUID, user_id: str | None) -> str | None:
-    """The link that starts ``user_id``'s sign-in to a server, or ``None`` where none can be made."""
+def _sign_in_url(
+    config: GatewayConfig | None, server_id: uuid.UUID, user_id: str | None, workspace_id: uuid.UUID | None
+) -> str | None:
+    """The link that starts ``user_id``'s sign-in to a server from a workspace, or ``None`` where none can be made."""
     if config is None or user_id is None:
         return None
     try:
-        return McpConnectionService.sign_in_link(config, server_id=server_id, user_id=user_id)
+        return McpConnectionService.sign_in_link(
+            config, server_id=server_id, user_id=user_id, workspace_id=workspace_id
+        )
     except (McpConnectionSetupError, SecretBoxUnavailableTenancyError):
         return None
 
 
 def _with_sign_in_link(
-    exc: McpExecutionError, config: GatewayConfig, server_id: uuid.UUID, user_id: str | None
+    exc: McpExecutionError,
+    config: GatewayConfig,
+    server_id: uuid.UUID,
+    user_id: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> McpExecutionError:
     """``exc`` with the caller's sign-in link when a renewal during the call found the sign-in gone."""
     if exc.code == CODE_SIGN_IN_REQUIRED and exc.sign_in_url is None:
-        exc.sign_in_url = _sign_in_url(config, server_id, user_id)
+        exc.sign_in_url = _sign_in_url(config, server_id, user_id, workspace_id)
     return exc
 
 
@@ -450,7 +458,7 @@ async def _resolve_server(
             CODE_SIGN_IN_REQUIRED,
             ExecutionState.NOT_STARTED,
             403,
-            sign_in_url=_sign_in_url(config, required.mcp_server_id, required.user_id),
+            sign_in_url=_sign_in_url(config, required.mcp_server_id, required.user_id, principal.workspace_id),
         ) from None
     except McpConnectionUnavailableError:
         logger.warning("Stateless MCP user token could not be renewed server_id=%s", mcp_server_id)
@@ -475,8 +483,12 @@ async def _resolve_server(
 
 
 def _caller_patterns(principal: _Principal, server: ResolvedMcpServer) -> list[str]:
-    """The tool patterns the authenticated key holds on a stored server; empty means it cannot reach it."""
-    return principal.mcp_access.patterns_for(server.id, server.everyone_tools, server.read_tools)
+    """The tool patterns the authenticated key holds on a stored server; empty means it cannot reach it.
+
+    On an organization's server they are clipped to its limit for the key's workspace.
+    """
+    granted = principal.mcp_access.patterns_for(server.id, server.everyone_tools, server.read_tools)
+    return granted if server.tool_limit is None else clip_mcp_tool_patterns(granted, server.tool_limit)
 
 
 def _decide_tool(principal: _Principal, server: ResolvedMcpServer, tool_name: str) -> tuple[bool, str]:
@@ -489,6 +501,8 @@ def _decide_tool(principal: _Principal, server: ResolvedMcpServer, tool_name: st
     """
     if server.allowed_tools is not None and tool_name not in server.allowed_tools:
         return False, "mcp_server"
+    if server.tool_limit is not None and not is_mcp_tool_allowed(server.tool_limit, tool_name):
+        return False, "mcp_organization"
     source, patterns = principal.mcp_access.decide(server.id, server.everyone_tools)
     return is_mcp_tool_allowed(expand_mcp_tool_patterns(patterns, server.read_tools), tool_name), f"mcp_{source}"
 
@@ -642,7 +656,9 @@ async def list_mcp_servers(
     user_id = principal.mcp_access.user_id
     return McpServersResponse(
         servers=[
-            summary.model_copy(update={"sign_in_url": _sign_in_url(config, summary.id, user_id)})
+            summary.model_copy(
+                update={"sign_in_url": _sign_in_url(config, summary.id, user_id, principal.workspace_id)}
+            )
             if summary.sign_in_required
             else summary
             for summary in listed
@@ -674,13 +690,19 @@ async def list_mcp_tools(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     servers: WorkspaceMcpServersDep,
+    listings: McpToolListingsDep,
+    http_response: Response,
 ) -> McpToolsResponse:
     """List the tools a stored MCP server exposes to the authenticated workspace.
 
-    Call this once per server when preparing a model or workflow run, and reuse
-    the answer for every tool from that server for the length of the run: there
-    is no cross-run cache in this version, so a later run rediscovers and
-    staleness stays bounded without any invalidation state to keep.
+    Otari keeps each server's own tool listing for up to five minutes and answers
+    from it, so calling this at the start of every run costs no connection to the
+    server. The `Age` response header says how many seconds old the listing is,
+    and `Cache-Control: no-cache` on the request asks the server again. A kept
+    listing is never served across an edit to the server (its `server_revision`
+    changes) or to a different credential, so each user of a per-user server is
+    answered from a listing read with their own token. The key's access rule is
+    applied on every call, never kept.
 
     The response is the whole authorized catalog or an error. It is never
     partial, because a caller would read a short catalog as the complete input
@@ -715,11 +737,16 @@ async def list_mcp_tools(
             patterns = _caller_patterns(principal, server)
             try:
                 catalog = await discover_stored_tools(
-                    server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
+                    server,
+                    lambda name: is_mcp_tool_allowed(patterns, name),
+                    contacts=mcp_server_contacts,
+                    listings=listings,
+                    refresh=_asks_to_revalidate(raw_request),
                 )
             except McpExecutionError as failed:
-                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id, principal.workspace_id) from None
             visible, warnings = catalog.tools, catalog.warnings
+            http_response.headers["Age"] = str(int(catalog.age_s))
 
             response = McpToolsResponse(
                 server_id=server.id,
@@ -760,14 +787,23 @@ async def list_mcp_tools(
         raise
 
     logger.info(
-        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
+        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d age_s=%d duration_ms=%.2f",
         getattr(raw_request.state, "otari_request_id", "-"),
         mcp_server_id,
         len(visible),
         len(warnings),
+        int(catalog.age_s),
         (time.monotonic() - started) * 1000,
     )
     return response
+
+
+def _asks_to_revalidate(request: Request) -> bool:
+    """Whether the request's ``Cache-Control`` carries ``no-cache`` or ``max-age=0``."""
+    directives = {
+        directive.strip().lower().replace(" ", "") for directive in request.headers.get("cache-control", "").split(",")
+    }
+    return "no-cache" in directives or "max-age=0" in directives
 
 
 @router.post(
@@ -856,7 +892,7 @@ async def execute_mcp_tool(
                     contacts=mcp_server_contacts,
                 )
             except McpExecutionError as failed:
-                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id, principal.workspace_id) from None
             finally:
                 # A finally rather than an except, so a call the deadline cancels is recorded as failed too.
                 if trace is not None:

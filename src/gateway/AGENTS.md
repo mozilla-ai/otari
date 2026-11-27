@@ -81,6 +81,14 @@ root anywhere under `src/gateway`.
 
 `verify_master_key` authenticates either a header master key or an active
 dashboard session. It does not prove that the session may act deployment-wide.
+`get_session_identity` also resolves a personal access token (`otari-pat-`) as
+its owner acting in the token's organization, on `GET` and `HEAD` only, so every
+route that takes a session takes a token for reads; a route that must refuse one
+asks `is_personal_access_token_request`, and a read that does more than read
+(dials a provider, finishes a connection) declares `refuse_access_tokens`. An
+MCP client's sign-in token (`otari-mcp-at-`) resolves the same way only inside
+`reading_through_mcp()`, which the MCP server (`api/mcp_server.py`) opens around
+the reads its tools make through the app, so a route's own checks are the only ones.
 
 - Deployment-wide management routers declare
   `require_deployment_operator` on the router, not per route, so a route added
@@ -207,7 +215,7 @@ once, in the request preamble, and reused at admission; the same decision says
 where a referenced upload goes, staged for the gateway's sandbox or copied, for
 each candidate as it is dispatched, into the provider account whose container
 will read it (`FileService.provider_file_ids`). The tool loop is in
-`services/mcp_loop.py`, the sandbox and the older search backend under `services/`,
+`services/mcp_loop.py`, the sandbox under `services/`,
 the web search and fetch backends on any-search and any-fetch under `services/tools/`,
 and outbound URL checks in `services/url_safety.py`. A request that declares several
 tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
@@ -265,19 +273,23 @@ is held the same way. Its `api_base` is refused at write unless it reaches
 public addresses and its provider is in `TENANT_ENDPOINT_PROVIDERS`
 (`core/provider_params.py`), the SDKs that take an injected client;
 `get_provider_kwargs` then hands that SDK the pinned client on every dispatch,
-and the key's model discovery dials through it too. Its `client_args` are held
-to `tenant_client_args_allowed`, refused at write and dropped from a row
+and the key's model discovery and its provider file sessions
+(`adapters/provider_file_adapter.py`) dial through it too. Its `client_args` are
+held to `tenant_client_args_allowed`, refused at write and dropped from a row
 stored before, because other names reach the SDK constructor and can choose
 the destination, the transport, the headers or an ambient credential.
 
 Provider resolution asks `ModelProviderPort` for a deployment-owned credential
 only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`
-tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
-hosted credential must never move ahead of BYO or leave its trusted gateway.
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. The
+adapter resolves every candidate of a request on one `HostedServing`, which
+reads the providers and their regions once, as detached rows, rather than once
+per candidate. A hosted credential must never move ahead of BYO or leave its
+trusted gateway.
 A vendor switched off on a hosted provider (`hosted_provider_disabled_vendors`,
 vendor read by `_hosted_vendors.vendor_of`) is refused in both
-`HostedProviderRuntime.resolve` and `serveable_models`, so dispatch and the
+`HostedServing.resolve` and `serveable_models`, so dispatch and the
 catalog agree; change one and change the other.
 
 A hosted provider with regions (`hosted_provider_regions`, `_hosted_regions.py`)
@@ -321,6 +333,10 @@ worker's, a flow that falls back to handing the link over, and any decision abou
 what a link proves: a link the recipient's mailbox never saw is hand-carried,
 whatever the transport reported.
 
+`Mailer.readiness` answers both at once, as `MailReadiness`, and that is what
+`GET /api/v1/bootstrap` publishes as `mail`. A caller outside this package that
+needs both questions reads it rather than deriving the pair separately.
+
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing
 work.
@@ -340,8 +356,9 @@ from their own code, so it filters on the endpoint label as well as the source
 The activation-state table stores only dismissal and setup-key state.
 
 Key issuance requires workspace management authority and rotates the existing
-setup key. `activation_guide` disables eligibility without unmounting the
-endpoints.
+setup key, except for a member who does not manage the workspace
+(`WorkspaceMemberActivationState`). `activation_guide` disables eligibility
+without unmounting the endpoints.
 
 ## Data and migrations
 

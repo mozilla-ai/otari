@@ -74,6 +74,7 @@ export const MCP_CATALOG_SYNC_POLL_MS = 5_000
 export const MCP_SERVER_REQUESTS = "mcp-server-requests"
 export const UPDATE_CHECK = "update-check"
 export const BUILD = "build"
+export const GATEWAY_LIVENESS = "gateway-liveness"
 export const KEYS = "keys"
 // One key's federation rules. Its own root rather than a child of KEYS: a key
 // edit invalidates KEYS, and that changes nothing about which identities may
@@ -119,6 +120,8 @@ export const HOSTED_PRICE_RESET_PREVIEW = "hosted-price-reset-preview"
 // The decision models that pick a subagent's model. One root: switching one on
 // switches the others off on the server, so every write refetches the list.
 export const AGENT_RECOMMENDERS = "agent-recommenders"
+// What the subagent router saved, read per window and scope.
+export const SUBAGENT_SAVINGS = "subagent-savings"
 // The signed-in identity read on its own (`GET /v1/auth/profile`), for a caller
 // the organization context cannot describe because it has no organization. Not
 // a child of ORGANIZATIONS: switching organization does not change who you are.
@@ -146,6 +149,11 @@ export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
 // reads them. A write also moves each workspace's view of them, which sits
 // under WORKSPACES, so the hooks invalidate that view by name.
 export const ORGANIZATION_WEB_SEARCH_KEYS = "organization-web-search-keys"
+// The organization's own MCP servers, and below each one its connected users
+// and how each workspace reaches it. Its own root for the reason the keys above
+// have one; a write also moves what each workspace reaches, which sits under
+// WORKSPACES and PLAYGROUND, so the hooks invalidate that view by name.
+export const ORGANIZATION_MCP_SERVERS = "organization-mcp-servers"
 // The models an organization offers on one of its provider keys. Its own root
 // key rather than a child of ORGANIZATION_PROVIDER_KEYS: making a key default or
 // archiving one does not move a model row, and nesting would refetch every open
@@ -192,6 +200,9 @@ export const PLAYGROUND = "playground"
 // happen to be acting in, and switching organizations does not change the list.
 export const PASSKEYS = "passkeys"
 
+// The signed-in identity's own access tokens, a person's like its passkeys.
+export const ACCESS_TOKENS = "access-tokens"
+
 // Whether a mailed reset or verification link can still be used, read once on
 // arrival. Keyed by the link's kind and token, and never invalidated: using the
 // link moves the page to its success state rather than back to this check.
@@ -201,6 +212,10 @@ export const MAILED_LINK_STATUS = "mailed-link-status"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
+// How often the liveness probe behind `useGatewayUnreachable` asks again while
+// the gateway is not answering: often enough that the alarm clears within a few
+// seconds of it coming back.
+export const GATEWAY_LIVENESS_RECHECK_MS = 5_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

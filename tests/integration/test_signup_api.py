@@ -24,7 +24,6 @@ from fastapi.testclient import TestClient
 from gateway.core.addresses import same_address
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.signup_invite_port import AddressProof
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 
@@ -148,10 +147,8 @@ def test_signup_on_an_untouched_address_is_enumeration_safe(
 class _Invites:
     """An invitation ``tok`` emailed to ada@example.com."""
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
-        if token != "tok" or not same_address("ada@example.com", claimed_address):
-            return None
-        return AddressProof.MAILBOX
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
+        return token == "tok" and same_address("ada@example.com", claimed_address)
 
 
 @pytest.fixture

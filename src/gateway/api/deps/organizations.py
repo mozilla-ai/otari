@@ -1,5 +1,6 @@
 """How a request reaches the organizations domain: organizations, workspaces, members and invitations."""
 
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import Depends
@@ -23,8 +24,10 @@ from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
+    OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
 )
 from gateway.repositories.traces import TracesRepositories
@@ -39,9 +42,11 @@ from gateway.services.organizations import (
     InvitationDelivery,
     InvitationFactsReader,
     InvitationMailLimit,
+    InvitationPolicy,
     MembershipListener,
     MembershipListeners,
     OrganizationClaimedDomains,
+    OrganizationReach,
     UserAccess,
 )
 from gateway.services.tenancy import (
@@ -70,7 +75,12 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
         TraceMembershipListener(TracesRepositories.on(uow)),
-        McpGrantMembershipListener(uow),
+        McpGrantMembershipListener(
+            uow,
+            OrganizationReach(
+                WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            ),
+        ),
     )
 
 
@@ -136,6 +146,17 @@ def get_invitation_mail_limit(
 
 
 InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
+
+
+def invitation_policy_of(config: GatewayConfig) -> InvitationPolicy:
+    """The frozen limits an invitation service is held to on this deployment."""
+    return InvitationPolicy(
+        expires_after=timedelta(hours=config.invitation_expiry_hours),
+        per_address_per_day=config.invitation_per_address_per_day,
+        per_day=config.invitation_per_day,
+        resend_limit=config.invitation_resend_limit,
+        resend_wait=timedelta(minutes=config.invitation_resend_wait_minutes),
+    )
 
 
 def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> InvitationDelivery:

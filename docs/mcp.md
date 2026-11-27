@@ -8,7 +8,7 @@ Add MCP as a top-level request field, not a `tools` entry.
 Use either or both of:
 
 - `mcp_servers`: inline MCP server configs the gateway should connect to directly
-- `mcp_server_ids`: ids of MCP servers your workspace has configured
+- `mcp_server_ids`: ids of MCP servers your workspace has configured, or your organization added for every workspace
 
 Otari resolves `mcp_server_ids` first and appends the resulting server configs
 to any inline `mcp_servers`, reading the servers the workspace configured on
@@ -480,6 +480,14 @@ user who has not signed in to a per-user server, or whose own token the server
 refuses, is not a server failure and records nothing. So `health.checked_at` is
 the last contact, and the manual check is for a server no request uses yet.
 
+An organization's per-user server is the exception, because every workspace of
+the organization reads its `health`. A member's own sign-in to it lists nothing
+and records nothing, so `health` can stay unset after a sign-in that worked. A
+later request through that member's connection records whether the server
+answered, never the tools it listed: the tool list comes from the organization's
+own check. A contact made before the server switched between personal and shared
+accounts is not recorded at all.
+
 A server that fails its check is still stored. `health.status` is `failing` and
 `health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,
 `redirected`, `unauthorized` (401), `forbidden` (403), `not_found` (404 or
@@ -625,11 +633,12 @@ server, the key or the user deletes them.
 #### Servers named in a request
 
 `mcp_servers` in a completion request names a server by URL, which no ACL covers.
-A workspace refuses such a request with a `400` unless
-`request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around. A new
-workspace starts with it off; one that existed before ACLs, including the default
-workspace an install migrates into, keeps it on. Change it with
-`PATCH /api/v1/workspaces/{workspace_id}`.
+A workspace refuses such a request with a `400` (`request_mcp_servers_disallowed`)
+unless `request_mcp_servers_allowed` is on, so its ACLs cannot be stepped around.
+A new workspace starts with it off; one that existed before ACLs, including the
+default workspace an install migrates into, keeps it on. Change it with the
+**Allow servers outside this list** switch on the workspace's **MCP servers**
+card, or with `PATCH /api/v1/workspaces/{workspace_id}`.
 
 The switch also covers asking a provider to dial a server itself: a Responses tool
 of `type: "mcp"`, or a Gemini tool with a non-empty `mcp_servers`
@@ -648,7 +657,7 @@ and need an owner or admin of the organization or the workspace:
 | `POST /access/grants` | Give one rule to several `api_key_ids` and `user_ids`. A key or user that has a rule gets this one instead. |
 | `PATCH /access/grants/{grant_id}` | Change one rule's `tools`. |
 | `DELETE /access/grants/{grant_id}` | Delete one rule; its key or user falls back to the next match. |
-| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy) or `server` (disabled, or the tool is not exposed). |
+| `GET /access/check?api_key_id=&tool=` | Say whether a key may call a tool, and what decided: `key`, `user`, `everyone` (the default policy), `server` (disabled, or the tool is not exposed) or `organization` (the organization's limit for the workspace). |
 
 `GET /api/v1/workspaces/{workspace_id}/mcp-servers/keys/{api_key_id}/access`
 answers the other way round: what one key reaches on each of the workspace's
@@ -662,6 +671,24 @@ deleted user is refused. A user's rules on a workspace's servers are deleted whe
 they leave the workspace or its organization, so inviting them again restores
 none. A server holds at most 1000 rules, so write a rule for a user rather than
 one per key.
+
+#### A workspace's settings on an organization's server
+
+An organization's server is read-only from a workspace, apart from the
+workspace's own settings on it. These routes live under the same path and need
+an owner or admin of the organization or the workspace:
+
+| Route | Does |
+|---|---|
+| `PATCH /override` | Change only the fields sent; one left out keeps what is stored. `enabled` is the workspace's switch, `true` or `false`, never `null`. `everyone_tools` and `attach_by_default` take `null` to follow the server's own again. |
+| `DELETE /override` | Take all of the workspace's own settings away, so it follows the server's again. |
+
+Both answer the server as the workspace reads it, with its settings under
+`in_workspace`, and keep the organization's limit for the workspace. Both are a
+`404` for the workspace's own server, which is changed with `PATCH /` instead.
+Sending only what changed is what keeps two admins from undoing each other: an
+admin who turns the server off and another who changes the default policy both
+keep their change.
 
 ## Limits and safety
 
@@ -792,9 +819,27 @@ Authorization: Bearer <token>
 }
 ```
 
-Call this once per server when you prepare a run, and reuse the answer for every
-tool from that server for the length of the run. There is no cross-run cache, so
-a later run rediscovers.
+Call it when you prepare a run, and reuse the answer for every tool from that
+server for the length of the run. Otari keeps each server's own tool listing for
+up to five minutes and answers from it, so discovering at the start of every run
+opens no connection to the server while the listing is kept:
+
+- The `Age` response header is how many seconds ago Otari last asked the server.
+- Send `Cache-Control: no-cache` to have Otari ask the server again, for example
+  right after you changed the server's tools yourself. Each Otari replica keeps
+  its own listing, so the fresh answer replaces only the copy on the replica
+  that served your request; another replica may answer from its own copy for
+  up to five minutes.
+- An edit to the stored server (its URL, credential or allowlist, everything
+  `server_revision` covers) is never answered from a listing kept before it.
+- A per-user server's listing is kept per user, read with that user's own token.
+- The key's [access rule](#server-access) and the screening below apply on every
+  call, not to the kept listing, so two keys sharing a server each see only
+  their own tools.
+
+A tool the server itself adds or removes, with no edit in Otari, can therefore
+take up to five minutes to appear, or be proposed from the listing after it is
+gone; execution then returns the server's own typed error.
 
 Where the stored server has an allowlist, `tools` is its intersection with the
 live catalog, so a tool the server added later is not exposed just because it

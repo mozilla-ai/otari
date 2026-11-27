@@ -110,7 +110,6 @@ from gateway.services.providers._hosted_credentials import (
     normalize_provider,
     origin_of,
     public_api_base,
-    reencrypted,
     unmask_api_base,
 )
 from gateway.services.providers._hosted_name_index import (
@@ -121,11 +120,17 @@ from gateway.services.providers._hosted_name_index import (
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
-from gateway.services.providers._hosted_runtime import HostedProviderRuntime
-from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
+from gateway.services.providers._hosted_runtime import HostedProviderRuntime, HostedServing, HostedServingBuilder
+from gateway.services.providers._hosted_sources import (
+    HostedDataLocations,
+    HostedProviderProfile,
+    HostedSource,
+    HostedSources,
+)
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
+from gateway.services.providers._workspace_hosted_access import workspace_allowed_data_locations
+from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, reencrypted
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 from gateway.types.model_type import ModelType, OfferedModelType
 
@@ -177,6 +182,7 @@ class HostedProviderService:
         live_byo_pairs: LiveByoPairs,
         organization_exists: OrganizationExists,
         metadata_overrides: ModelMetadataOverrideService,
+        serving: HostedServingBuilder,
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
 
@@ -187,7 +193,7 @@ class HostedProviderService:
         organizations hold a live key for each of the given providers, and
         ``organization_exists`` whether the deployment holds an organization a
         restriction names; callables, because the rows they read are another
-        domain's.
+        domain's. ``serving`` builds the resolver a request's candidates share.
         """
         self.metadata_overrides = metadata_overrides
         self.uow = uow
@@ -208,7 +214,7 @@ class HostedProviderService:
             validate_api_base=self._validate_api_base,
         )
         self.offers = HostedOffers(models, pricing)
-        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors)
+        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors, serving=serving)
         self.sweep = HostedCatalogSweep(
             uow,
             config=config,
@@ -1128,6 +1134,20 @@ class HostedProviderService:
         async with self.uow:
             return await self.sources.zero_data_retention_names(organization_id)
 
+    async def data_locations(
+        self, *, organization_id: uuid.UUID | None, workspace_id: uuid.UUID | None = None
+    ) -> HostedDataLocations:
+        """Where each enabled provider serveable to ``organization_id`` keeps request data, and each of its regions.
+
+        ``None`` is the deployment's own view, which sees every provider. A
+        location is None where the connection declares none. For a
+        ``workspace_id`` that accepts only some locations, only those are kept,
+        as dispatch serves a request billed to it from no other.
+        """
+        async with self.uow:
+            found = await self.sources.data_locations(organization_id)
+        return found.within(workspace_allowed_data_locations(workspace_id))
+
     async def profiles(self) -> dict[str, HostedProviderProfile]:
         """Every hosted provider's implementation, terms of service and privacy policy, by name.
 
@@ -1152,11 +1172,9 @@ class HostedProviderService:
         regions = await self.runtime.resolve(name, model, organization_id=organization_id)
         return regions[0] if regions else None
 
-    async def resolve_regions(
-        self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
-    ) -> list[ResolvedHostedProvider]:
-        """The usable connections of the hosted provider ``name`` for ``organization_id``, in the order tried."""
-        return await self.runtime.resolve(name, model, organization_id=organization_id)
+    def serving(self) -> HostedServing:
+        """One request's resolver, reading the hosted providers once, however many candidates it is asked about."""
+        return self.runtime.serving()
 
     async def discovery_dials(self) -> dict[str, DiscoveryDial]:
         """Each provider switched on, with the dial that lists its models on its credential.

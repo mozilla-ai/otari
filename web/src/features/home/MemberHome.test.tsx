@@ -7,6 +7,7 @@ import type {
   UsageEntry,
   UsageGroupRow,
   UsageSummary,
+  WorkspaceActivation,
   WorkspaceBudgetDefault,
 } from "@/client"
 import { MemberHome } from "@/features/home/MemberHome"
@@ -15,6 +16,7 @@ import {
   UNSEEN_LIMIT_NOTE,
 } from "@/features/home/memberHomeModel"
 import { API_ROOT } from "@/shared/api/client"
+import { formatUsd } from "@/shared/helpers/format"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -24,6 +26,7 @@ import {
   organizationMember,
   SURFACES,
   usageTotals,
+  workspaceActivation,
   workspaceBudgetDefault,
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
@@ -71,14 +74,34 @@ const WEEKLY = workspaceBudgetDefault({
   reset_alignment: "calendar_week",
 })
 
-function summary(start: string, cost: number): UsageSummary {
+function summary(
+  start: string,
+  cost: number,
+  { hosted = 0, cached = 0 }: { hosted?: number; cached?: number } = {},
+): UsageSummary {
   return {
     // As the server writes it back, not as it was asked.
     start_date: new Date(start).toISOString().replace(".000Z", "+00:00"),
     end_date: new Date().toISOString(),
     bucket: "day",
-    totals: usageTotals({ cost, request_count: 1 }),
-    series: [],
+    totals: usageTotals({
+      cost,
+      request_count: 1,
+      deployment_paid_cost: hosted,
+    }),
+    series: cached
+      ? [0, 1].map((hour) => ({
+          bucket_start: new Date(Date.now() - hour * 3600e3).toISOString(),
+          cache_read_tokens: cached / 2,
+          cache_write_tokens: 0,
+          cost: cost / 2,
+          errors: 0,
+          input_tokens: 500,
+          output_tokens: 100,
+          requests: 1,
+          tokens: 600,
+        }))
+      : [],
     by_api_key: [],
     by_endpoint: [],
     by_model: [],
@@ -114,6 +137,9 @@ async function renderMemberHome({
   hasTraces = false,
   url = "/",
   byModel = [],
+  hosted = 0,
+  cached = 0,
+  firstRun,
 }: {
   windowCost: number
   periodCost: number
@@ -126,6 +152,16 @@ async function renderMemberHome({
   url?: string
   /** The window's spend by model id. */
   byModel?: UsageGroupRow[]
+  /** The window's deployment-paid cost. */
+  hosted?: number
+  /** The window's input tokens read from cache, of 1,000. */
+  cached?: number
+  /**
+   * Wei in Platform with no key and no session yet, and what the setup guide's
+   * reads answer: the server's offer (`"pending"` never answers) and the
+   * models Wei may call.
+   */
+  firstRun?: { activation: WorkspaceActivation | "pending"; models: string[] }
 }): Promise<URL[]> {
   const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
@@ -140,24 +176,51 @@ async function renderMemberHome({
     const query = new URLSearchParams(search)
     switch (path) {
       case "/organizations/me":
-        return Response.json(AS_WEI)
+        return Response.json(
+          firstRun
+            ? {
+                ...AS_WEI,
+                workspace_memberships: [
+                  { workspace_id: PLATFORM, name: "Platform", role: "member" },
+                ],
+              }
+            : AS_WEI,
+        )
+      case `/workspaces/${PLATFORM}/activation`:
+        return firstRun?.activation === "pending"
+          ? new Promise<Response>(() => {})
+          : Response.json(firstRun?.activation ?? {})
+      case "/models":
+        return Response.json({
+          object: "list",
+          data: (firstRun?.models ?? []).map((id) => ({
+            id,
+            object: "model",
+            created: 0,
+            owned_by: "openai",
+          })),
+        })
       case "/organizations/me/members":
         return Response.json({ data: [member], count: 1 })
       case `/workspaces/${PLATFORM}/member-budget-policies`:
         return Response.json({ data: defaults, count: defaults.length })
       case "/organizations/me/keys":
-        return Response.json([LAPTOP])
+        return Response.json(firstRun ? [] : [LAPTOP])
       case "/organizations/me/usage":
         return Response.json([refusal])
       case "/organizations/me/traces/count":
-        return Response.json({ count: 3 })
+        return Response.json({ count: firstRun ? 0 : 3 })
       case "/organizations/me/usage/summary": {
         const start = query.get("start_date") ?? ""
         const isWindow =
           query.has("end_date") ||
           query.getAll("dimensions").some((one) => one !== "none")
         return Response.json({
-          ...summary(start, isWindow ? windowCost : periodCost),
+          ...summary(
+            start,
+            isWindow ? windowCost : periodCost,
+            isWindow ? { hosted, cached } : {},
+          ),
           by_api_key: [
             {
               key: LAPTOP.id,
@@ -217,7 +280,9 @@ async function renderMemberHome({
         <Provider>
           <DeploymentProvider
             value={bootstrap(
-              hasTraces ? { surfaces: [...SURFACES, "traces"] } : {},
+              hasTraces || firstRun
+                ? { surfaces: [...SURFACES, "traces"] }
+                : {},
             )}
           >
             <SelectedWorkspaceProvider>
@@ -230,6 +295,73 @@ async function renderMemberHome({
   )
   return asked
 }
+
+describe("MemberHome, on a first run", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const FIRST_RUN = "Start your first agent"
+
+  it("holds its first-run band back while the setup guide is offered", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      firstRun: {
+        activation: workspaceActivation(),
+        models: ["openai:gpt-4o-mini"],
+      },
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        asked.some((url) => url.pathname.endsWith(`${PLATFORM}/activation`)),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: FIRST_RUN })).toBeNull()
+  })
+
+  it("holds its first-run band back until the setup guide's offer answers", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      firstRun: { activation: "pending", models: ["openai:gpt-4o-mini"] },
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        asked.some((url) => url.pathname.endsWith(`${PLATFORM}/activation`)),
+      ).toBe(true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: FIRST_RUN })).toBeNull()
+  })
+
+  it.each([
+    [
+      "the member skipped the guide",
+      {
+        activation: workspaceActivation({
+          experience_eligible: false,
+          dismissed: true,
+        }),
+        models: ["openai:gpt-4o-mini"],
+      },
+    ],
+    [
+      "there is no model to call, so the guide holds back",
+      { activation: workspaceActivation(), models: [] },
+    ],
+  ])("shows its first-run band when %s", async (_case, firstRun) => {
+    await renderMemberHome({ windowCost: 0, periodCost: 0, firstRun })
+
+    expect(
+      await screen.findByRole("heading", { name: FIRST_RUN }),
+    ).toBeInTheDocument()
+  })
+})
 
 describe("MemberHome, by model", () => {
   afterEach(() => {
@@ -391,6 +523,30 @@ describe("MemberHome, sessions", () => {
       await findRowMenuItem(user, /See its sessions/, table),
     ).not.toBeNull()
     expect(screen.queryByText("Failures")).toBeNull()
+  })
+})
+
+describe("MemberHome, who paid", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("keeps the request count on Tokens once the split and the cache share both take a subline", async () => {
+    await renderMemberHome({
+      windowCost: 2,
+      periodCost: 2,
+      hosted: 0.5,
+      cached: 250,
+    })
+    expect(
+      await screen.findByText(
+        `${formatUsd(0.5)} hosted · ${formatUsd(1.5)} own keys`,
+      ),
+    ).toBeVisible()
+    expect(
+      screen.getByText(/^1 requests? · 25\.0% of input from cache$/),
+    ).toBeVisible()
   })
 })
 

@@ -305,6 +305,28 @@ describe("CreateKeyDialog", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("refuses a limit that is not a positive amount, and says why on the field", async () => {
+    mockApi({ role: "owner", isOperator: false })
+    const { user, dialog } = await openDialog()
+    const limit = await within(dialog).findByLabelText(
+      "Spend limit, in dollars",
+    )
+    await user.type(limit, "abc")
+
+    const message = "Enter a number above zero, like 12.50, or leave it empty."
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(message)
+    expect(limit).toHaveAttribute("aria-invalid", "true")
+    expect(limit).toHaveAccessibleDescription(message)
+    expect(
+      within(dialog).getByRole("button", { name: "Create API key" }),
+    ).toBeDisabled()
+
+    await user.clear(limit)
+    await user.type(limit, "12.50")
+    expect(within(dialog).queryByText(message)).toBeNull()
+    expect(limit).not.toHaveAttribute("aria-invalid")
+  })
+
   it("offers a member no budget and says who sets one", async () => {
     mockApi({
       role: "member",

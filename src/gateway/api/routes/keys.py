@@ -13,6 +13,7 @@ from gateway.api.deps import (
     ApiKeyServiceDep,
     BudgetServiceDep,
     CallerOrganization,
+    OrgProviderKeyServiceDep,
     get_config,
     get_db,
     require_deployment_operator,
@@ -341,6 +342,7 @@ async def create_key(
     organization_id: CallerOrganization,
     key_format: ApiKeyFormatPortDep,
     budgets: BudgetServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
 ) -> CreateKeyResponse:
     """Create a new API key in the caller's organization.
 
@@ -356,8 +358,11 @@ async def create_key(
     organization's provider credentials and bills there, so minting into another
     organization's workspace would spend its budget on its credentials.
     """
+    key_slugs = await org_provider_keys.slug_providers(organization_id)
     try:
-        allowed_models = validate_allowed_models(config, request.allowed_models)
+        allowed_models = validate_allowed_models(
+            config, request.allowed_models, organization_id=organization_id, key_slugs=key_slugs
+        )
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
         scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
@@ -406,6 +411,18 @@ async def create_key(
 
     # A key must not grant more than its user's default (a freshly created user
     # has no default, so this only bites when attaching to a restricted user).
+    # A catalog ID stands for the offerings that default covers.
+    if user.allowed_models is not None:
+        try:
+            allowed_models = validate_allowed_models(
+                config,
+                request.allowed_models,
+                organization_id=organization_id,
+                within=user.allowed_models,
+                key_slugs=key_slugs,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not is_allowlist_subset(allowed_models, user.allowed_models, tool_keys=config.legacy_search_tool_keys()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=KEY_MODELS_EXCEED_USER_DETAIL)
     if not tools_within_user(config, allowed_tools, user_tools=user.allowed_tools, user_models=user.allowed_models):
@@ -530,6 +547,7 @@ async def update_key(
     organization_id: CallerOrganization,
     budgets: BudgetServiceDep,
     api_keys: ApiKeyServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
@@ -563,6 +581,8 @@ async def update_key(
             ),
             stored=stored,
             owner_id=key.user_id,
+            organization_id=organization_id,
+            key_slugs=await org_provider_keys.slug_providers(organization_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

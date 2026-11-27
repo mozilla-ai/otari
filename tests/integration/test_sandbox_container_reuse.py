@@ -49,7 +49,7 @@ class _FakeSession:
     def discard(self) -> None:
         self.holds_across_requests = False
 
-    async def execute(self, code: str, *, timeout_s: float) -> Any:
+    async def execute(self, code: str, *, language: str, timeout_s: float) -> Any:
         raise AssertionError("the faked model never calls the tool")
 
     async def put_file(self, path: str, data: bytes, *, mime_type: str) -> None:
@@ -67,6 +67,7 @@ class _FakePort:
     """Records every lease it was asked for; ``gone`` names sessions it no longer has."""
 
     label = "fake-provider"
+    languages = ("python",)
 
     def __init__(self) -> None:
         self.opened: list[dict[str, Any]] = []

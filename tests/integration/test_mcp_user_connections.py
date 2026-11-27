@@ -62,15 +62,17 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpServerAliasRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerGrantRepository,
+    WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.model_access import McpAccess, mcp_read_tools, revoke_user_mcp_grants
-from gateway.services.organizations import UserAccess
+from gateway.services.organizations import OrganizationReach, UserAccess
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import workspace_mcp_server_service
 from gateway.services.tenancy.workspace_mcp_server_service import (
@@ -86,8 +88,11 @@ from gateway.services.tools import (
     AttachedMcpServerIndex,
     McpConnectionService,
     McpGrantMembershipListener,
+    McpServerContact,
+    McpServerContacts,
     McpSignInReason,
     McpUserTokens,
+    McpWorkspaceServers,
     _mcp_connections,
     _mcp_oauth,
 )
@@ -266,6 +271,15 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
             UserRepository(uow),
         ),
         users=UserAccess(OrganizationRepositories.on(uow)),
+        views=McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
+    )
+
+
+def _reach(uow: UnitOfWork) -> OrganizationReach:
+    return OrganizationReach(
+        WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
     )
 
 
@@ -627,7 +641,11 @@ async def test_a_member_sees_the_tools_their_own_rule_admits(
 
     await _sign_in(async_db, config, world, world.member)
     await WorkspaceMcpServerGrantRepository(async_db).put(
-        world.server.id, api_key_ids=[], user_ids=[str(world.member.id)], tools=["delete_file"]
+        await _row(async_db, world.server.id),
+        workspace_id=world.workspace.id,
+        api_key_ids=[],
+        user_ids=[str(world.member.id)],
+        tools=["delete_file"],
     )
     await async_db.commit()
     own = await service.my_tools(user=world.member, **ids)
@@ -674,6 +692,63 @@ async def test_a_members_sign_in_lists_the_server_once_and_records_it_as_a_check
     assert health is not None
     assert (health["status"], health["tools"]) == ("healthy", ["list_files", "read_file", "delete_file"])
     assert health["checked_at"]
+
+
+async def test_one_person_s_listing_is_not_recorded_on_an_organization_s_per_user_server(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every workspace of the organization reads the server's health, and one account lists what that account may."""
+    seen: list[ResolvedMcpServer] = []
+    _catalog(monkeypatch, seen)
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    await _sign_in(async_db, config, world, world.member)
+    assert seen == []
+    assert (await _row(async_db, world.server.id)).health is None
+
+    # Nor what a request through that person's connection listed: it still says the server answered.
+    @asynccontextmanager
+    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as session:
+            yield UnitOfWork(session)
+
+    listing = ServerCheck(tool_names=["list_files", "delete_file"])
+    contact = McpServerContact(server_id=world.server.id, url=PUBLIC_URL, listing=listing)
+    assert await McpServerContacts(unit_of_work=unit_of_work)._store(contact) == "decided"
+    health = (await _row(async_db, world.server.id)).health
+    assert health is not None
+    assert (health["status"], health.get("tools", [])) == ("healthy", [])
+
+
+async def test_a_contact_made_before_the_server_switched_credential_mode_is_not_recorded(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """A personal account's listing that lands after a switch to shared would otherwise read as everyone's."""
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.credential_mode = McpCredentialMode.SHARED
+    await async_db.commit()
+
+    @asynccontextmanager
+    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as session:
+            yield UnitOfWork(session)
+
+    contacts = McpServerContacts(unit_of_work=unit_of_work)
+    listing = ServerCheck(tool_names=["list_files"])
+    personal = McpServerContact(
+        server_id=world.server.id, url=PUBLIC_URL, listing=listing, credential_mode=McpCredentialMode.PER_USER
+    )
+    assert await contacts._store(personal) == "stale"
+    assert (await _row(async_db, world.server.id)).health is None
+
+    shared = dataclasses.replace(personal, credential_mode=McpCredentialMode.SHARED)
+    assert await contacts._store(shared) == "decided"
+    health = (await _row(async_db, world.server.id)).health
+    assert health is not None and health["tools"] == ["list_files"]
 
 
 async def test_a_listing_that_fails_right_after_a_sign_in_is_recorded_and_does_not_fail_the_sign_in(
@@ -851,7 +926,7 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     with pytest.raises(McpOAuthIssuerChangedError) as refused:
         await service.start_connection(user=world.owner, return_to=None, **ids)
     assert refused.value.error_code == "mcp_oauth_issuer_changed"
-    assert "save the OAuth client again" in str(refused.value)
+    assert "A workspace admin must save the OAuth client again" in str(refused.value)
     assert len(wire.exchanges) == 1
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
 
@@ -863,6 +938,27 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     await _sign_in(async_db, config, world, world.owner)
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == moved
     assert wire.registrations == []
+
+
+async def test_a_moved_organization_server_sends_its_members_to_the_organizations_admins(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    """A workspace admin cannot save an organization's server, so the refusal names who can."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+    with pytest.raises(McpOAuthIssuerChangedError) as refused:
+        await _service(async_db, config).start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert "An organization owner or admin" in str(refused.value)
+    assert "Organization > MCP servers" in str(refused.value)
+    assert "workspace admin" not in str(refused.value)
 
 
 async def test_a_managers_client_is_never_sent_to_a_moved_token_endpoint_under_the_same_issuer(
@@ -1097,6 +1193,24 @@ async def test_a_server_that_registers_no_client_asks_for_a_client_id(
     assert "does not let Otari register itself" in str(unpublished.value)
     assert "open Settings" in str(unpublished.value)
     assert (await async_db.execute(select(McpOAuthFlow))).first() is None
+
+
+async def test_an_organization_server_that_registers_no_client_sends_members_to_the_organization(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    """A workspace cannot change its organization's server, so the refusal names who can."""
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    wire.metadata = McpOAuthMetadata(authorization_endpoint=f"{ISSUER}/authorize", token_endpoint=f"{ISSUER}/token")
+    with pytest.raises(McpConnectionSetupError) as unpublished:
+        await _service(async_db, config).start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert "An organization owner or admin must add an OAuth client ID" in str(unpublished.value)
+    assert "Organization > MCP servers" in str(unpublished.value)
 
 
 def _refusing_registration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1903,7 +2017,7 @@ async def test_leaving_the_workspace_ends_a_members_connections_to_its_servers(
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.member.id, [world.workspace.id])
 
     assert await _connection(async_db, world.server.id, str(world.member.id)) is None
     assert await _connection(async_db, world.server.id, str(world.owner.id)) is not None
@@ -2391,7 +2505,7 @@ async def test_leaving_the_workspace_revokes_upstream_once_it_commits(
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.member.id, [world.workspace.id])
         await asyncio.sleep(0)
         assert wire.revoked == [], "nothing is sent before the removal commits"
     await _drain_revocations()
@@ -2409,7 +2523,9 @@ async def test_a_removal_that_rolls_back_revokes_nothing(
 
     with pytest.raises(RuntimeError):
         async with uow:
-            await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+            await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(
+                world.member.id, [world.workspace.id]
+            )
             raise RuntimeError("the removal failed after the listener ran")
     await _drain_revocations()
     await async_db.commit()
@@ -2426,7 +2542,7 @@ async def test_deleting_the_workspace_revokes_its_servers_connections_once_it_co
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
+        await McpGrantMembershipListener(uow, _reach(uow)).workspace_deleted(world.workspace.id, [])
     await _drain_revocations()
 
     assert wire.revoked == ["refresh-1"]
@@ -2441,6 +2557,8 @@ async def test_a_removal_past_one_page_counts_what_it_did_not_revoke(
     monkeypatch.setattr("gateway.repositories.tools.mcp_user_connection_repository.REVOCABLE_PAGE", 1)
     rows, total = await McpUserConnectionRepository(async_db).revocable(server_ids=[world.server.id], limit=1)
     assert (len(rows), total) == (1, 2)
+    rows, total = await McpUserConnectionRepository(async_db).revocable(server_ids=[world.server.id], limit=0)
+    assert (rows, total) == ([], 2), "a zero limit only counts"
 
     with caplog.at_level("INFO", logger="gateway"):
         await _service(async_db, config).delete_server(
@@ -2741,7 +2859,9 @@ def attached_index_on_async_db(async_db: AsyncSession, monkeypatch: pytest.Monke
 
     async def on_the_test_database() -> None:
         async with AsyncSession(async_db.bind) as session:
-            await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(session))
+            await AttachedMcpServerIndex.refresh(
+                WorkspaceMcpServerRepository(session), WorkspaceMcpServerOverrideRepository(session)
+            )
 
     monkeypatch.setattr(AttachedMcpServerIndex, "_refresh_on_a_session_of_its_own", on_the_test_database)
 
@@ -2817,7 +2937,9 @@ async def test_whether_a_workspace_has_an_attached_server_follows_each_write_wit
     )
     await async_db.commit()
     assert await servers.any_attached(world.workspace.id) is True
-    await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(async_db))
+    await AttachedMcpServerIndex.refresh(
+        WorkspaceMcpServerRepository(async_db), WorkspaceMcpServerOverrideRepository(async_db)
+    )
     assert await servers.any_attached(world.workspace.id) is False
 
 
@@ -2893,7 +3015,7 @@ async def test_a_named_per_user_server_is_a_sign_in_for_a_user_and_a_no_user_not
 
 
 def _link_ticket(config: GatewayConfig, server_id: uuid.UUID, user_id: str = "alice") -> str:
-    return sign_in_link(config, server_id=server_id, user_id=user_id).split("ticket=", 1)[1]
+    return sign_in_link(config, server_id=server_id, user_id=user_id, workspace_id=None).split("ticket=", 1)[1]
 
 
 async def _link_uses(db: AsyncSession) -> list[McpSignInLinkUse]:

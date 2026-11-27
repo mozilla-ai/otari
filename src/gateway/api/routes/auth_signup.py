@@ -5,11 +5,13 @@ routes: the person completing signup or opening a verification link holds no
 master key and no session yet, and the token or address in the request is
 their whole proof of anything here.
 
-What signup may do depends on ``open_signup``. Off, the default, it only ever
-claims an identity ``organization_service`` already put on the roster (an admin
-added or invited the address) and creates nothing from nothing. On, an address
-nobody has added is registered instead, with an organization of its own. See
-``user_service.create_user_for_signup``'s own docstring for both.
+What signup may do depends on the invitation the request names and on
+``open_signup``. An invitation that allows an account creates one whatever that
+setting says. With no invitation and the setting off, the default, signup only
+ever claims an identity an admin already added or invited by address, and
+creates nothing from nothing. With it on, an address nobody has added is
+registered instead, with an organization of its own. See
+``user_service.create_user_for_signup``'s own docstring.
 
 Either way it is enumeration-safe the same way resend and reset-request are: the
 response never says whether the address was unknown, already claimed, or
@@ -45,6 +47,7 @@ from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.user_service import (
+    SignupSubmission,
     create_user_for_signup,
     resend_verification_email,
     verify_email,
@@ -170,25 +173,27 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    proof = await invites.proof_for(body.invite, claimed_address=body.email) if body.invite else None
     try:
         claimed = await create_user_for_signup(
             db,
             config,
             background_tasks=background_tasks,
-            email=body.email,
-            password=body.password,
-            uow=uow,
-            organizations=organizations,
             blocked_addresses=identities,
-            full_name=body.full_name,
-            terms_accepted=body.terms_accepted,
-            proof=proof,
+            invites=invites,
+            organizations=organizations,
+            submission=SignupSubmission(
+                email=body.email,
+                password=body.password,
+                full_name=body.full_name,
+                invite_token=body.invite,
+                terms_accepted=body.terms_accepted,
+            ),
+            uow=uow,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
-    if proof is not None and claimed is not None:
+    if claimed is not None and claimed.email_verified_at is not None:
         return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 

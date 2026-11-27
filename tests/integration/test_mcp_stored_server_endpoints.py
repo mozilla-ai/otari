@@ -12,6 +12,7 @@ and the suite does not need egress.
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -31,7 +32,7 @@ from gateway.inflight import InFlightRegistry
 from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
-from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer
 from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -127,9 +128,14 @@ def _store_server(
     token: str | None = "ghp_token",
     enabled: bool = True,
     allowed_tools: list[str] | None = None,
+    organizations: bool = False,
 ) -> WorkspaceMcpServer:
+    """A server ``workspace_id`` reaches: its own, or with ``organizations`` its organization's."""
+    workspace = test_db.get(Workspace, workspace_id)
+    assert workspace is not None
     row = WorkspaceMcpServer(
-        workspace_id=workspace_id,
+        organization_id=workspace.organization_id,
+        workspace_id=None if organizations else workspace_id,
         name="github",
         url=url,
         encrypted_token=encrypt_secret(token) if token else None,
@@ -395,6 +401,59 @@ def test_a_stored_server_on_an_internal_address_is_not_called(
     assert session.calls == []
 
 
+def test_an_organization_server_is_executed_from_a_workspace_that_reaches_it(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    """The other half of the refusal below, so it cannot pass by not finding the server."""
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), organizations=True)
+
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    ("url", "resolves_to"),
+    [
+        ("http://127.0.0.1:8000/mcp", None),
+        ("http://[::1]:8000/mcp", None),
+        ("https://mcp.rebound.example/mcp", "127.0.0.1"),
+    ],
+)
+def test_an_organization_server_on_an_internal_address_is_not_called(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    resolves_to: str | None,
+) -> None:
+    """An organization's server is held to the rule a workspace's is: execution checks its URL again."""
+    if resolves_to is not None:
+
+        async def resolve(_host: str) -> list[object]:
+            return [ipaddress.ip_address(resolves_to)]
+
+        monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolve)
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=url, token=None, organizations=True)
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert session.calls == []
+
+
 def test_a_stored_token_is_never_sent_over_cleartext_http(
     client: TestClient,
     test_db: Session,
@@ -580,3 +639,131 @@ def test_a_configuration_change_after_discovery_is_refused_without_contacting_th
     assert response.status_code == 409, response.text
     assert response.json()["code"] == "mcp_server_changed"
     assert session.calls == []
+
+
+def test_a_second_discovery_is_answered_from_the_kept_listing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+
+    first = client.get(path, headers=api_key_header)
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+    second = client.get(path, headers=api_key_header)
+
+    assert first.status_code == second.status_code == 200, second.text
+    assert first.headers["age"] == "0"
+    assert "age" in second.headers
+    assert second.json() == first.json()
+    assert session.pages == 1
+    assert _EVENTS.count("mcp_session_opened") == 1
+
+
+def test_no_cache_asks_the_server_again(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    client.get(path, headers=api_key_header)
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+
+    refreshed = client.get(path, headers={**api_key_header, "Cache-Control": "no-cache"})
+    after = client.get(path, headers=api_key_header)
+
+    assert [tool["name"] for tool in refreshed.json()["tools"]] == ["create_issue", "added_later"]
+    assert refreshed.headers["age"] == "0"
+    assert after.json() == refreshed.json()
+    assert session.pages == 2
+
+
+def test_an_edit_to_the_server_is_never_answered_from_the_listing_kept_before_it(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    before = client.get(path, headers=api_key_header).json()
+    session.tools.append(MCPTool(name="added_later", description="new", input_schema={"type": "object"}))
+
+    row.encrypted_token = encrypt_secret("ghp_rotated")
+    test_db.add(row)
+    test_db.commit()
+    after = client.get(path, headers=api_key_header).json()
+
+    assert after["server_revision"] != before["server_revision"]
+    assert [tool["name"] for tool in after["tools"]] == ["create_issue", "added_later"]
+    assert session.pages == 2
+
+
+def test_a_failed_discovery_keeps_nothing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+    working = session.list_tools
+
+    async def refuse(*, params: PaginatedRequestParams | None = None) -> ListToolsResult:
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(session, "list_tools", refuse)
+    failed = client.get(path, headers=api_key_header)
+    monkeypatch.setattr(session, "list_tools", working)
+    recovered = client.get(path, headers=api_key_header)
+
+    assert failed.status_code == 502, failed.text
+    assert recovered.status_code == 200, recovered.text
+    assert session.pages == 1
+
+
+def test_two_users_of_a_per_user_server_never_see_each_others_listing(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-user server's revision is the same for every user, so only the credential tells their listings apart."""
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    tokens = iter(["alice-token", "bob-token", "alice-token"])
+    resolve = mcp_route._resolve_server
+
+    async def as_next_user(*args: Any, **kwargs: Any) -> ResolvedMcpServer:
+        resolved = await resolve(*args, **kwargs)
+        return resolved.model_copy(
+            update={"authorization_token": next(tokens), "credential_revision": McpCredentialMode.PER_USER}
+        )
+
+    @asynccontextmanager
+    async def open_session(server: ResolvedMcpServer, *args: Any, **kwargs: Any) -> Any:
+        fake = _FakeSession()
+        fake.tools = [MCPTool(name=f"{server.authorization_token}_files", input_schema={"type": "object"})]
+        _EVENTS.append("mcp_session_opened")
+        yield fake
+
+    monkeypatch.setattr(mcp_route, "_resolve_server", as_next_user)
+    monkeypatch.setattr(mcp_stateless, "open_session", open_session)
+    path = f"{API_ROOT}/mcp/servers/{row.id}/tools"
+
+    alice, bob, alice_again = (client.get(path, headers=api_key_header).json() for _ in range(3))
+
+    assert alice["server_revision"] == bob["server_revision"]
+    assert [tool["name"] for tool in alice["tools"]] == ["alice-token_files"]
+    assert [tool["name"] for tool in bob["tools"]] == ["bob-token_files"]
+    assert alice_again == alice
+    assert _EVENTS.count("mcp_session_opened") == 2

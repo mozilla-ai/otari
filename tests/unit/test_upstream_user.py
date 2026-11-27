@@ -54,6 +54,7 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     # No end-user field on the provider's API.
     LLMProvider.LINER: None,
     LLMProvider.MISTRAL: None,
+    LLMProvider.SARVAM: None,
     # Vertex AI documents ``labels`` for billing and reporting, not abuse monitoring.
     LLMProvider.VERTEXAI: None,
     # The operator's own model server: nobody upstream enforces a policy.

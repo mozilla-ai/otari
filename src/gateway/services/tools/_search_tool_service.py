@@ -20,10 +20,11 @@ from gateway.exceptions.tools_exceptions import (
     SearchToolAlreadyStoredError,
     SearchToolChangedError,
     SearchToolKeyUnstorableError,
+    SearchToolOptionsUnreadableError,
     StoredSearchToolNotFoundError,
 )
 from gateway.log_config import logger
-from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.secret_fields import restore_is_unsafe, restore_redacted_values
 from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolConflict, SearchToolRepository
 from gateway.schemas.tools import (
@@ -45,8 +46,11 @@ from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
+    decrypt_mapping,
     decrypt_secret,
+    encrypt_mapping,
     encrypt_secret,
+    readable_mapping,
 )
 from gateway.services.tool_settings_service import WEB_SEARCH_DEFAULT_TOOL, apply_override
 from gateway.services.tools._search_tool_connection import instance_to_test, unsaved_instance_to_test
@@ -61,6 +65,7 @@ from gateway.services.tools._search_tool_overlay import (
     stored_tool_names,
 )
 from gateway.services.tools._search_tool_writes import (
+    blank_api_key_problem,
     check_kind_unchanged,
     check_tool_entry,
     check_tool_name_is_free,
@@ -120,15 +125,32 @@ def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
         raise SearchToolKeyUnstorableError(str(exc)) from None
 
 
+def _resealed(ciphertext: str | None) -> str | None:
+    """The same secret sealed again under the primary key. Nothing stays nothing."""
+    return None if ciphertext is None else encrypt_secret(decrypt_secret(ciphertext))
+
+
 def _is_decryptable(row: SearchToolCredential) -> bool:
-    """Whether the row's stored key can be read with the current OTARI_SECRET_KEY."""
-    if not row.encrypted_api_key:
-        return True
+    """Whether the row's stored secrets can be read with the current OTARI_SECRET_KEY."""
     try:
-        decrypt_secret(row.encrypted_api_key)
+        if row.encrypted_api_key:
+            decrypt_secret(row.encrypted_api_key)
+        decrypt_mapping(row.encrypted_options)
     except (SecretBoxUnavailableError, SecretDecryptionError):
         return False
     return True
+
+
+def _encrypted_options(options: dict[str, Any] | None) -> str | None:
+    """The ciphertext to store for ``options``, or None to clear them.
+
+    Raises:
+        SearchToolKeyUnstorableError: ``OTARI_SECRET_KEY`` is missing or invalid.
+    """
+    try:
+        return encrypt_mapping(options or None)
+    except SecretBoxUnavailableError as exc:
+        raise SearchToolKeyUnstorableError(str(exc)) from None
 
 
 class SearchToolService:
@@ -171,6 +193,7 @@ class SearchToolService:
                 listed.append(
                     ListedSearchToolSchema.from_model(
                         row,
+                        options=readable_mapping(row.encrypted_options),
                         decryptable=_is_decryptable(row),
                         shadows_config=row.name in from_config,
                         price_per_call=per_call,
@@ -291,7 +314,7 @@ class SearchToolService:
                     fetch_tool=entry["fetch_tool"],
                     api_base=request.api_base,
                     timeout_seconds=request.timeout,
-                    options=restore_redacted_values(request.options, None) or {},
+                    encrypted_options=_encrypted_options(restore_redacted_values(request.options, None)),
                     encrypted_api_key=encrypted_api_key,
                     last4=last4,
                 )
@@ -309,7 +332,7 @@ class SearchToolService:
             )
         await self._apply_write(f"writing '{name}'")
         return CreatedSearchToolSchema(
-            **row.to_public_dict(),
+            **row.to_public_dict(readable_mapping(row.encrypted_options)),
             shadows_config=shadows_config,
             pinned_web_search_default_tool=pinned.name if pinned is not None else None,
             notice=pinned.notice if pinned is not None else None,
@@ -338,6 +361,7 @@ class SearchToolService:
             # Distinguish "field omitted" (keep) from "field set to null" (clear), then
             # validate the instance as it will be after the patch.
             sent = request.model_fields_set
+            stored_options = readable_mapping(existing.encrypted_options)
             fetch_tool = request.fetch_tool.strip() if request.fetch_tool is not None else None
             # An explicit null provider is meaningless (the column is non-null), so it
             # keeps the stored provider.
@@ -347,7 +371,7 @@ class SearchToolService:
                 "fetch_tool": fetch_tool if "fetch_tool" in sent else existing.fetch_tool,
                 "api_base": request.api_base if "api_base" in sent else existing.api_base,
                 "timeout": request.timeout if "timeout" in sent else existing.timeout_seconds,
-                "options": request.options if "options" in sent else existing.options,
+                "options": request.options if "options" in sent else stored_options,
                 # Only presence matters to the validator, and the stored key is never
                 # decrypted here just to re-validate it.
                 "api_key": request.api_key if "api_key" in sent else existing.encrypted_api_key,
@@ -378,12 +402,17 @@ class SearchToolService:
                 changes["timeout_seconds"] = request.timeout
             if "options" in sent:
                 # A value echoed back as the mask keeps the stored one.
-                changes["options"] = restore_redacted_values(request.options, existing.options) or {}
+                if restore_is_unsafe(stored_options, request.options, sealed=existing.encrypted_options is not None):
+                    raise SearchToolOptionsUnreadableError
+                stored_options = restore_redacted_values(request.options, stored_options) or None
+                changes["encrypted_options"] = _encrypted_options(stored_options)
             if "api_key" in sent:
                 changes["encrypted_api_key"], changes["last4"] = _encrypted_key(request.api_key)
             row = await self.tools.update(existing, changes)
         await self._apply_write(f"writing '{name}'")
-        return StoredSearchToolSchema.from_model(row, shadows_config=name in config_file_tools(self.config, kind))
+        return StoredSearchToolSchema.from_model(
+            row, options=stored_options, shadows_config=name in config_file_tools(self.config, kind)
+        )
 
     async def delete(self, name: str) -> None:
         """Delete a stored instance. A config-file one, or ``builtin_fetch``, cannot be deleted here.
@@ -399,11 +428,14 @@ class SearchToolService:
         await self._apply_write(f"writing '{name}'")
 
     async def reencrypt(self) -> ReencryptSearchToolsResponse:
-        """Re-encrypt stored keys with the current primary OTARI_SECRET_KEY.
+        """Re-encrypt every stored secret with the current primary OTARI_SECRET_KEY.
 
-        A key the configured key set cannot decrypt is left untouched and counted
-        as unreadable. A row an edit changed mid-rotation is counted as skipped:
-        whoever wrote it already encrypted it with the primary key.
+        Both the key and the provider options, because a rotation that left
+        either behind would break the row once the retired key is dropped.
+
+        A secret the configured key set cannot decrypt is left untouched and
+        counted as unreadable. A row an edit changed mid-rotation is counted as
+        skipped: whoever wrote it already encrypted it with the primary key.
 
         Raises:
             SearchToolKeyUnstorableError: ``OTARI_SECRET_KEY`` is missing or invalid.
@@ -414,16 +446,13 @@ class SearchToolService:
         async with self.uow:
             try:
                 for row in await self.tools.list_encrypted():
-                    original = row.encrypted_api_key
-                    if original is None:
-                        continue
+                    expected = (row.encrypted_api_key, row.encrypted_options)
                     try:
-                        plaintext = decrypt_secret(original)
+                        replacement = (_resealed(expected[0]), _resealed(expected[1]))
                     except SecretDecryptionError:
                         unreadable += 1
                         continue
-                    replacement = encrypt_secret(plaintext)
-                    if await self.tools.swap_ciphertext(row.name, expected=original, replacement=replacement):
+                    if await self.tools.swap_ciphertexts(row.name, expected=expected, replacement=replacement):
                         reencrypted += 1
                     else:
                         skipped += 1
@@ -446,6 +475,28 @@ class SearchToolService:
         """Reload the stored rows and the runtime tool settings, apply both, and return shadowed names."""
         async with self.uow:
             return await self._reload_stored_tools()
+
+    def refuse_blank_api_keys(self) -> None:
+        """Refuse to start on a configured search or fetch tool whose ``api_key`` came out blank.
+
+        Run at boot before the stored tools load, so only config-file entries
+        are read, as a write through the API is refused the same way.
+
+        Raises:
+            ValueError: every such tool, by name.
+        """
+        configured: tuple[tuple[ToolKind, Mapping[str, Any]], ...] = (
+            ("search", self.config.search_tools),
+            ("fetch", self.config.fetch_tools),
+        )
+        problems = [
+            problem
+            for kind, tools in configured
+            for name, entry in tools.items()
+            if isinstance(entry, Mapping) and (problem := blank_api_key_problem(kind, name, entry))
+        ]
+        if problems:
+            raise ValueError("; ".join(problems))
 
     async def load_at_startup(self) -> bool:
         """Prime the overlay so the first request does not race the first refresh, and return whether it did.

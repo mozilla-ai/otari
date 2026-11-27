@@ -9,7 +9,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -28,6 +28,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         *,
         state_hash: str,
         server_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         user_id: str,
         identity_id: uuid.UUID | None,
         encrypted_code_verifier: str,
@@ -45,12 +46,14 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         expires_at: datetime,
         for_check: bool = False,
         for_shared: bool = False,
+        shared_account_generation: int | None = None,
     ) -> None:
         """Stage a sign-in that is about to be sent to its authorization server."""
         self.db.add(
             McpOAuthFlow(
                 state_hash=state_hash,
                 server_id=server_id,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 identity_id=identity_id,
                 encrypted_code_verifier=encrypted_code_verifier,
@@ -67,6 +70,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
                 return_to=return_to,
                 for_check=for_check,
                 for_shared=for_shared,
+                shared_account_generation=shared_account_generation,
                 expires_at=expires_at,
             )
         )
@@ -97,19 +101,42 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
 
     async def remove_for_user(self, user_id: str, server_ids: Collection[uuid.UUID] | None = None) -> None:
         """Stage the removal of a user's pending sign-ins, on these servers or on every one."""
-        query = delete(McpOAuthFlow).where(McpOAuthFlow.user_id == user_id)
+        await self.remove_for_users([user_id], server_ids)
+
+    async def remove_for_users(
+        self, user_ids: Collection[str], server_ids: Collection[uuid.UUID] | None = None
+    ) -> None:
+        """Stage the removal of these users' pending sign-ins, on these servers or on every one, in one statement."""
+        if not user_ids:
+            return
+        query = delete(McpOAuthFlow).where(McpOAuthFlow.user_id.in_(list(user_ids)))
         if server_ids is not None:
             if not server_ids:
                 return
             query = query.where(McpOAuthFlow.server_id.in_(list(server_ids)))
         await self.db.execute(query)
 
-    async def remove_unbound(self, server_id: uuid.UUID, user_id: str) -> None:
-        """Stage the removal of a user's pending sign-ins to a server that no dashboard session started."""
+    async def remove_for_user_in_workspaces(self, user_id: str, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of a user's pending sign-ins started from these workspaces."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            delete(McpOAuthFlow).where(
+                McpOAuthFlow.user_id == user_id, McpOAuthFlow.workspace_id.in_(list(workspace_ids))
+            )
+        )
+
+    async def remove_unbound(self, server_id: uuid.UUID, user_id: str, workspace_id: uuid.UUID | None) -> None:
+        """Stage the removal of a user's pending sign-ins to a server that no dashboard session started.
+
+        Only those started from ``workspace_id``, or recording no workspace: a sign-in to an organization's
+        server started from another workspace is that workspace's to finish.
+        """
         await self.db.execute(
             delete(McpOAuthFlow).where(
                 McpOAuthFlow.server_id == server_id,
                 McpOAuthFlow.user_id == user_id,
                 McpOAuthFlow.identity_id.is_(None),
+                or_(McpOAuthFlow.workspace_id == workspace_id, McpOAuthFlow.workspace_id.is_(None)),
             )
         )

@@ -21,9 +21,13 @@ from gateway.services.tools import (
     NativeCall,
     Refusal,
     Tool,
+    WebFetchBackend,
+    WebSearchBackend,
+    WebToolCallCap,
+    builtin_fetch_resolved,
     native_rendering,
+    resolve_in_loop_search,
 )
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "tools" / "_registry.py"
@@ -72,14 +76,6 @@ def test_usage_filters_on_exactly_the_listed_tools() -> None:
     assert set(GATEWAY_TOOL_NAMES) == {tool.name for tool in BUILTIN_TOOLS}
 
 
-@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
-def test_a_definition_names_its_tool_and_is_new_on_every_call(tool: BuiltinTool) -> None:
-    definition = tool.definition()
-    assert definition["type"] == "function"
-    assert definition["function"]["name"] == tool.name
-    assert tool.definition() is not definition, "a caller mutating one definition must not change the next"
-
-
 def test_a_listed_tool_can_be_put_in_a_set() -> None:
     """A tool is identified by its name, so its renderings must not cost it its hash."""
     assert len(set(BUILTIN_TOOLS)) == len(BUILTIN_TOOLS)
@@ -88,20 +84,39 @@ def test_a_listed_tool_can_be_put_in_a_set() -> None:
 def _backend_for(tool: BuiltinTool) -> ToolBackend:
     """The backend that runs ``tool``, built without opening a connection."""
     if tool.name == WEB_SEARCH_TOOL_NAME:
-        return WebRetrievalBackend(base_url="http://search.invalid")
+        search = resolve_in_loop_search(GatewayConfig(web_search_url="http://search.invalid"), None)
+        assert search is not None
+        return WebSearchBackend(search, cap=WebToolCallCap(10), max_results=5)
     if tool.name == WEB_FETCH_TOOL_NAME:
-        return WebRetrievalBackend(enable_search=False, enable_fetch=True)
+        return WebFetchBackend(builtin_fetch_resolved())
     if tool.name == CODE_EXECUTION_TOOL_NAME:
         return SandboxBackend(port=ProtocolCodeExecutionAdapter("http://sandbox.invalid"))
     raise AssertionError(f"no backend case for listed tool {tool.name!r}")
 
 
+def _definition_of(tool: BuiltinTool, backend: ToolBackend) -> dict[str, Any]:
+    [definition] = [entry for entry in backend.openai_tools if entry["function"]["name"] == tool.name]
+    return definition
+
+
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
-def test_the_backend_that_runs_a_tool_advertises_its_listed_definition(tool: BuiltinTool) -> None:
+def test_the_backend_that_runs_a_tool_advertises_a_new_definition_of_it_on_every_read(tool: BuiltinTool) -> None:
     backend = _backend_for(tool)
-    assert tool.definition() in backend.openai_tools
+    definition = _definition_of(tool, backend)
+    assert definition["type"] == "function"
+    assert _definition_of(tool, backend) is not definition, "a caller mutating one definition must not change the next"
     assert backend.owns_tool(tool.name)
     assert tool.name in dict(backend.purpose_hints())
+
+
+def test_the_listing_publishes_the_code_execution_definition_the_model_is_given() -> None:
+    port = ProtocolCodeExecutionAdapter("http://sandbox.invalid")
+    config = GatewayConfig(sandbox_url="http://sandbox.invalid")
+    listed = _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability(), port.languages)
+    [code_execution] = [tool for tool in listed if tool.id == Tool.CODE_EXECUTION]
+    [given] = SandboxBackend(port=port).openai_tools
+    assert code_execution.input_schema == given["function"]["parameters"]
+    assert code_execution.description == given["function"]["description"]
 
 
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
@@ -216,7 +231,8 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability())}
+    listed = _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability(), ())
+    reported = {tool.id: tool.available for tool in listed}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
 

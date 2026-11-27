@@ -36,6 +36,13 @@ class EmptyUploadError(TenancyValidationError):
         super().__init__("Uploaded file is empty")
 
 
+class ReservedPurposeError(TenancyValidationError):
+    """The upload named a purpose only the gateway's own code execution stores files under."""
+
+    def __init__(self, purpose: str) -> None:
+        super().__init__(f"The purpose {purpose!r} is reserved for code-execution outputs")
+
+
 class UploadTooLargeError(TenancyError):
     """The upload ran past the deployment's size ceiling."""
 
@@ -43,6 +50,15 @@ class UploadTooLargeError(TenancyError):
 
     def __init__(self, max_bytes: int) -> None:
         super().__init__(f"File exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB")
+
+
+class WorkspaceStorageFullError(TenancyError):
+    """The upload would take its workspace past the deployment's storage allowance."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+
+    def __init__(self) -> None:
+        super().__init__("This upload would exceed the workspace's file storage limit; delete files to upload more")
 
 
 class UnknownPageCursorError(TenancyValidationError):

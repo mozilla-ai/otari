@@ -657,7 +657,7 @@ def _passkey_count(tmp_path: Path) -> int:
     return int(count)
 
 
-def test_a_reset_that_replaces_a_vouched_address_removes_the_passkeys_registered_under_it(
+def test_a_reset_that_replaces_an_unproved_address_removes_the_passkeys_registered_under_it(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     with _client(tmp_path) as client:
@@ -665,7 +665,7 @@ def test_a_reset_that_replaces_a_vouched_address_removes_the_passkeys_registered
         engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
         with engine.begin() as connection:
             connection.execute(
-                text('UPDATE "user" SET email_vouched_at = CURRENT_TIMESTAMP WHERE email = :email'),
+                text('UPDATE "user" SET email_proven_at = NULL WHERE email = :email'),
                 {"email": "ada@example.com"},
             )
         engine.dispose()
@@ -703,11 +703,11 @@ def _delivering(monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
     return delivered
 
 
-def _vouched_at(tmp_path: Path, *, email: str) -> object:
+def _proven_at(tmp_path: Path, *, email: str) -> object:
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
         value = connection.execute(
-            text('SELECT email_vouched_at FROM "user" WHERE email = :email'), {"email": email}
+            text('SELECT email_proven_at FROM "user" WHERE email = :email'), {"email": email}
         ).scalar_one()
     engine.dispose()
     return value
@@ -735,8 +735,8 @@ def test_an_operator_hands_a_member_a_password_link_where_mail_is_off(
         signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
         assert signed_in.status_code == 200, signed_in.text
 
-    # The mailbox never saw the link, so the address is vouched for rather than proven.
-    assert _vouched_at(tmp_path, email="ada@example.com") is not None
+    # The mailbox never saw the link, so the address is verified rather than proved.
+    assert _proven_at(tmp_path, email="ada@example.com") is None
 
 
 def test_an_operator_password_link_is_handed_back_where_the_transport_reaches_nobody(
@@ -762,7 +762,7 @@ def test_an_operator_password_link_is_handed_back_where_the_transport_reaches_no
         )
         assert confirmed.status_code == 204, confirmed.text
 
-    assert _vouched_at(tmp_path, email="ada@example.com") is not None
+    assert _proven_at(tmp_path, email="ada@example.com") is None
 
 
 def test_an_operator_password_link_is_mailed_where_the_transport_reaches_the_mailbox(
@@ -788,7 +788,7 @@ def test_an_operator_password_link_is_mailed_where_the_transport_reaches_the_mai
         )
         assert confirmed.status_code == 204, confirmed.text
 
-    assert _vouched_at(tmp_path, email="ada@example.com") is None
+    assert _proven_at(tmp_path, email="ada@example.com") is not None
 
 
 def test_an_operator_password_link_is_refused_where_it_could_not_help(
@@ -843,10 +843,45 @@ def test_a_member_cannot_issue_a_password_link(tmp_path: Path, caplog: pytest.Lo
     assert _reset_token_hash(tmp_path, email="ada@example.com") is None
 
 
+def test_a_shared_link_retires_the_proof_without_moving_the_verification_date(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``email_verified_at`` records the first verification, so a link no mailbox saw must not move it."""
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="hopper@example.com")
+        account_id = _account_id(client, email="hopper@example.com")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        verified_before, proven_before = connection.execute(
+            text('SELECT email_verified_at, email_proven_at FROM "user" WHERE email = :email'),
+            {"email": "hopper@example.com"},
+        ).one()
+    assert verified_before is not None
+    assert proven_before is not None
+
+    with _client(tmp_path, mail_transport="none", public_base_url=None) as client:
+        issued = _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
+        assert issued.status_code == 201, issued.text
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm",
+            json={"token": issued.json()["link"].split("token=", 1)[1], "new_password": NEW_PASSWORD},
+        )
+        assert confirmed.status_code == 204, confirmed.text
+
+    with engine.begin() as connection:
+        verified_after, proven_after = connection.execute(
+            text('SELECT email_verified_at, email_proven_at FROM "user" WHERE email = :email'),
+            {"email": "hopper@example.com"},
+        ).one()
+    assert verified_after == verified_before
+    assert proven_after is None
+
+
 def test_an_operator_password_link_claims_no_organization_until_the_mailbox_proves_the_address(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A shared link only vouches for the address, so open signup founds an organization at the later proof."""
+    """A shared link does not prove the address, so open signup founds an organization at the later proof."""
     with _client(tmp_path, open_signup=True) as client:
         added = client.post(
             f"{API_ROOT}/organizations/me/members",
