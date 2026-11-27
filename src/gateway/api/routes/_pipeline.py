@@ -6099,7 +6099,7 @@ def build_streaming_response(
         nonlocal first_chunk_at
         first_chunk_at = time.monotonic()
         if automatic_observation is not None:
-            automatic_observation.first_response()
+            automatic_observation.first_response(waited_on_gateway=tool_loop)
 
     def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
         nonlocal reported_usage, streamed_chars, streamed_tier, usage_is_final

@@ -36,6 +36,8 @@ _LIMIT = 10000
 _COOLDOWN = 15.0
 _MAX_COOLDOWN = 600.0
 _REFUSAL_TTL = 300.0
+# A stream whose first output took longer than this served its caller, but cools its offering like a failure.
+_SLOW_FIRST_OUTPUT = 15.0
 # A model still missing once its refusal lapses is refused for longer, up to the last step.
 _MISSING_MODEL_STEPS = (3600.0, 3 * 3600.0, 12 * 3600.0)
 # How a provider's message says the model is not served on this credential. Request text a provider
@@ -201,12 +203,19 @@ class AutomaticObservation:
     health: _Health | None
     started: float
     first_at: float | None = None
+    # Whether the gateway's own work, such as running tools, came before the first output.
+    first_waited_on_gateway: bool = False
     finished: bool = False
 
-    def first_response(self) -> None:
-        """Record the first output time once for streaming latency feedback."""
+    def first_response(self, *, waited_on_gateway: bool = False) -> None:
+        """Record the first output time once for streaming latency feedback.
+
+        ``waited_on_gateway`` marks a first output that also waited on the gateway's own work, which
+        a slow start must not be blamed on the provider for.
+        """
         if self.first_at is None:
             self.first_at = self.selection.router.clock()
+            self.first_waited_on_gateway = waited_on_gateway
 
     def finish(
         self, *, success: bool = False, unhealthy: bool = False, account: bool = False, missing: bool = False
@@ -216,6 +225,8 @@ class AutomaticObservation:
         ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
         which cools every model served on it rather than this one alone. It applies only with ``unhealthy``,
         so a gateway-side refusal that carries the same status never cools a shared credential.
+        A stream whose first output took longer than ``_SLOW_FIRST_OUTPUT`` succeeds for the caller but counts as a
+        failure of the offering, so the next request starts elsewhere instead of waiting as long.
         ``missing`` marks a model the credential does not serve, which ranks last for the workspace for a while
         (:meth:`AutomaticRouter.remember_missing`) instead of counting against the offering's health or credential.
         """
@@ -228,11 +239,17 @@ class AutomaticObservation:
             unhealthy = account = False
             router.remember_missing(self.selection.tenant, self.selection.mode, self.key)
             self.selection.forget_key(self.key)
+        slow = (
+            success
+            and self.first_at is not None
+            and not self.first_waited_on_gateway
+            and self.first_at - self.started > _SLOW_FIRST_OUTPUT
+        )
         # A failed credential is the account's, not the offering's: it cools the account alone.
         credential = account and unhealthy
         if self.health is not None:
             self.health.active = max(0, self.health.active - 1)
-            if unhealthy and not credential:
+            if (unhealthy and not credential) or slow:
                 self.health.failures = _consecutive(self.health.failures, self.health.cooldown, now)
                 self.health.cooldown = now + _backoff(self.health.failures)
             if success:
@@ -241,6 +258,7 @@ class AutomaticObservation:
                 old = self.health.latency.get(self.selection.mode)
                 value = 0.8 * old[0] + 0.2 * elapsed if old and now - old[1] < _TTL else elapsed
                 self.health.latency[self.selection.mode] = (value, now)
+            if success and not slow:
                 self.health.cooldown = 0
                 self.health.failures = 0
         if credential:
@@ -248,9 +266,9 @@ class AutomaticObservation:
         elif success:
             router.accounts.pop(self.account, None)
             router.missing.pop(router._digest(("missing", self.selection.tenant, self.selection.mode, self.key)), None)
-        if unhealthy:
+        if unhealthy or slow:
             self.selection.forget_key(self.key)
-        if success and self.selection.affinity:
+        if success and not slow and self.selection.affinity:
             router.bind(self.selection.affinity, self.selection.organization, self.key, now, self.selection.ttl)
 
 

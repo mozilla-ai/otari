@@ -107,6 +107,64 @@ def test_latency_expires_and_does_not_mix_streaming(router: AutomaticRouter, now
     assert _rank(router).head.instance == "us"
 
 
+def _stream(router: AutomaticRouter, now: list[float], first_after: float | None, **changes: Any) -> CompiledPlan:
+    """Serve one streamed request on the head offering, its first output ``first_after`` seconds in."""
+    plan = _rank(router, **{"mode": "chat:stream", **changes})
+    assert plan.automatic is not None
+    observation = plan.automatic.start(plan.head)
+    if first_after is not None:
+        now[0] += first_after
+        observation.first_response()
+    now[0] += 1
+    observation.finish(success=True)
+    return plan
+
+
+def test_a_stream_slow_to_start_cools_its_offering_without_failing(router: AutomaticRouter, now: list[float]) -> None:
+    """A first output past the threshold sends the next request elsewhere, for a cooldown that lapses."""
+    assert _stream(router, now, 16, anchor="").head.instance == "us"
+    assert _rank(router, mode="chat:stream", anchor="").head.instance == "eu"
+    now[0] += 16
+    assert _rank(router, mode="chat:stream", anchor="").head.instance == "us"
+
+
+def test_a_stream_that_starts_in_time_is_not_a_strike(router: AutomaticRouter, now: list[float]) -> None:
+    """Under the threshold, or with no first output to time, a success clears the offering as before."""
+    _stream(router, now, 14, anchor="")
+    _stream(router, now, None, anchor="", mode="chat:completion")
+    assert all(health.cooldown == 0 and health.failures == 0 for health in router.health.values())
+
+
+def test_a_slow_start_spent_on_the_gateways_own_work_is_not_a_strike(router: AutomaticRouter, now: list[float]) -> None:
+    """A stream whose first output waited on gateway-run tools does not cool the provider."""
+    plan = _rank(router, mode="chat:stream", anchor="")
+    assert plan.automatic is not None
+    observation = plan.automatic.start(plan.head)
+    now[0] += 30
+    observation.first_response(waited_on_gateway=True)
+    observation.finish(success=True)
+    assert all(health.cooldown == 0 and health.failures == 0 for health in router.health.values())
+
+
+def test_streams_that_keep_starting_slowly_cool_for_longer(router: AutomaticRouter, now: list[float]) -> None:
+    """Each slow start in a row backs off further, like consecutive failures."""
+    us = _plan().attempts[0]
+    key = router.candidate_key(us)
+    _stream(router, now, 20, anchor="", plan=CompiledPlan("acme/model", [us]))
+    first = router.health[key].cooldown - now[0]
+    now[0] += first + 1
+    _stream(router, now, 20, anchor="", plan=CompiledPlan("acme/model", [us]))
+    assert router.health[key].cooldown - now[0] == 2 * first
+
+
+def test_a_slow_start_does_not_bind_the_session(router: AutomaticRouter, now: list[float]) -> None:
+    """A session is not kept on an offering that started slowly, nor left bound to one it was on."""
+    _stream(router, now, 1)
+    assert router.affinities
+    _stream(router, now, 20)
+    assert not router.affinities
+
+
 def test_outage_overrides_locality_then_recovers(router: AutomaticRouter, now: list[float]) -> None:
     """Cooldown temporarily outweighs regional preference and expires without a successful probe."""
     first = _rank(router, region="us")

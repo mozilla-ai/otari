@@ -728,7 +728,11 @@ Selection uses these signals:
 
 - **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
   put an offering behind healthy alternatives for 15 seconds, doubling with each
-  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  consecutive failure up to 10 minutes; a success resets it. A stream whose first
+  output took more than 15 seconds still answers its caller, but counts as such a
+  failure, so the next request starts elsewhere and the session is not kept on
+  that offering; a stream running the gateway's own tools is exempt, since its
+  first output also waits on them. A 402 or a rejected
   credential cools every model served on that credential the same way, for the
   workspace that saw it. An offering the deployment refuses to serve a caller on its
   credential ranks last for that caller for 5 minutes, and one whose provider says it
