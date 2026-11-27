@@ -389,6 +389,7 @@ class WorkspaceActivationService:
                 user_id=owner.user_id,
                 # The guide's one job is a first model call.
                 scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
+                created_at=now,
                 expires_at=expires_at,
             )
             self.db.add(record)
@@ -405,6 +406,7 @@ class WorkspaceActivationService:
             # guide for again is being asked for deliberately, and a new
             # plaintext must not be born expired: the rotation restarts the
             # lifetime, so this is a fresh ceiling, not the old expiry.
+            record.created_at = now
             record.is_active = True
             record.expires_at = expires_at
 
@@ -541,6 +543,11 @@ class WorkspaceActivationService:
             alias=user.full_name or user.email,
         )
         record = await self._existing_key(state)
+        now = datetime.now(UTC)
+        # The deployment's lifetime cap, if set, binds this key like any other mint: the
+        # guide must not hand a workspace manager a key the cap forbids. A rotation
+        # restarts the lifetime, so the ceiling is measured from this presentation.
+        expires_at, _ceiling = ApiKeyService.cap_key_expiry(self.config, None, created_at=now, now=now)
         # Rotated only where the member could switch the key back on themselves:
         # theirs, and not disabled for a reason an owner cannot clear (an
         # operator's, or a revocation). Any other row is left as it is and a
@@ -560,6 +567,8 @@ class WorkspaceActivationService:
                 scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
                 exclude_from_budget=False,
                 self_service=True,
+                created_at=now,
+                expires_at=expires_at,
             )
             self.db.add(record)
         else:
@@ -567,7 +576,8 @@ class WorkspaceActivationService:
             record.key_prefix = self.key_format.fingerprint(plaintext)
             record.key_suffix = key_suffix(plaintext)
             record.is_active = True
-            record.expires_at = None
+            record.created_at = now
+            record.expires_at = expires_at
 
         now = datetime.now(UTC)
         if state.first_presented_at is None:
