@@ -11,8 +11,7 @@ describe("ToolsFrame", () => {
       await screen.findByRole("heading", { level: 1, name: "Tools" }),
     ).toBeInTheDocument()
     expect(screen.getByText("LIST")).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "← Tools" })).toBeNull()
-    expect(screen.queryByRole("navigation")).toBeNull()
+    expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
   })
 
   it("titles a tool's settings by the tool and links back to the list above the title", async () => {
@@ -27,11 +26,10 @@ describe("ToolsFrame", () => {
       name: "Web search",
     })
     expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull()
-    const back = screen.getByRole("link", { name: "← Tools" })
+    const back = screen.getByRole("link", { name: "Tools" })
     expect(back).toHaveAttribute("href", "/tools")
     expect(
       back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
-    expect(screen.getByRole("navigation", { name: "Back" })).toBeInTheDocument()
   })
 })

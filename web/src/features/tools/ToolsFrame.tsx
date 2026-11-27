@@ -1,6 +1,6 @@
-import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { BackLink } from "@/shared/components/BackLink"
 
 export type ToolsView = "/tools" | "/tools/web-search" | "/tools/code-execution"
 
@@ -21,13 +21,7 @@ export function ToolsFrame({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      {back ? (
-        <nav aria-label="Back" className="text-caption">
-          <Link to="/tools" className="text-link hover:text-link-hover">
-            ← Tools
-          </Link>
-        </nav>
-      ) : null}
+      {back ? <BackLink to="/tools" label="Tools" /> : null}
       <PageIntro title={title} />
       {children}
     </div>

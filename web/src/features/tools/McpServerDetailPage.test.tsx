@@ -106,7 +106,7 @@ describe("McpServerDetailPage, Access", () => {
     mockMcpServerApi({ server: SERVER })
     await openPage()
 
-    expect(screen.getByRole("link", { name: "← MCP servers" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "MCP servers" })).toHaveAttribute(
       "href",
       "/mcp-servers",
     )

@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiSettings } from "react-icons/fi"
 import type { WorkspaceMcpServer } from "@/client"
@@ -55,6 +55,7 @@ import {
   useWorkspaceMcpServer,
   useWorkspaceMcpServerLogos,
 } from "@/shared/api/tools"
+import { BackLink } from "@/shared/components/BackLink"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /**
@@ -134,13 +135,7 @@ export function McpServerDetailPage({
   })
   const logo = useWorkspaceMcpServerLogos(workspaceId).get(serverId)
 
-  const back = (
-    <nav aria-label="Back" className="text-caption">
-      <Link to="/mcp-servers" className="text-link hover:text-link-hover">
-        ← MCP servers
-      </Link>
-    </nav>
-  )
+  const back = <BackLink to="/mcp-servers" label="MCP servers" />
 
   const read = query.data
   // The server is read only once there is a workspace to read it from, so the

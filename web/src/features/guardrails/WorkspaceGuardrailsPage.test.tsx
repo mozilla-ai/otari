@@ -116,13 +116,16 @@ describe("WorkspaceGuardrailsPage", () => {
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull()
   })
 
-  it("links back to Rules, where it opens from", async () => {
+  it("links back to the Data tab of Rules above its title, where it opens from", async () => {
     mockApi()
     await renderPage()
 
+    const back = await screen.findByRole("link", { name: "Rules" })
+    expect(back).toHaveAttribute("href", "/rules?type=data")
+    const title = screen.getByRole("heading", { level: 1, name: "Guardrails" })
     expect(
-      await screen.findByRole("link", { name: "← Rules" }),
-    ).toHaveAttribute("href", "/rules")
+      back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it("offers nothing to change here", async () => {

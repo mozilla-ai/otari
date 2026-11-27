@@ -133,7 +133,10 @@ test.describe("dashboard core flows", () => {
     await openListed(page, "Tools", "Web search")
     await expect(pageHeading(page, "Web search")).toBeVisible()
     // A tool's settings lead back to the list, which has no tab row to do it.
-    await page.getByRole("main").getByRole("link", { name: "← Tools" }).click()
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Tools", exact: true })
+      .click()
     await expect(page).toHaveURL(/\/tools$/)
     // A page of its own, so reaching it proves its own route resolves.
     await openRow(page, "MCP servers")

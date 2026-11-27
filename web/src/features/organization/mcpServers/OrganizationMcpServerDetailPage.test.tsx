@@ -180,7 +180,7 @@ describe("OrganizationMcpServerDetailPage", () => {
     renderPage()
 
     await screen.findByRole("heading", { level: 1, name: SERVER.name })
-    expect(screen.getByRole("link", { name: "← MCP servers" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "MCP servers" })).toHaveAttribute(
       "href",
       "/organization/mcp-servers",
     )

@@ -53,7 +53,7 @@ describe("ToolsPage", () => {
     expect(await screen.findByText(OVERVIEW_ROW)).toBeInTheDocument()
     expect(screen.queryByRole("link", GUARDRAILS_LINK)).not.toBeInTheDocument()
     expect(screen.queryByRole("navigation", { name: "Tools views" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "← Tools" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
   })
 
   it("gives an operator with ?service=guardrails the guardrail services view", async () => {
@@ -64,7 +64,7 @@ describe("ToolsPage", () => {
       "href",
       "/organization/guardrails",
     )
-    expect(screen.getByRole("link", { name: "← Tools" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute(
       "href",
       "/tools",
     )
@@ -80,6 +80,6 @@ describe("ToolsPage", () => {
 
     expect(await screen.findByText(OVERVIEW_ROW)).toBeInTheDocument()
     expect(screen.queryByRole("link", GUARDRAILS_LINK)).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "← Tools" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
   })
 })

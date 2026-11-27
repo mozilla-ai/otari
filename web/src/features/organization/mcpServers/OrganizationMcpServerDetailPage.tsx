@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiSettings } from "react-icons/fi"
 
@@ -38,6 +38,7 @@ import {
 } from "@/shared/api/organizationMcpServers"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUpdateMcpServer } from "@/shared/api/tools"
+import { BackLink } from "@/shared/components/BackLink"
 
 import { OrganizationMcpServerWorkspaces } from "./OrganizationMcpServerWorkspaces"
 
@@ -94,16 +95,7 @@ export function OrganizationMcpServerDetailPage({
   // the role while the page is open would otherwise keep seeing the server.
   const server = canEdit ? query.data : undefined
 
-  const back = (
-    <nav aria-label="Back" className="text-caption">
-      <Link
-        to="/organization/mcp-servers"
-        className="text-link hover:text-link-hover"
-      >
-        ← MCP servers
-      </Link>
-    </nav>
-  )
+  const back = <BackLink to="/organization/mcp-servers" label="MCP servers" />
 
   if (!server) {
     if (context.isPending || (canEdit && query.isPending)) {
