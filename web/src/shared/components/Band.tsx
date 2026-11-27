@@ -3,7 +3,7 @@ import { Section } from "@/design-system/layout/Section"
 
 /**
  * A titled band: the heading row a page section opens with, ruled off from the
- * next. The one section shape of the People, Rules and Home pages.
+ * next. The one section shape of the People, Guardrails and Home pages.
  */
 export function Band({
   title,

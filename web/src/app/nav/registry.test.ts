@@ -53,7 +53,7 @@ describe("nav registry", () => {
       "/",
       "/traces",
       "/people",
-      "/rules",
+      "/guardrails",
       "/routing",
       "/models",
       "/tools",
@@ -90,11 +90,10 @@ describe("nav registry", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Playground",
       "Members",
-      "Guardrails",
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",
@@ -369,10 +368,7 @@ describe("nav registry", () => {
         item.to,
         item.requires,
       ]),
-    ).toEqual([
-      ["/playground", "contributor"],
-      ["/tools/guardrails", "manager"],
-    ])
+    ).toEqual([["/playground", "contributor"]])
   })
 
   it("gates no base entry on a capability", () => {
@@ -482,7 +478,7 @@ describe("nav registry", () => {
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",
@@ -621,11 +617,10 @@ describe("isPathVisible", () => {
   })
 
   it("gates a destination with no row on its own surface, not its row's", () => {
-    // The workspace's guardrails open from Rules and are served by the tools
-    // surface, so the tools surface is the one that decides. Withholding
-    // `routing` leaves the page served; withholding `tools` is what refuses it.
-    expect(isPathVisible("/tools/guardrails", without("tools"))).toBe(false)
-    expect(isPathVisible("/tools/guardrails", without("routing"))).toBe(true)
+    // The roster opens from People and is served by the workspaces surface,
+    // so that surface is the one that decides.
+    expect(isPathVisible("/members", without("workspaces"))).toBe(false)
+    expect(isPathVisible("/members", without("routing"))).toBe(true)
   })
 
   it("gates a nested destination on the entry it sits under", () => {
@@ -882,16 +877,15 @@ describe("navPageForPath", () => {
       to: "/routing",
       label: "Routing",
     })
-    expect(pageLabelForPath("/tools/guardrails")).toBe("Guardrails")
     expect(pageLabelForPath("/members")).toBe("Members")
   })
 })
 
 describe("Routing", () => {
-  it("is a rail row directly after Rules, selected on its own pages", () => {
+  it("is a rail row directly after Guardrails, selected on its own pages", () => {
     const index = NAV_SECTIONS.find((section) => section.id === "index")
     const labels = index?.items.map((item) => item.label) ?? []
-    expect(labels.indexOf("Routing")).toBe(labels.indexOf("Rules") + 1)
+    expect(labels.indexOf("Routing")).toBe(labels.indexOf("Guardrails") + 1)
     for (const path of ["/routing", "/routing/coding"]) {
       expect(railPathForPath(path)).toBe("/routing")
       expect(navContextForPath(path)).toBe("workspace")
@@ -901,13 +895,6 @@ describe("Routing", () => {
 })
 
 describe("destinations with no row", () => {
-  it("selects Rules on the workspace's guardrails", () => {
-    expect(railPathForPath("/tools/guardrails")).toBe("/rules")
-    expect(navContextForPath("/tools/guardrails")).toBe("workspace")
-    // Gated as its own entry, not as Rules.
-    expect(navItemForPath("/tools/guardrails")?.surface).toBe("tools")
-  })
-
   it("selects People on the workspace roster", () => {
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navItemForPath("/members")?.surface).toBe("workspaces")
@@ -925,16 +912,14 @@ describe("destinations with no row", () => {
         (item.children ?? []).map((child) => child.to),
       ),
     ])
-    for (const path of ["/tools/guardrails", "/members"]) {
-      expect(rows).not.toContain(path)
-    }
+    expect(rows).not.toContain("/members")
   })
 
   it("leaves a page with a row of its own to select that row, naming no other", () => {
     expect(railPathForPath("/keys")).toBe("/keys")
     expect(railPathForPath("/tools/web-search")).toBe("/tools")
     expect(railPathForPath("/people/some-person")).toBe("/people")
-    expect(railPathForPath("/rules/some-rule")).toBe("/rules")
+    expect(railPathForPath("/guardrails/some-guardrail")).toBe("/guardrails")
     expect(railPathForPath("/account")).toBeUndefined()
   })
 })
@@ -1008,7 +993,7 @@ const WORKSPACE = [
   "/requests",
   "/router-savings",
   "/people",
-  "/rules",
+  "/guardrails",
   "/routing",
   "/models",
   "/tools",
@@ -1041,14 +1026,11 @@ const DEPLOYMENT = [
 
 describe("the rails, per role", () => {
   for (const [role, expected] of [
-    ["owner", [...WORKSPACE, "/tools/guardrails", ...ORGANIZATION]],
-    ["admin", [...WORKSPACE, "/tools/guardrails", ...ORGANIZATION]],
+    ["owner", [...WORKSPACE, ...ORGANIZATION]],
+    ["admin", [...WORKSPACE, ...ORGANIZATION]],
     ["member", WORKSPACE],
     ["viewer", WORKSPACE],
-    [
-      "operator",
-      [...WORKSPACE, "/tools/guardrails", ...ORGANIZATION, ...DEPLOYMENT],
-    ],
+    ["operator", [...WORKSPACE, ...ORGANIZATION, ...DEPLOYMENT]],
   ] as const) {
     it(`offers the ${role} the pages that open for them, and no others`, () => {
       expect([...reach(ROLES[role])].sort()).toEqual([...expected].sort())
@@ -1056,14 +1038,12 @@ describe("the rails, per role", () => {
   }
 
   it("keeps each page with no row within reach of a row the same role is offered", () => {
-    // A tool's page opens from Tools, the workspace's guardrails from Rules,
-    // and the roster from People. A role that may open
+    // A tool's page opens from Tools, and the roster from People. A role that may open
     // the page has to be offered the row it opens from, or the page is only
     // reachable by typing its address.
     const OPENED_FROM: Readonly<Record<string, string>> = {
       "/tools/web-search": "/tools",
       "/tools/code-execution": "/tools",
-      "/tools/guardrails": "/rules",
       "/members": "/people",
     }
     for (const caller of Object.values(ROLES)) {

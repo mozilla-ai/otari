@@ -120,8 +120,8 @@ export function PersonBudget({
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex min-w-0 flex-col gap-1">
             <Link
-              to="/rules/$ruleId"
-              params={{ ruleId: ruleIdForCeiling(binding.ceiling) }}
+              to="/guardrails/$id"
+              params={{ id: ruleIdForCeiling(binding.ceiling) }}
               className="w-fit text-emphasis underline underline-offset-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
             >
               {binding.ceiling.name ?? "Spend limit"}

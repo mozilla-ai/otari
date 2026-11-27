@@ -304,7 +304,6 @@ describe("useNavVisibility on the caller's access", () => {
   it("gives an owner the manager's rows and the Playground", async () => {
     mockRole("owner")
     const isVisible = await predicate(SURFACES)
-    expect(isVisible(entry("/tools/guardrails"))).toBe(true)
     expect(isVisible(entry("/workspaces"))).toBe(true)
     expect(isVisible(PLAYGROUND_NAV_ITEM)).toBe(true)
   })
@@ -312,7 +311,6 @@ describe("useNavVisibility on the caller's access", () => {
   it("hides a manager's row from a member, and leaves them the rest", async () => {
     mockRole("member")
     const isVisible = await predicate(SURFACES)
-    expect(isVisible(entry("/tools/guardrails"))).toBe(false)
     // A row on the organization rail is a manager's without saying so.
     expect(isVisible(entry("/workspaces"))).toBe(false)
     expect(isVisible(PLAYGROUND_NAV_ITEM)).toBe(true)
@@ -329,7 +327,6 @@ describe("useNavVisibility on the caller's access", () => {
   it("offers a manager's row when the read fails, as the page then opens", async () => {
     mockCallerUnavailable()
     const isVisible = await predicate(SURFACES)
-    expect(isVisible(entry("/tools/guardrails"))).toBe(true)
     expect(isVisible(entry("/workspaces"))).toBe(true)
   })
 })

@@ -3,8 +3,8 @@ import { Outlet } from "@tanstack/react-router"
 import { screen, waitFor } from "@testing-library/react"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { GuardrailsPage } from "@/features/rules/GuardrailsPage"
 import { RulePage } from "@/features/rules/RulePage"
-import { RulesPage } from "@/features/rules/RulesPage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -37,14 +37,14 @@ const SHELL = (
   </Provider>
 )
 
-/** Rules as `role` sees it, with the read at `failing` refused. */
+/** Guardrails as `role` sees it, with the read at `failing` refused. */
 async function renderFailing(
   role: Role,
   failing: string,
   {
-    url = "/rules",
+    url = "/guardrails",
     keys = [],
-    page = <RulesPage />,
+    page = <GuardrailsPage />,
   }: { url?: string; keys?: unknown[]; page?: ReactElement } = {},
 ) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -80,7 +80,7 @@ async function renderFailing(
   return renderWithRouter(page, { url, shell: SHELL })
 }
 
-describe("Rules, when a read fails", () => {
+describe("Guardrails, when a read fails", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
@@ -107,26 +107,25 @@ describe("Rules, when a read fails", () => {
     )
   })
 
-  it("does not call a tab empty when its read failed", async () => {
+  it("does not call a band empty when its read failed", async () => {
     const failing = "/organizations/me/spend-ceilings"
     await renderFailing("owner", failing, {
-      url: "/rules?type=spend",
-      // A rule on another tab, so the list is not empty as a whole.
+      // A guardrail in another band, so the list is not empty as a whole.
       keys: [apiKey({ id: "key-ci", allowed_models: ["gpt-5"] })],
     })
     expect(await screen.findByRole("alert")).toHaveTextContent(
       `Refused ${failing}`,
     )
     expect(
-      await screen.findByRole("grid", { name: "Rules" }),
+      await screen.findByRole("grid", { name: "Budget" }),
     ).toBeInTheDocument()
-    expect(screen.queryByText("No spend limits yet.")).toBeNull()
+    expect(screen.queryByText("No budgets yet.")).toBeNull()
   })
 
   it("says a read failed on a rule it could still find", async () => {
     const failing = "/workspaces"
     await renderFailing("owner", failing, {
-      url: "/rules/access-key-key-ci",
+      url: "/guardrails/access-key-key-ci",
       keys: [
         apiKey({ id: "key-ci", key_name: "ci", allowed_models: ["gpt-5"] }),
       ],
@@ -164,7 +163,7 @@ function OthersFetching() {
   return null
 }
 
-describe("Rules, while a workspace's defaults are read", () => {
+describe("Guardrails, while a workspace's defaults are read", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
@@ -232,10 +231,10 @@ describe("Rules, while a workspace's defaults are read", () => {
     })
     await renderWithRouter(
       <>
-        <RulesPage />
+        <GuardrailsPage />
         <OthersFetching />
       </>,
-      { url: "/rules", shell: SHELL },
+      { url: "/guardrails", shell: SHELL },
     )
 
     // Every other read has answered, so only the defaults hold the list back.

@@ -39,6 +39,8 @@ import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-exec
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminRecommenderRouteImport } from './routes/admin.recommender'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
+import { Route as GuardrailsIndexRouteImport } from './routes/guardrails.index'
+import { Route as GuardrailsIdRouteImport } from './routes/guardrails.$id'
 import { Route as McpConnectionsCallbackRouteImport } from './routes/mcp-connections.callback'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers.index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers.$serverId'
@@ -220,6 +222,16 @@ const AdminRecommenderRoute = AdminRecommenderRouteImport.update({
 const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
   id: '/admin/web-search',
   path: '/admin/web-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuardrailsIndexRoute = GuardrailsIndexRouteImport.update({
+  id: '/guardrails/',
+  path: '/guardrails/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuardrailsIdRoute = GuardrailsIdRouteImport.update({
+  id: '/guardrails/$id',
+  path: '/guardrails/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpConnectionsCallbackRoute = McpConnectionsCallbackRouteImport.update({
@@ -424,6 +436,7 @@ export interface FileRoutesByFullPath {
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/guardrails/$id': typeof GuardrailsIdRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
@@ -443,6 +456,7 @@ export interface FileRoutesByFullPath {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/guardrails/': typeof GuardrailsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
@@ -480,6 +494,7 @@ export interface FileRoutesByTo {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/guardrails/$id': typeof GuardrailsIdRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
@@ -499,6 +514,7 @@ export interface FileRoutesByTo {
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/': typeof OverviewIndexRoute
+  '/guardrails': typeof GuardrailsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
@@ -545,6 +561,7 @@ export interface FileRoutesById {
   '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/guardrails/$id': typeof GuardrailsIdRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/models/$': typeof ModelsSplatRoute
@@ -565,6 +582,7 @@ export interface FileRoutesById {
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/_overview/': typeof OverviewIndexRoute
+  '/guardrails/': typeof GuardrailsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
@@ -612,6 +630,7 @@ export interface FileRouteTypes {
     | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/guardrails/$id'
     | '/mcp-connections/callback'
     | '/mcp-servers/$serverId'
     | '/models/$'
@@ -631,6 +650,7 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
+    | '/guardrails/'
     | '/mcp-servers/'
     | '/models/'
     | '/organization/'
@@ -668,6 +688,7 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/guardrails/$id'
     | '/mcp-connections/callback'
     | '/mcp-servers/$serverId'
     | '/models/$'
@@ -687,6 +708,7 @@ export interface FileRouteTypes {
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
     | '/'
+    | '/guardrails'
     | '/mcp-servers'
     | '/models'
     | '/organization'
@@ -732,6 +754,7 @@ export interface FileRouteTypes {
     | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
+    | '/guardrails/$id'
     | '/mcp-connections/callback'
     | '/mcp-servers/$serverId'
     | '/models/$'
@@ -752,6 +775,7 @@ export interface FileRouteTypes {
     | '/tools/web-search'
     | '/workspaces/$workspaceId'
     | '/_overview/'
+    | '/guardrails/'
     | '/mcp-servers/'
     | '/models/'
     | '/organization/'
@@ -795,9 +819,11 @@ export interface RootRouteChildren {
   AdminHostedProvidersRoute: typeof AdminHostedProvidersRouteWithChildren
   AdminRecommenderRoute: typeof AdminRecommenderRoute
   AdminWebSearchRoute: typeof AdminWebSearchRoute
+  GuardrailsIdRoute: typeof GuardrailsIdRoute
   McpConnectionsCallbackRoute: typeof McpConnectionsCallbackRoute
   PeoplePersonIdRoute: typeof PeoplePersonIdRoute
   RulesRuleIdRoute: typeof RulesRuleIdRoute
+  GuardrailsIndexRoute: typeof GuardrailsIndexRoute
   PeopleIndexRoute: typeof PeopleIndexRoute
   RulesIndexRoute: typeof RulesIndexRoute
 }
@@ -1012,6 +1038,20 @@ declare module '@tanstack/react-router' {
       path: '/admin/web-search'
       fullPath: '/admin/web-search'
       preLoaderRoute: typeof AdminWebSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guardrails/': {
+      id: '/guardrails/'
+      path: '/guardrails'
+      fullPath: '/guardrails/'
+      preLoaderRoute: typeof GuardrailsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guardrails/$id': {
+      id: '/guardrails/$id'
+      path: '/guardrails/$id'
+      fullPath: '/guardrails/$id'
+      preLoaderRoute: typeof GuardrailsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-connections/callback': {
@@ -1426,9 +1466,11 @@ const rootRouteChildren: RootRouteChildren = {
   AdminHostedProvidersRoute: AdminHostedProvidersRouteWithChildren,
   AdminRecommenderRoute: AdminRecommenderRoute,
   AdminWebSearchRoute: AdminWebSearchRoute,
+  GuardrailsIdRoute: GuardrailsIdRoute,
   McpConnectionsCallbackRoute: McpConnectionsCallbackRoute,
   PeoplePersonIdRoute: PeoplePersonIdRoute,
   RulesRuleIdRoute: RulesRuleIdRoute,
+  GuardrailsIndexRoute: GuardrailsIndexRoute,
   PeopleIndexRoute: PeopleIndexRoute,
   RulesIndexRoute: RulesIndexRoute,
 }

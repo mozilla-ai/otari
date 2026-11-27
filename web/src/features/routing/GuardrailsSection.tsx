@@ -14,7 +14,7 @@ import { ModeToggle } from "./ModeToggle"
 
 function GuardrailsPageLink() {
   return (
-    <Link to="/tools/guardrails" className="text-link hover:underline">
+    <Link to="/guardrails" className="text-link hover:underline">
       Guardrails page
     </Link>
   )

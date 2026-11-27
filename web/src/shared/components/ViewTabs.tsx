@@ -12,8 +12,8 @@ interface ViewTab {
 }
 
 /**
- * Views of one page as links under its title, each its own route: Rules and
- * Routing, Sessions and Requests.
+ * Views of one page as links under its title: Guardrails and Assignments,
+ * Sessions and Requests.
  */
 export function ViewTabs({
   label,

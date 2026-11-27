@@ -155,7 +155,6 @@ describe("a page the caller may not open", () => {
     "/workspaces",
     "/settings",
     "/admin/accounts",
-    "/tools/guardrails",
   ]) {
     it(`sends a member who types ${url} Home`, async () => {
       setDesktop()
@@ -201,7 +200,6 @@ describe("an address written another way", () => {
     ["/Settings", "/settings", "admin"],
     ["/Admin/accounts", "/admin/accounts", "member"],
     ["/Admin/accounts", "/admin/accounts", "admin"],
-    ["/tools/Guardrails", "/tools/guardrails", "member"],
     // A query string, a trailing slash, an escaped letter and a doubled slash.
     ["/organization/members?x=1", "/organization/members", "member"],
     ["/organization/members/", "/organization/members", "member"],
@@ -335,12 +333,6 @@ describe("a page the caller may open", () => {
     ).toBeInTheDocument()
   })
 
-  it("opens the workspace's guardrails to an admin", async () => {
-    setDesktop()
-    await renderAt("/tools/guardrails", "admin")
-    expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
-  })
-
   it("keeps a member's way in from a rail row they may open", async () => {
     setDesktop()
     const user = userEvent.setup()
@@ -354,7 +346,7 @@ describe("a page the caller may open", () => {
 describe("the selected rail row", () => {
   for (const [url, row, route] of [
     ["/people/some-person", "People", "/people/$personId"],
-    ["/rules/some-rule", "Rules", "/rules/$ruleId"],
+    ["/guardrails/some-guardrail", "Guardrails", "/guardrails/$id"],
     ["/routing/coding", "Routing", "/routing/$name"],
     ["/keys?state=disabled", "API keys", "/keys"],
     ["/traces?range=30d", "Traces", "/traces"],

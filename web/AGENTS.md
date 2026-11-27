@@ -116,9 +116,9 @@ page the caller may not open is not drawn; a feature asks
 shell.
 
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. A few destinations have no row of
-their own (`OFF_RAIL_ITEMS`) and select the row that stands for them: the
-workspace's guardrails select Rules, and the workspace roster People.
+points to a real page, never a redirect. A destination with no row of its
+own (`OFF_RAIL_ITEMS`) selects the row that stands for it: the workspace
+roster selects People.
 `/playground`, `/account`, and `/invitations` are chrome destinations and do
 not belong in a rail.
 

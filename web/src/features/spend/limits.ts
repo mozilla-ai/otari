@@ -208,7 +208,7 @@ export function limitLine(limit: AppliedLimit): string {
 export interface LimitTarget {
   scope: LimitScope
   scopeId: string
-  /** Who the limit is on, for the budget's name in Rules: "Wei Zhang". */
+  /** Who the limit is on, for the budget's name in Guardrails: "Wei Zhang". */
   name: string
   own: AppliedLimit | null
 }

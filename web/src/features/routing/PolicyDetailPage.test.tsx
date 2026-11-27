@@ -531,7 +531,7 @@ describe("PolicyDetailPage", () => {
     const guardrails = await section("Guardrails")
     expect(
       guardrails.getByRole("link", { name: "Guardrails page" }),
-    ).toHaveAttribute("href", "/tools/guardrails")
+    ).toHaveAttribute("href", "/guardrails")
     await waitFor(() =>
       expect(
         guardrails.getByRole("button", { name: "Add a guardrail" }),
@@ -569,7 +569,7 @@ describe("PolicyDetailPage", () => {
     ).toBeInTheDocument()
     expect(
       guardrails.getByRole("link", { name: "Guardrails page" }),
-    ).toHaveAttribute("href", "/tools/guardrails")
+    ).toHaveAttribute("href", "/guardrails")
   })
 
   it("opens the user's own row when the address names one", async () => {

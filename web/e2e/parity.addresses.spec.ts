@@ -53,6 +53,17 @@ test.describe("dashboard addresses", () => {
     await expect(pageHeading(page, "MCP servers")).toBeVisible()
   })
 
+  test("the retired Rules and workspace guardrails paths land on Guardrails", async ({
+    page,
+  }) => {
+    await login(page)
+    for (const old of ["/rules?type=data", "/tools/guardrails"]) {
+      await page.goto(old)
+      await expect(page).toHaveURL(/:\d+\/guardrails$/)
+      await expect(pageHeading(page, "Guardrails")).toBeVisible()
+    }
+  })
+
   test("an API path a browser opens stays the API's answer", async ({
     page,
   }) => {

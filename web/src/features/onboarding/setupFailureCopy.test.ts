@@ -10,7 +10,7 @@ describe("setupFailureCopy", () => {
     expect(setupFailureCopy("policy")).toEqual({
       cause:
         "A budget, a model allow-list, or a rate limit rejected the request.",
-      hint: { label: "Open rules", to: "/rules" },
+      hint: { label: "Open guardrails", to: "/guardrails" },
     })
   })
 

@@ -10,6 +10,7 @@ import {
   buildRules,
   defaultRuleSort,
   emptyCopy,
+  modelEntries,
   peopleBandWords,
   peopleShown,
   type Rule,
@@ -18,12 +19,11 @@ import {
   ruleActions,
   ruleColumns,
   ruleIdForCeiling,
-  rulesOnTab,
-  ruleTabOf,
-  ruleTabs,
+  rulesOfType,
   sortRules,
   stopDefaultWords,
   type TeamDefault,
+  toolEntries,
   type WorkspaceDefaultRow,
 } from "@/features/rules/rules"
 import {
@@ -325,6 +325,46 @@ describe("buildRules, as an owner or admin reads it", () => {
     })
   })
 
+  it("lists a budget that caps only tokens or requests, with its caps and no dollar figures", () => {
+    const rules = byId(
+      buildRules(
+        sources({
+          ceilings: [
+            ceiling("tokens", {
+              max_budget: null,
+              token_limit: 1_000_000,
+              request_limit: 500,
+            }),
+            ceiling("each-tokens", {
+              scope_type: "workspace_member",
+              scope_id: "wm-wei",
+              budget_id: "tokens-each",
+              max_budget: null,
+              token_limit: 2_000,
+            }),
+          ],
+          members: [member("wei", [{ workspaceMemberId: "wm-wei" }])],
+        }),
+      ),
+    )
+    const whole = rules.get("spend-tokens")?.spend
+    expect(whole).toMatchObject({
+      max: null,
+      caps: "1,000,000 tokens + 500 requests",
+    })
+    // No dollar cap to measure against, and none for the limit dialog to change.
+    expect(whole?.used).toBeUndefined()
+    expect(whole?.usedSpent).toBeUndefined()
+    expect(whole?.target).toBeUndefined()
+    const each = rules.get("spend-each-tokens-each")?.spend
+    expect(each).toMatchObject({
+      max: null,
+      caps: "2,000 tokens",
+      isEach: true,
+    })
+    expect(each?.used).toBeUndefined()
+  })
+
   it("reads a period that ended before now as nothing spent, as Home does", () => {
     const rules = buildRules(
       sources({
@@ -464,9 +504,9 @@ describe("buildRules, as an owner or admin reads it", () => {
     )
     expect(rules.map((rule) => [rule.type, rule.scope, rule.mode])).toEqual([
       ["access", { kind: "key", name: "ci" }, "Enforce"],
-      ["data", { kind: "everyone" }, "Enforce"],
-      ["data", { kind: "everyone" }, "Off"],
-      ["data", { kind: "teams", teams: ["Platform"] }, "Watch"],
+      ["data", { kind: "everyone", organization: "Northwind Labs" }, "Block"],
+      ["data", { kind: "everyone", organization: "Northwind Labs" }, "Off"],
+      ["data", { kind: "teams", teams: ["Platform"] }, "Monitor"],
     ])
     expect(rules[0]?.access).toEqual({
       models: ["openai:gpt-5.4-mini"],
@@ -633,6 +673,7 @@ describe("what each role may do and see", () => {
     type: "spend",
     spend: {
       max: 700,
+      caps: "$700.00",
       per: "a month",
       isEach: false,
       spent: 150,
@@ -652,14 +693,28 @@ describe("what each role may do and see", () => {
     id: "spend-each-d",
     name: "Each Data member, weekly",
     type: "spend",
-    spend: { max: 25, per: "a week", isEach: true, spent: 0, used: 0 },
+    spend: {
+      max: 25,
+      caps: "$25.00",
+      per: "a week",
+      isEach: true,
+      spent: 0,
+      used: 0,
+    },
     teamDefault: dataDefault,
   })
   const oldBudget = rule({
     id: "spend-each-o",
     name: "Each Platform member, weekly",
     type: "spend",
-    spend: { max: 40, per: "a week", isEach: true, spent: 1, used: 0.5 },
+    spend: {
+      max: 40,
+      caps: "$40.00",
+      per: "a week",
+      isEach: true,
+      spent: 1,
+      used: 0.5,
+    },
   })
   const none = () => false
   const dataAdmin = (id: string) => id === "ws-data"
@@ -693,55 +748,40 @@ describe("what each role may do and see", () => {
     }
   })
 
-  it("shows spend columns and the Data tab to owners and admins only", () => {
-    expect(ruleTabs(true)).toEqual(["all", "spend", "access", "data"])
-    expect(ruleTabs(false)).toEqual(["all", "spend", "access"])
-    expect(ruleTabOf("data", false)).toBe("all")
-    expect(ruleTabOf("spend", false)).toBe("spend")
-    expect(ruleTabOf("actions", true)).toBe("all")
-    expect(ruleColumns("all", true, true)).toEqual([
+  it("gives each band its own columns, spend only to owners and admins", () => {
+    expect(ruleColumns("spend", true, true)).toEqual([
       "name",
-      "type",
       "scope",
       "limit",
       "spent",
       "used",
-      "mode",
       "actions",
     ])
-    expect(ruleColumns("spend", true, true)).not.toContain("type")
-    expect(ruleColumns("all", false, false)).toEqual([
+    expect(ruleColumns("spend", false, false)).toEqual([
       "name",
-      "type",
       "scope",
       "limit",
-      "mode",
     ])
-    expect(ruleColumns("all", false, true)).toContain("actions")
-    expect(ruleColumns("access", false, false)).toEqual([
+    expect(ruleColumns("spend", false, true)).toContain("actions")
+    expect(ruleColumns("access", true, false)).toEqual([
       "name",
-      "scope",
       "models",
       "tools",
-      "mode",
-    ])
-    expect(ruleColumns("data", true, true)).toEqual([
-      "name",
-      "scope",
-      "mode",
-      "actions",
     ])
   })
 
   it("says what is empty in the caller's terms", () => {
-    expect(emptyCopy("all", true).title).toBe("No rules yet.")
-    expect(emptyCopy("all", false).title).toBe(
-      "No spend limit or model list reaches your workspaces or your API keys.",
+    expect(emptyCopy("spend", true).title).toBe("No budgets yet.")
+    expect(emptyCopy("spend", false).title).toBe(
+      "No budget reaches your workspaces.",
+    )
+    expect(emptyCopy("data", true, undefined, "Platform").title).toBe(
+      "No content moderation runs in Platform.",
     )
     expect(emptyCopy("data", true).link?.to).toBe("/organization/guardrails")
   })
 
-  it("speaks for the keys the caller reads on an empty Access tab", () => {
+  it("speaks for the keys the caller reads on an empty access band", () => {
     const operator = emptyCopy("access", true, {
       isDeploymentWide: true,
       canCreateKey: true,
@@ -797,7 +837,41 @@ describe("what each role may do and see", () => {
       "Each Platform member, weekly",
       "Northwind, monthly",
     ])
-    expect(rulesOnTab(rules, "access")).toEqual([access])
+    expect(rulesOfType(rules, "access")).toEqual([access])
+  })
+})
+
+describe("a key's lists, as a cell shows them", () => {
+  it("names a provider wildcard in words and keeps any other id as it is", () => {
+    expect(
+      modelEntries(["anthropic:*", "openai:gpt-5.1-mini", "mistral:*"]),
+    ).toEqual([
+      { id: "anthropic:*", text: "All Anthropic models", isId: false },
+      { id: "openai:gpt-5.1-mini", text: "openai:gpt-5.1-mini", isId: true },
+      { id: "mistral:*", text: "All Mistral AI models", isId: false },
+    ])
+  })
+
+  it("tells no list, an empty list and the star apart", () => {
+    expect(modelEntries(null)).toEqual([
+      { id: "*", text: "All models", isId: false },
+    ])
+    expect(modelEntries([])).toEqual([
+      { id: "", text: "No models", isId: false },
+    ])
+    expect(modelEntries(["*"])).toEqual([
+      { id: "*", text: "All models", isId: false },
+    ])
+    expect(toolEntries(null)).toEqual([
+      { id: "*", text: "Any tool", isId: false },
+    ])
+    expect(toolEntries(["*"])).toEqual([
+      { id: "*", text: "Any tool", isId: false },
+    ])
+    expect(toolEntries([])).toEqual([{ id: "", text: "No tools", isId: false }])
+    expect(toolEntries(["tavily"])).toEqual([
+      { id: "tavily", text: "tavily", isId: true },
+    ])
   })
 })
 

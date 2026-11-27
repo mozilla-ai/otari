@@ -61,7 +61,7 @@ describe("a build that replaces the label-override module", () => {
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",

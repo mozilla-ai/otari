@@ -145,7 +145,7 @@ export function RulePeople({
             }
             emptyContent={
               <EmptyMessage>
-                Nobody on the roster is under this rule.
+                Nobody on the roster is under this guardrail.
               </EmptyMessage>
             }
             mobileLayout="cards"

@@ -93,7 +93,7 @@ interface AttentionAction {
   label: string
   /** A limit to change in place. */
   limit?: LimitTarget
-  to?: "/rules" | "/requests"
+  to?: "/guardrails" | "/requests"
   search?: Record<string, string>
   /** A control an edition renders itself (`overlayHomeAccount.tsx`). */
   node?: ReactNode
@@ -204,7 +204,9 @@ function limitRows(input: AttentionInput): Ranked[] {
     const limit = `${formatUsd(max)} ${perWords(ceiling)}`.trim()
     const target = input.targets.get(ceiling.id)
     const dialog = (label: string): AttentionAction =>
-      target ? { label, limit: target } : { label: "Open Rules", to: "/rules" }
+      target
+        ? { label, limit: target }
+        : { label: "Open Guardrails", to: "/guardrails" }
 
     if (used >= 1) {
       const days = ceiling.period_end ? daysUntil(ceiling.period_end, now) : 0

@@ -120,8 +120,8 @@ const TABLE: readonly [string, readonly Access[]][] = [
   ["/requests", [o, o, o, o, o, o]],
   ["/people", [o, o, o, o, o, o]],
   ["/people/some-person", [o, o, o, o, o, o]],
-  ["/rules", [o, o, o, o, o, o]],
-  ["/rules/some-rule", [o, o, o, o, o, o]],
+  ["/guardrails", [o, o, o, o, o, o]],
+  ["/guardrails/some-guardrail", [o, o, o, o, o, o]],
   ["/routing", [o, o, o, o, o, o]],
   ["/routing/coding", [o, o, o, o, o, o]],
   ["/models", [o, o, o, o, o, o]],
@@ -131,7 +131,8 @@ const TABLE: readonly [string, readonly Access[]][] = [
   ["/tools/code-execution", [o, o, o, o, o, o]],
   ["/mcp-servers", [o, o, o, o, o, o]],
   ["/mcp-servers/some-server", [o, o, o, o, o, o]],
-  ["/tools/guardrails", [o, o, x, x, x, x]],
+  // A redirect into Guardrails now, so it opens as Tools does.
+  ["/tools/guardrails", [o, o, o, o, o, o]],
   ["/mcp-connections/callback", [o, o, o, o, o, o]],
   ["/keys", [o, o, o, o, o, o]],
   ["/members", [o, o, o, o, o, o]],
@@ -191,8 +192,6 @@ describe("who may open which page", () => {
   })
 
   it("prefers the exact entry over the one whose subtree contains it", () => {
-    // Guardrails sits under Tools by address and asks more than Tools does.
-    expect(requirementFor(at("/tools/guardrails").route ?? "")).toBe("manager")
     expect(requirementFor(at("/tools/web-search").route ?? "")).toBeUndefined()
     // A workspace's own page asks less than the list it sits under.
     expect(requirementFor(at("/workspaces").route ?? "")).toBe("manager")
@@ -250,7 +249,7 @@ describe("an address written another way", () => {
     ["/Playground", [o, o, o, x, o, o]],
     ["/Settings", [o, x, x, x, x, x]],
     ["/Admin/accounts", [o, x, x, x, x, x]],
-    ["/tools/Guardrails", [o, o, x, x, x, x]],
+    ["/tools/Guardrails", [o, o, o, o, o, o]],
     ["/Workspaces", [o, o, x, x, x, x]],
     ["/Workspaces/ws-data", [o, o, x, x, o, x]],
     ["/organization/members/", [o, o, x, x, x, x]],
@@ -317,7 +316,6 @@ describe("while the caller is still being read", () => {
       "/workspaces/ws-data",
       "/settings",
       "/playground",
-      "/tools/guardrails",
     ]) {
       expect(routeAccess(at(path), loading), path).toBe("pending")
     }
@@ -370,7 +368,7 @@ describe("when the caller could not be read", () => {
       answer: "no-organization",
       selectedWorkspaceRole: null,
     }
-    for (const address of ["/people", "/rules", "/keys", "/traces"]) {
+    for (const address of ["/people", "/guardrails", "/keys", "/traces"]) {
       expect(routeAccess(at(address), outside), address).toBe("blocked")
     }
     // Pages no rail row governs, such as the caller's own account, still open.

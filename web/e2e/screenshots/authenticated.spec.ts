@@ -113,6 +113,12 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     // The page's own title, so a 404 does not pass for a model.
     heading: /parity/i,
   },
+  { route: "/guardrails", name: "guardrails", heading: /guardrails/i },
+  {
+    route: "/guardrails?view=assignments",
+    name: "guardrails-assignments",
+    heading: /guardrails/i,
+  },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   // The selected workspace's roster, which is not the organization one below:

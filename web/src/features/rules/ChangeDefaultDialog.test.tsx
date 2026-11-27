@@ -24,7 +24,7 @@ async function renderDialog(teamDefault: TeamDefault) {
   await renderWithRouter(
     <ChangeDefaultDialog teamDefault={teamDefault} onClose={() => {}} />,
     {
-      url: "/rules",
+      url: "/guardrails",
       shell: (
         <Provider>
           <DeploymentProvider value={bootstrap()}>

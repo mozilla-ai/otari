@@ -27,7 +27,7 @@ import {
 import { useWorkspaces } from "@/shared/api/workspaces"
 
 /**
- * New rule: who it applies to, then the limit. A spend rule is the kind this
+ * New guardrail: who it applies to, then the limit. A budget is the kind this
  * page can make, through the same budget and ceiling writes as everywhere else
  * a limit is set; the other kinds are made where they live today.
  *
@@ -41,7 +41,7 @@ export function NewRuleDialog({ onClose }: { onClose: () => void }) {
   const members = useOrganizationMembers()
   const keys = useKeys()
   const ceilings = useAllSpendCeilings()
-  // One clock for the dialog's life, as the Rules page keeps one.
+  // One clock for the dialog's life, as the Guardrails page keeps one.
   const [now] = useState(() => Date.now())
   const [kind, setKind] = useState<TargetKind>()
   const [choice, setChoice] = useState("")
@@ -81,8 +81,8 @@ export function NewRuleDialog({ onClose }: { onClose: () => void }) {
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      title="New rule"
-      description="A spend rule: who it applies to, then how much and how often it resets."
+      title="New guardrail"
+      description="A budget: who it applies to, then how much and how often it resets."
       submitLabel={picked?.own ? "Edit limit" : "Next"}
       isPending={false}
       error={ceilings.error ?? workspaces.error ?? members.error ?? keys.error}
@@ -163,8 +163,8 @@ export function NewRuleDialog({ onClose }: { onClose: () => void }) {
         />
       )}
       <p className="text-caption">
-        Model access is set on Members &amp; roles, and guardrails on the
-        organization’s Guardrails page. Rules for commands and files live in
+        Model access is set on Members &amp; roles, and content moderation on
+        the organization’s Guardrails page. Rules for commands and files live in
         each repository’s <code className="font-mono">.otari</code> directory.
       </p>
     </FormDialog>
