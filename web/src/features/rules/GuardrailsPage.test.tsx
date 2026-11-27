@@ -498,6 +498,46 @@ describe("Guardrails, when a read fails or is slow", () => {
     ).toBeInTheDocument()
   })
 
+  it("draws nothing that depends on the role until it is known", async () => {
+    let answer = () => {}
+    const held = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        held: { "/organizations/me": held },
+      },
+    )
+    await screen.findByRole("heading", { name: "Guardrails", level: 1 })
+    expect(screen.queryByText(/Owners and admins also see/)).toBeNull()
+    expect(screen.queryByRole("heading", { name: /^Budget/ })).toBeNull()
+    answer()
+    expect(
+      await screen.findByRole("grid", { name: "Guardrails on each member" }),
+    ).toBeInTheDocument()
+  })
+
+  it("tells an owner whose role could not be read nothing a member is told", async () => {
+    await renderAs(
+      "owner",
+      <GuardrailsPage />,
+      "/guardrails?view=assignments",
+      {
+        ...FULL,
+        failing: ["/organizations/me"],
+      },
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Refused /organizations/me",
+    )
+    expect(screen.queryByText(/Owners and admins also see/)).toBeNull()
+    expect(screen.queryByRole("heading", { name: /^Budget/ })).toBeNull()
+  })
+
   for (const role of ["member", "viewer"] as const) {
     it(`asks nothing a ${role} would be refused`, async () => {
       await renderAs(role, <GuardrailsPage />, "/guardrails")

@@ -11,6 +11,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   useCanCreateKey,
   useCanManageWorkspace,
+  useIsRoleSettled,
 } from "@/features/organization/access"
 import { BandEmpty, EntryList } from "@/features/rules/BandParts"
 import { GuardrailAssignments } from "@/features/rules/GuardrailAssignments"
@@ -68,11 +69,16 @@ const SORTABLE: readonly RuleSort["column"][] = [
  */
 export function GuardrailsPage() {
   const { rules, isManager, isLoading, error } = useRules()
+  // Until the caller's role is known, nothing that depends on it is drawn: an
+  // owner would otherwise see a member's page first, and keep it if the read
+  // fails.
+  const isRoleKnown = useIsRoleSettled()
   const moderation = useModeration(isManager)
   const context = useOrganizationContext().data
   const url = useUrlState(URL_DEFAULTS)
   const [isNewOpen, setNewOpen] = useState(false)
-  const isAssignments = isManager && url.get("view") === "assignments"
+  const isAssignments =
+    isRoleKnown && isManager && url.get("view") === "assignments"
   const organizationName = context?.organization?.name
 
   const budgets = rulesOfType(rules, "spend")
@@ -109,7 +115,7 @@ export function GuardrailsPage() {
             <ErrorBanner error={error ?? moderation.error} />
           </div>
         ) : null}
-        {isManager ? (
+        {isRoleKnown && isManager ? (
           <ViewTabs
             label="Guardrails views"
             current={isAssignments ? "assignments" : "guardrails"}
@@ -131,7 +137,7 @@ export function GuardrailsPage() {
         ) : null}
       </div>
 
-      {isAssignments ? (
+      {!isRoleKnown ? null : isAssignments ? (
         <GuardrailAssignments
           rules={rules}
           isRulesLoading={isLoading}
@@ -166,7 +172,7 @@ export function GuardrailsPage() {
         </div>
       )}
 
-      {isManager ? null : (
+      {!isRoleKnown || isManager ? null : (
         <p className="text-caption">
           Owners and admins also see organization and workspace budgets, budgets
           on one person or one API key, and content moderation.
