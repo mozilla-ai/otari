@@ -25521,6 +25521,8 @@ export interface components {
              * @description The HTTP status the server refused with, if any
              */
             http_status?: number | null;
+            /** @description The most recent contact that got no answer, however long ago; null if none is known */
+            last_failure?: components["schemas"]["WorkspaceMcpServerLastFailure"] | null;
             /**
              * Missing Allowed Tools
              * @description Allow-listed names the server did not offer
@@ -25533,9 +25535,10 @@ export interface components {
             read_only_hinted_tools?: string[];
             /**
              * Status
+             * @description failing: the last contact got no answer. degraded: the last contact got one, but another failed within the last 60 minutes. healthy: neither
              * @enum {string}
              */
-            status: "healthy" | "failing";
+            status: "healthy" | "degraded" | "failing";
             /**
              * Tool Count
              * @description Live tools the allow-list admits; null when the check failed, or when the server answered a request that did not list its tools and no listing is on record
@@ -25595,6 +25598,20 @@ export interface components {
              * @description The deciding rule's tool patterns; [] means the key cannot reach the server
              */
             tools: string[];
+        };
+        /**
+         * WorkspaceMcpServerLastFailure
+         * @description The most recent time the gateway could not get an answer from the server, and why.
+         */
+        WorkspaceMcpServerLastFailure: {
+            error: components["schemas"]["CheckFailure"];
+            /** Failed At */
+            failed_at: string;
+            /**
+             * Http Status
+             * @description The HTTP status the server refused with, if any
+             */
+            http_status?: number | null;
         };
         /**
          * WorkspaceMcpServerLogoPublic

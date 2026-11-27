@@ -24,6 +24,7 @@ from gateway.services.tools._mcp_server_health import (
     _MAX_PENDING_WRITES,
     ATTACHED_COOLDOWN_S,
     CONTACT_WRITE_INTERVAL_S,
+    DEGRADED_WINDOW_S,
     MAX_ALLOWED_TOOLS,
     health_after_contact,
     server_health,
@@ -65,7 +66,7 @@ def test_a_contact_that_listed_nothing_keeps_the_tools_on_record() -> None:
 
 
 def test_a_first_contact_without_a_listing_says_healthy_and_claims_no_tool_count() -> None:
-    health = _after(_stored("failing", error="timeout"), McpServerContact(SERVER, URL))
+    health = _after(_stored("failing", age_s=DEGRADED_WINDOW_S + 1, error="timeout"), McpServerContact(SERVER, URL))
 
     assert health is not None
     assert health["status"] == "healthy"
@@ -92,7 +93,7 @@ def test_a_change_is_written_at_once() -> None:
 
     assert failed is not None and failed["status"] == "failing" and failed["error"] == "unreachable"
     assert grown is not None and grown["tool_count"] == 3
-    assert recovered is not None and recovered["status"] == "healthy"
+    assert recovered is not None and recovered["status"] == "degraded"
 
 
 def test_a_failed_contact_keeps_the_read_hints_on_record() -> None:
@@ -104,8 +105,67 @@ def test_a_failed_contact_keeps_the_read_hints_on_record() -> None:
     assert failed["read_only_hinted_tools"] == ["list_issues"]
 
     answered = _after(failed, McpServerContact(SERVER, URL))
-    assert answered is not None and answered["status"] == "healthy"
+    assert answered is not None and answered["status"] == "degraded"
     assert answered["read_only_hinted_tools"] == ["list_issues"]
+
+
+def test_a_server_that_fails_between_answers_reads_degraded_until_the_window_passes() -> None:
+    answered = server_health(None, LISTING).model_dump(mode="json")
+
+    failed = _after(answered, McpServerContact(SERVER, URL, failure=CheckFailure.NOT_MCP))
+    assert failed is not None and failed["status"] == "failing"
+    assert failed["last_failure"] == {"failed_at": failed["checked_at"], "error": "not_mcp", "http_status": None}
+
+    again = _after(failed, McpServerContact(SERVER, URL, listing=LISTING))
+    assert again is not None and again["status"] == "degraded" and again["error"] is None
+    assert again["tool_count"] == 2
+    assert again["last_failure"] == failed["last_failure"]
+
+    # Another answer within the window says the same thing, so it is not written.
+    assert _after(again, McpServerContact(SERVER, URL, listing=LISTING)) is None
+
+    long_ago = (datetime.now(UTC) - timedelta(seconds=DEGRADED_WINDOW_S + 1)).isoformat()
+    aged = {**again, "last_failure": {**again["last_failure"], "failed_at": long_ago}}
+    recovered = _after(aged, McpServerContact(SERVER, URL, listing=LISTING))
+    assert recovered is not None and recovered["status"] == "healthy"
+    assert recovered["last_failure"]["failed_at"] == long_ago
+
+
+def test_a_degraded_server_answering_without_a_listing_turns_healthy_after_the_window() -> None:
+    long_ago = (datetime.now(UTC) - timedelta(seconds=DEGRADED_WINDOW_S + 1)).isoformat()
+    stored = server_health(None, LISTING).model_dump(mode="json")
+    stored.update(status="degraded", last_failure={"failed_at": long_ago, "error": "timeout"})
+
+    health = _after(stored, McpServerContact(SERVER, URL))
+
+    assert health is not None and health["status"] == "healthy" and health["tools"] == stored["tools"]
+
+
+def test_a_failing_health_stored_before_failures_were_remembered_counts_as_the_last_failure() -> None:
+    legacy = _stored("failing", error="unreachable")
+
+    health = _after(legacy, McpServerContact(SERVER, URL, listing=LISTING))
+
+    assert health is not None and health["status"] == "degraded"
+    assert health["last_failure"] == {"failed_at": legacy["checked_at"], "error": "unreachable", "http_status": None}
+
+
+def test_one_user_s_refusal_leaves_no_failure_on_record() -> None:
+    answered = server_health(None, LISTING).model_dump(mode="json")
+    refused = McpServerContact(SERVER, URL, failure=CheckFailure.UNAUTHORIZED, http_status=401)
+
+    assert health_after_contact(answered, allowed_tools=None, per_user=True, contact=refused) is None
+
+
+def test_a_degraded_server_keeps_its_listing_for_read_hints() -> None:
+    server = WorkspaceMcpServer(workspace_id=uuid.uuid4(), name="s", url=URL)
+    health = server_health(None, LISTING).model_dump(mode="json")
+    health["status"] = "degraded"
+    server.health = health
+
+    WorkspaceMcpServerHealth.keep_first_read_hints(server)
+
+    assert server.read_tools_hinted == ["list_issues"]
 
 
 def test_an_old_answer_is_refreshed() -> None:

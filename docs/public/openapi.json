@@ -33873,6 +33873,17 @@
             "description": "The HTTP status the server refused with, if any",
             "title": "Http Status"
           },
+          "last_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceMcpServerLastFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent contact that got no answer, however long ago; null if none is known"
+          },
           "missing_allowed_tools": {
             "description": "Allow-listed names the server did not offer",
             "items": {
@@ -33890,8 +33901,10 @@
             "type": "array"
           },
           "status": {
+            "description": "failing: the last contact got no answer. degraded: the last contact got one, but another failed within the last 60 minutes. healthy: neither",
             "enum": [
               "healthy",
+              "degraded",
               "failing"
             ],
             "title": "Status",
@@ -34027,6 +34040,36 @@
           "allowed_tools"
         ],
         "title": "WorkspaceMcpServerKeyAccess",
+        "type": "object"
+      },
+      "WorkspaceMcpServerLastFailure": {
+        "description": "The most recent time the gateway could not get an answer from the server, and why.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/CheckFailure"
+          },
+          "failed_at": {
+            "title": "Failed At",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The HTTP status the server refused with, if any",
+            "title": "Http Status"
+          }
+        },
+        "required": [
+          "failed_at",
+          "error"
+        ],
+        "title": "WorkspaceMcpServerLastFailure",
         "type": "object"
       },
       "WorkspaceMcpServerLogoPublic": {

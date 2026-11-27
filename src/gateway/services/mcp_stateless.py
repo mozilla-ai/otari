@@ -668,6 +668,7 @@ async def discover_stored_tools(
     contacts: ContactObserver | None = None,
     listings: ToolListings | None = None,
     refresh: bool = False,
+    timings: MutableMapping[str, float] | None = None,
 ) -> DiscoveredCatalog:
     """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
@@ -680,23 +681,31 @@ async def discover_stored_tools(
     no tool. ``contacts`` hears whether the server answered, and its catalog where the
     listing read all of it. With ``listings``, the server's raw answer is reused
     while it is kept, unless ``refresh``; the filter and screening run every time.
+    ``timings``, when given, gets ``admission_ms`` once this caller's own listing holds a slot,
+    which is how a caller whose deadline ends the listing tells the server's silence from a wait
+    for capacity or for another caller's listing.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
     if listings is None:
-        listed, age_s = await _list_live(server, contacts), 0.0
+        listed, age_s = await _list_live(server, contacts, timings), 0.0
     else:
         listed, age_s = await listings.get_or_load(
-            listing_key(server), lambda: _list_live(server, contacts), refresh=refresh
+            listing_key(server), lambda: _list_live(server, contacts, timings), refresh=refresh
         )
     catalog = _screened(listed, admits)
     return DiscoveredCatalog(tools=catalog.tools, warnings=catalog.warnings, age_s=age_s)
 
 
-async def _list_live(server: ResolvedMcpServer, contacts: ContactObserver | None) -> list[MCPTool]:
+async def _list_live(
+    server: ResolvedMcpServer, contacts: ContactObserver | None, timings: MutableMapping[str, float] | None = None
+) -> list[MCPTool]:
+    admission_started = monotonic()
     try:
         async with DISCOVERY_GATE.slot():
+            if timings is not None:
+                timings["admission_ms"] = (monotonic() - admission_started) * 1000
             return await _run_in_owner_task(_list_once(server, contacts))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
