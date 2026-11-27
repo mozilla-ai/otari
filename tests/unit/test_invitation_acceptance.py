@@ -269,6 +269,29 @@ async def test_an_expired_a_declined_and_an_unknown_link_answer_alike(store: _St
     assert len(set(answers)) == 1
 
 
+async def test_a_decline_that_lands_after_an_earlier_read_closes_the_link(store: _Store) -> None:
+    """The lookup answers as committed, so a link declined since this session read it opens nothing.
+
+    A decline writes the row without touching an instance the session holds, and a session does not
+    expire its instances on commit, so a cached answer would still read as live.
+    """
+    organization = await store.organization()
+    await store.invitation(organization)
+    link = store.link()
+
+    async with store.uow:
+        # Held for the rest of the block, as a caller deciding on this invitation holds it. The
+        # identity map keeps weak references, so dropping it would evict the stale instance.
+        first = await link.open("plain-token")
+        assert first is not None
+        declined = await store.repositories.invitations.decline_by_token_hash(
+            hash_token("plain-token"), at=store.clock.now
+        )
+        assert declined is not None
+
+        assert await link.open("plain-token") is None
+
+
 async def test_preview_refuses_a_blocked_address(store: _Store) -> None:
     organization = await store.organization()
     await store.invitation(organization)

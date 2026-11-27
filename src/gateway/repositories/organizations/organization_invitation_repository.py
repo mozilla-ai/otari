@@ -387,14 +387,21 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         return list(result.scalars().all())
 
     async def get_by_token_hash(self, token_hash: str, *, lock: bool = False) -> OrganizationInvitation | None:
-        """Return the invitation with this token hash, or None if there is none.
+        """Return the invitation with this token hash as committed, or None if there is none.
 
         ``lock`` holds the row until the caller's transaction ends, so a cancellation or a decline
         of it waits.
 
+        NOTE: ``populate_existing`` so a caller sees what another transaction committed, rather than
+        an instance this session loaded earlier. A session does not expire its instances on commit.
+
         NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
         """
-        statement = select(OrganizationInvitation).where(OrganizationInvitation.token_hash == token_hash)
+        statement = (
+            select(OrganizationInvitation)
+            .where(OrganizationInvitation.token_hash == token_hash)
+            .execution_options(populate_existing=True)
+        )
         if lock:
             statement = statement.with_for_update()
         result = await self.db.execute(statement)
