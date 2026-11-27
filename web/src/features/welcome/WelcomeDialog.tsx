@@ -21,7 +21,7 @@ import { useProviders } from "@/shared/api/providers"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 const OFFERS = [
-  "Open-weight models, hosted by Mozilla.ai",
+  "Open-weight models, hosted by Mozilla AI",
   "Web search for your models",
   "Code execution in a hosted sandbox",
 ]
