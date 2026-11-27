@@ -59,7 +59,7 @@ describe("GuardrailsSection", () => {
     await renderSection([], organizationContext({ role: "admin" }))
     expect(
       await screen.findByRole("link", { name: "Guardrails page" }),
-    ).toHaveAttribute("href", "/tools/guardrails")
+    ).toHaveAttribute("href", "/guardrails")
   })
 
   it("points nobody else at a page they may not open", async () => {

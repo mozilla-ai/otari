@@ -142,7 +142,7 @@ describe("type 2, a limit reached", () => {
     )
   })
 
-  it("opens the dialog where Home has the row, and Rules where it has none", () => {
+  it("opens the dialog where Home has the row, and Guardrails where it has none", () => {
     const withRow = attention(
       input({
         ceilings: [ceiling({ id: "cx", current_spend: 100 })],
@@ -151,7 +151,10 @@ describe("type 2, a limit reached", () => {
     ).items[0]
     expect(withRow?.action.label).toBe("Raise the limit")
     expect(withRow?.action.limit?.scopeId).toBe("m1")
-    expect(reached()?.action).toEqual({ label: "Open Rules", to: "/rules" })
+    expect(reached()?.action).toEqual({
+      label: "Open Guardrails",
+      to: "/guardrails",
+    })
   })
 
   it("is not reached once its period has ended", () => {

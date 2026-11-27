@@ -1,7 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { WorkspaceGuardrailsPage } from "@/features/guardrails/WorkspaceGuardrailsPage"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/tools/guardrails")({
-  component: WorkspaceGuardrailsPage,
+  // The workspace's guardrails are the Content moderation band of Guardrails
+  // now. A link to the old page still lands there, with no history entry.
+  beforeLoad: () => {
+    throw redirect({ to: "/guardrails", replace: true })
+  },
 })

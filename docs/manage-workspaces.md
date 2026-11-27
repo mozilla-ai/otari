@@ -20,7 +20,7 @@ To select which provider keys a workspace can use, open the workspace from the l
 
 ## Manage a workspace
 
-From the main dashboard, select the workspace in the top-left corner. Its menu has **Activity**, **Traces**, **People**, **Rules**, **Routing**, **Models**, **Tools**, **MCP servers** and **API keys**, with **Create API key** above them. **People** links to the workspace's member list.
+From the main dashboard, select the workspace in the top-left corner. Its menu has **Activity**, **Traces**, **People**, **Guardrails**, **Routing**, **Models**, **Tools**, **MCP servers** and **API keys**, with **Create API key** above them. **People** links to the workspace's member list.
 
 Click **Organization** at the bottom of the menu, then use the sidebar to move between different areas:
 

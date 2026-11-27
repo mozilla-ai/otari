@@ -58,8 +58,8 @@ import { useWorkspaces } from "@/shared/api/workspaces"
 // a service instead of a definition. Definitions come first, since nothing can
 // be mandated onto one before it exists.
 //
-// Not the workspace rail's `/tools/guardrails`, which sets the deployment's own
-// guardrails service. Rows here are keyed on the organization.
+// Rows here are keyed on the organization. The workspace rail's Guardrails
+// lists the ones running in the selected workspace.
 
 type OpenKind = "definition" | "mandate" | "test" | "mandate-test"
 type Open = { kind: "" } | { kind: OpenKind; editingId: string }

@@ -46,7 +46,7 @@ describe("rail location memory", () => {
     })
   })
 
-  it.each(["/people", "/rules"])("returns to %s", (path) => {
+  it.each(["/people", "/guardrails"])("returns to %s", (path) => {
     rememberLocation(path, showsEverything)
 
     expect(lastLocation("workspace", showsEverything)).toEqual({ to: path })
@@ -94,9 +94,9 @@ describe("rail location memory", () => {
 
   it("ignores a destination with no row whose own surface is gated off", () => {
     rememberLocation("/routing", showsEverything)
-    // The workspace's guardrails open from Rules and are served by the tools
-    // surface, so that surface is the one consulted, not the row's.
-    rememberLocation("/tools/guardrails", withoutSurface("tools"))
+    // The roster opens from People and is served by the workspaces surface,
+    // so that surface is the one consulted, not the row's.
+    rememberLocation("/members", withoutSurface("workspaces"))
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
       to: "/routing",

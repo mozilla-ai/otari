@@ -286,7 +286,7 @@ describe("AppShell responsive layout", () => {
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",
@@ -774,7 +774,7 @@ describe("AppShell surface gating", () => {
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",
@@ -977,7 +977,7 @@ describe("AppShell entitlement gating", () => {
       "Activity",
       "Traces",
       "People",
-      "Rules",
+      "Guardrails",
       "Routing",
       "Models",
       "Tools",
@@ -1547,15 +1547,15 @@ describe("AppShell entitlement gating", () => {
 
   it("answers a page with no row with the panel when its own surface is gone", async () => {
     mockMatchMedia(false)
-    // The workspace's guardrails open from Rules and are served by the tools
-    // surface. A bookmark still reaches the route on a deployment without it,
-    // and the entry `navItemForPath` answers with carries that surface.
+    // The roster opens from People and is served by the workspaces surface. A
+    // bookmark still reaches the route on a deployment without it, and the
+    // entry `navItemForPath` answers with carries that surface.
     await renderShell(bootstrap({ surfaces: ["routing"] }), {
-      url: "/tools/guardrails",
+      url: "/members",
     })
 
     expect(
-      await screen.findByText("Guardrails is not available here"),
+      await screen.findByText("Members is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })
@@ -1778,7 +1778,7 @@ const WORKSPACE_RAIL = [
   "/",
   "/traces",
   "/people",
-  "/rules",
+  "/guardrails",
   "/routing",
   "/models",
   "/tools",
@@ -1845,18 +1845,18 @@ describe("the workspace rail, per role", () => {
     ])
   })
 
-  // The workspace's guardrails open to owners and admins only, so that page is
-  // checked as an owner.
-  it("selects Rules on /tools/guardrails", async () => {
+  it("selects Guardrails on one guardrail's page", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap(), {
-      url: "/tools/guardrails",
+      url: "/guardrails/some-guardrail",
       ...asRole("owner"),
     })
     const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
-    const rules = await within(sidebar).findByRole("link", { name: "Rules" })
-    expect(rules).toHaveAttribute("aria-current", "page")
-    expect(rules.className).toBe(
+    const guardrails = await within(sidebar).findByRole("link", {
+      name: "Guardrails",
+    })
+    expect(guardrails).toHaveAttribute("aria-current", "page")
+    expect(guardrails.className).toBe(
       `${navRowClass({ isActive: true, isCollapsed: false })} w-full`,
     )
     const tools = within(sidebar).getByRole("link", { name: "Tools" })

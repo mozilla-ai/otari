@@ -107,8 +107,8 @@ export function RefusedRequests({ rule }: { rule: Rule }) {
       title="Refused requests"
       description={
         isManager
-          ? "Requests the gateway refused this week for anyone under this rule. A refusal says why, not which rule refused it."
-          : "Your own requests the gateway refused this week under this rule. Only owners and admins see everyone’s. A refusal says why, not which rule refused it."
+          ? "Requests the gateway refused this week for anyone under this guardrail. A refusal says why, not which guardrail refused it."
+          : "Your own requests the gateway refused this week under this guardrail. Only owners and admins see everyone’s. A refusal says why, not which guardrail refused it."
       }
     >
       <ErrorBanner error={refused.error} />

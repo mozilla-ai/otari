@@ -3388,27 +3388,30 @@ body {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
-/* Each view's lanes plus 14rem for the name, which a narrower table would
-   squeeze to nothing: the frame scrolls instead. */
+/* Each band's lanes plus room for its first column, which a narrower table
+   would squeeze to nothing: the frame scrolls instead. */
 .otari-rules-table .table__content {
   table-layout: fixed;
   width: 100%;
-  min-width: 69.5rem; /* All: 55.5rem of lanes */
+  min-width: 68.5rem; /* Budget: 54.5rem of lanes */
 }
-.otari-rules-table:is(.is-spend, .is-access, .is-data) .table__content {
-  min-width: 64.5rem; /* 50.5rem */
+.otari-rules-table.is-access .table__content {
+  min-width: 60rem;
+}
+.otari-rules-table.is-data .table__content {
+  min-width: 68rem; /* 54.25rem */
+}
+.otari-rules-table.is-member.is-spend .table__content {
+  min-width: 61.5rem; /* 47.5rem */
 }
 .otari-rules-table.is-people .table__content {
   min-width: 36rem;
 }
-.otari-rules-table.is-member .table__content {
-  min-width: 67.5rem; /* All: 53.5rem */
+.otari-rules-table.is-assigned-members .table__content {
+  min-width: 62rem;
 }
-.otari-rules-table.is-member.is-spend .table__content {
-  min-width: 62.5rem; /* 48.5rem */
-}
-.otari-rules-table.is-member.is-access .table__content {
-  min-width: 70.5rem; /* 56.5rem */
+.otari-rules-table.is-assigned-keys .table__content {
+  min-width: 70rem;
 }
 .otari-rules-table .table__row .table__cell {
   height: 2.75rem;
@@ -3420,43 +3423,71 @@ body {
   overflow: hidden;
 }
 /* Each lane is its widest content plus the cell's padding: "$40.00 each,
-   a month" is 166px, the Enforce chip 59px. */
-.otari-rules-table .table__column[data-key="type"] {
-  width: 5rem;
-}
-.otari-rules-table .table__column[data-key="mode"] {
-  width: 6rem;
-}
+   a month" is 166px. */
 .otari-rules-table .table__column[data-key="scope"] {
-  width: 15rem;
+  width: 16.25rem;
 }
 .otari-rules-table .table__column[data-key="limit"] {
-  width: 12.5rem;
+  width: 15rem;
 }
 .otari-rules-table .table__column[data-key="spent"] {
-  width: 5.5rem;
+  width: 7rem;
 }
 .otari-rules-table .table__column[data-key="used"] {
-  width: 8.5rem;
-}
-.otari-rules-table .table__column[data-key="models"] {
-  width: 14rem;
-}
-.otari-rules-table .table__column[data-key="tools"] {
-  width: 11rem;
+  width: 13rem;
 }
 .otari-rules-table .table__column[data-key="actions"] {
   width: 3rem;
 }
+/* A key's name, then its lists, the tools taking what is left. */
+.otari-rules-table.is-access .table__column[data-key="name"] {
+  width: 16.25rem;
+}
+.otari-rules-table.is-access .table__column[data-key="models"] {
+  width: 31.25rem;
+}
+/* The profile takes what is left, since under a broken guardrail it also
+   carries "Requests served unchecked". */
 .otari-rules-table.is-data .table__column[data-key="scope"] {
-  width: 40rem;
+  width: 15.25rem;
+}
+.otari-rules-table.is-data .table__column[data-key="runs_on"] {
+  width: 8.5rem;
+}
+.otari-rules-table.is-data .table__column[data-key="checks"] {
+  width: 11.875rem;
+}
+.otari-rules-table.is-data .table__column[data-key="mode"] {
+  width: 5.5rem;
+}
+/* "Serve it unchecked" on one line, since a wrapped answer reads as two. */
+.otari-rules-table.is-data .table__column[data-key="on_unavailable"] {
+  width: 10.125rem;
 }
 /* A member's list has no spend lanes, so its words get the room. */
 .otari-rules-table.is-member .table__column[data-key="scope"] {
-  width: 22.5rem;
+  width: 31.25rem;
 }
 .otari-rules-table.is-member .table__column[data-key="limit"] {
-  width: 17rem;
+  width: auto;
+}
+/* Who is under what in the selected workspace. */
+.otari-rules-table.is-assigned-members .table__column[data-key="member"],
+.otari-rules-table.is-assigned-keys .table__column[data-key="key"] {
+  width: 15rem;
+}
+.otari-rules-table.is-assigned-members .table__column[data-key="role"] {
+  width: 6.875rem;
+}
+.otari-rules-table:is(.is-assigned-members, .is-assigned-keys)
+  .table__column[data-key="budget"] {
+  width: 20.625rem;
+}
+.otari-rules-table.is-assigned-keys .table__column[data-key="models"] {
+  width: 16rem;
+}
+.otari-rules-table.is-assigned-keys .table__column[data-key="tools"] {
+  width: 10rem;
 }
 /* The people under one rule: a name, then two or three figures. */
 .otari-rules-table.is-people .table__column[data-key="spent"],

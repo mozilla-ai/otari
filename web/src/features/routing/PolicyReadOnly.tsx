@@ -108,7 +108,7 @@ export function PolicyReadOnly({ row }: { row: RoutingRow }) {
         {isManager ? (
           <p className="text-caption">
             Profiles and the service are managed on the{" "}
-            <Link to="/tools/guardrails" className="text-link hover:underline">
+            <Link to="/guardrails" className="text-link hover:underline">
               Guardrails page
             </Link>
             .

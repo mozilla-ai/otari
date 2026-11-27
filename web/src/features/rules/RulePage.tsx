@@ -25,7 +25,7 @@ import { NotYet } from "@/shared/components/NotYet"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
 /**
- * One rule: what it is and who it reaches, the people under it, the refusals
+ * One guardrail: what it is and who it reaches, the people under it, the refusals
  * its subject met, and what the control plane stores for it. Owners and
  * admins change a limit from here; anyone else reads the rule as the server
  * gives it to them.
@@ -40,16 +40,16 @@ export function RulePage({ ruleId }: { ruleId: string }) {
     if (error) {
       return (
         <>
-          <BackLink to="/rules" label="Rules" />
+          <BackLink to="/guardrails" label="Guardrails" />
           <ErrorBanner error={error} />
         </>
       )
     }
     return (
       <>
-        <BackLink to="/rules" label="Rules" />
+        <BackLink to="/guardrails" label="Guardrails" />
         <EmptyState
-          title="No rule at this link"
+          title="No guardrail at this link"
           description="It may have been removed."
         />
       </>
@@ -73,7 +73,7 @@ export function RulePage({ ruleId }: { ruleId: string }) {
 
   return (
     <>
-      <BackLink to="/rules" label="Rules" />
+      <BackLink to="/guardrails" label="Guardrails" />
       <div className="otari-rules-intro is-stacked">
         <PageIntro title={rule.name} action={action} />
       </div>
@@ -129,9 +129,9 @@ export function RulePage({ ruleId }: { ruleId: string }) {
       ) : (
         <Band title="Decision log">
           <NotYet>
-            Every decision this rule made would be listed here, each opening its
-            session. The gateway does not record guardrail decisions per rule
-            yet.
+            Every decision this guardrail made would be listed here, each
+            opening its session. The gateway does not record content moderation
+            decisions per guardrail yet.
           </NotYet>
         </Band>
       )}

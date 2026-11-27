@@ -3,7 +3,8 @@ import type { RuleMode } from "@/features/rules/rules"
 
 const TONE: Record<RuleMode, ChipTone> = {
   Enforce: "accent",
-  Watch: "neutral",
+  Block: "accent",
+  Monitor: "neutral",
   Off: "neutral",
 }
 

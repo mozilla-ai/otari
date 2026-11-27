@@ -81,4 +81,33 @@ describe("retired paths", () => {
     expect((await open("/mcp-servers/srv-1")).path).toBe("/mcp-servers/srv-1")
     expect((await open("/tools/web-search")).path).toBe("/tools/web-search")
   })
+
+  it("opens Guardrails on the old Rules path, dropping the tab it named", async () => {
+    for (const url of ["/rules", "/rules/"]) {
+      const landed = await open(`${url}?type=data&q=ci`)
+
+      expect(landed.path, url).toBe("/guardrails")
+      expect(landed.search, url).toEqual({ q: "ci" })
+      expect(landed.entries, url).toBe(1)
+    }
+  })
+
+  it("opens a guardrail's page on its old Rules path", async () => {
+    const landed = await open("/rules/spend-each-b1")
+
+    expect(landed.path).toBe("/guardrails/spend-each-b1")
+    expect(landed.entries).toBe(1)
+  })
+
+  it("opens Guardrails on the workspace's old guardrails page", async () => {
+    const landed = await open("/tools/guardrails")
+
+    expect(landed.path).toBe("/guardrails")
+    expect(landed.entries).toBe(1)
+  })
+
+  it("leaves the new Guardrails paths where they are", async () => {
+    expect((await open("/guardrails")).path).toBe("/guardrails")
+    expect((await open("/guardrails/data-g1")).path).toBe("/guardrails/data-g1")
+  })
 })

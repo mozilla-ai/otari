@@ -10,6 +10,7 @@ import {
   buildRules,
   defaultRuleSort,
   emptyCopy,
+  modelEntries,
   peopleBandWords,
   peopleShown,
   type Rule,
@@ -18,12 +19,11 @@ import {
   ruleActions,
   ruleColumns,
   ruleIdForCeiling,
-  rulesOnTab,
-  ruleTabOf,
-  ruleTabs,
+  rulesOfType,
   sortRules,
   stopDefaultWords,
   type TeamDefault,
+  toolEntries,
   type WorkspaceDefaultRow,
 } from "@/features/rules/rules"
 import {
@@ -464,9 +464,9 @@ describe("buildRules, as an owner or admin reads it", () => {
     )
     expect(rules.map((rule) => [rule.type, rule.scope, rule.mode])).toEqual([
       ["access", { kind: "key", name: "ci" }, "Enforce"],
-      ["data", { kind: "everyone" }, "Enforce"],
-      ["data", { kind: "everyone" }, "Off"],
-      ["data", { kind: "teams", teams: ["Platform"] }, "Watch"],
+      ["data", { kind: "everyone", organization: "Northwind Labs" }, "Block"],
+      ["data", { kind: "everyone", organization: "Northwind Labs" }, "Off"],
+      ["data", { kind: "teams", teams: ["Platform"] }, "Monitor"],
     ])
     expect(rules[0]?.access).toEqual({
       models: ["openai:gpt-5.4-mini"],
@@ -693,55 +693,40 @@ describe("what each role may do and see", () => {
     }
   })
 
-  it("shows spend columns and the Data tab to owners and admins only", () => {
-    expect(ruleTabs(true)).toEqual(["all", "spend", "access", "data"])
-    expect(ruleTabs(false)).toEqual(["all", "spend", "access"])
-    expect(ruleTabOf("data", false)).toBe("all")
-    expect(ruleTabOf("spend", false)).toBe("spend")
-    expect(ruleTabOf("actions", true)).toBe("all")
-    expect(ruleColumns("all", true, true)).toEqual([
+  it("gives each band its own columns, spend only to owners and admins", () => {
+    expect(ruleColumns("spend", true, true)).toEqual([
       "name",
-      "type",
       "scope",
       "limit",
       "spent",
       "used",
-      "mode",
       "actions",
     ])
-    expect(ruleColumns("spend", true, true)).not.toContain("type")
-    expect(ruleColumns("all", false, false)).toEqual([
+    expect(ruleColumns("spend", false, false)).toEqual([
       "name",
-      "type",
       "scope",
       "limit",
-      "mode",
     ])
-    expect(ruleColumns("all", false, true)).toContain("actions")
-    expect(ruleColumns("access", false, false)).toEqual([
+    expect(ruleColumns("spend", false, true)).toContain("actions")
+    expect(ruleColumns("access", true, false)).toEqual([
       "name",
-      "scope",
       "models",
       "tools",
-      "mode",
-    ])
-    expect(ruleColumns("data", true, true)).toEqual([
-      "name",
-      "scope",
-      "mode",
-      "actions",
     ])
   })
 
   it("says what is empty in the caller's terms", () => {
-    expect(emptyCopy("all", true).title).toBe("No rules yet.")
-    expect(emptyCopy("all", false).title).toBe(
-      "No spend limit or model list reaches your workspaces or your API keys.",
+    expect(emptyCopy("spend", true).title).toBe("No budgets yet.")
+    expect(emptyCopy("spend", false).title).toBe(
+      "No budget reaches your workspaces.",
+    )
+    expect(emptyCopy("data", true, undefined, "Platform").title).toBe(
+      "No content moderation runs in Platform.",
     )
     expect(emptyCopy("data", true).link?.to).toBe("/organization/guardrails")
   })
 
-  it("speaks for the keys the caller reads on an empty Access tab", () => {
+  it("speaks for the keys the caller reads on an empty access band", () => {
     const operator = emptyCopy("access", true, {
       isDeploymentWide: true,
       canCreateKey: true,
@@ -797,7 +782,29 @@ describe("what each role may do and see", () => {
       "Each Platform member, weekly",
       "Northwind, monthly",
     ])
-    expect(rulesOnTab(rules, "access")).toEqual([access])
+    expect(rulesOfType(rules, "access")).toEqual([access])
+  })
+})
+
+describe("a key's lists, as a cell shows them", () => {
+  it("names a provider wildcard in words and keeps any other id as it is", () => {
+    expect(
+      modelEntries(["anthropic:*", "openai:gpt-5.1-mini", "mistral:*"]),
+    ).toEqual([
+      { text: "All Anthropic models", isId: false },
+      { text: "openai:gpt-5.1-mini", isId: true },
+      { text: "All Mistral AI models", isId: false },
+    ])
+  })
+
+  it("tells no list, an empty list and the star apart", () => {
+    expect(modelEntries(null)).toEqual([{ text: "All models", isId: false }])
+    expect(modelEntries([])).toEqual([{ text: "No models", isId: false }])
+    expect(modelEntries(["*"])).toEqual([{ text: "All models", isId: false }])
+    expect(toolEntries(null)).toEqual([{ text: "Any tool", isId: false }])
+    expect(toolEntries(["*"])).toEqual([{ text: "Any tool", isId: false }])
+    expect(toolEntries([])).toEqual([{ text: "No tools", isId: false }])
+    expect(toolEntries(["tavily"])).toEqual([{ text: "tavily", isId: true }])
   })
 })
 

@@ -1,12 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { RulePage } from "@/features/rules/RulePage"
-
-function SelectedRule() {
-  const { ruleId } = Route.useParams()
-  return <RulePage ruleId={ruleId} />
-}
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/rules/$ruleId")({
-  component: SelectedRule,
+  // The old path of one guardrail's page. Ids did not change with the address.
+  beforeLoad: ({ params, search }) => {
+    throw redirect({
+      to: "/guardrails/$id",
+      params: { id: params.ruleId },
+      search,
+      replace: true,
+    })
+  },
 })

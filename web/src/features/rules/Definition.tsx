@@ -33,7 +33,7 @@ export function Definition({
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
           <span className="text-title">Definition</span>
           <span className="text-caption">
-            What the control plane stores for this rule, as JSON: {records}{" "}
+            What the control plane stores for this guardrail, as JSON: {records}{" "}
             {records === 1 ? "record" : "records"}
           </span>
         </span>

@@ -1,12 +1,12 @@
 /**
- * One rules registry over the stores that hold rules today, apart: spend
+ * One registry of guardrails over the stores that hold them today, apart: spend
  * ceilings and the budgets behind them, model and tool allow-lists on keys,
- * and the organization's guardrails. Each becomes a row with a type, who it
- * applies to, where it is enforced and how. Hook gates (Actions) live in each
+ * and the organization's content moderation. Each becomes a row with a type,
+ * who it applies to, where it is enforced and how. Hook gates live in each
  * repository's `.otari/` directory and no store lists them, so they have no
- * rows.
+ * rows. Code names keep the word "rule", which the page was called before.
  *
- * Only owners and admins read the ceilings, budgets and guardrails
+ * Only owners and admins read the ceilings, budgets and moderation
  * (`buildRules`). Anyone else reads what the server gives them
  * (`buildMemberRules`): each person's per-workspace ceiling amount on the
  * roster, the per-person default of their own workspaces, and their own keys.
@@ -28,51 +28,20 @@ import type { LimitScope, LimitTarget } from "@/features/spend/limits"
 import { limitsOn, perWords, resetEndedPeriods } from "@/features/spend/limits"
 import { keyName } from "@/features/spend/names"
 import { formatUsd } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
-type RuleType = "access" | "spend" | "data"
-export type RuleMode = "Enforce" | "Watch" | "Off"
+export type RuleType = "access" | "spend" | "data"
+/** A budget or an allow-list only enforces; content moderation blocks or monitors. */
+export type RuleMode = "Enforce" | "Block" | "Monitor" | "Off"
 
 export const RULE_TYPE_LABEL: Record<RuleType, string> = {
-  access: "Access",
-  spend: "Spend",
-  data: "Data",
+  spend: "Budget",
+  access: "Model & provider access",
+  data: "Content moderation",
 }
 
-/**
- * The views of the list. Actions has none: nothing lists hook gates, so its
- * tab could only hold a sentence, which the All view carries under the table.
- */
-export type RuleTab = "all" | "spend" | "access" | "data"
-
-export const RULE_TAB_LABEL: Record<RuleTab, string> = {
-  all: "All",
-  spend: "Spend",
-  access: "Access",
-  data: "Data",
-}
-
-const TAB_TYPE: Record<Exclude<RuleTab, "all">, RuleType> = {
-  spend: "spend",
-  access: "access",
-  data: "data",
-}
-
-/** Guardrails are refused to anyone but owners and admins, so is their tab. */
-export function ruleTabs(isManager: boolean): RuleTab[] {
-  return isManager
-    ? ["all", "spend", "access", "data"]
-    : ["all", "spend", "access"]
-}
-
-/** The tab a `?type=` value opens, or All for one this caller has not got. */
-export function ruleTabOf(value: string, isManager: boolean): RuleTab {
-  return ruleTabs(isManager).find((tab) => tab === value) ?? "all"
-}
-
-export function rulesOnTab(rules: readonly Rule[], tab: RuleTab): Rule[] {
-  return tab === "all"
-    ? [...rules]
-    : rules.filter((rule) => rule.type === TAB_TYPE[tab])
+export function rulesOfType(rules: readonly Rule[], type: RuleType): Rule[] {
+  return rules.filter((rule) => rule.type === type)
 }
 
 /** Whose requests a rule reaches, as the usage log filters them. */
@@ -335,6 +304,22 @@ const uniqueTeams = (placements: readonly Placement[]) => [
   ...new Set(placements.map((one) => one.team)),
 ]
 
+export const moderationRuleId = (guardrailId: string) => `data-${guardrailId}`
+
+/** Who a moderation guardrail reaches: the whole organization, or its workspaces. */
+export function moderationScope(
+  guardrail: Pick<
+    OrganizationGuardrail,
+    "applies_to_all_workspaces" | "workspace_ids"
+  >,
+  teamName: (workspaceId: string) => string,
+  organizationName: string | undefined,
+): RuleScope {
+  return guardrail.applies_to_all_workspaces
+    ? { kind: "everyone", organization: organizationName }
+    : { kind: "teams", teams: guardrail.workspace_ids.map(teamName) }
+}
+
 /** Every rule, as an owner or admin reads them. */
 export function buildRules(sources: RuleSources): Rule[] {
   const ceilings = resetEndedPeriods(sources.ceilings, sources.now)
@@ -506,19 +491,16 @@ export function buildRules(sources: RuleSources): Rule[] {
   rules.push(...keyAccessRules(sources.keys, sources.now))
 
   for (const guardrail of sources.guardrails) {
-    const scope: RuleScope = guardrail.applies_to_all_workspaces
-      ? { kind: "everyone" }
-      : { kind: "teams", teams: guardrail.workspace_ids.map(teamName) }
     rules.push({
-      id: `data-${guardrail.id}`,
+      id: moderationRuleId(guardrail.id),
       name: guardrail.profile,
       type: "data",
-      scope,
+      scope: moderationScope(guardrail, teamName, sources.organizationName),
       mode: !guardrail.enabled
         ? "Off"
         : guardrail.mode === "block"
-          ? "Enforce"
-          : "Watch",
+          ? "Block"
+          : "Monitor",
       subject: {},
       definition: guardrail,
       createdAt: guardrail.created_at,
@@ -669,33 +651,28 @@ export function ruleActions(
 
 export type RuleColumn =
   | "name"
-  | "type"
   | "scope"
   | "limit"
   | "spent"
   | "used"
   | "models"
   | "tools"
-  | "mode"
   | "actions"
 
 /**
- * The columns a tab shows this caller. Spent and Used only where the server
- * gives the spend; the actions lane wherever any row can have a menu.
+ * The columns a band shows this caller. Spent and Used only where the server
+ * gives the spend; the actions lane wherever any row can have a menu. Content
+ * moderation has a table of its own.
  */
 export function ruleColumns(
-  tab: RuleTab,
+  type: Exclude<RuleType, "data">,
   isManager: boolean,
   hasActions: boolean,
 ): RuleColumn[] {
   const actions: RuleColumn[] = hasActions ? ["actions"] : []
-  if (tab === "access") {
-    return ["name", "scope", "models", "tools", "mode", ...actions]
-  }
-  if (tab === "data") return ["name", "scope", "mode", ...actions]
-  const type: RuleColumn[] = tab === "all" ? ["type"] : []
+  if (type === "access") return ["name", "models", "tools", ...actions]
   const spend: RuleColumn[] = isManager ? ["spent", "used"] : []
-  return ["name", ...type, "scope", "limit", ...spend, "mode", ...actions]
+  return ["name", "scope", "limit", ...spend, ...actions]
 }
 
 interface EmptyCopy {
@@ -705,7 +682,7 @@ interface EmptyCopy {
   link?: { label: string; to: string }
 }
 
-/** Whose API keys the caller reads, which an empty Access tab speaks for. */
+/** Whose API keys the caller reads, which an empty access band speaks for. */
 interface KeyReader {
   /** The deployment's operator reads every key; anyone else, their own. */
   isDeploymentWide: boolean
@@ -713,12 +690,14 @@ interface KeyReader {
   organizationName?: string
 }
 
+/** What an empty band says, by type and by who is reading it. */
 export function emptyCopy(
-  tab: RuleTab,
+  type: RuleType,
   isManager: boolean,
   keys: KeyReader = { isDeploymentWide: true, canCreateKey: true },
+  workspaceName?: string,
 ): EmptyCopy {
-  if (tab === "access") {
+  if (type === "access") {
     // An owner or admin also reads the organization's service keys.
     const whose = keys.isDeploymentWide
       ? "No API key has"
@@ -734,27 +713,16 @@ export function emptyCopy(
       }`,
     }
   }
-  if (tab === "data") {
+  if (type === "data") {
     return {
-      title: "No guardrails yet.",
-      body: "A guardrail checks each request before it reaches a model. Set one up in",
+      title: `No content moderation runs in ${workspaceName ?? "this workspace"}.`,
+      body: "It checks each request before it reaches a model. Set it up in the organization’s",
       link: { label: "Guardrails", to: "/organization/guardrails" },
     }
   }
-  if (!isManager) {
-    return tab === "spend"
-      ? { title: "No spend limit reaches your workspaces." }
-      : {
-          title:
-            "No spend limit or model list reaches your workspaces or your API keys.",
-        }
-  }
-  return tab === "spend"
-    ? { title: "No spend limits yet.", body: "Set one with New rule." }
-    : {
-        title: "No rules yet.",
-        body: "Set a spend limit for everyone, a workspace, a person or an API key with New rule.",
-      }
+  return isManager
+    ? { title: "No budgets yet.", body: "Set one with New guardrail." }
+    : { title: "No budget reaches your workspaces." }
 }
 
 /** What stopping a workspace's default leaves, said for its headcount. */
@@ -803,4 +771,39 @@ export function accessWords(access: NonNullable<Rule["access"]>): string {
       : `${list.length} ${list.length === 1 ? one : many}`
   const words = `${count(access.models, "model", "models")}, ${count(access.tools, "tool", "tools")}`
   return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** One entry of an allow-list as a cell shows it. */
+export interface ListEntry {
+  text: string
+  /** A model or tool id, set in mono; words otherwise. */
+  isId: boolean
+}
+
+/**
+ * A key's model list: a provider wildcard in the words the model picker uses
+ * for it, anything else as the id it is. No list allows every model.
+ */
+export function modelEntries(models: readonly string[] | null): ListEntry[] {
+  if (models === null || models.includes("*")) {
+    return [{ text: "All models", isId: false }]
+  }
+  if (models.length === 0) return [{ text: "No models", isId: false }]
+  return models.map((id) =>
+    id.endsWith(":*")
+      ? {
+          text: `All ${providerDisplayName(id.slice(0, -2))} models`,
+          isId: false,
+        }
+      : { text: id, isId: true },
+  )
+}
+
+/** A key's search and fetch tools; no list, or the star, allows any. */
+export function toolEntries(tools: readonly string[] | null): ListEntry[] {
+  if (tools === null || tools.includes("*")) {
+    return [{ text: "Any tool", isId: false }]
+  }
+  if (tools.length === 0) return [{ text: "No tools", isId: false }]
+  return tools.map((id) => ({ text: id, isId: true }))
 }

@@ -41,9 +41,9 @@ import type {
  * The workspace rail, and the only place its destinations are declared.
  *
  * One section, headingless: every row is a place in the selected workspace,
- * and none of them is a category. Two destinations are registered without a
- * row (`OFF_RAIL_ITEMS`): the workspace's Guardrails, which opens from Rules,
- * and `/members`, the workspace roster, which opens from People.
+ * and none of them is a category. One destination is registered without a
+ * row (`OFF_RAIL_ITEMS`): `/members`, the workspace roster, which opens from
+ * People.
  *
  * Each thing exists once: Billing, Providers and Email domains are
  * organization pages, reached from the footer's Organization row.
@@ -74,7 +74,7 @@ const BASE_NAV_SECTIONS = [
         views: ["/requests", "/router-savings"],
       },
       { to: "/people", label: "People", icon: FiUsers },
-      { to: "/rules", label: "Rules", icon: FiShield },
+      { to: "/guardrails", label: "Guardrails", icon: FiShield },
       // Not tagged `capability: "routing"`: ARCHITECTURE.md marks the routing
       // split provisional. `/aliases` redirects onto `/routing`.
       { to: "/routing", label: "Routing", surface: "routing", icon: FiRepeat },
@@ -238,9 +238,8 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organization_providers",
         icon: FiServer,
       },
-      // The organization's own guardrails and where each one runs. Not the
-      // workspace rail's `/tools/guardrails`, which sets the deployment's own
-      // guardrails service.
+      // The organization's own guardrails and where each one runs. The
+      // workspace rail's Guardrails lists the ones running in that workspace.
       {
         to: "/organization/guardrails",
         label: "Guardrails",
@@ -530,16 +529,6 @@ export const PLAYGROUND_NAV_ITEM = {
  */
 export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS
 
-// An owner or admin sets the workspace's guardrails; the page has nothing for
-// anyone else to do. It opens from Rules' Data tab, so it selects Rules.
-const WORKSPACE_GUARDRAILS_NAV_ITEM = {
-  to: "/tools/guardrails",
-  label: "Guardrails",
-  surface: "tools",
-  icon: FiShield,
-  requires: "manager",
-} as const satisfies NavItem
-
 /**
  * The workspace roster, registered without a row. People lists the workspace
  * and links here for what only the roster does (add someone to the workspace,
@@ -555,7 +544,6 @@ const WORKSPACE_MEMBERS_NAV_ITEM = {
 /** Destinations with no rail row, by the rail row that stands for them. */
 const OFF_RAIL_ITEMS: readonly { item: NavItem; railPath?: NavPath }[] = [
   { item: WORKSPACE_MEMBERS_NAV_ITEM, railPath: "/people" },
-  { item: WORKSPACE_GUARDRAILS_NAV_ITEM, railPath: "/rules" },
 ]
 
 const RAIL_ITEMS: readonly NavItem[] = [
@@ -576,8 +564,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
 
 /**
  * The rail row to mark selected at this pathname: for a destination with no
- * row, the row that stands for it (Rules for the workspace guardrails), and otherwise the
- * destination's own entry.
+ * row, the row that stands for it (People for the workspace roster), and
+ * otherwise the destination's own entry.
  */
 export function railPathForPath(pathname: string): NavPath | undefined {
   const item = navItemForPath(pathname)
