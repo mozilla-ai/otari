@@ -133,6 +133,10 @@ A manager checks the server and chooses its tools apart from any connection: on
 the server's page, click **Check** under **Exposed tools**. See
 [Check a server](mcp-servers.md#check-a-server).
 
+A server your organization added for every workspace works the same way, and
+one sign-in serves every workspace that reaches it: you connect once, from any
+of them. See [Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
+
 ## Connect from your coding agent instead
 
 You do not have to open the dashboard. When a workspace manager has set the
