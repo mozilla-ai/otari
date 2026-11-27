@@ -405,7 +405,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
       {/* Below md the panel covers the page, which then takes no focus or
           presses until it closes. */}
       <div className="flex flex-col" inert={open !== null && isMobile}>
-        {embedded ? null : <PageIntro title="Sessions" />}
+        {embedded ? null : <PageIntro title="Traces" />}
         {keepsContent ? (
           <InfoBanner>
             {workspaceId ? "This workspace keeps" : "Your workspaces keep"} what

@@ -63,13 +63,13 @@ const BASE_NAV_SECTIONS = [
       // organization keeps, since it is where they are told how to get in.
       {
         to: "/",
-        label: "Home",
+        label: "Activity",
         icon: FiHome,
         reachableWithoutOrganization: true,
       },
       {
         to: "/sessions",
-        label: "Sessions",
+        label: "Traces",
         icon: FiList,
         views: ["/requests", "/router-savings"],
       },

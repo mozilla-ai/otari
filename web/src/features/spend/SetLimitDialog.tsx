@@ -152,7 +152,7 @@ export function SetLimitDialog({
         ) : null}
         <p className="text-sm text-muted">
           A request that would go past the limit is refused until it resets, and
-          the refusal shows in Sessions.
+          the refusal shows in Traces.
         </p>
         {target.own ? (
           <p className="text-sm text-muted">

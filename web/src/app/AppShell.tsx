@@ -1371,8 +1371,8 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Home."
-                  actionLabel={pathname === "/" ? undefined : "Go to Home"}
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Activity."
+                  actionLabel={pathname === "/" ? undefined : "Go to Activity"}
                   onAction={() => void navigate({ to: "/" })}
                 />
               ) : (

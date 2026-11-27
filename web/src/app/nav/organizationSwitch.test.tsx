@@ -247,7 +247,7 @@ describe("switching organization", () => {
   it("keeps a page working where the new role is lower", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByRole("heading", { name: "Home" })
+    await screen.findByRole("heading", { name: "Activity" })
 
     await switchOrganization()
 
@@ -270,7 +270,7 @@ describe("switching organization", () => {
   it("takes the new role from the switch's own answer", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByRole("heading", { name: "Home" })
+    await screen.findByRole("heading", { name: "Activity" })
 
     await switchOrganization()
 
@@ -295,7 +295,7 @@ describe("switching organization", () => {
       holdCeilingsHere: { held: hold.promise, answered: answered.resolve },
     })
     renderShellOverPage()
-    await screen.findByRole("heading", { name: "Home" })
+    await screen.findByRole("heading", { name: "Activity" })
 
     await switchOrganization()
     // The organization switched into has answered, with a ceiling well inside
@@ -318,7 +318,7 @@ describe("switching organization", () => {
   it("does not ask for a workspace of the organization it left", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByRole("heading", { name: "Home" })
+    await screen.findByRole("heading", { name: "Activity" })
     expect(requests.some((r) => r.includes(WORKSPACE_HERE))).toBe(true)
 
     await switchOrganization()
@@ -339,7 +339,7 @@ describe("switching organization", () => {
   it("makes the gated read again where the role survives the switch", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByRole("heading", { name: "Home" })
+    await screen.findByRole("heading", { name: "Activity" })
 
     await switchOrganization()
 

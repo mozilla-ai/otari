@@ -148,7 +148,7 @@ describe("AccountMenu", () => {
     expect(link).toHaveAttribute("href", "/playground")
     expect(link).toHaveClass("md:hidden")
     expect(link.nextElementSibling).toBe(
-      screen.getByRole("link", { name: "Documentation" }),
+      screen.getByRole("link", { name: "Docs" }),
     )
   })
 
@@ -172,7 +172,7 @@ describe("AccountMenu", () => {
     mockCaller(OPERATOR)
     await openMenu()
 
-    const link = await screen.findByRole("link", { name: "Documentation" })
+    const link = await screen.findByRole("link", { name: "Docs" })
     expect(link).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(link).toHaveAttribute("target", "_blank")
   })
@@ -230,7 +230,7 @@ describe("AccountMenu", () => {
     mockCaller(OPERATOR)
     await openMenu({ docs_url: "https://docs.example.com/" })
 
-    const link = await screen.findByRole("link", { name: "Documentation" })
+    const link = await screen.findByRole("link", { name: "Docs" })
     expect(link).toHaveAttribute("href", "https://docs.example.com/")
     expect(link).toHaveAttribute("target", "_blank")
     // Still the row the top bar hands off to below `md`, not a second entry
@@ -411,7 +411,7 @@ it("opens Contact from a phone-only row right after Documentation", async () => 
   // From md up the top bar carries it, as it carries Documentation.
   expect(trigger).toHaveClass("md:hidden")
   expect(trigger.previousElementSibling).toBe(
-    screen.getByRole("link", { name: "Documentation" }),
+    screen.getByRole("link", { name: "Docs" }),
   )
   await userEvent.setup().click(trigger)
   expect(onOpenFeedback).toHaveBeenCalledOnce()

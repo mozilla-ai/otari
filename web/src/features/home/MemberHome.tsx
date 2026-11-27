@@ -455,7 +455,7 @@ export function MemberHome({
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
-        title="Home"
+        title="Activity"
         action={
           <SpendPeriodPicker
             value={period}

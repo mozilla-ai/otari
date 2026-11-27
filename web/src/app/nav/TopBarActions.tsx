@@ -46,7 +46,7 @@ export function TopBarActions({
         rel="noopener noreferrer"
         className={ACTION}
       >
-        Documentation
+        Docs
       </a>
       {/* A button beside the links, so it takes their class and the pointer a
           link gets for free. */}

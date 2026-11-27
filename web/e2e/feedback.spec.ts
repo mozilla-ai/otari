@@ -24,7 +24,7 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test("desktop: the top bar opens it beside Documentation, a failure keeps the draft, a retry thanks", async ({
+test("desktop: the top bar opens it beside Docs, a failure keeps the draft, a retry thanks", async ({
   page,
 }) => {
   const payloads: unknown[] = []
@@ -50,7 +50,7 @@ test("desktop: the top bar opens it beside Documentation, a failure keeps the dr
   const trigger = topBar.getByRole("button", { name: "Contact", exact: true })
   expect(
     await topBar
-      .getByRole("link", { name: "Documentation", exact: true })
+      .getByRole("link", { name: "Docs", exact: true })
       .evaluate((link) => link.nextElementSibling?.textContent),
   ).toBe("Contact")
   await trigger.click()
@@ -218,7 +218,7 @@ test("a gateway with feedback off never offers Contact", async ({ page }) => {
   await disableFeedback(page)
   await login(page)
   await expect(
-    page.getByRole("link", { name: "Documentation", exact: true }),
+    page.getByRole("link", { name: "Docs", exact: true }),
   ).toBeVisible()
   await expect(
     page.getByRole("button", { name: "Contact", exact: true }),

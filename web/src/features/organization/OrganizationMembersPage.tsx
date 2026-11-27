@@ -1247,7 +1247,7 @@ export function OrganizationMembersPage() {
                       {
                         id: "sessions",
                         label: "See their sessions",
-                        hint: "Everything their agents ran, in Sessions",
+                        hint: "Everything their agents ran, in Traces",
                         icon: FiLayers,
                         run: () =>
                           void navigate({

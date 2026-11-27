@@ -106,7 +106,7 @@ function NoOrganizationOverview() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Home" />
+      <PageIntro title="Activity" />
       <EmptyState
         title="You're not a member of an organization yet"
         description={
@@ -247,7 +247,7 @@ function SessionsLayout() {
   return (
     <div className="flex flex-col">
       <PageIntro
-        title="Sessions"
+        title="Traces"
         action={
           workspaceFilter ? (
             <div inert={isCovered}>
@@ -260,7 +260,7 @@ function SessionsLayout() {
         {tabs.length > 1 ? (
           <div className="pb-5">
             <ViewTabs
-              label="Sessions views"
+              label="Traces views"
               tabs={tabs.map((tab) => ({
                 to: tab.path,
                 label: tab.label,

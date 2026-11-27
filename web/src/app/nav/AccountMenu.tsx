@@ -285,7 +285,7 @@ export function AccountMenu({
   onOpenDeploymentLevel?: () => void
   /**
    * Below `md`, opens the Contact dialog, which the shell mounts outside this
-   * popover. From `md` up the top bar carries it beside Documentation.
+   * popover. From `md` up the top bar carries it beside Docs.
    */
   onOpenFeedback?: () => void
 }) {
@@ -438,7 +438,7 @@ export function AccountMenu({
             />
           )}
           <MenuExternalLink
-            label="Documentation"
+            label="Docs"
             icon={FiBookOpen}
             href={documentationHref({ docs_url })}
             className="md:hidden"

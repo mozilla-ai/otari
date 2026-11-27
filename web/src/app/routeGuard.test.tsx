@@ -346,7 +346,7 @@ describe("a page the caller may open", () => {
     const user = userEvent.setup()
     await renderAt("/keys", "member")
     await screen.findByText("PAGE CONTENT")
-    await user.click(screen.getByRole("link", { name: "Home" }))
+    await user.click(screen.getByRole("link", { name: "Activity" }))
     expect(await screen.findByText("HOME PAGE")).toBeInTheDocument()
   })
 })
@@ -357,7 +357,7 @@ describe("the selected rail row", () => {
     ["/rules/some-rule", "Rules", "/rules/$ruleId"],
     ["/routing/coding", "Rules", "/routing/$name"],
     ["/keys?state=disabled", "API keys", "/keys"],
-    ["/sessions?range=30d", "Sessions", "/sessions"],
+    ["/sessions?range=30d", "Traces", "/sessions"],
   ] as const) {
     it(`is announced as current on ${url}`, async () => {
       setDesktop()

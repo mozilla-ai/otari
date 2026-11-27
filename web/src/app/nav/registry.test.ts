@@ -90,8 +90,8 @@ describe("nav registry", () => {
       "Members",
       "Routing",
       "Guardrails",
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",
@@ -337,17 +337,17 @@ describe("nav registry", () => {
   })
 
   it("leaves the index ungated on both axes", () => {
-    const overview = NAV_ITEMS.find((item) => item.label === "Home")
+    const overview = NAV_ITEMS.find((item) => item.label === "Activity")
     // The deployment's own front page: it reads whatever it is allowed to, so
     // gating it would leave a deployment with no landing page at all.
     expect(overview?.surface).toBeUndefined()
     expect(overview?.capability).toBeUndefined()
   })
 
-  it("files Requests and Router savings under Sessions rather than rows of their own", () => {
+  it("files Requests and Router savings under Traces rather than rows of their own", () => {
     // Views under one title, each gated on its own surface inside the page,
     // so neither adds a row.
-    const sessions = NAV_ITEMS.find((item) => item.label === "Sessions")
+    const sessions = NAV_ITEMS.find((item) => item.label === "Traces")
     expect(sessions?.views).toEqual(["/requests", "/router-savings"])
     for (const view of ["/requests", "/router-savings"]) {
       expect(NAV_ITEMS.map((item) => item.to)).not.toContain(view)
@@ -476,8 +476,8 @@ describe("nav registry", () => {
     const index = NAV_SECTIONS.find((section) => section.id === "index")
     expect(index?.label).toBeUndefined()
     expect(index?.items.map((item) => item.label)).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",
@@ -587,7 +587,7 @@ describe("navItemForPath", () => {
   })
 
   it("matches the index only exactly", () => {
-    expect(navItemForPath("/")?.label).toBe("Home")
+    expect(navItemForPath("/")?.label).toBe("Activity")
     // As a prefix, "/" would claim every path in the dashboard and gate the
     // whole shell on the index's (absent) gating.
     expect(navItemForPath("/keys")?.label).toBe("API keys")
@@ -640,9 +640,9 @@ describe("isPathVisible", () => {
     expect(isPathVisible("/routing/new", without("routing"))).toBe(false)
   })
 
-  it("answers a view of Sessions with Sessions", () => {
-    expect(navItemForPath("/requests")?.label).toBe("Sessions")
-    expect(navItemForPath("/sessions")?.label).toBe("Sessions")
+  it("answers a view of Traces with Traces", () => {
+    expect(navItemForPath("/requests")?.label).toBe("Traces")
+    expect(navItemForPath("/sessions")?.label).toBe("Traces")
     // Ungated, like the page it is a view of: each tab gates itself.
     expect(isPathVisible("/sessions", without("traces"))).toBe(true)
   })
@@ -833,7 +833,7 @@ describe("composeNavItems", () => {
 describe("pageLabelForPath", () => {
   it("names a rail page and a chrome page from one place", () => {
     expect(pageLabelForPath("/keys")).toBe("API keys")
-    expect(pageLabelForPath("/sessions")).toBe("Sessions")
+    expect(pageLabelForPath("/sessions")).toBe("Traces")
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()
@@ -1064,7 +1064,7 @@ describe("the rails, per role", () => {
 })
 
 describe("reachableWithoutOrganization", () => {
-  it("is declared by Home alone in the base registry", () => {
+  it("is declared by Activity alone in the base registry", () => {
     const optedIn = [
       ...NAV_SECTIONS,
       ...ORG_NAV_SECTIONS,

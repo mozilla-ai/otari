@@ -90,7 +90,7 @@ describe("Sessions scope", () => {
     renderSessions("/requests")
 
     await screen.findByRole("navigation", {
-      name: "Sessions views",
+      name: "Traces views",
       hidden: true,
     })
     expect(screen.queryByText("Mine")).toBeNull()

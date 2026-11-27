@@ -7,13 +7,13 @@ import { PARITY } from "./parity-data"
 // one worker against one gateway either way (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
-test.describe("Home and Sessions", () => {
-  test("opens on Home, with no getting-started screen on a working gateway", async ({
+test.describe("Activity and Traces", () => {
+  test("opens on Activity, with no getting-started screen on a working gateway", async ({
     page,
   }) => {
     await login(page)
     await expect(
-      page.getByRole("main").getByRole("heading", { name: "Home" }),
+      page.getByRole("main").getByRole("heading", { name: "Activity" }),
     ).toBeVisible()
     // Onboarding is an empty-gateway state. With providers configured and
     // usage recorded it has to be gone, or a working gateway keeps being told
@@ -57,8 +57,8 @@ test.describe("Home and Sessions", () => {
 
   test("a window picked on one view carries to the other", async ({ page }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Sessions" }).click()
-    const views = page.getByRole("navigation", { name: "Sessions views" })
+    await nav(page).getByRole("link", { name: "Traces" }).click()
+    const views = page.getByRole("navigation", { name: "Traces views" })
     await views.getByRole("link", { name: "Requests" }).click()
     await expect(page).toHaveURL(/\/requests/)
 
@@ -73,9 +73,9 @@ test.describe("Home and Sessions", () => {
     page,
   }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Sessions" }).click()
+    await nav(page).getByRole("link", { name: "Traces" }).click()
     await page
-      .getByRole("navigation", { name: "Sessions views" })
+      .getByRole("navigation", { name: "Traces views" })
       .getByRole("link", { name: "Requests" })
       .click()
     await expect(page).toHaveURL(/\/requests/)

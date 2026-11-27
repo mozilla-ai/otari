@@ -25,7 +25,7 @@ function periodCopy(period: Period | undefined): {
     return {
       label: "Monthly spend limit, in dollars",
       description:
-        "Resets on the first of each month. A request that would go past it is refused, and the refusal shows in Sessions.",
+        "Resets on the first of each month. A request that would go past it is refused, and the refusal shows in Traces.",
     }
   }
   const per = perWords(period)
@@ -33,10 +33,10 @@ function periodCopy(period: Period | undefined): {
   return {
     label: "Spend limit, in dollars",
     description: !per
-      ? "A request that would go past it is refused, and the refusal shows in Sessions."
+      ? "A request that would go past it is refused, and the refusal shows in Traces."
       : `A request that would take a person past the limit is refused until ${
           noun ? `their ${noun} resets` : "it resets"
-        }, and the refusal shows in Sessions.`,
+        }, and the refusal shows in Traces.`,
   }
 }
 

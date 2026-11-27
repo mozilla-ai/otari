@@ -266,7 +266,7 @@ describe("WorkspaceDefaultLimit", () => {
     ).toHaveValue("40")
     expect(
       within(dialog).getByText(
-        "A request that would take a person past the limit is refused until their week resets, and the refusal shows in Sessions.",
+        "A request that would take a person past the limit is refused until their week resets, and the refusal shows in Traces.",
       ),
     ).toBeVisible()
   })

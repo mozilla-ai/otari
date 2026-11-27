@@ -126,7 +126,7 @@ function KeyCreated({
           <ErrorBanner error={limitError} />
           <p className="text-sm text-muted">
             The key works, but its limit was not saved. Set it from the key’s
-            row on Home.
+            row on Activity.
           </p>
         </div>
       ) : null}

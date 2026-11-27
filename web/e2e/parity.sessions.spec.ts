@@ -10,8 +10,8 @@ test.describe("sessions", () => {
     page,
   }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Sessions" }).click()
-    await expect(pageHeading(page, "Sessions")).toBeVisible()
+    await nav(page).getByRole("link", { name: "Traces" }).click()
+    await expect(pageHeading(page, "Traces")).toBeVisible()
     await expect(page).toHaveURL(/\/sessions/)
 
     const row = tableRows(page, "Sessions").filter({

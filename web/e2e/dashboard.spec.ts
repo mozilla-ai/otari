@@ -24,7 +24,7 @@ test.describe("dashboard core flows", () => {
     page,
   }) => {
     await login(page)
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
     await expect(page.getByText("Get started with Otari")).toBeVisible()
   })
 
@@ -115,7 +115,7 @@ test.describe("dashboard core flows", () => {
 
     // Permanent: the offer does not come back on the next page load.
     await page.reload()
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
     await expect(sheet).toBeHidden()
   })
 

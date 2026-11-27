@@ -49,7 +49,7 @@ export function Home() {
   if (!selected) {
     return (
       <PageIntro
-        title="Home"
+        title="Activity"
         detail="You are not in a workspace yet. An owner or admin of the organization can add you to one."
       />
     )

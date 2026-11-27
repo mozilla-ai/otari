@@ -58,8 +58,8 @@ describe("a build that replaces the label-override module", () => {
         (item) => item.label,
       ),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",

@@ -283,8 +283,8 @@ describe("AppShell responsive layout", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",
@@ -360,8 +360,8 @@ describe("AppShell responsive layout", () => {
 
     // On the index first, because that is the half the comment above is about:
     // "/" lights here and must stop lighting once a page under it is open.
-    expect(document.title).toBe("Home · Otari")
-    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute(
+    expect(document.title).toBe("Activity · Otari")
+    expect(screen.getByRole("link", { name: "Activity" })).toHaveAttribute(
       "aria-current",
       "page",
     )
@@ -590,7 +590,7 @@ describe("AppShell responsive layout", () => {
 
     // In the top bar, where the design puts it, rather than inside the account
     // menu: the docs are read alongside a page rather than instead of one.
-    const guideLink = await screen.findByRole("link", { name: "Documentation" })
+    const guideLink = await screen.findByRole("link", { name: "Docs" })
     expect(guideLink).toHaveAttribute("href", "https://docs.otari.ai/")
   })
 
@@ -632,7 +632,7 @@ describe("AppShell for a caller with no organization", () => {
 
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" })
     expect(
-      await within(sidebar).findByRole("link", { name: "Home" }),
+      await within(sidebar).findByRole("link", { name: "Activity" }),
     ).toBeInTheDocument()
     // A 404 is no organization, not an unavailable context, which would fail
     // open onto the operator rows and the organization rail.
@@ -761,8 +761,8 @@ describe("AppShell surface gating", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",
@@ -865,7 +865,7 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
-    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument()
   })
 
   it("drops a section header once its whole group is gated away", async () => {
@@ -911,8 +911,8 @@ describe("AppShell entitlement gating", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
-      "Home",
-      "Sessions",
+      "Activity",
+      "Traces",
       "People",
       "Rules",
       "Models",
@@ -942,7 +942,7 @@ describe("AppShell entitlement gating", () => {
       screen.getByText(/Choose another page from the menu/),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Go to Home" }),
+      screen.getByRole("button", { name: "Go to Activity" }),
     ).toBeInTheDocument()
   })
 
@@ -1070,7 +1070,7 @@ describe("AppShell entitlement gating", () => {
       await screen.findByRole("link", { name: "Members & roles" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Sessions" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Traces" })).toBeNull()
   })
 
   it("offers a way into the organization rail, and a way back out", async () => {
@@ -1386,7 +1386,7 @@ describe("AppShell entitlement gating", () => {
     // pointing at it below the breakpoint. The row carries `md:hidden` for the
     // mirror-image reason: above it, the top bar already answers.
     await user.click(screen.getByRole("button", { name: /^Account:/ }))
-    const guideRow = await screen.findByRole("link", { name: "Documentation" })
+    const guideRow = await screen.findByRole("link", { name: "Docs" })
     expect(guideRow).toHaveAttribute("href", "https://docs.otari.ai/")
     expect(guideRow).toHaveClass("md:hidden")
   })
@@ -1474,7 +1474,7 @@ describe("AppShell entitlement gating", () => {
       within(rail).getByRole("link", { name: "Accounts" }),
     ).toBeInTheDocument()
     // And neither of the other two rails is showing.
-    expect(within(rail).queryByRole("link", { name: "Home" })).toBeNull()
+    expect(within(rail).queryByRole("link", { name: "Activity" })).toBeNull()
     expect(
       within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
@@ -1631,7 +1631,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/models" })
 
-    await user.click(screen.getByRole("link", { name: "Home" }))
+    await user.click(screen.getByRole("link", { name: "Activity" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "index",
@@ -1804,7 +1804,7 @@ describe("the workspace rail, per role", () => {
 
   for (const [path, row] of [
     ["/members", "People"],
-    ["/requests", "Sessions"],
+    ["/requests", "Traces"],
     ["/tools/web-search", "Tools"],
   ] as const) {
     it(`announces ${row} as the current row on ${path}, and no other`, async () => {
