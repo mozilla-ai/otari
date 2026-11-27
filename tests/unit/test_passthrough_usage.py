@@ -81,6 +81,24 @@ def test_an_image_reports_the_images_returned() -> None:
     )
 
 
+def test_an_image_reports_the_image_tokens_among_its_output() -> None:
+    result = ImagesResponse.model_validate(
+        {
+            "created": 0,
+            "data": [{"b64_json": "aGk="}],
+            "usage": {
+                "input_tokens": 20,
+                "output_tokens": 1_440,
+                "total_tokens": 1_460,
+                "input_tokens_details": {"image_tokens": 0, "text_tokens": 20},
+                "output_tokens_details": {"image_tokens": 1_120, "text_tokens": 320},
+            },
+        }
+    )
+
+    assert image_usage(result).image_output_tokens == 1_120
+
+
 @pytest.mark.parametrize("data", [None, []])
 def test_no_images_returned_reports_none(data: list[Image] | None) -> None:
     reported = image_usage(ImagesResponse(created=0, data=data), size="1024x1024")

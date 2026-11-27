@@ -38,6 +38,7 @@ from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    image_output_tokens_of,
     provider_web_searches_of,
     reasoning_tokens_of,
 )
@@ -373,6 +374,7 @@ class _ChatTotals:
     cache_write_5m: int = 0
     cache_write_1h: int = 0
     reasoning: int = 0
+    image: int = 0
     web_searches: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     stream_id: str | None = None
@@ -390,6 +392,7 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
     acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
     acc.cache_write_1h += cache_write_1h_tokens_of(usage)
     acc.reasoning += reasoning_tokens_of(usage)
+    acc.image += image_output_tokens_of(usage)
     acc.web_searches += provider_web_searches_of(usage)
 
 
@@ -416,10 +419,12 @@ def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatT
                 ephemeral_1h_input_tokens=totals.cache_write_1h,
             )
     reasoning = usage.completion_tokens_details
-    if reasoning is None and totals.reasoning:
+    if reasoning is None and (totals.reasoning or totals.image):
         reasoning = usage.completion_tokens_details = CompletionTokensDetails()
     if reasoning is not None:
         reasoning.reasoning_tokens = totals.reasoning
+        if totals.image:
+            reasoning.image_tokens = totals.image
     if totals.web_searches:
         usage.server_tool_use = ServerToolUsage(web_search_requests=totals.web_searches)
 

@@ -662,7 +662,10 @@ def _responses_usage(usage: Any) -> dict[str, Any] | None:
             "cache_write_tokens": getattr(prompt_details, "cache_write_tokens", None) or 0,
         },
         "output_tokens": usage.completion_tokens or 0,
-        "output_tokens_details": {"reasoning_tokens": getattr(completion_details, "reasoning_tokens", None) or 0},
+        "output_tokens_details": {
+            "reasoning_tokens": getattr(completion_details, "reasoning_tokens", None) or 0,
+            **({"image_tokens": image} if (image := getattr(completion_details, "image_tokens", None)) else {}),
+        },
         "total_tokens": usage.total_tokens or 0,
     }
 

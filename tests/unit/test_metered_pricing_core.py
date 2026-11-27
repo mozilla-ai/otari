@@ -391,6 +391,26 @@ def test_a_meter_with_no_units_gets_no_charge_line() -> None:
     assert [line["meter"] for line in lines] == ["input"]
 
 
+def test_image_output_tokens_bill_at_the_image_price_the_block_gives() -> None:
+    # gemini-3.1-flash-lite-image: text output $1.50/M, image output $30/M.
+    pricing = _pricing(
+        input_price_per_million=Decimal("0.25"),
+        output_price_per_million=Decimal("1.5"),
+        rates={"text": {"input": {"price": 0.25}, "output": {"price": 1.5}}, "image": {"output": {"price": 30}}},
+    )
+    usage = billable_usage(input_tokens=20, output_tokens=1_440, image_output_tokens=1_120, cache_tokens_included=True)
+
+    cost, _, lines = price_billable_usage(pricing, usage)
+
+    assert cost == Decimal("0.034085")
+    assert [(line["meter"], line["units"]) for line in lines] == [
+        ("input", 20),
+        ("output", 320),
+        ("image_output", 1_120),
+    ]
+    assert estimate_metered_cost(pricing, estimated_input_tokens=0, estimated_output_tokens=1_000) == Decimal("0.03")
+
+
 # ---------------------------------------------------------------------------
 # The reserve-time upper bound
 # ---------------------------------------------------------------------------
