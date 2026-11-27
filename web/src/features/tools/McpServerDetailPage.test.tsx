@@ -102,6 +102,16 @@ describe("McpServerDetailPage, Access", () => {
     ).toBeVisible()
   })
 
+  it("links back to the MCP servers list above the server's name", async () => {
+    mockMcpServerApi({ server: SERVER })
+    await openPage()
+
+    expect(screen.getByRole("link", { name: "← MCP servers" })).toHaveAttribute(
+      "href",
+      "/tools/mcp-servers",
+    )
+  })
+
   it("explains each Availability choice, in the list and behind the icon", async () => {
     mockMcpServerApi({ server: SERVER })
     const user = userEvent.setup()

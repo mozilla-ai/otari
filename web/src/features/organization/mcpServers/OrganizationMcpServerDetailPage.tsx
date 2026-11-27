@@ -137,6 +137,7 @@ export function OrganizationMcpServerDetailPage({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
+      {back}
       <McpConnectionNoticeBanner onAddClient={addClient} />
       <PageIntro
         title={server.name}
