@@ -5,7 +5,7 @@ import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 
 export const Route = createFileRoute("/tools/web-search")({
   component: () => (
-    <ToolsFrame back>
+    <ToolsFrame title="Web search" back>
       <ToolsGuardrailsPage only="web_search" />
     </ToolsFrame>
   ),

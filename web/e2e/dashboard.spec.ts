@@ -131,7 +131,7 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Routing", exact: true }).click()
     await expect(pageHeading(page, "Routing")).toBeVisible()
     await openListed(page, "Tools", "Web search")
-    await expect(pageHeading(page, "Tools")).toBeVisible()
+    await expect(pageHeading(page, "Web search")).toBeVisible()
     // A tool's settings lead back to the list, which has no tab row to do it.
     await page.getByRole("main").getByRole("link", { name: "← Tools" }).click()
     await expect(page).toHaveURL(/\/tools$/)

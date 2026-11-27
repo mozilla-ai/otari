@@ -68,6 +68,10 @@ describe("ToolsPage", () => {
       "href",
       "/tools",
     )
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Guardrail services" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull()
   })
 
   it("gives a non-operator with ?service=guardrails the overview", async () => {

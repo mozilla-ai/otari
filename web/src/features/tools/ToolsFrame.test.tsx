@@ -4,23 +4,34 @@ import { renderWithRouter } from "@/tests/router"
 import { ToolsFrame } from "./ToolsFrame"
 
 describe("ToolsFrame", () => {
-  it("titles the page and leaves a tool's list with no way back", async () => {
+  it("titles the list Tools, with no way back", async () => {
     await renderWithRouter(<ToolsFrame>LIST</ToolsFrame>)
 
     expect(
-      await screen.findByRole("heading", { name: "Tools" }),
+      await screen.findByRole("heading", { level: 1, name: "Tools" }),
     ).toBeInTheDocument()
     expect(screen.getByText("LIST")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "← Tools" })).toBeNull()
     expect(screen.queryByRole("navigation")).toBeNull()
   })
 
-  it("links a tool's settings back to the list", async () => {
-    await renderWithRouter(<ToolsFrame back>SETTINGS</ToolsFrame>)
+  it("titles a tool's settings by the tool and links back to the list above the title", async () => {
+    await renderWithRouter(
+      <ToolsFrame title="Web search" back>
+        SETTINGS
+      </ToolsFrame>,
+    )
 
+    const title = await screen.findByRole("heading", {
+      level: 1,
+      name: "Web search",
+    })
+    expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull()
+    const back = screen.getByRole("link", { name: "← Tools" })
+    expect(back).toHaveAttribute("href", "/tools")
     expect(
-      await screen.findByRole("link", { name: "← Tools" }),
-    ).toHaveAttribute("href", "/tools")
-    expect(screen.queryByRole("navigation")).toBeNull()
+      back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(screen.getByRole("navigation", { name: "Back" })).toBeInTheDocument()
   })
 })

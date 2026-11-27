@@ -15,7 +15,10 @@ export function ToolsPage() {
   const { isOperator } = useDeploymentOperator()
   const showsGuardrails = search.service === "guardrails" && isOperator
   return (
-    <ToolsFrame back={showsGuardrails}>
+    <ToolsFrame
+      title={showsGuardrails ? "Guardrail services" : "Tools"}
+      back={showsGuardrails}
+    >
       {showsGuardrails ? (
         <ToolsGuardrailsPage only="guardrails" />
       ) : (

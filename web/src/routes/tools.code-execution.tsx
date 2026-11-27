@@ -5,7 +5,7 @@ import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 
 export const Route = createFileRoute("/tools/code-execution")({
   component: () => (
-    <ToolsFrame back>
+    <ToolsFrame title="Code execution" back>
       <ToolsGuardrailsPage only="sandbox" />
     </ToolsFrame>
   ),

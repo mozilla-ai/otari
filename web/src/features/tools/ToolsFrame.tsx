@@ -5,29 +5,30 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 export type ToolsView = "/tools" | "/tools/web-search" | "/tools/code-execution"
 
 /**
- * Tools as one page: one title over the list of tools, and over each tool's
- * settings, which open from the list. A settings view takes `back`, a link to
- * the list, since nothing else on the page leads there.
+ * The page a tool's list and each tool's settings share. The list is titled
+ * Tools; a tool's settings open from it, are titled by the tool and take
+ * `back`, a link to the list placed above the title as every detail page's
+ * back link is.
  */
 export function ToolsFrame({
+  title = "Tools",
   back = false,
   children,
 }: {
+  title?: string
   back?: boolean
   children: ReactNode
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <PageIntro
-        title="Tools"
-        detail={
-          back ? (
-            <Link to="/tools" className="text-link hover:text-link-hover">
-              ← Tools
-            </Link>
-          ) : undefined
-        }
-      />
+      {back ? (
+        <nav aria-label="Back" className="text-caption">
+          <Link to="/tools" className="text-link hover:text-link-hover">
+            ← Tools
+          </Link>
+        </nav>
+      ) : null}
+      <PageIntro title={title} />
       {children}
     </div>
   )
