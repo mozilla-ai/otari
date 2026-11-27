@@ -1874,7 +1874,7 @@ class OrganizationService:
                         )
                     )
                 except (TenancyConflictError, TenancyValidationError) as exc:
-                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
+                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc), code=exc.error_code))
 
         mailer = Mailer(config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.

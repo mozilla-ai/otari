@@ -970,6 +970,63 @@ def test_bulk_invite_emails_every_address_when_a_transport_is_configured(
     assert all(row["accept_link"] is None for row in result["invited"])
 
 
+def _address_a_first_organization_recorded(db_session: Session, email: str) -> User:
+    """An identity a first organization recorded, in the state an invitation link's password leaves.
+
+    Verified, so it can sign in, and never proved, so a second organization may not take it. Built
+    directly because the real route to this state is accepting an invitation with a password, which
+    the API client cannot reach as the one operator identity. No organization of its own: the refusal
+    reads the identity alone, and a second organization row would trip the bootstrap's foreign-tenancy
+    guard before the route runs.
+    """
+    identity = User(email=email)
+    db_session.add(identity)
+    db_session.commit()
+    identity.email_verified_at = datetime.now(UTC)
+    identity.email_proven_at = None
+    db_session.add(identity)
+    db_session.commit()
+    return identity
+
+
+def test_inviting_a_recorded_address_says_who_has_to_prove_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The refusal is about the invited address, so the inviter is told their own account is not at fault."""
+    _address_a_first_organization_recorded(db_session, "recorded@example.com")
+
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "recorded@example.com", "role": "owner"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["code"] == "member_address_unproven"
+    assert "recorded@example.com" in body["detail"]
+    # Read as an instruction about the caller's own account, this refusal sends an admin to reset
+    # their password, which is what the wording exists to prevent.
+    assert "your own account" in body["detail"]
+
+
+def test_a_bulk_invite_carries_the_recorded_address_code(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A refused address in a batch answers the same code the single invite does, so a client maps one value."""
+    _address_a_first_organization_recorded(db_session, "recorded@example.com")
+
+    result = _bulk_invite(client, master_key_header, ["recorded@example.com", "fresh@example.com"])
+
+    assert [row["email"] for row in result["invited"]] == ["fresh@example.com"]
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["code"] == "member_address_unproven"
+
+
 def test_bulk_invite_refuses_an_empty_list(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/organizations/me/member-invitations/bulk",

@@ -1350,6 +1350,9 @@ class BulkInvitationFailurePublic(SQLModel):
 
     email: str
     detail: str
+    # The refusal's stable code, where it carries one, so a client maps it rather than matching ``detail``.
+    # The same value the single invite answers as the body's ``code`` and as ``Otari-Error-Code``.
+    code: str | None = None
 
 
 class BulkInviteOrganizationMembersResultPublic(SQLModel):
