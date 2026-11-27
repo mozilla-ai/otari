@@ -892,8 +892,17 @@ function AppShellChrome() {
         // media query each other's precondition, with nothing in either file
         // saying so, and it would break the first time somebody lifted those
         // declarations out. Saying which of the three it is keeps each end
-        // correct on its own.
-        data-rail={isMobile ? "drawer" : collapsed ? "collapsed" : "expanded"}
+        // correct on its own. A fourth, `dense`, is the dense sidebar's narrower
+        // rail.
+        data-rail={
+          isMobile
+            ? "drawer"
+            : collapsed
+              ? "collapsed"
+              : isDense
+                ? "dense"
+                : "expanded"
+        }
       >
         <aside
           ref={asideRef}

@@ -880,6 +880,57 @@ describe("AppShell surface gating", () => {
     expect(screen.getByRole("link", { name: "Activity" })).toBeInTheDocument()
   })
 
+  it("draws Routing only where the routing surface is hosted, and MCP servers with Tools", async () => {
+    mockMatchMedia(false)
+    const everything = ["models", "keys", "routing", "tools"]
+    const rowsOf = async (surfaces: string[]) => {
+      const view = await renderShell(bootstrap({ surfaces }))
+      expect(
+        await screen.findByRole("link", { name: "API keys" }),
+      ).toBeInTheDocument()
+      const sidebar = screen.getByRole("navigation", { name: "Sidebar" })
+      const names = within(sidebar)
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+      view.unmount()
+      cleanup()
+      return names
+    }
+
+    expect(await rowsOf(everything)).toEqual([
+      "Activity",
+      "Traces",
+      "People",
+      "Rules",
+      "Routing",
+      "Models",
+      "Tools",
+      "MCP servers",
+      "API keys",
+    ])
+    expect(await rowsOf(everything.filter((one) => one !== "routing"))).toEqual(
+      [
+        "Activity",
+        "Traces",
+        "People",
+        "Rules",
+        "Models",
+        "Tools",
+        "MCP servers",
+        "API keys",
+      ],
+    )
+    expect(await rowsOf(everything.filter((one) => one !== "tools"))).toEqual([
+      "Activity",
+      "Traces",
+      "People",
+      "Rules",
+      "Routing",
+      "Models",
+      "API keys",
+    ])
+  })
+
   it("drops a section header once its whole group is gated away", async () => {
     mockMatchMedia(false)
     // The organization rail is the one with headings. "Cost & billing" holds
@@ -2067,12 +2118,12 @@ describe("the dense sidebar switch", () => {
     const { container } = await renderShell()
 
     const aside = container.querySelector("aside")
-    expect(aside?.className).toContain("w-[16.5rem]")
-    expect(aside?.className).not.toContain("w-[15rem]")
+    expect(aside).toHaveClass("w-[16.5rem]")
+    expect(aside).not.toHaveClass("w-[15rem]")
     expect((await railRow("People")).className).toBe(
       `${navRowClass({ isCollapsed: false })} w-full`,
     )
-    expect((await railRow("People")).className).toContain("min-h-11")
+    expect(await railRow("People")).toHaveClass("min-h-11")
   })
 
   it("draws a 240px rail of 32px rows once it is on", async () => {
@@ -2081,14 +2132,13 @@ describe("the dense sidebar switch", () => {
     const { container } = await renderShell()
 
     const aside = container.querySelector("aside")
-    expect(aside?.className).toContain("w-[15rem]")
-    expect(aside?.className).not.toContain("w-[16.5rem]")
+    expect(aside).toHaveClass("w-[15rem]")
+    expect(aside).not.toHaveClass("w-[16.5rem]")
     const row = await railRow("People")
     expect(row.className).toBe(
       `${navRowClass({ isCollapsed: false, isDense: true })} w-full`,
     )
-    expect(row.className).toContain("min-h-8")
-    expect(row.className).toContain("pointer-coarse:min-h-11")
+    expect(row).toHaveClass("min-h-8", "pointer-coarse:min-h-11")
   })
 
   it("makes Create API key 32px in place of 36px", async () => {
@@ -2102,8 +2152,8 @@ describe("the dense sidebar switch", () => {
     await renderShell(bootstrap(), asRole("owner"))
     const dense = await screen.findByRole("button", { name: "Create API key" })
     expect(dense.className).not.toBe(normalClass)
-    expect(dense.className).toMatch(/button--sm/)
-    expect(normalClass).not.toMatch(/button--sm/)
+    expect(dense).toHaveClass("button--sm")
+    expect(normalClass.split(" ")).not.toContain("button--sm")
   })
 
   it("leaves the collapsed rail and the mobile drawer at their own sizes", async () => {
@@ -2111,9 +2161,7 @@ describe("the dense sidebar switch", () => {
     window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
     mockMatchMedia(false)
     const collapsed = await renderShell()
-    expect(collapsed.container.querySelector("aside")?.className).toContain(
-      "w-[4.5rem]",
-    )
+    expect(collapsed.container.querySelector("aside")).toHaveClass("w-[4.5rem]")
     expect((await railRow("People")).className).toBe(
       `${navRowClass({ isCollapsed: true })} w-full`,
     )
@@ -2125,9 +2173,7 @@ describe("the dense sidebar switch", () => {
     const user = userEvent.setup()
     const drawer = await renderShell()
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    expect(drawer.container.querySelector("aside")?.className).not.toContain(
-      "w-[15rem]",
-    )
+    expect(drawer.container.querySelector("aside")).not.toHaveClass("w-[15rem]")
     expect((await railRow("People")).className).toBe(
       `${navRowClass({ isCollapsed: false })} w-full`,
     )
@@ -2149,14 +2195,49 @@ describe("the dense sidebar switch", () => {
     expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
       "1",
     )
-    expect(container.querySelector("aside")?.className).toContain("w-[15rem]")
+    expect(container.querySelector("aside")).toHaveClass("w-[15rem]")
 
     await user.click(toggle)
     expect(toggle).toHaveAttribute("aria-checked", "false")
     expect(window.localStorage.getItem("otari.dashboard.sidebarDense")).toBe(
       "0",
     )
-    expect(container.querySelector("aside")?.className).toContain("w-[16.5rem]")
+    expect(container.querySelector("aside")).toHaveClass("w-[16.5rem]")
     expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("publishes the narrower rail's footprint, and the default's when off", async () => {
+    mockMatchMedia(false)
+    const off = await renderShell()
+    expect(off.container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "expanded",
+    )
+    off.unmount()
+    cleanup()
+
+    window.localStorage.setItem("otari.dashboard.sidebarDense", "1")
+    const on = await renderShell()
+    expect(on.container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "dense",
+    )
+  })
+
+  it("offers the switch on the expanded rail and not on the collapsed one", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    expect(
+      await screen.findByRole("switch", { name: "Dense sidebar" }),
+    ).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+    await user.click(await screen.findByRole("button", { name: /^Account:/ }))
+    await screen.findByRole("dialog", { name: "Account" })
+    expect(screen.queryByRole("switch", { name: "Dense sidebar" })).toBeNull()
   })
 })

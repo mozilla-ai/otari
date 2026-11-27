@@ -111,7 +111,6 @@ function MenuItem({
   trailingIcon,
   hasTrailingGutter = false,
   ariaLabel,
-  isOn,
   className = "",
 }: {
   label: string
@@ -131,15 +130,11 @@ function MenuItem({
    */
   hasTrailingGutter?: boolean
   ariaLabel?: string
-  /** Makes the row a switch, on or off, instead of an action. */
-  isOn?: boolean
   className?: string
 }) {
   return (
     <button
       type="button"
-      role={isOn === undefined ? undefined : "switch"}
-      aria-checked={isOn}
       disabled={isDisabled}
       title={title}
       // A disabled button takes no focus, so the tooltip is pointer-only. Fold
@@ -271,21 +266,27 @@ function AppearanceControl() {
 
 /**
  * The dense sidebar, on or off: a comparison switch for the rail's 32px rows
- * (`nav/sidebarDensity.ts`). A desk setting, so a phone's menu does not offer it.
+ * (`nav/sidebarDensity.ts`). A desk setting on the expanded rail: a phone's menu
+ * and the collapsed rail keep their own sizes, so neither offers it.
  */
 function DenseSidebarControl() {
   const [isOn, setOn] = useDenseSidebarPreference()
   return (
-    <MenuItem
-      label="Dense sidebar"
-      icon={FiAlignJustify}
-      trailing={isOn ? "On" : "Off"}
-      hasTrailingGutter
-      ariaLabel="Dense sidebar"
-      isOn={isOn}
-      onPress={() => setOn(!isOn)}
-      className="max-md:hidden"
-    />
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isOn}
+      aria-label="Dense sidebar"
+      onClick={() => setOn(!isOn)}
+      className={`${MENU_ROW} ${MENU_ROW_RESTING} max-md:hidden`}
+    >
+      <FiAlignJustify aria-hidden="true" className={MENU_ICON_CLASS} />
+      <span className="min-w-0 flex-1 truncate">Dense sidebar</span>
+      <span className="w-11 shrink-0 text-right text-shell-secondary font-normal text-muted">
+        {isOn ? "On" : "Off"}
+      </span>
+      <span aria-hidden="true" className="-ml-0.5 size-4 shrink-0" />
+    </button>
   )
 }
 
@@ -389,7 +390,7 @@ export function AccountMenu({
               the page looks. */}
           <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
-          <DenseSidebarControl />
+          {isCollapsed ? null : <DenseSidebarControl />}
           {/* The deployment's own pages, which used to sit in the organization
               rail's General section. They are the deployment talking about
               itself rather than the tenant, and that rail is where a tenant

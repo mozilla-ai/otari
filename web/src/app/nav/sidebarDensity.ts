@@ -25,9 +25,13 @@ function readStored(): boolean {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
-  // Another tab turning it on or off.
+  // Another tab turning it on or off, or clearing storage (a null key). What
+  // storage says now is the truth again, so a value held for a refused write
+  // gives way to it.
   const onStorage = (event: StorageEvent) => {
-    if (event.key === DENSE_SIDEBAR_KEY) listener()
+    if (event.key !== null && event.key !== DENSE_SIDEBAR_KEY) return
+    held = null
+    listener()
   }
   window.addEventListener("storage", onStorage)
   return () => {

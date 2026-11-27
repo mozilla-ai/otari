@@ -5,10 +5,20 @@ import {
   useDenseSidebarPreference,
 } from "@/app/nav/sidebarDensity"
 
+/** What another tab does to storage, which is also how a held value is let go. */
+function storageChangedElsewhere(key: string | null = DENSE_SIDEBAR_KEY) {
+  act(() => {
+    window.dispatchEvent(new StorageEvent("storage", { key }))
+  })
+}
+
 describe("the dense sidebar preference", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
+    // The module remembers a value a refused write could not store; any
+    // storage event is what lets it go, so each test starts from storage.
+    storageChangedElsewhere(null)
   })
 
   it("is off until someone turns it on", () => {
@@ -37,18 +47,32 @@ describe("the dense sidebar preference", () => {
     expect(one.result.current[0]).toBe(false)
   })
 
-  it("follows another tab", () => {
+  it("follows another tab turning it on", () => {
     const { result } = renderHook(() => useDenseSidebarPreference())
-    act(() => {
-      window.localStorage.setItem(DENSE_SIDEBAR_KEY, "1")
-      window.dispatchEvent(
-        new StorageEvent("storage", { key: DENSE_SIDEBAR_KEY }),
-      )
-    })
+    window.localStorage.setItem(DENSE_SIDEBAR_KEY, "1")
+    storageChangedElsewhere()
     expect(result.current[0]).toBe(true)
   })
 
-  it("still works for the page when storage refuses, and is off when it cannot be read", () => {
+  it("follows another tab clearing storage, which names no key", () => {
+    window.localStorage.setItem(DENSE_SIDEBAR_KEY, "1")
+    const { result } = renderHook(() => useDenseSidebarPreference())
+    expect(result.current[0]).toBe(true)
+
+    window.localStorage.clear()
+    storageChangedElsewhere(null)
+    expect(result.current[0]).toBe(false)
+  })
+
+  it("ignores a storage event about some other key", () => {
+    const { result } = renderHook(() => useDenseSidebarPreference())
+    act(() => result.current[1](true))
+    window.localStorage.removeItem(DENSE_SIDEBAR_KEY)
+    storageChangedElsewhere("otari.dashboard.sidebarCollapsed")
+    expect(result.current[0]).toBe(true)
+  })
+
+  it("still works for the page when storage refuses the write", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked")
     })
@@ -57,12 +81,28 @@ describe("the dense sidebar preference", () => {
     expect(result.current[0]).toBe(true)
     act(() => result.current[1](false))
     expect(result.current[0]).toBe(false)
+  })
+
+  it("stops holding a refused value once another tab writes", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    const { result } = renderHook(() => useDenseSidebarPreference())
+    act(() => result.current[1](true))
+    expect(result.current[0]).toBe(true)
 
     vi.restoreAllMocks()
+    window.localStorage.setItem(DENSE_SIDEBAR_KEY, "0")
+    storageChangedElsewhere()
+    expect(result.current[0]).toBe(false)
+  })
+
+  it("is off when storage cannot be read", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked")
     })
-    const unreadable = renderHook(() => useDenseSidebarPreference())
-    expect(unreadable.result.current[0]).toBe(false)
+    window.localStorage.setItem(DENSE_SIDEBAR_KEY, "1")
+    const { result } = renderHook(() => useDenseSidebarPreference())
+    expect(result.current[0]).toBe(false)
   })
 })

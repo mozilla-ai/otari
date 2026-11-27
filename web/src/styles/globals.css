@@ -3324,6 +3324,10 @@ body {
   [data-rail="expanded"] {
     --rail-width: 16.5rem;
   }
+  /* The dense sidebar, which is narrower (`nav/sidebarDensity.ts`). */
+  [data-rail="dense"] {
+    --rail-width: 15rem;
+  }
   [data-rail="collapsed"] {
     --rail-width: 4.5rem;
   }
