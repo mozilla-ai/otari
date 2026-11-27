@@ -291,7 +291,12 @@ def filter_router_pool(
         try:
             resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
-            dropped.append(DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})"))
+            # The detail is stored on the usage row and read back by organization
+            # members, so it says what happened without echoing the exception: the
+            # cause names provider config and belongs in the log, next to the
+            # selector it is about. Same rule as the compiler's caller-facing text.
+            logger.warning("Router pool: '%s' does not resolve (%s)", selector, type(exc).__name__)
+            dropped.append(DroppedCandidate(selector, "unresolvable", "could not be resolved to a provider"))
             continue
         if not is_model_allowed(allowlist, f"{resolved.instance}:{resolved.model}"):
             dropped.append(DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller"))
