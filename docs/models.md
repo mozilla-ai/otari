@@ -221,6 +221,14 @@ uses:
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
+- `reasoning`: how a reasoning model's reasoning can be set, from the entry of
+  the provider a request reaches. `supported_efforts` lists the
+  `reasoning_effort` values that provider takes, `none` among them where
+  reasoning can be switched off. `default_effort` and `default_enabled` say
+  what it does when a request names no effort, and appear only where models.dev
+  records a default. The whole object is left out for a model models.dev
+  records no reasoning controls for, including a reasoning model that cannot be
+  tuned.
 
 An SGLang server also says how it was started, and that overrides models.dev:
 without a tool-call parser it offers no `tools`, a reasoning parser adds
@@ -228,7 +236,7 @@ without a tool-call parser it offers no `tools`, a reasoning parser adds
 not say, so its models keep models.dev's flags, except that a listing entry
 with a `reasoning` object (the efforts it accepts) adds `reasoning`.
 
-All three are unset for a model neither models.dev nor its server describes,
+`name`, `supported_parameters` and `architecture` are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
 

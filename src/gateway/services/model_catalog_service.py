@@ -65,6 +65,9 @@ class ModelCatalogEntry:
     input_modalities: list[str] = field(default_factory=list)
     output_modalities: list[str] = field(default_factory=list)
     reasoning: bool = False
+    reasoning_efforts: list[str] = field(default_factory=list)
+    reasoning_default_effort: str | None = None
+    reasoning_default_enabled: bool | None = None
     tool_call: bool = False
     structured_output: bool = False
     attachment: bool = False
@@ -95,6 +98,9 @@ class ModelCatalogEntry:
             input_modalities=list(model.input_modalities),
             output_modalities=list(model.output_modalities),
             reasoning=model.reasoning,
+            reasoning_efforts=list(model.reasoning_efforts),
+            reasoning_default_effort=model.reasoning_default_effort,
+            reasoning_default_enabled=model.reasoning_default_enabled,
             tool_call=model.tool_call,
             structured_output=model.structured_output,
             attachment=model.attachment,

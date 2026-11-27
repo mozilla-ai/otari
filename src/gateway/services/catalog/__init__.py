@@ -2,7 +2,12 @@
 
 from gateway.services.catalog._aliases import hide_alias_target
 from gateway.services.catalog._dated import dated_builds
-from gateway.services.catalog._limits import ModelArchitecture, apply_model_metadata, served_context_window
+from gateway.services.catalog._limits import (
+    ModelArchitecture,
+    ModelReasoning,
+    apply_model_metadata,
+    served_context_window,
+)
 from gateway.services.catalog._metadata import load_catalog_metadata, metadata_entry
 from gateway.services.catalog._model_type import (
     catalog_model_type,
@@ -53,6 +58,7 @@ __all__ = [
     "MetadataOverride",
     "ModelArchitecture",
     "ModelMetadataOverrideService",
+    "ModelReasoning",
     "ModelType",
     "OfferingRow",
     "OrganizationSelectors",

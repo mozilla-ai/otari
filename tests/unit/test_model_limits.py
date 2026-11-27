@@ -7,12 +7,13 @@ from gateway.services.catalog._limits import (
     ModelArchitecture,
     ModelCapabilities,
     ModelLimits,
+    ModelReasoning,
     apply_model_metadata,
     model_capabilities,
     model_limits,
 )
 from gateway.services.merged_catalog_service import ModelObject
-from gateway.types.models_dev import parse_catalog
+from gateway.types.models_dev import parse_catalog, parse_catalog_v2
 
 # Limits that differ from the pricing snapshot's wherever both know the model, so a test can tell which one answered.
 MODELS_DEV = parse_catalog(
@@ -205,3 +206,74 @@ def test_an_undescribed_model_clears_what_an_earlier_pass_filled() -> None:
     apply_model_metadata(_config(), MODELS_DEV, model)
 
     assert (model.description, model.release_date, model.knowledge_cutoff) == (None, None, None)
+
+
+# Tencent's own listing of Hy4 takes two efforts and gives no default; a second
+# host names its default effort, and a third reasons with nothing to set.
+REASONING = parse_catalog_v2(
+    {
+        "tencent-tokenhub": {
+            "models": {
+                "hy4": {"name": "Hy4", "capabilities": {"reasoning": {"supported": True, "effort": ["none", "high"]}}}
+            }
+        },
+        "other": {
+            "models": {
+                "hy4": {
+                    "capabilities": {
+                        "reasoning": {
+                            "supported": True,
+                            "effort": ["none", "low", "high"],
+                            "default": {"type": "effort", "value": "high"},
+                        }
+                    }
+                },
+                "always-thinks": {"capabilities": {"reasoning": {"supported": True}}},
+            }
+        },
+    }
+)
+
+
+def test_a_row_lists_the_efforts_its_provider_takes() -> None:
+    model = ModelObject(id="tencent-tokenhub:hy4", created=0, owned_by="tencent-tokenhub")
+
+    apply_model_metadata(_config(), REASONING, model)
+
+    assert model.reasoning == ModelReasoning(supported_efforts=["none", "high"])
+    assert model.model_dump(exclude_none=True)["reasoning"] == {"supported_efforts": ["none", "high"]}
+
+
+def test_a_row_names_the_default_its_provider_records() -> None:
+    model = ModelObject(id="other:hy4", created=0, owned_by="other")
+
+    apply_model_metadata(_config(), REASONING, model)
+
+    assert model.reasoning == ModelReasoning(
+        supported_efforts=["none", "low", "high"], default_effort="high", default_enabled=True
+    )
+
+
+def test_a_model_with_no_reasoning_controls_has_no_reasoning_object() -> None:
+    """Reasoning still shows in ``supported_parameters``; there is just nothing to set."""
+    thinks = ModelObject(id="other:always-thinks", created=0, owned_by="other")
+    plain = ModelObject(id="openai:gpt-4o", created=0, owned_by="openai")
+
+    apply_model_metadata(_config(), REASONING, thinks)
+    apply_model_metadata(_config(), MODELS_DEV, plain)
+
+    assert thinks.supported_parameters == ["reasoning"]
+    assert (thinks.reasoning, plain.reasoning) == (None, None)
+
+
+def test_an_undescribed_model_clears_its_reasoning() -> None:
+    model = ModelObject(
+        id="nebius:made-up-model-xyz",
+        created=0,
+        owned_by="nebius",
+        reasoning=ModelReasoning(supported_efforts=["high"]),
+    )
+
+    apply_model_metadata(_config(), MODELS_DEV, model)
+
+    assert model.reasoning is None
