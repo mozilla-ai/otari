@@ -40,7 +40,7 @@ describe("People under a rule", () => {
     )
     const user = userEvent.setup()
     await renderWithRouter(<RulePeople rule={RULE} isManager />, {
-      url: "/rules/spend-each-b",
+      url: "/guardrails/spend-each-b",
       shell: (
         <Provider>
           <DeploymentProvider value={bootstrap()}>
@@ -81,7 +81,7 @@ describe("People under a rule", () => {
         isManager
       />,
       {
-        url: "/rules/spend-each-b",
+        url: "/guardrails/spend-each-b",
         shell: (
           <Provider>
             <DeploymentProvider value={bootstrap()}>

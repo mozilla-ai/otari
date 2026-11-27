@@ -3,7 +3,6 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { RoutingPage } from "@/features/routing/RoutingPage"
 import { GuardrailsPage } from "@/features/rules/GuardrailsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -13,6 +12,7 @@ import {
   bootstrap,
   organizationContext,
   organizationGuardrail,
+  organizationGuardrailDefinition,
   organizationMember,
   organizationSpendCeiling,
   workspace,
@@ -153,6 +153,9 @@ interface Data {
   failing?: string[]
   /** Paths held until the test lets them answer. */
   held?: Record<string, Promise<void>>
+  definitions?: unknown[]
+  /** The deployment's operator, who reads every key. */
+  operator?: boolean
 }
 
 const FULL: Data = {
@@ -182,9 +185,10 @@ async function renderAs(
         return Response.json(
           organizationContext({
             role,
-            deployment_operator: false,
+            deployment_operator: data.operator ?? false,
             workspace_memberships: [
               { workspace_id: PLATFORM.id, name: "Platform", role: "member" },
+              { workspace_id: RESEARCH.id, name: "Research", role: "member" },
             ],
           }),
         )
@@ -192,6 +196,8 @@ async function renderAs(
         return paged([PLATFORM, RESEARCH])
       case "/organizations/me/guardrails":
         return paged(data.guardrails)
+      case "/organizations/me/guardrail-definitions":
+        return paged(data.definitions)
       case "/organizations/me/members":
         return paged(data.members)
       case "/organizations/me/spend-ceilings":
@@ -265,16 +271,6 @@ describe("Guardrails", () => {
           screen.queryByRole("heading", { name: /^Content moderation/ }),
         ).toBeNull()
       }
-    })
-
-    it(`titles the routing policies Routing, with no Guardrails views, for a ${role}`, async () => {
-      await renderAs(role, <RoutingPage />, "/routing")
-      expect(
-        await screen.findByRole("heading", { name: "Routing" }),
-      ).toBeInTheDocument()
-      expect(screen.queryByRole("heading", { name: "Guardrails" })).toBeNull()
-      expect(views()).toBeNull()
-      expect(screen.queryByRole("button", { name: "New guardrail" })).toBeNull()
     })
   }
 
@@ -360,6 +356,12 @@ describe("Guardrails, Assignments", () => {
     expect(elena).toHaveTextContent("Contractor cap")
     // Research's member is not in Platform.
     expect(within(grid).queryByText("Hana Kobayashi")).toBeNull()
+    // By name, whatever order the roster comes in.
+    expect(
+      within(grid)
+        .getAllByRole("rowheader")
+        .map((cell) => cell.textContent),
+    ).toEqual(["Elena Petrova", "Wei Zhang"])
     // A member's model list is the deployment operator's to read.
     expect(
       within(grid)
@@ -661,4 +663,106 @@ describe("Guardrails, when a read fails or is slow", () => {
       }
     })
   }
+})
+
+describe("Guardrails, per caller and workspace", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("opens Assignments for an admin from the address", async () => {
+    await renderAs("admin", <GuardrailsPage />, "/guardrails?view=assignments")
+    expect(
+      await screen.findByRole("grid", { name: "Guardrails on each member" }),
+    ).toBeInTheDocument()
+  })
+
+  it("opens a viewer on the Guardrails view whatever the address asks", async () => {
+    await renderAs("viewer", <GuardrailsPage />, "/guardrails?view=assignments")
+    await screen.findByRole("heading", { name: /^Budget/ })
+    expect(
+      screen.queryByRole("grid", { name: "Guardrails on each member" }),
+    ).toBeNull()
+    expect(views()).toBeNull()
+  })
+
+  it("gives the deployment's operator the same page an owner gets", async () => {
+    await renderAs("owner", <GuardrailsPage />, "/guardrails", {
+      ...FULL,
+      operator: true,
+    })
+    await waitFor(() => expect(views()).not.toBeNull())
+    expect(
+      await screen.findByRole("grid", {
+        name: "Content moderation running in Platform",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("follows the selected workspace", async () => {
+    window.localStorage.setItem(
+      "otari.dashboard.selectedWorkspace",
+      RESEARCH.id,
+    )
+    await renderAs("owner", <GuardrailsPage />, "/guardrails")
+    const grid = await screen.findByRole("grid", {
+      name: "Content moderation running in Research",
+    })
+    expect(
+      await within(grid).findByRole("row", { name: /^secrets/ }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByRole("row", { name: /^pii/ })).toBeInTheDocument()
+  })
+
+  it("lists the selected workspace's members only, by name", async () => {
+    window.localStorage.setItem(
+      "otari.dashboard.selectedWorkspace",
+      RESEARCH.id,
+    )
+    await renderAs("owner", <GuardrailsPage />, "/guardrails?view=assignments")
+    const grid = await screen.findByRole("grid", {
+      name: "Guardrails on each member",
+    })
+    await within(grid).findByRole("row", { name: /Hana Kobayashi/ })
+    expect(within(grid).queryByText("Wei Zhang")).toBeNull()
+    expect(within(grid).getByRole("row", { name: /Hana/ })).toHaveTextContent(
+      "via Research",
+    )
+  })
+
+  it("says what a broken moderation guardrail does to requests", async () => {
+    await renderAs("owner", <GuardrailsPage />, "/guardrails", {
+      ...FULL,
+      definitions: [
+        organizationGuardrailDefinition({ id: "d-1", build_state: "failed" }),
+      ],
+      guardrails: [
+        organizationGuardrail({
+          id: "g-refused",
+          profile: "pii",
+          mode: "block",
+          on_unavailable: "block",
+          definition_id: "d-1",
+          applies_to_all_workspaces: true,
+        }),
+        organizationGuardrail({
+          id: "g-open",
+          profile: "toxicity",
+          mode: "monitor",
+          definition_id: "d-1",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    const grid = await screen.findByRole("grid", {
+      name: "Content moderation running in Platform",
+    })
+    expect(
+      await within(grid).findByRole("row", { name: /^pii/ }),
+    ).toHaveTextContent("Requests refused")
+    expect(
+      within(grid).getByRole("row", { name: /^toxicity/ }),
+    ).toHaveTextContent("Requests served unchecked")
+  })
 })

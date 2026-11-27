@@ -93,9 +93,10 @@ describe("retired paths", () => {
   })
 
   it("opens a guardrail's page on its old Rules path", async () => {
-    const landed = await open("/rules/spend-each-b1")
+    const landed = await open("/rules/spend-each-b1?from=home")
 
     expect(landed.path).toBe("/guardrails/spend-each-b1")
+    expect(landed.search).toEqual({ from: "home" })
     expect(landed.entries).toBe(1)
   })
 

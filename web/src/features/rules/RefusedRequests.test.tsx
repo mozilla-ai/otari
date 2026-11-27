@@ -106,7 +106,7 @@ async function renderRefusals(
     }
   })
   await renderWithRouter(<RefusedRequests rule={rule(subject)} />, {
-    url: "/rules/r",
+    url: "/guardrails/r",
     shell: (
       <Provider>
         <DeploymentProvider value={bootstrap()}>

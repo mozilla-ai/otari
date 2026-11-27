@@ -242,7 +242,7 @@ function renderDialog({
     }
   })
   return renderWithRouter(<NewRuleDialog onClose={() => {}} />, {
-    url: "/rules",
+    url: "/guardrails",
     shell: (
       <Provider>
         <DeploymentProvider value={bootstrap()}>

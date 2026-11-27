@@ -53,8 +53,7 @@ describe("rail location memory", () => {
   })
 
   it("remembers a destination with no row under the workspace rail", () => {
-    // Routing opens from Rules and has no row, but it is a page of its own to
-    // come back to.
+    // A page of its own to come back to, as every rail row is.
     rememberLocation("/routing", showsEverything)
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
