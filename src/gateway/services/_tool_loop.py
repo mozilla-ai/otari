@@ -480,6 +480,34 @@ def _round_request(
     return kwargs
 
 
+def _forces_caller_tool(choice: Any, user_tools: list[dict[str, Any]], pool: ToolBackend) -> bool:
+    """Whether ``choice`` still owes the caller a call of one of its own function tools.
+
+    ``required``, Messages' ``any``, an ``allowed_tools`` choice in ``required``
+    mode that lists one of them, or one of them by name: the response must end
+    in a call the caller can run, and a round that ran only the gateway's tools
+    has not made one. A force on the gateway's own tools, or on a provider's
+    built-in tool, is met by the round that ran it.
+    """
+    own = {
+        name
+        for tool in user_tools
+        if tool.get("type") in (None, "function", "custom")
+        and (name := _tool_name(tool)) is not None
+        and not pool.owns_tool(name)
+    }
+    if not own:
+        return False
+    if choice == "required" or (isinstance(choice, dict) and choice.get("type") == "any"):
+        return True
+    if isinstance(choice, dict) and choice.get("type") == "allowed_tools":
+        # Chat Completions nests the mode and the list; Responses has them at the top level.
+        nested = choice.get("allowed_tools")
+        spec = nested if isinstance(nested, dict) else choice
+        return spec.get("mode") == "required" and any(_tool_name(tool) in own for tool in spec.get("tools") or [])
+    return _tool_name(choice) in own
+
+
 def _round_kwargs(
     base: dict[str, Any],
     merged_tools: list[dict[str, Any]],
@@ -493,7 +521,8 @@ def _round_kwargs(
     """The tool arguments for one round.
 
     A forced ``tool_choice`` applies to the first round only (see
-    :func:`_released_tool_choice`). The last round the loop allows withholds the gateway's own tools, so the model
+    :func:`_released_tool_choice`), unless it is still owed to the caller (see
+    :func:`_forces_caller_tool`). The last round the loop allows withholds the gateway's own tools, so the model
     answers from what its earlier rounds gathered rather than calling a tool whose
     result could never reach it. The caller's tools stay, since a call of one ends
     the loop anyway. Every provider the loop serves accepts a transcript holding
@@ -511,7 +540,7 @@ def _round_kwargs(
     kwargs = dict(base)
     if tools:
         kwargs["tools"] = tools
-    if not first and "tool_choice" in kwargs:
+    if not first and "tool_choice" in kwargs and not _forces_caller_tool(kwargs["tool_choice"], user_tools, pool):
         released = _released_tool_choice(kwargs["tool_choice"])
         if released is None:
             kwargs.pop("tool_choice")
