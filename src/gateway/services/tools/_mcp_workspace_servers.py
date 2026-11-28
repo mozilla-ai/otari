@@ -163,8 +163,3 @@ class McpWorkspaceServers:
         """Every enabled server the workspace reaches, oldest first."""
         rows = await self._servers.enabled_in_workspace(workspace_id, organization_id)
         return [view for view in await self.seen_from(workspace_id, rows) if view.enabled]
-
-    async def any_organization_server_attached(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
-        """Whether the workspace attaches one of its organization's enabled servers to every request."""
-        shared = await self._servers.enabled_of_organization(organization_id)
-        return any(view.attach_by_default for view in await self.seen_from(workspace_id, shared))

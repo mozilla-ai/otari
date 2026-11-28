@@ -147,19 +147,6 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return list((await self.db.execute(query)).scalars().all())
 
-    async def enabled_of_organization(self, organization_id: uuid.UUID) -> list[WorkspaceMcpServer]:
-        """An organization's own enabled servers, oldest first."""
-        query = (
-            select(WorkspaceMcpServer)
-            .where(
-                WorkspaceMcpServer.organization_id == organization_id,
-                WorkspaceMcpServer.workspace_id.is_(None),
-                WorkspaceMcpServer.enabled.is_(True),
-            )
-            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
-        )
-        return list((await self.db.execute(query)).scalars().all())
-
     async def name_in_use(
         self, organization_id: uuid.UUID, name: str, *, of_workspace: bool, except_id: uuid.UUID | None
     ) -> bool:
