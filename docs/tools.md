@@ -1308,6 +1308,21 @@ refuse such a value when a tool is saved.
   request's top-level `search_domain_filter` and `country` are applied by Otari as
   for every provider but Exa. Perplexity refuses a `time_range` or a
   `search_recency_filter` together with a publication date filter.
+- **SearchApi** (`searchapi`) needs an API key, read from the tool's `api_key`, such as
+  `${SEARCHAPI_API_KEY}`. SearchApi returns Google's results; it takes the key in a
+  header and the query in the request URL, which Otari keeps out of its logs. It
+  reports no cost, so a search is billed at the tool's own rate (its
+  `price_per_call`, or a `search` price set on the dashboard's Web search page or
+  through the API). SearchApi's [pricing](https://www.searchapi.io/pricing), read
+  2026-11-23, is a monthly plan with a number of searches: from $40 for 10,000 ($4
+  per 1,000) down to $1 per 1,000 on the largest; only answers with a 200 are
+  billed, and a plan's searches are rate limited to 20% of the plan an hour. A
+  search returns at most 10 results, one page of Google's, and its hits carry a
+  snippet but no page text. Set `gl` and `hl` in the tool's `options`, such as
+  `gl: us` and `hl: en`, to pin the country and the interface language, the one
+  Google renders the page and the result dates in; SearchApi's defaults are those
+  two. `hl` does not limit which pages come back: for pages in a language, set
+  `lr`, such as `lr: lang_de`.
 - **Serply** (`serply`) needs an API key, read from the tool's `api_key`, such as
   `${SERPLY_API_KEY}`. Serply returns Google's results; it takes the key in a
   header and the query in the request URL, which Otari keeps out of its logs. Set

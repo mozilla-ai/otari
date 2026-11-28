@@ -522,6 +522,36 @@ status below 400 as a success; what that cost depended on the provider.
   `http_error` for it, so an adapter's own check stays `status >= 400`. The conformance suite
   sends every provider a 302 with a JSON object, through a client set to follow redirects.
 
+### 2026-11-23, SearchApi (any-search)
+
+The second provider that returns a scraped Google results page, after Serply, with the key as a
+Bearer token and the query in the URL.
+
+- A documentation can call a parameter phased out while the API still honors it: SearchApi's docs
+  say Google retired `num` in September 2025 and a page is 10, but `num=3` answered a page of 3
+  and paged by 3 on 2026-11-23, and `num=20` was answered as 10. Send it and cut the hits to the
+  count as well, so the adapter is right whichever way the provider goes, and say in the docstring
+  what was checked and when.
+- "Found nothing" can come two ways from one provider: a 200 with an `error` sentence (`Google
+  didn't return any results.`) and no `organic_results`, or a 200 with no `error` and no
+  `organic_results` when Google answered only other sections (`top_stories` for a news query
+  under `time_period=last_day`). Treat the list's absence as no hits either way, and leave the
+  sentence in `raw`; read `search_metadata.status` for whether the call itself succeeded.
+- A no-results search can be slow: the `empty` fixture, a `site:` query on a domain that does not
+  exist, timed out once at the default 15 seconds and recorded on the next try.
+- A result's `link` can be a Google redirect (`https://www.google.com/goto?url=...`) with a
+  `link_token` beside it. It is a URL with a host, but its `url` is usually a session token no
+  caller can fetch, so the hit is dropped and the count filled from the next ones, as Serply's
+  opaque tokens are; when `url` decodes to an http(s) URL, that URL is the hit. `snippet` is
+  missing from some results (a rich-snippet-only result), never null, so an absent one is an
+  empty snippet and a null one is `unexpected_response`, like an `error` that is not a sentence.
+- Error bodies are one sentence in `error` at every status, and the sentence quotes the request
+  (`Unsupported value `zz` in time_period parameter.`), so the tag comes from the status; only a
+  400 and a 401 were seen live, 402 and 429 are from the pricing page's terms.
+- Fixture recipes: `normal` with `--max-results 3`, which keeps the page small (2 organic results
+  came back beside other sections); `empty` with `site:` set to a domain that does not exist;
+  `error` with a made-up key, a 401.
+
 ### 2026-11-24, Keenable (any-search)
 
 The first provider whose key is optional: with one it calls `/v1/search`, without one

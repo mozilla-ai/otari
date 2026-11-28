@@ -336,6 +336,47 @@ lacking `url`, `title` or `snippet`, or with one of them not a string, or with a
 neither a string nor null, or that does not parse, raises `ProviderError` with the tag
 `unexpected_response`. Fields the adapter does not read, `last_updated` among them, are ignored.
 
+## SearchApi
+
+`searchapi` calls SearchApi's [Google Search API](https://www.searchapi.io/docs/google),
+`GET /api/v1/search?engine=google`, with the key read from `SEARCHAPI_API_KEY` when not passed. The
+key travels as a Bearer token in the `Authorization` header; the query travels in the URL, which
+the log filter above keeps out of httpx's log.
+
+| `SearchHit` | From SearchApi |
+|---|---|
+| `url`, `title` | `link`, `title`; a Google redirect `link`, `https://www.google.com/goto?url=...`, with a `link_token` beside it in `raw`, is unwrapped to its `url` when that is an http(s) URL and dropped when it is a token |
+| `snippet` | `snippet`, or `""` when a result has none; SearchApi returns no page text, so `text` is always `None` |
+| `published` | always `None`: SearchApi shows a result's date as display text in the language `hl` names, such as `Nov 11, 2026` or `7 days ago`, so it stays in `raw` |
+
+SearchApi reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
+SearchApi's documentation calls `num` phased out, but a `num` below 10 was honored when the
+adapter was written, and the hits are cut to the count as well, so either way the count holds.
+`time_range` becomes `time_period`, `last_day`, `last_week`, `last_month` or `last_year`, and wins
+over the `time_period` option, which also reaches the finer `last_hour` and below. The other
+native options are `gl`, `hl`, `location`, `device`, `safe`, `page`, `time_period_min`,
+`time_period_max`, `lr`, `cr`, `nfpr` and `filter`, sent as query parameters under those names;
+`--describe searchapi` lists them. An option set to `None` is not sent.
+
+SearchApi signals every failure with an HTTP status and an `error` sentence in the body, which can
+quote the request. Any status from 400 raises `ProviderError`, tagged by the status:
+`invalid_request` (400), `invalid_api_key` (401), `payment_required` (402), `rate_limited` (429),
+else `http_error`; the sentence never reaches the error. A search that found nothing is a 200 with
+no `organic_results`, with the sentence `Google didn't return any results.` in `error` or, when
+Google answered only other sections such as `top_stories`, with no `error` at all: both are an
+empty result, not an error. Any other sentence in `error` in a 200 without `organic_results` is
+SearchApi reporting a failure inside a 200, and comes back as the result's `error`, tagged
+`provider_error`. A `search_metadata.status` other than `Success`, which no call has returned yet,
+becomes the result's `error`, tagged from the status.
+
+Every field read from a successful answer is checked: an answer without `search_metadata` or its
+`status`, or with `organic_results` that is not a list, or with an item lacking `link` or `title`,
+or with any of these or `snippet` of the wrong type, raises `ProviderError` with the tag
+`unexpected_response`. A `link` that is not an http or https URL with a host is dropped rather than
+failing the search, and the count is filled from the items after it. Ads, the AI overview, the
+knowledge graph, top stories and SearchApi's other SERP sections come in fields of their own,
+which the adapter does not read, so a field SearchApi adds breaks nothing.
+
 ## SearXNG
 
 `searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,

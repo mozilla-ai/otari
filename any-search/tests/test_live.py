@@ -62,6 +62,8 @@ EXPECTED: dict[str, Expected] = {
     "mojeek": Expected(dated={}, snippets=True),
     # Perplexity returns page text and no snippet, and dates the hits it knows a day for.
     "perplexity": Expected(dated={}),
+    # SearchApi returns Google's snippet and no page text, and dates no hit: a result's date is display text.
+    "searchapi": Expected(snippets=True),
     # Serply returns Google's snippet and no page text, and dates no hit.
     # Searched where SEARXNG_BASE_URL names an instance, on two engines with public APIs, which answer CI where
     # scraping engines meet CAPTCHAs. Neither has a time filter, so a search with one comes back empty.
