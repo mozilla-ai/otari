@@ -358,10 +358,15 @@ describe("DeploymentGate", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign in to continue" }),
     ).toBeInTheDocument()
-    expect(vi.mocked(announce).mock.calls.map(([message]) => message)).toEqual([
-      "This address didn’t answer like a gateway",
-      "Sign in to continue",
-    ])
+    // The heading is announced from an effect that runs after it is painted.
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(announce).mock.calls.map(([message]) => message),
+      ).toEqual([
+        "This address didn’t answer like a gateway",
+        "Sign in to continue",
+      ]),
+    )
   })
 
   it("names the address it asked, where that is not the page's own", async () => {
