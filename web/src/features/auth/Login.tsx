@@ -24,7 +24,7 @@ import {
   startOAuthSignIn,
 } from "@/shared/api/client"
 import { currentRoute } from "@/shared/helpers/appLocation"
-import { mailCanSend } from "@/shared/helpers/bootstrap"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import {
   PasskeyCancelledError,
   supportsPasskeys,
@@ -265,7 +265,7 @@ export function Login() {
     open_signup,
     organization_oidc_enabled,
   } = useDeployment()
-  const canSendMail = mailCanSend(mail)
+  const canSendMail = mailDelivers(mail)
   const offersPasswordForm = sign_in_methods.includes("password")
   const offersMasterKeyForm = sign_in_methods.includes("master_key")
   // Both are published whenever a member holds a password on a deployment its

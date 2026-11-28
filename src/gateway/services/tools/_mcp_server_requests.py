@@ -447,7 +447,7 @@ class McpServerRequestService:
         self._send_later(send)
 
     async def _mail_managers(self, workspace: Workspace, *, requester: User, title: str, note: str | None) -> None:
-        if not self._mailer.can_send_links:
+        if not self._mailer.can_deliver_links:
             return
         try:
             # A block of its own, after the step committed: a failure here rolls back nothing that step stored.
@@ -476,7 +476,7 @@ class McpServerRequestService:
         decided_by: uuid.UUID,
     ) -> None:
         """Tell each requester the answer; ``answered`` holds their workspace's name, the requester and the title."""
-        if not answered or not self._mailer.can_send_links:
+        if not answered or not self._mailer.can_deliver_links:
             return
         try:
             async with self._uow:

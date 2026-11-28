@@ -76,21 +76,6 @@ describe("PublicAuthPage: the mail gate", () => {
     },
   )
 
-  it.each(["/signup", "/resend-verification", "/recover-password"] as const)(
-    "still opens %s where a send reaches no recipient",
-    (path) => {
-      // These endpoints accept the request on such a deployment, so a panel
-      // here would refuse a flow the server does not.
-      renderPage(path, { mail: "sends_only" })
-
-      expect(
-        screen.queryByRole("heading", {
-          name: "Not available on this gateway",
-        }),
-      ).not.toBeInTheDocument()
-    },
-  )
-
   it("still opens a reset link, whose message was sent while mail worked", () => {
     renderPage("/reset-password", {
       route: "/reset-password?token=abc",

@@ -234,8 +234,8 @@ def test_an_allow_list_applies_whole_to_a_request_that_named_none() -> None:
 def test_a_disjoint_allow_list_is_refused_rather_than_emptied() -> None:
     """An empty allow-list reads as *no* allow-list downstream, so it cannot be the answer.
 
-    `_build_web_retrieval_backend` applies the field only when it is truthy, so
-    narrowing to `[]` would turn the narrowest possible policy into none at all.
+    The field is applied only when it is truthy, so narrowing to `[]` would turn
+    the narrowest possible policy into none at all.
     """
     entry: dict[str, object] = {"type": "otari_web_search", "allowed_domains": ["elsewhere.example"]}
 
@@ -246,7 +246,7 @@ def test_a_disjoint_allow_list_is_refused_rather_than_emptied() -> None:
 def test_a_request_naming_a_subdomain_of_a_permitted_domain_keeps_it() -> None:
     """A list entry is a suffix, not a host, so the narrower side of a pair survives.
 
-    `WebSearchBackend._apply_domain_filters` keeps a result whose hostname equals an
+    A domain rule keeps a result whose hostname equals an
     entry *or ends in* `"." + entry`, so a workspace allowing `example.com`
     already permits `docs.example.com`. A request naming the subdomain is asking
     for strictly less, and comparing the two as opaque strings would refuse it.

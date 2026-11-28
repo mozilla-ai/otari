@@ -178,7 +178,7 @@ VISION_STRATEGIES = ("describe", "ocr", "off")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
 # even when it is. See GatewayConfig.mail_transport.
-MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
+MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "none")
 
 # Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
@@ -968,10 +968,8 @@ class GatewayConfig(
         description=(
             "Which transport delivers outgoing mail: 'auto' (default) uses SMTP when "
             "smtp_host and mail_from_email are both set and sends nothing otherwise, "
-            "'smtp' requires them and refuses to start without them, 'console' logs "
-            "each message instead of delivering it (local development only: the log "
-            "line contains the message body, including the invitation or reset token "
-            "in its link), and 'none' turns mail off even where SMTP is configured."
+            "'smtp' requires them and refuses to start without them, and 'none' turns "
+            "mail off even where SMTP is configured."
         ),
     )
     public_base_url: Annotated[str | None, Shown(SettingsGroup.MAIL)] = Field(
@@ -1179,7 +1177,7 @@ class GatewayConfig(
     models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
         default=MODELS_DEV_BASE_URL,
         description=(
-            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "Where the models.dev catalog is fetched from. The default is Mozilla AI's fork, which "
             "publishes models.dev's catalog plus the models it does not list yet. Set "
             "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
@@ -1607,7 +1605,7 @@ class GatewayConfig(
 
     @property
     def effective_mail_transport(self) -> str:
-        """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
+        """Which transport a send would actually use: ``smtp`` or ``none``.
 
         Answers what a send *would use*, never what was asked for, and it stays
         the same answer whether or not :meth:`validate_mail_transport` was ever
@@ -1624,7 +1622,7 @@ class GatewayConfig(
         transport at all otherwise.
         """
         configured = self.mail_transport.strip().lower()
-        if configured in {"console", "none"}:
+        if configured == "none":
             return configured
         # 'auto' and an explicit 'smtp' resolve identically, because what SMTP
         # needs to exist does not depend on how it was asked for. They differ
@@ -2427,16 +2425,6 @@ class GatewayConfig(
         failure never waits until someone presses Invite.
         """
         configured = self.mail_transport.strip().lower()
-        if configured == "console":
-            # Once, at load, rather than per send: an operator who selected this
-            # deliberately does not need it repeated, but one who inherited it
-            # from a copied config needs to see it at least once, because the
-            # log it writes carries the token in every link it "delivers".
-            logger.warning(
-                "mail_transport is 'console': outgoing mail is written to the log, token-bearing "
-                "links included, and delivered to nobody. Use 'smtp' to actually send."
-            )
-            return
         # The *configured* value, not the effective one: an explicit 'smtp' that
         # cannot be built now resolves to 'none', which is precisely the state
         # this refuses. Keying on the effective value would make the check

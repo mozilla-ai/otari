@@ -18,7 +18,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNeedsSsoSignInError,
     InvitationNoLongerValidError,
 )
-from gateway.models.organizations import WorkspaceAssignment
+from gateway.models.organizations import OrganizationInvitation, WorkspaceAssignment
 from gateway.models.tenancy import (
     Organization,
     OrganizationDomain,
@@ -26,6 +26,7 @@ from gateway.models.tenancy import (
     WorkspaceAssignmentRequest,
 )
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
+from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
@@ -269,6 +270,54 @@ async def test_an_expired_a_declined_and_an_unknown_link_answer_alike(store: _St
     assert len(set(answers)) == 1
 
 
+async def test_a_decline_that_lands_after_an_earlier_read_closes_the_link(store: _Store) -> None:
+    """The lookup answers as committed, so a link declined since this session read it opens nothing.
+
+    A decline writes the row without touching an instance the session holds, and a session does not
+    expire its instances on commit, so a cached answer would still read as live.
+    """
+    organization = await store.organization()
+    await store.invitation(organization)
+    link = store.link()
+
+    async with store.uow:
+        # Held for the rest of the block, as a caller deciding on this invitation holds it. The
+        # identity map keeps weak references, so dropping it would evict the stale instance.
+        first = await link.open("plain-token")
+        assert first is not None
+        declined = await store.repositories.invitations.decline_by_token_hash(
+            hash_token("plain-token"), at=store.clock.now
+        )
+        assert declined is not None
+
+        assert await link.open("plain-token") is None
+
+
+async def test_a_link_that_expires_while_the_lookup_waits_opens_nothing(
+    monkeypatch: pytest.MonkeyPatch, store: _Store
+) -> None:
+    """Expiry is decided on the clock read after the lookup, which waits where a writer holds the row.
+
+    A clock read before the lookup judges the link by the time before that wait, so one that expired
+    during it would still open.
+    """
+    organization = await store.organization()
+    await store.invitation(organization, expires_in=timedelta(seconds=30))
+    real_lookup = OrganizationInvitationRepository.get_by_token_hash
+
+    async def lookup_that_outlasts_the_link(
+        self: OrganizationInvitationRepository, token_hash: str, *, lock: bool = False
+    ) -> OrganizationInvitation | None:
+        found = await real_lookup(self, token_hash, lock=lock)
+        store.clock.now += timedelta(minutes=1)
+        return found
+
+    monkeypatch.setattr(OrganizationInvitationRepository, "get_by_token_hash", lookup_that_outlasts_the_link)
+
+    async with store.uow:
+        assert await store.link().open("plain-token") is None
+
+
 async def test_preview_refuses_a_blocked_address(store: _Store) -> None:
     organization = await store.organization()
     await store.invitation(organization)
@@ -321,7 +370,7 @@ async def test_the_proven_domain_rule_is_asked_of_a_hand_carried_link_alone(stor
 
     # An emailed link is not held to another organization's proof, whether or not mail works now.
     assert (await store.acceptance().preview("emailed-token")).invited_email == "bob@proven.test"
-    undelivered = store.acceptance(mail_transport="console")
+    undelivered = store.acceptance(mail_transport="none")
     assert (await undelivered.preview("emailed-token")).invited_email == "bob@proven.test"
 
     # A hand-carried one is held to it, and configuring mail afterwards does not release it.

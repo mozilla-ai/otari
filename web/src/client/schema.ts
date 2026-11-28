@@ -3317,10 +3317,13 @@ export interface paths {
          *     request sends as `model` to let the gateway choose the provider: it tries the
          *     model's offerings best first and falls back down the list. An entry's price,
          *     token limits and capabilities are those of the offering tried first, at the
-         *     caller's own rate; a token limit that offering does not know is the smallest
-         *     the model's other offerings report, and an output limit filled that way is
-         *     capped at the entry's context window. A value nobody knows is omitted rather
-         *     than sent as null.
+         *     caller's own rate; a token limit or capability that offering does not know
+         *     comes from the model's other offerings, the smallest limit or the parameters
+         *     the first of them reports, and an output limit filled that way is capped at
+         *     the entry's context window. A field no offering reports is read
+         *     from models.dev's entry for the model, preferring the vendor's own, so a
+         *     model reached on an organization's key to an OpenAI-compatible endpoint is
+         *     described too. A value nobody knows is omitted rather than sent as null.
          *
          *     Aliases and routing policies are listed beside the models. An
          *     `instance:model` selector still pins a request to one provider, and
@@ -11598,6 +11601,8 @@ export interface components {
          * @description An address the bulk invite could not invite, and why.
          */
         BulkInvitationFailurePublic: {
+            /** Code */
+            code?: string | null;
             /** Detail */
             detail: string;
             /** Email */
@@ -16704,15 +16709,19 @@ export interface components {
         };
         /**
          * MailReadiness
-         * @description How far an email carrying a link back to this deployment gets.
+         * @description Whether this deployment is configured to put a link into somebody's inbox.
          *
          *     The members are exclusive and cover every deployment.
          *     ``none`` means no message is sent at all.
-         *     ``sends_only`` means a message is sent and no link the recipient can open reaches them.
-         *     ``delivers`` means the recipient's mailbox receives it.
+         *     ``delivers`` means a message is sent to the address it names, which is what the
+         *     configuration permits rather than what a mail server went on to do with it.
+         *     Whether a send succeeds is :meth:`Mailer.send`'s answer, once.
+         *
+         *     NOTE: An operator confirms a real end-to-end delivery through the mail test
+         *     surface. This value never stands for a send that has been tried.
          * @enum {string}
          */
-        MailReadiness: "none" | "sends_only" | "delivers";
+        MailReadiness: "none" | "delivers";
         /**
          * MailSettings
          * @description What this deployment can send, and what stands in the way if it cannot.
@@ -16745,12 +16754,12 @@ export interface components {
             public_base_url: string | null;
             /**
              * Ready
-             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. True for a transport that delivers to nobody. The 'mail' field on /api/v1/bootstrap tells those apart.
+             * @description Whether an email carrying a link back to this deployment reaches its recipient, which is what every message the control plane sends needs.
              */
             ready: boolean;
             /**
              * Transport
-             * @description The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.
+             * @description The transport a send would use: 'smtp' or 'none'.
              */
             transport: string;
         };
@@ -25674,6 +25683,8 @@ export interface components {
              * @description The HTTP status the server refused with, if any
              */
             http_status?: number | null;
+            /** @description The most recent contact that got no answer, however long ago; null if none is known */
+            last_failure?: components["schemas"]["WorkspaceMcpServerLastFailure"] | null;
             /**
              * Missing Allowed Tools
              * @description Allow-listed names the server did not offer
@@ -25686,9 +25697,10 @@ export interface components {
             read_only_hinted_tools?: string[];
             /**
              * Status
+             * @description failing: the last contact got no answer. degraded: the last contact got one, but another failed within the last 60 minutes. healthy: neither
              * @enum {string}
              */
-            status: "healthy" | "failing";
+            status: "healthy" | "degraded" | "failing";
             /**
              * Tool Count
              * @description Live tools the allow-list admits; null when the check failed, or when the server answered a request that did not list its tools and no listing is on record
@@ -25748,6 +25760,20 @@ export interface components {
              * @description The deciding rule's tool patterns; [] means the key cannot reach the server
              */
             tools: string[];
+        };
+        /**
+         * WorkspaceMcpServerLastFailure
+         * @description The most recent time the gateway could not get an answer from the server, and why.
+         */
+        WorkspaceMcpServerLastFailure: {
+            error: components["schemas"]["CheckFailure"];
+            /** Failed At */
+            failed_at: string;
+            /**
+             * Http Status
+             * @description The HTTP status the server refused with, if any
+             */
+            http_status?: number | null;
         };
         /**
          * WorkspaceMcpServerLogoPublic

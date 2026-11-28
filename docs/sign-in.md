@@ -198,10 +198,9 @@ like the other signup paths.
 ### Signup
 
 Signup sets a password for an address and sends a verification link. Signup
-needs [mail](configuration.md#mail), because an account that cannot verify its
-address cannot sign in. Where that mail reaches nobody, as with
-`mail_transport: console`, signup still completes and the page that follows says
-to ask whoever runs the deployment for the link.
+needs [mail](configuration.md#mail) that reaches a mailbox, because an account
+that cannot verify its address cannot sign in, so a deployment that cannot
+deliver a link refuses signup rather than stranding the caller.
 
 The link verifies the address only together with that password, because anyone
 can sign up with an address they do not hold:

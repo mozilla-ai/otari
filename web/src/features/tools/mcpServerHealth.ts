@@ -1,5 +1,6 @@
 import type { McpServerCheckFailure, WorkspaceMcpServerHealth } from "@/client"
 import { isLiteralToolName, toolNoun } from "@/features/tools/mcpAccess"
+import { formatDateTime } from "@/shared/helpers/format"
 
 // What the gateway last learned by talking to a server, in words: from a
 // manager's check, or from a real request that reached it. The codes are
@@ -86,7 +87,8 @@ export function hasToolListing(
   health: WorkspaceMcpServerHealth | null,
 ): health is WorkspaceMcpServerHealth {
   return (
-    health?.status === "healthy" &&
+    health !== null &&
+    health.status !== "failing" &&
     health.tool_count !== null &&
     health.tool_count !== undefined
   )
@@ -96,6 +98,10 @@ export function hasToolListing(
 export function healthDetail(health: WorkspaceMcpServerHealth): string {
   if (health.error) {
     return FAILURES[health.error].detail(health.http_status)
+  }
+  const failure = health.last_failure
+  if (health.status === "degraded" && failure) {
+    return `It answers, but not every time. The last failure, ${formatDateTime(failure.failed_at)}: ${FAILURES[failure.error].detail(failure.http_status)}`
   }
   const missing = health.missing_allowed_tools ?? []
   if (missing.length > 0) {
@@ -112,7 +118,7 @@ export function healthDetail(health: WorkspaceMcpServerHealth): string {
 /** Whether a check found something the operator should look at. */
 export function healthNeedsAttention(health: WorkspaceMcpServerHealth) {
   return (
-    health.status === "failing" ||
+    health.status !== "healthy" ||
     (health.missing_allowed_tools ?? []).length > 0
   )
 }
@@ -128,8 +134,8 @@ export type HealthState = "healthy" | "attention" | "failing" | "unchecked"
 
 /**
  * The four states the server list's dot shows: never reached, failing,
- * answering but worth a look (no successful contact in a week, or allow-listed
- * tools the server no longer offers), and healthy.
+ * answering but worth a look (failing on and off, no successful contact in a
+ * week, or allow-listed tools the server no longer offers), and healthy.
  */
 export function healthState(
   health: WorkspaceMcpServerHealth | null,

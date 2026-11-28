@@ -1874,7 +1874,7 @@ class OrganizationService:
                         )
                     )
                 except (TenancyConflictError, TenancyValidationError) as exc:
-                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
+                    failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc), code=exc.error_code))
 
         mailer = Mailer(config)
         # Bounded, so a large batch does not open a hundred SMTP connections at once.
@@ -2025,7 +2025,7 @@ class OrganizationService:
         # it reaches the invitee. A relative link means nothing in an inbox, and
         # neither does a message the transport shows the operator instead of
         # sending. This is the degrading branch of the no-mail design; a surface
-        # with no such fallback calls mailer.require_ready() instead.
+        # with no such fallback calls mailer.require_can_deliver() instead.
         if mailer.can_deliver_links:
             mail_limited = not await mail_limit.admit(organization.id, email)
         if mailer.can_deliver_links and not mail_limited:

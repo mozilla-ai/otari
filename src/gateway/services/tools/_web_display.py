@@ -2,8 +2,7 @@
 
 A hit's title and date are whatever a provider sent, so each dialect bounds and
 collapses them the same way before they go on the wire. A hit is any-search's
-``SearchHit``, whose date is shown as an ISO date, or the old backend's dict,
-whose date string is shown as the provider sent it. A fetch's URL loses its
+``SearchHit``, whose date is shown as an ISO date. A fetch's URL loses its
 query string and fragment, which a fetch result never displays.
 """
 
@@ -20,12 +19,6 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_web_url,
 )
 
-# A search result's recency, collapsed to one line and length-capped before it goes
-# on the wire. Same rendering hygiene the text formatter applies: the value is
-# whatever a search-API-fronting adapter forwarded, so one overlong or multiline
-# entry shouldn't be what makes a citations panel unreadable.
-_HIT_DATE_MAX_CHARS = 128
-
 # Backend-supplied titles are unbounded. Generous for a real page title, and small
 # enough that a full result set of them cannot approach the tool-result byte limit
 # on its own.
@@ -35,11 +28,6 @@ _HIT_TITLE_MAX_BYTES = 512
 def hit_title(title: object, url: str) -> str:
     """A hit's title, capped, or its URL when it has none."""
     return truncate_utf8(str(title or url).strip(), _HIT_TITLE_MAX_BYTES, suffix="…").text
-
-
-def hit_date(value: object) -> str | None:
-    """A hit's date on one line and capped, ``None`` when it has none."""
-    return " ".join(str(value or "").split())[:_HIT_DATE_MAX_CHARS] or None
 
 
 def published_date(value: datetime | None) -> str | None:
@@ -56,26 +44,21 @@ def search_query(arguments: Mapping[str, Any]) -> str:
     return str(arguments.get("query") or "")
 
 
-def hits_to_show(results: Iterable[SearchHit | Mapping[str, Any]]) -> Iterator[tuple[str, str, str | None]]:
+def hits_to_show(results: Iterable[SearchHit]) -> Iterator[tuple[str, str, str | None]]:
     """Each hit's URL, title and date as a caller is shown them; a hit without a URL has nothing to show."""
     for result in results:
-        title: object
-        date: object
-        if isinstance(result, SearchHit):
-            url, title, date = result.url.strip(), result.title, published_date(result.published)
-        else:
-            url, title, date = str(result.get("url") or "").strip(), result.get("title"), result.get("published_date")
+        url = result.url.strip()
         if url:
-            yield url, hit_title(title, url), hit_date(date)
+            yield url, hit_title(result.title, url), published_date(result.published)
 
 
-def take_last_hits(pool: object) -> list[SearchHit] | list[dict[str, Any]] | None:
-    """The hits the backend that ran a search kept, taking them: any-search's, else the old backend's.
+def take_last_hits(pool: object) -> list[SearchHit] | None:
+    """The hits the search backend that ran a call kept, taking them.
 
     ``None`` for a backend that keeps none, which is how a gateway-run search is
     told apart from an MCP server's tool of the same name.
     """
-    take = getattr(pool, "take_last_hits", None) or getattr(pool, "take_last_results", None)
+    take = getattr(pool, "take_last_hits", None)
     return take() if take is not None else None
 
 

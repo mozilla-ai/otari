@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
+from _mail_support import MAIL_CONFIGURED
 from gateway.api.deps.invitations import (
     get_invitation_acceptance,
     get_invitation_link,
@@ -35,8 +36,7 @@ def _config() -> GatewayConfig:
         invitation_per_day=7,
         invitation_resend_limit=3,
         invitation_resend_wait_minutes=11,
-        mail_from_email="otari@example.com",
-        mail_transport="console",
+        **MAIL_CONFIGURED,  # type: ignore[arg-type]
         public_base_url="https://otari.example.com",
     )
 

@@ -1793,11 +1793,11 @@ class WorkspaceMcpServerService:
             await self.db.commit()
             logger.info("MCP server check dropped server_id=%s reason=edited", server.id)
             return True
-        health = WorkspaceMcpServerHealth.from_check(server.allowed_tools, check)
-        if check.failure is not None and server.health is not None:
+        previous = WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None
+        health = WorkspaceMcpServerHealth.from_check(server.allowed_tools, check).following(previous)
+        if check.failure is not None and previous is not None:
             # What '@read' stands for until a manager labels tools: one failed check, possibly with one
             # user's token, must not empty it for everyone, as one failed contact does not.
-            previous = WorkspaceMcpServerHealth.model_validate(server.health)
             health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
         server.health = health.model_dump(mode="json")
         WorkspaceMcpServerHealth.keep_first_read_hints(server)
@@ -2862,7 +2862,7 @@ class WorkspaceMcpServerService:
 
         health = WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None
         listed: tuple[list[str], dict[str, str], str] | None = None
-        if health is not None and health.status == "healthy" and health.tool_count is not None:
+        if health is not None and health.answered and health.tool_count is not None:
             listed = (health.tools, health.tool_descriptions, health.checked_at)
         elif access != "none" and server.credential_mode == McpCredentialMode.PER_USER:
             listed = await self._list_with_own_connection(server, user_id)

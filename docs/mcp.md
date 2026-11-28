@@ -477,7 +477,10 @@ server's answers are written at most once every 15 minutes, and the same failure
 at most once a minute, unless its status changes; each gateway process runs at most 64 such writes at once: a contact past that
 is not recorded. A
 user who has not signed in to a per-user server, or whose own token the server
-refuses, is not a server failure and records nothing. So `health.checked_at` is
+refuses, is not a server failure and records nothing, and neither does a
+request turned away because the gateway had no free slot to reach the server
+with. A request whose own deadline ends before the server answers records
+`timeout`. So `health.checked_at` is
 the last contact, and the manual check is for a server no request uses yet.
 
 An organization's per-user server is the exception, because every workspace of
@@ -487,6 +490,12 @@ later request through that member's connection records whether the server
 answered, never the tools it listed: the tool list comes from the organization's
 own check. A contact made before the server switched between personal and shared
 accounts is not recorded at all.
+
+`health.last_failure` is the most recent contact that got no answer, with
+`failed_at`, `error` and `http_status`, and stays on record after the server
+answers again. A server that answers within an hour of its last failure reports
+`health.status` `degraded` rather than `healthy`, so one that fails on and off
+does not read healthy because the latest request happened to get through.
 
 A server that fails its check is still stored. `health.status` is `failing` and
 `health.error` names the cause: `unreachable`, `tls_failed`, `timeout`,

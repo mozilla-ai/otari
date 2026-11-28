@@ -1,13 +1,13 @@
 """Outgoing mail settings, and the operator's way to prove they work.
 
-Two endpoints under ``/api/v1/settings``, operator-gated like
-the rest of the management API:
+Two endpoints under the settings resource, operator-gated like the rest of the
+management API:
 
-* ``GET /api/v1/settings/mail`` reports which transport (if any) this deployment
-  would send through, what it would send as, and, when it cannot send, exactly
-  which settings are missing. Naming them is the point: "mail is unavailable" is
-  only honest if it says what would make it available.
-* ``POST /api/v1/settings/mail/test`` renders and sends a real templated message, so
+* A read reports which transport (if any) this deployment would send through,
+  what it would send as, and, when it cannot send, exactly which settings are
+  missing. Naming them is the point: "mail is unavailable" is only honest if it
+  says what would make it available.
+* A test send renders and sends a real templated message, so
   an operator can confirm the configuration end to end rather than discovering
   it the first time someone is invited. On a deployment with no transport it
   refuses with 503 up front and never pretends to have sent anything.
@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, require_deployment_operator
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
 
@@ -37,15 +37,12 @@ router = APIRouter(
 class MailSettings(BaseModel):
     """What this deployment can send, and what stands in the way if it cannot."""
 
-    transport: str = Field(
-        description="The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'."
-    )
+    transport: str = Field(description="The transport a send would use: 'smtp' or 'none'.")
     enabled: bool = Field(description="Whether a transport is configured at all.")
     ready: bool = Field(
         description=(
-            "Whether a message carrying a link back to this deployment can be sent, which is "
-            "what every message the control plane sends needs. True for a transport that "
-            f"delivers to nobody. The 'mail' field on {API_ROOT}/bootstrap tells those apart."
+            "Whether an email carrying a link back to this deployment reaches its recipient, "
+            "which is what every message the control plane sends needs."
         )
     )
     from_email: str | None = Field(description="The 'From' address on outgoing mail, if one is configured.")
@@ -98,7 +95,7 @@ def _settings(config: GatewayConfig) -> MailSettings:
     return MailSettings(
         transport=mailer.transport_name,
         enabled=mailer.is_configured,
-        ready=mailer.can_send_links,
+        ready=mailer.can_deliver_links,
         from_email=config.mail_from_email,
         from_name=config.mail_from_name,
         public_base_url=config.public_base_url,
@@ -137,7 +134,7 @@ async def send_test_mail(
 
     mailer = Mailer(config)
     try:
-        mailer.require_ready()
+        mailer.require_can_deliver()
     except MailNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
 

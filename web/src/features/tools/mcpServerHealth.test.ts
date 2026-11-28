@@ -44,6 +44,30 @@ describe("mcpServerHealth", () => {
     expect(healthNeedsAttention(refused)).toBe(true)
   })
 
+  it("says a server that answers between failures fails on and off, and why it last failed", () => {
+    const degraded = health({
+      status: "degraded",
+      last_failure: {
+        failed_at: "2026-08-01T00:00:00+00:00",
+        error: "timeout",
+        http_status: null,
+      },
+    })
+
+    expect(healthDetail(degraded)).toMatch(/^It answers, but not every time\./)
+    expect(healthDetail(degraded)).toMatch(/did not answer in time/)
+    expect(healthNeedsAttention(degraded)).toBe(true)
+    expect(healthState(degraded, Date.parse("2026-08-01T00:30:00Z"))).toBe(
+      "attention",
+    )
+    expect(checkedTools({ health: degraded, allowed_tools: null })).toEqual(
+      expect.objectContaining({
+        isKnown: true,
+        tools: ["list_issues", "get_issue"],
+      }),
+    )
+  })
+
   it("labels an unclassified refusal by its status", () => {
     const refused = health({
       status: "failing",

@@ -157,27 +157,6 @@ describe("MailDeliveryCard", () => {
     expect(await screen.findByText(/Sent over smtp/)).toBeInTheDocument()
   })
 
-  it("does not tell an operator to check an inbox for a console send", async () => {
-    // The console transport writes to the log and delivers to nobody, so the
-    // inbox wording would send them looking for a message that never left.
-    mockApi(
-      { ...READY, transport: "console" },
-      { ok: true, transport: "console", reason: null },
-    )
-    renderCard()
-
-    await screen.findByText("Console (logged, not delivered)")
-    await userEvent.type(screen.getByLabelText("Recipient"), "ada@example.com")
-    await userEvent.click(
-      screen.getByRole("button", { name: "Send test email" }),
-    )
-
-    expect(
-      await screen.findByText(/Written to the gateway log/),
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/recipient's inbox/)).not.toBeInTheDocument()
-  })
-
   it("shows the transport's own reason when a configured send fails", async () => {
     mockApi(READY, {
       ok: false,

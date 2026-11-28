@@ -4,15 +4,12 @@ Unit rather than integration: the route reads configuration and sends through a
 transport, with no database behind it beyond the one the app needs to boot.
 """
 
-import logging
-from collections.abc import Generator
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
+from _mail_support import MAIL_CONFIGURED, RecordingTransport
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
@@ -66,43 +63,36 @@ def test_a_transport_without_a_public_url_is_still_not_ready(tmp_path: Path) -> 
     assert refused.status_code == 503
 
 
-def test_a_configured_deployment_sends_a_templated_test_message(tmp_path: Path) -> None:
-    with _client(tmp_path, mail_transport="console", public_base_url="https://otari.example.com") as client:
+def test_a_configured_deployment_sends_a_templated_test_message(
+    tmp_path: Path, recorded_mail: RecordingTransport
+) -> None:
+    with _client(tmp_path, **MAIL_CONFIGURED, public_base_url="https://otari.example.com") as client:
         body = client.get(f"{API_ROOT}/settings/mail", headers=AUTH).json()
         sent = client.post(f"{API_ROOT}/settings/mail/test", json={"to": "ada@example.com"}, headers=AUTH)
 
     assert body["ready"] is True
     assert body["missing"] == []
     assert sent.status_code == 200
-    assert sent.json() == {"ok": True, "transport": "console", "reason": None}
-
-
-@pytest.fixture
-def console_mail(caplog: pytest.LogCaptureFixture) -> Generator[pytest.LogCaptureFixture]:
-    """Read what the console transport logged; the gateway logger does not propagate."""
-    gateway_logger.addHandler(caplog.handler)
-    try:
-        with caplog.at_level(logging.INFO, logger="gateway"):
-            yield caplog
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    assert sent.json() == {"ok": True, "transport": "smtp", "reason": None}
+    assert recorded_mail.last.to == "ada@example.com"
 
 
 def test_the_test_message_names_the_interface_rather_than_this_process(
-    tmp_path: Path, console_mail: pytest.LogCaptureFixture
+    tmp_path: Path, recorded_mail: RecordingTransport
 ) -> None:
     # The one message whose whole job is proving the mail setup has to name the
     # address an operator would actually open.
     with _client(
         tmp_path,
-        mail_transport="console",
+        **MAIL_CONFIGURED,
         public_base_url="https://api.example.com",
         ui_base_url="https://app.example.com/ui",
     ) as client:
         client.post(f"{API_ROOT}/settings/mail/test", json={"to": "ada@example.com"}, headers=AUTH)
 
-    assert "https://app.example.com/ui" in console_mail.text
-    assert "https://api.example.com" not in console_mail.text
+    body = recorded_mail.last.message.text
+    assert "https://app.example.com/ui" in body
+    assert "https://api.example.com" not in body
 
 
 def test_a_send_that_fails_reports_why_instead_of_erroring(tmp_path: Path) -> None:
@@ -124,7 +114,7 @@ def test_a_send_that_fails_reports_why_instead_of_erroring(tmp_path: Path) -> No
 
 
 def test_a_malformed_recipient_is_refused_before_any_transport_is_touched(tmp_path: Path) -> None:
-    with _client(tmp_path, mail_transport="console", public_base_url="https://otari.example.com") as client:
+    with _client(tmp_path, **MAIL_CONFIGURED, public_base_url="https://otari.example.com") as client:
         response = client.post(f"{API_ROOT}/settings/mail/test", json={"to": "not-an-address"}, headers=AUTH)
 
     assert response.status_code == 422

@@ -7,11 +7,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-import httpx
 import pytest
 
 import any_search
-from gateway.api.routes._tools import _build_web_retrieval_backend
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import ToolKind
 from gateway.exceptions.tools_exceptions import (
@@ -29,17 +27,13 @@ from gateway.models.tools import (
     WebToolCredentialSource,
     WorkspaceWebSearchKeyOverride,
 )
-from gateway.services import search_backend
 from gateway.services.secret_box import encrypt_mapping, encrypt_secret, generate_secret_key
 from gateway.services.tools import (
-    SearchQuery,
     _web_search_keys,
     apply_web_access_policy,
-    page_budget_chars,
     resolve_search,
 )
 from gateway.services.tools._web_search_keys import resolve_web_search_key
-from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 _ORG = WebToolCredentialSource.ORG
@@ -169,6 +163,34 @@ def test_a_fetch_key_is_a_fetch_credential_with_its_endpoint_and_options(monkeyp
     )
 
 
+def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
+    policy = replace(_NO_POLICY, credential=WebSearchCredential(provider="exa", source=_ORG, api_key="workspace-key"))
+
+    resolved = resolve_search(config, policy, requested=None, request_options=None)
+
+    assert resolved is not None
+    assert (resolved.provider, resolved.api_key) == ("exa", "workspace-key")
+
+
+def test_without_a_workspace_key_the_deployments_provider_is_used() -> None:
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
+
+    resolved = resolve_search(config, None, requested=None, request_options=None)
+
+    assert resolved is not None
+    assert (resolved.provider, resolved.api_key) == ("tavily", "deployment-key")
+
+
+@pytest.mark.parametrize(
+    ("api_key", "sendable"),
+    [("tvly-abc", True), ("", False), ("tvly abc", False), ("tvly\nabc", False), ("tvly\x7fabc", False)],
+)
+def test_only_a_key_with_no_whitespace_or_control_character_is_sendable(api_key: str, sendable: bool) -> None:
+    """A key the HTTP client refuses is refused here first, since its own error quotes the header."""
+    assert _web_search_keys._is_sendable_api_key(api_key) is sendable
+
+
 def test_a_key_stored_without_a_key_is_never_completed_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EXA_API_KEY", "the-deployments-own-key")
     key = _key("keyless", provider="exa")
@@ -180,27 +202,6 @@ def test_a_key_stored_without_a_key_is_never_completed_from_the_environment(monk
 
     with pytest.raises(WebSearchCredentialRefusedError, match="carries no API key"):
         resolve_search(GatewayConfig(), policy, requested=None, request_options=None)
-
-
-def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
-    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
-
-    backend = _build_web_retrieval_backend(
-        base_url="http://searxng:8080",
-        search_tool_entry={},
-        credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
-        config=config,
-    )
-
-    assert (backend._provider, backend._provider_api_key) == ("tavily", "workspace-key")
-
-
-def test_without_a_workspace_key_the_deployments_provider_is_used() -> None:
-    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
-
-    backend = _build_web_retrieval_backend(base_url=None, search_tool_entry={}, config=config)
-
-    assert (backend._provider, backend._provider_api_key) == ("tavily", "deployment-key")
 
 
 @pytest.mark.parametrize(
@@ -243,115 +244,6 @@ def test_the_choice_decrypts_only_until_a_usable_key() -> None:
 
     assert chosen is default
     assert asked == ["pinned", "default"]
-
-
-# The provider call is stubbed above the client, which the keyed search only passes on.
-_NO_NETWORK = httpx.MockTransport(lambda _request: httpx.Response(500))
-
-
-@pytest.mark.asyncio
-async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-
-    async def fake_provider_search(**kwargs: Any) -> list[dict[str, Any]]:
-        seen.update(kwargs)
-        return [
-            {"url": "https://kept.example/a", "title": "A", "content": "first"},
-            {"url": "https://dropped.example/b", "title": "B", "content": "second"},
-            {"url": "https://kept.example/c", "title": "C", "content": "third"},
-        ]
-
-    monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
-    credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key")
-
-    async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
-        outcome = await search_backend.run_keyed_search(
-            credential,
-            SearchQuery(query="q", max_results=2, domain_filter=("-dropped.example",)),
-            timeout_s=3.0,
-            client=client,
-        )
-
-    assert (seen["provider"], seen["api_key"], seen["query"]) == ("tavily", "workspace-key", "q")
-    assert seen["options"] == {"max_results": 2}
-    assert seen["timeout_s"] == 3.0
-    # The caller's client, the app's web provider client in the route.
-    assert seen["client"] is client
-    assert [hit.url for hit in outcome.results] == ["https://kept.example/a", "https://kept.example/c"]
-    assert outcome.cost_usd is None
-
-
-@pytest.mark.asyncio
-async def test_a_workspace_keys_hits_keep_their_page_text_within_the_page_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
-        page = {"url": "https://a.example", "content": "a snippet", "extracted_content": "page text " * 100}
-        return [
-            {**page, "title": "A", "published_date": "2026-11-04"},
-            {"title": "no url"},
-            {"url": "", "title": "an empty url"},
-            {"url": "https://b.example", "content": "only a snippet"},
-        ]
-
-    monkeypatch.setattr(search_backend, "provider_search", provider_search)
-    query = SearchQuery(query="q", max_tokens_per_page=5)
-    async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
-        outcome = await search_backend.run_keyed_search(
-            WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
-            query,
-            timeout_s=3.0,
-            client=client,
-        )
-
-    first, second = outcome.results
-    assert (first.url, first.title, first.date) == ("https://a.example", "A", "2026-11-04")
-    assert first.snippet == ("page text " * 100)[: page_budget_chars(query)]
-    assert (second.url, second.snippet, second.date) == ("https://b.example", "only a snippet", None)
-
-
-@pytest.mark.asyncio
-async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def failing_provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
-        raise WebSearchProviderError("tavily search returned HTTP 401", tag="http_error", status=401)
-
-    monkeypatch.setattr(search_backend, "provider_search", failing_provider_search)
-
-    with pytest.raises(search_backend.SearchProviderError) as raised:
-        async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
-            await search_backend.run_keyed_search(
-                WebSearchCredential(provider="tavily", source=_ORG, api_key="workspace-key"),
-                SearchQuery(query="q"),
-                timeout_s=3.0,
-                client=client,
-            )
-
-    assert "workspace-key" not in str(raised.value)
-    # Kept for the 502's headers.
-    assert (raised.value.tag, raised.value.status) == ("http_error", 401)
-
-
-@pytest.mark.asyncio
-async def test_direct_search_on_a_workspace_key_localizes_to_the_requested_country(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seen: dict[str, Any] = {}
-
-    async def fake_provider_search(**kwargs: Any) -> list[dict[str, Any]]:
-        seen.update(kwargs)
-        return []
-
-    monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
-
-    async with httpx.AsyncClient(transport=_NO_NETWORK) as client:
-        await search_backend.run_keyed_search(
-            WebSearchCredential(provider="brave", source=_ORG, api_key="workspace-key"),
-            SearchQuery(query="q", max_results=2, country="de"),
-            timeout_s=3.0,
-            client=client,
-        )
-
-    assert seen["options"] == {"max_results": 2, "country": "de"}
 
 
 class _Overrides:

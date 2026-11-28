@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.models.tools import WebSearchCredential, WebToolCredentialSource
+from gateway.models.tools import WebSearchCredential
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tools import (
     NO_WEB_TOOLS,
@@ -44,7 +44,6 @@ _SEARCH = PricedTool(WEB_SEARCH_TOOL_NAME, f"fake:{_INSTANCE}", _SEARCH_ROWS, Tr
 _PAGES = PricedTool(
     WEB_SEARCH_TOOL_NAME, "fake:fake-fetch", (instance_rate_key("fetch", "fake-fetch", "fake"),), True, enrichment=True
 )
-_SEARCH_ON_ITS_OWN_ROW = PricedTool(WEB_SEARCH_TOOL_NAME, None, ("otari:web_search",), True)
 _BUILTIN_FETCH = PricedTool(
     WEB_FETCH_TOOL_NAME,
     "builtin:builtin_fetch",
@@ -52,20 +51,18 @@ _BUILTIN_FETCH = PricedTool(
     True,
 )
 _CODE = PricedTool("code_execution", None, ("otari:code_execution",), True)
-_ORG_KEY = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tvly-test")
 
 
 def _web(
     *,
     search: bool = False,
-    on_library: bool = True,
     fetch: bool = False,
     credential: WebSearchCredential | None = None,
     pages: bool = False,
     config: GatewayConfig = _FAKE_SEARCH,
 ) -> AdmittedWebTools:
     """A request's admitted web tools; with ``pages``, its searches' hits are enriched as ``config`` says."""
-    in_loop = resolve_in_loop_search(config, None) if search and on_library else None
+    in_loop = resolve_in_loop_search(config, None) if search else None
     return AdmittedWebTools(
         search_tool_entry={"type": "otari_web_search"} if search else None,
         fetch_tool_entry={"type": "otari_web_fetch"} if fetch else None,
@@ -130,17 +127,7 @@ def test_a_search_reads_pages_through_its_enrichment_unless_enrichment_is_off() 
 
     assert enrichment_for(_ENRICHED, in_loop) is in_loop.enrichment
     assert enrichment_for(_ENRICHED.model_copy(update={"web_search_extract": False}), in_loop) is None
-    assert enrichment_for(_ENRICHED, None) is None, "the old backend's pages are its own"
-
-
-def test_a_search_the_old_backend_serves_is_checked_on_its_tools_own_row() -> None:
-    assert _checked(_web(search=True, on_library=False)) == [_SEARCH_ON_ITS_OWN_ROW]
-
-
-def test_a_search_the_old_backend_serves_on_the_workspaces_own_key_is_not_deployment_paid() -> None:
-    assert _checked(_web(search=True, on_library=False, credential=_ORG_KEY)) == [
-        replace(_SEARCH_ON_ITS_OWN_ROW, deployment_paid=False)
-    ]
+    assert enrichment_for(_ENRICHED, None) is None, "a search that resolves nothing reads no pages"
 
 
 def test_a_search_the_libraries_run_on_the_workspaces_own_key_is_not_deployment_paid() -> None:
@@ -154,9 +141,9 @@ def test_a_search_the_libraries_run_on_the_workspaces_own_key_is_not_deployment_
 
 
 def test_every_admitted_tool_is_listed_whatever_require_pricing_says() -> None:
-    web = _web(search=True, on_library=False, fetch=True)
+    web = _web(search=True, fetch=True)
 
-    assert admitted_tools(code_execution=True, web=web) == [_SEARCH_ON_ITS_OWN_ROW, _BUILTIN_FETCH, _CODE]
+    assert admitted_tools(code_execution=True, web=web) == [_SEARCH, _BUILTIN_FETCH, _CODE]
 
 
 def test_the_fetch_tool_is_checked_on_the_instance_admission_resolved() -> None:
@@ -164,9 +151,9 @@ def test_the_fetch_tool_is_checked_on_the_instance_admission_resolved() -> None:
 
 
 def test_every_tool_a_request_runs_is_checked_in_the_registrys_order() -> None:
-    checked = _checked(_web(search=True, on_library=False, fetch=True), code_execution=True)
+    checked = _checked(_web(search=True, fetch=True), code_execution=True)
 
-    assert checked == [_SEARCH_ON_ITS_OWN_ROW, _BUILTIN_FETCH, _CODE]
+    assert checked == [_SEARCH, _BUILTIN_FETCH, _CODE]
 
 
 @pytest.mark.parametrize(("require_pricing", "budget_exempt"), [(False, False), (True, True)])

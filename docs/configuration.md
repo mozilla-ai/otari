@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the models.dev price snapshot when no stored price exists. |
-| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla.ai's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
+| `models_dev_base_url` | Where the models.dev catalog is fetched from. Defaults to [Mozilla AI's fork of models.dev](https://github.com/mozilla-ai/models.dev), which serves models.dev's catalog plus the models it does not list yet; set `https://models.dev` to read models.dev itself. |
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
@@ -1094,7 +1094,7 @@ serves, with their history; the cleanup never runs on a schedule.
 An update fetches models.dev's v2 catalog, and its v1 catalog when v2 fails,
 from `models_dev_base_url`. It carries every rate the catalog states, per
 second, image, character and minute as well as per token, so a video, image,
-speech or transcription model is priced by an update as a chat model is. The default is Mozilla.ai's fork of models.dev,
+speech or transcription model is priced by an update as a chat model is. The default is Mozilla AI's fork of models.dev,
 which publishes the same documents at the same paths, built from models.dev's
 catalog plus the models it does not list yet; each of those is also offered to
 models.dev, and leaves the fork once it lands there. `https://models.dev` reads
@@ -1571,8 +1571,9 @@ file or environment, then to the built-in default.
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search
   with its provider. Several search instances with neither log a warning at
-  startup. A deployment with no search instance also serves the legacy backend
-  to [direct search](tools.md#direct-search), under its provider's name.
+  startup. A deployment with no search instance also serves the search the
+  legacy settings describe to [direct search](tools.md#direct-search), under its
+  provider's name.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
@@ -1780,19 +1781,17 @@ every message in a temporary database inside its container, which goes when the 
 it accepts any credential. So it belongs in development and never in a deployment that serves
 anybody.
 
-`mail_transport: console` writes complete messages to logs for local testing.
-Those messages can contain invitation or password-reset tokens, so never use it
-where logs are shared. Test delivery from Settings or
-`POST /api/v1/settings/mail/test`.
+No transport writes a message to the log, because a verification or invitation
+link is a bearer credential and a log is read by people the message was never
+addressed to. Use the development mail sink above instead. Test delivery from
+Settings or `POST /api/v1/settings/mail/test`.
 
-Nothing reaches a recipient on that transport, so anything whose outcome depends
-on somebody receiving the message behaves as it does with no mail at all. An
-invitation hands its accept link back, a password link is shown instead of
-emailed, and health check alerts tell nobody. Signing up without an invitation,
-a verification resend and a password reset need `public_base_url` as well, and
-are refused without it. With it set they are accepted, because their message is
-written to the log for an operator to pass on, and the page that follows says to
-ask for the link rather than to watch an inbox. Signing up from an invitation is
+Every outcome that depends on somebody receiving a message is decided by one
+question: whether a link reaches a mailbox. Where it does not, an invitation
+hands its accept link back, a password link is shown instead of emailed, and
+health check alerts tell nobody. Signing up without an invitation, a
+verification resend and a password reset are refused outright, because each one
+exists to put a link in somebody's inbox. Signing up from an invitation is
 accepted either way, because the invitation names the address and the account
 needs no verification link.
 

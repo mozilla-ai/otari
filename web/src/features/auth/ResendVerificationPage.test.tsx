@@ -108,7 +108,7 @@ describe("ResendVerificationPage", () => {
   })
 
   it("offers to create a link where this deployment cannot email a working one", () => {
-    renderPage("sends_only")
+    renderPage("none")
 
     expect(
       screen.getByText(/cannot email it, so ask whoever runs it/),

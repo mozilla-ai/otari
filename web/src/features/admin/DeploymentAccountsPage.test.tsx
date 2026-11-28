@@ -288,7 +288,7 @@ describe("DeploymentAccountsPage", () => {
   })
 
   it.each([
-    ["sends_only", "Create the link"],
+    ["none", "Create the link"],
     ["delivers", "Email the link"],
   ] as const)(
     "offers to %s the link by what a recipient actually receives",

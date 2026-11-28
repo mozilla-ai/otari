@@ -7,7 +7,7 @@ Search, in order:
    ``direct_credential``, the workspace's organization key for an unnamed
    call, is given: the key's provider, key and options then serve the call,
    and the instance keeps its name and timeout. On a deployment with no
-   instance, ``requested`` may name the legacy backend instead.
+   instance, ``requested`` may name the legacy settings' search instead.
 2. Else the policy's credential: the workspace's organization key.
 3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
@@ -31,12 +31,10 @@ endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes no workspace layer, which holds search
 options, and a request layer on the direct endpoint alone. The count the
 layers name is taken out of the options, for the caller to apply as its door
-does. Where a library
-runs the call, each option is checked as the instance's are: a
+does. Each option is checked as the instance's are: a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
-names the layer and the key, never the value. What the old code runs takes
-the layers unchecked.
+names the layer and the key, never the value.
 """
 
 import functools
@@ -51,7 +49,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
-    WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
     ToolKind,
@@ -88,11 +85,6 @@ from gateway.types.tool_charges import (
     instance_rate_key,
 )
 
-# What runs a resolved call: one of the libraries, or the old code, which in
-# the loop is the old backend and on the direct endpoint the organization key's
-# own search.
-Runner = Literal["library", "old"]
-
 # How long a call may take when its instance sets no timeout: 30 seconds on
 # the direct endpoint and 15 in the loop. The built-in fetcher keeps its own
 # deadline.
@@ -123,7 +115,6 @@ class _Resolved:
 
     name: str | None
     provider: str
-    runner: Runner
     api_key: str = field(repr=False)
     api_base: str = field(repr=False)
     options: Mapping[str, Any] = field(repr=False, hash=False)
@@ -160,7 +151,7 @@ class InLoopSearch:
 def resolve_in_loop_search(
     config: ToolSettings, policy: ResolvedWebSearchConfig | None, *, request_options: Mapping[str, Any] | None = None
 ) -> InLoopSearch | None:
-    """The in-loop search on the libraries, or ``None`` when the old backend serves it or nothing does.
+    """The in-loop search on the libraries, or ``None`` when there is nothing to search with.
 
     Raises what :func:`resolve_search` raises for a request option the provider
     does not take, and what it and :func:`resolve_fetch` raise for a credential
@@ -172,13 +163,11 @@ def resolve_in_loop_search(
 
 def in_loop_search_for(
     config: ToolSettings, policy: ResolvedWebSearchConfig | None, search: ResolvedSearch
-) -> InLoopSearch | None:
-    """``search`` with the fetch that enriches its hits, or ``None`` when the old backend runs it.
+) -> InLoopSearch:
+    """``search`` with the fetch that enriches its hits.
 
     Raises what :func:`resolve_fetch` raises for a fetch credential it cannot use.
     """
-    if search.runner != "library":
-        return None
     return InLoopSearch(search, resolve_fetch(config, policy, requested=None, for_search=search))
 
 
@@ -210,16 +199,14 @@ def resolve_search(
             return _search_on_fallback(config, requested, direct_credential, request)
         timeout = instance.timeout or DIRECT_TIMEOUT_S
         if direct_credential is not None:
-            on_key = _search_on_credential(
-                direct_credential, name=instance.name, in_loop=False, timeout=timeout, request=request
-            )
+            on_key = _search_on_credential(direct_credential, name=instance.name, timeout=timeout, request=request)
             if on_key is not None:
                 return on_key
         return _search_on_instance(config, instance, in_loop=False, request=request)
     workspace = (policy.provider_options if policy is not None else None) or _NO_OPTIONS
     if policy is not None and policy.credential is not None:
         on_key = _search_on_credential(
-            policy.credential, name=None, in_loop=True, timeout=IN_LOOP_TIMEOUT_S, workspace=workspace, request=request
+            policy.credential, name=None, timeout=IN_LOOP_TIMEOUT_S, workspace=workspace, request=request
         )
         if on_key is not None:
             return on_key
@@ -240,7 +227,7 @@ def resolve_search_on_key(
     :func:`resolve_search` raises for the request's options and the key.
     """
     return _search_on_credential(
-        credential, name=name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request_options or _NO_OPTIONS
+        credential, name=name, timeout=DIRECT_TIMEOUT_S, request=request_options or _NO_OPTIONS
     )
 
 
@@ -345,11 +332,13 @@ def _search_on_instance(
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
-    """A search on ``instance``: its runner, its layered options and the rate keys it is billed under."""
+    """A search on ``instance``: its layered options and the rate keys it is billed under."""
+    if not instance.library_backed:
+        # Before the provider's metadata is looked up, which a provider any-search does not serve has none of.
+        raise SearchToolMisconfiguredError(instance.name)
     if refused_cost_tier(instance) is not None:
         # Before the options are layered, which would drop the tier with a warning for a call that does not run.
         raise SearchToolMisconfiguredError(instance.name)
-    runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
     if inherits_web_search_engines(instance.provider, own) and config.web_search_engines:
@@ -357,16 +346,14 @@ def _search_on_instance(
     options = _layered(
         "search",
         instance.provider,
-        checked=runner == "library",
+        checked=True,
         instance=(f"search instance '{instance.name}'", own, instance.dropped_options),
         workspace=workspace,
         request=request,
     )
     api_base = _base(instance.api_base or default_api_base(config, instance.provider))
-    if runner == "old" or (
-        any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base and not api_base
-    ):
-        # A provider no code here serves, or one needing an address with none of its own or to inherit.
+    if any_search.AnySearch.get_provider_metadata(instance.provider).requires_api_base and not api_base:
+        # A provider needing an address with none of its own or to inherit.
         raise SearchToolMisconfiguredError(instance.name)
     try:
         # Load checks the instance's own base; an inherited one is checked here.
@@ -378,7 +365,6 @@ def _search_on_instance(
     return ResolvedSearch(
         name=instance.name,
         provider=instance.provider,
-        runner=runner,
         api_key=instance.api_key or "",
         api_base=api_base,
         options=MappingProxyType(options),
@@ -396,14 +382,12 @@ def _search_on_fallback(
     direct_credential: WebSearchCredential | None,
     request: Mapping[str, Any],
 ) -> ResolvedSearch:
-    """A direct search on the legacy backend, which a deployment with no search instance serves under its name."""
+    """A direct search on the legacy settings' backend, which a deployment with no instance serves by name."""
     fallback = direct_search_fallback(config)
     if fallback is None or fallback.name != requested:
         raise SearchToolNotFoundError(requested)
     if direct_credential is not None:
-        on_key = _search_on_credential(
-            direct_credential, name=fallback.name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request
-        )
+        on_key = _search_on_credential(direct_credential, name=fallback.name, timeout=DIRECT_TIMEOUT_S, request=request)
         if on_key is not None:
             return on_key
     return _search_on_synthesized(fallback, workspace=_NO_OPTIONS, request=request, timeout=DIRECT_TIMEOUT_S)
@@ -416,12 +400,11 @@ def _search_on_synthesized(
     request: Mapping[str, Any],
     timeout: float = IN_LOOP_TIMEOUT_S,
 ) -> ResolvedSearch:
-    runner: Runner = "library" if synthesized.provider in any_search.AnySearch.get_supported_providers() else "old"
     legacy = {**synthesized.options, **({"engines": ",".join(synthesized.engines)} if synthesized.engines else {})}
     options = _layered(
         "search",
         synthesized.provider,
-        checked=runner == "library",
+        checked=True,
         instance=("legacy search settings", legacy, frozenset()),
         workspace=workspace,
         request=request,
@@ -430,7 +413,6 @@ def _search_on_synthesized(
     return ResolvedSearch(
         name=synthesized.name,
         provider=synthesized.provider,
-        runner=runner,
         api_key=synthesized.api_key or "",
         api_base=_base(synthesized.api_base),
         options=MappingProxyType(options),
@@ -445,49 +427,32 @@ def _search_on_credential(
     credential: WebSearchCredential,
     *,
     name: str | None,
-    in_loop: bool,
     timeout: float,
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
 ) -> ResolvedSearch | None:
     """The search a credential serves, or ``None`` for one whose provider this gateway cannot call."""
     provider = credential.provider
-    runner: Runner
-    if provider in any_search.AnySearch.get_supported_providers():
-        runner = "library"
-        metadata = any_search.AnySearch.get_provider_metadata(provider)
-        requires_key, default_base = credential_needs_api_key(metadata), metadata.default_api_base
-        requires_base = metadata.requires_api_base and not default_base
-    elif provider in WEB_SEARCH_PROVIDERS:
-        # A provider of the old search code that any-search does not serve.
-        runner = "old"
-        requires_key, default_base, requires_base = True, None, False
-    else:
+    if provider not in any_search.AnySearch.get_supported_providers():
         _ignore(credential, "search")
         return None
+    metadata = any_search.AnySearch.get_provider_metadata(provider)
+    requires_key, default_base = credential_needs_api_key(metadata), metadata.default_api_base
+    requires_base = metadata.requires_api_base and not default_base
     _check(credential, requires_key=requires_key, requires_base=requires_base)
-    if runner == "old" and _base(credential.api_base):
-        # The old code calls the provider's public endpoint, where the key would go instead.
-        raise WebSearchCredentialRefusedError(
-            provider, f"names a base URL, which this gateway's {provider} client cannot use"
-        )
     options = _layered(
         "search",
         provider,
-        checked=runner == "library",
+        checked=True,
         credential=(_CREDENTIAL_LAYER, credential.options),
         workspace=workspace,
         request=request,
     )
     max_results = _count(options, "max_results")
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
-    if in_loop and runner == "old":
-        # In the loop, the old backend records an organization key's calls with no label.
-        label = None
     return ResolvedSearch(
         name=name,
         provider=provider,
-        runner=runner,
         api_key=credential.api_key or "",
         api_base=_base(credential.api_base or default_base),
         options=MappingProxyType(options),
@@ -525,7 +490,6 @@ def _fetch_on_instance(
     return ResolvedFetch(
         name=instance.name,
         provider=instance.provider,
-        runner="library",
         api_key=instance.api_key or "",
         api_base=_base(
             instance.api_base or any_fetch.AnyFetch.get_provider_metadata(instance.provider).default_api_base
@@ -576,7 +540,6 @@ def _fetch_on_credential(
     return ResolvedFetch(
         name=name,
         provider=provider,
-        runner="library",
         api_key=credential.api_key or "",
         api_base=_base(credential.api_base or metadata.default_api_base),
         options=MappingProxyType(options),

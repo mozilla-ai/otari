@@ -192,8 +192,6 @@ async def _execute_tool_uses(
         owner = owning_backend(pool, block.name)
         try:
             text = await owner.call_tool(block.name, arguments)
-        except MaxToolIterationsExceeded:
-            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, block.name)
             log_tool_failure(block.name, detail, exc)
@@ -410,8 +408,6 @@ async def _call_stream_tool(
             )
         text = await pool.call_tool(name, arguments)
         return text, text, is_tool_error(text), False
-    except MaxToolIterationsExceeded:
-        raise
     except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
         detail = tool_failure_detail(pool, name)
         log_tool_failure(name, detail, exc)

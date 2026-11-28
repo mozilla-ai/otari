@@ -383,13 +383,13 @@ describe("Login", () => {
     expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
   })
 
-  it("keeps the mail-only ways in where a send reaches no recipient", () => {
-    // Signup, recovery and a verification resend each only send a message, and
-    // the endpoints behind them accept one on this deployment, so taking the
-    // links away would hide a flow that works.
+  it("takes the mail-only ways in away where a link reaches no mailbox", () => {
+    // Signup, recovery and a verification resend each depend on a link arriving,
+    // and the endpoints behind them refuse on such a deployment, so a link here
+    // would offer a flow the server does not serve.
     render(
       <Mounted
-        mail="sends_only"
+        mail="none"
         openSignup
         signInMethods={["master_key", "password"]}
       >
@@ -397,12 +397,10 @@ describe("Login", () => {
       </Mounted>,
     )
 
+    expect(screen.queryByRole("link", { name: /Create an account/ })).toBeNull()
     expect(
-      screen.getByRole("link", { name: /Create an account/ }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: /Forgot your password/ }),
-    ).toBeInTheDocument()
+      screen.queryByRole("link", { name: /Forgot your password/ }),
+    ).toBeNull()
   })
 
   it("links to the auth-free welcome page", async () => {

@@ -6,7 +6,7 @@ repository, not the hosted otari.ai service.
 
 ## Overview
 
-Otari is an open-source project stewarded by [Mozilla.ai](https://mozilla.ai).
+Otari is an open-source project stewarded by [Mozilla AI](https://mozilla.ai).
 Development happens in the open on GitHub. Anyone can use Otari, file issues,
 open pull requests, and take part in discussions.
 
@@ -32,7 +32,7 @@ consensus. Routine changes are merged once a maintainer approves and CI passes.
 Larger changes, such as new public APIs, breaking changes, or shifts in scope,
 are discussed in an issue or Discussion first so the reasoning is on the record
 and the community can weigh in. When maintainers disagree and consensus isn't
-reached, the decision escalates to the Mozilla.ai team that stewards the project.
+reached, the decision escalates to the Mozilla AI team that stewards the project.
 
 ## Becoming a maintainer
 
@@ -42,9 +42,9 @@ judgment in discussions. There is no fixed quota. If you want to grow into the
 role, the path is to keep contributing and engaging; existing maintainers will
 reach out.
 
-## Relationship to Mozilla.ai and otari.ai
+## Relationship to Mozilla AI and otari.ai
 
-Mozilla.ai develops both the open-source Otari gateway and the hosted otari.ai
+Mozilla AI develops both the open-source Otari gateway and the hosted otari.ai
 platform. The two share concepts and a wire protocol, but the gateway in this
 repository is and will remain open source under its existing license. It is a
 standalone product you can run with no dependency on the hosted service and no

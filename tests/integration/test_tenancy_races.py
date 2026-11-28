@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import MAIL_CONFIGURED
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
 from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
@@ -1038,7 +1040,7 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         user=owner_row,
         workspace_create=WorkspaceCreate(name="Research"),
     )
-    config = GatewayConfig()
+    config = GatewayConfig(mail_transport="none")
     invited = await OrganizationService(
         async_db, **membership_writes(async_db)
     ).invite_active_organization_member_for_user(
@@ -1098,14 +1100,14 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
     _, owner = await _seed_owner(async_db)
     owner_row = await UserRepository(async_db).get(owner.id)
     assert owner_row is not None
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com")
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com")  # type: ignore[arg-type]
     invited = await OrganizationService(
         async_db, **membership_writes(async_db)
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
         # No mail for the invite itself, so the link comes back to share.
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
@@ -1128,9 +1130,11 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
                     session,
                     config,
                     background_tasks=BackgroundTasks(),
-                    email="iris@example.com",
-                    password=f"signup-password-{index}",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
+                    invites=NullSignupInviteAdapter(),
+                    submission=user_service.SignupSubmission(
+                        email="iris@example.com", password=f"signup-password-{index}"
+                    ),
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1179,7 +1183,7 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
@@ -1202,11 +1206,11 @@ async def test_a_password_accept_waits_for_a_signup_hashing_under_its_locks(
             try:
                 return await user_service.create_user_for_signup(
                     session,
-                    GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com"),
+                    GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com"),  # type: ignore[arg-type]
                     background_tasks=BackgroundTasks(),
-                    email="iris@example.com",
-                    password="signup-password",
                     blocked_addresses=NO_BLOCKED_ADDRESSES,
+                    invites=NullSignupInviteAdapter(),
+                    submission=user_service.SignupSubmission(email="iris@example.com", password="signup-password"),
                     **claim_writes(session),
                 )
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
@@ -1295,7 +1299,7 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
         return await verify_absent_password_async(password)
 
     monkeypatch.setattr(user_service, "verify_absent_password_async", counting_absent_password_check)
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com", open_signup=True)  # type: ignore[arg-type]
     organizations_before = await _organization_count(async_db)
 
     async def signup(session: AsyncSession) -> User | None:
@@ -1303,9 +1307,9 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
             session,
             config,
             background_tasks=BackgroundTasks(),
-            email="nova@example.com",
-            password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
+            invites=NullSignupInviteAdapter(),
+            submission=user_service.SignupSubmission(email="nova@example.com", password="signup-password"),
             **claim_writes(session),
         )
 
@@ -1391,7 +1395,7 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
     """The losers roll back, so no organization is left behind without an owner who can sign in."""
     identity_id = await _unwanted_identity(async_db)
     _claim_together(monkeypatch)
-    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    config = GatewayConfig(**MAIL_CONFIGURED, public_base_url="https://gw.example.com", open_signup=True)  # type: ignore[arg-type]
     organizations_before = await _organization_count(async_db)
 
     async def signup(session: AsyncSession) -> User | None:
@@ -1399,9 +1403,9 @@ async def test_concurrent_open_signup_claims_of_an_unwanted_identity_found_one_o
             session,
             config,
             background_tasks=BackgroundTasks(),
-            email="nova@example.com",
-            password="signup-password",
             blocked_addresses=NO_BLOCKED_ADDRESSES,
+            invites=NullSignupInviteAdapter(),
+            submission=user_service.SignupSubmission(email="nova@example.com", password="signup-password"),
             **claim_writes(session),
         )
 
@@ -1500,7 +1504,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
-        config=GatewayConfig(),
+        config=GatewayConfig(mail_transport="none"),
         mail_limit=NO_MAIL_LIMIT,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )

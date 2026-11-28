@@ -105,6 +105,7 @@ EXECUTION_TOTAL_TIMEOUT_S = 45.0
 # Admission.
 DISCOVERY_CONCURRENCY = 4
 DISCOVERY_ADMISSION_TIMEOUT_S = 5.0
+CHECK_CONCURRENCY = 4
 EXECUTION_CONCURRENCY = 8
 EXECUTION_ADMISSION_TIMEOUT_S = 5.0
 
@@ -470,10 +471,12 @@ def discovery_response_exceeds_bound(response: Any) -> bool:
 class ConcurrencyGate:
     """A per-process slot ceiling with a bounded wait for admission.
 
-    Discovery and execution hold separate gates. Discovery talks to a
-    server that has not been authorized for anything yet and can be slow or
-    hostile; execution is running a call a person or a policy already approved.
-    One ceiling shared between them would let the first starve the second.
+    Discovery, execution and server checks hold separate gates. Discovery
+    talks to a server that has not been authorized for anything yet and can be
+    slow or hostile; execution is running a call a person or a policy already
+    approved. A check dials whatever URL an admin is saving, so one tenant
+    could hold every slot it shares. One ceiling shared between any two would
+    let the first starve the second.
     """
 
     def __init__(self, *, limit: int, admission_timeout_s: float) -> None:
@@ -501,6 +504,7 @@ class ConcurrencyGate:
 
 DISCOVERY_GATE = ConcurrencyGate(limit=DISCOVERY_CONCURRENCY, admission_timeout_s=DISCOVERY_ADMISSION_TIMEOUT_S)
 EXECUTION_GATE = ConcurrencyGate(limit=EXECUTION_CONCURRENCY, admission_timeout_s=EXECUTION_ADMISSION_TIMEOUT_S)
+CHECK_GATE = ConcurrencyGate(limit=CHECK_CONCURRENCY, admission_timeout_s=DISCOVERY_ADMISSION_TIMEOUT_S)
 
 
 async def _run_in_owner_task(operation: Coroutine[Any, Any, T]) -> T:
@@ -668,6 +672,7 @@ async def discover_stored_tools(
     contacts: ContactObserver | None = None,
     listings: ToolListings | None = None,
     refresh: bool = False,
+    timings: MutableMapping[str, float] | None = None,
 ) -> DiscoveredCatalog:
     """List the live tools a stored server's allowlist admits, and of those, the ones ``admits`` lets the caller see.
 
@@ -680,23 +685,31 @@ async def discover_stored_tools(
     no tool. ``contacts`` hears whether the server answered, and its catalog where the
     listing read all of it. With ``listings``, the server's raw answer is reused
     while it is kept, unless ``refresh``; the filter and screening run every time.
+    ``timings``, when given, gets ``admission_ms`` once this caller's own listing holds a slot,
+    which is how a caller whose deadline ends the listing tells the server's silence from a wait
+    for capacity or for another caller's listing.
 
     Raises:
         McpExecutionError: with the code and status the route returns.
     """
     if listings is None:
-        listed, age_s = await _list_live(server, contacts), 0.0
+        listed, age_s = await _list_live(server, contacts, timings), 0.0
     else:
         listed, age_s = await listings.get_or_load(
-            listing_key(server), lambda: _list_live(server, contacts), refresh=refresh
+            listing_key(server), lambda: _list_live(server, contacts, timings), refresh=refresh
         )
     catalog = _screened(listed, admits)
     return DiscoveredCatalog(tools=catalog.tools, warnings=catalog.warnings, age_s=age_s)
 
 
-async def _list_live(server: ResolvedMcpServer, contacts: ContactObserver | None) -> list[MCPTool]:
+async def _list_live(
+    server: ResolvedMcpServer, contacts: ContactObserver | None, timings: MutableMapping[str, float] | None = None
+) -> list[MCPTool]:
+    admission_started = monotonic()
     try:
         async with DISCOVERY_GATE.slot():
+            if timings is not None:
+                timings["admission_ms"] = (monotonic() - admission_started) * 1000
             return await _run_in_owner_task(_list_once(server, contacts))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
@@ -1006,11 +1019,11 @@ async def check_stored_server(server: ResolvedMcpServer) -> ServerCheck:
     caller's to settle first, as they are for discovery.
 
     Raises:
-        McpCapacityUnavailable: no discovery slot freed up in time, so nothing was checked.
+        McpCapacityUnavailable: no check slot freed up in time, so nothing was checked.
     """
     deadline = asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S)
     try:
-        async with deadline, DISCOVERY_GATE.slot():
+        async with deadline, CHECK_GATE.slot():
             return await _run_in_owner_task(_check_once(server))
     except McpCapacityUnavailable:
         raise

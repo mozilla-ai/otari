@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import Invitation, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -91,9 +92,10 @@ def test_invite_is_not_emailed_without_a_public_base_url(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """A relative accept link is useless in an inbox, so a transport alone is not enough."""
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", None)
 
     result = _invite(client, master_key_header, email="relative@example.com")
@@ -377,13 +379,19 @@ def test_an_unverified_signup_is_not_sent_to_a_verification_link_no_mailbox_rece
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    """The console transport shows the signup's link to the operator, so naming it would strand the invitee."""
+    """A verification link nobody can receive is no way in, so naming it would strand the invitee.
+
+    The signup happens while mail delivers and the deployment stops delivering afterwards, which is
+    the state an operator reaches by changing a setting rather than one signup can create itself.
+    """
     result = _invite(client, master_key_header, email="hedy@example.com")
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_up.status_code == 200, signed_up.text
+    monkeypatch.setattr(test_config, "mail_transport", "none")
 
     token = _token_from(result["accept_link"])
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
@@ -970,6 +978,63 @@ def test_bulk_invite_emails_every_address_when_a_transport_is_configured(
     assert all(row["accept_link"] is None for row in result["invited"])
 
 
+def _address_a_first_organization_recorded(db_session: Session, email: str) -> User:
+    """An identity a first organization recorded, in the state an invitation link's password leaves.
+
+    Verified, so it can sign in, and never proved, so a second organization may not take it. Built
+    directly because the real route to this state is accepting an invitation with a password, which
+    the API client cannot reach as the one operator identity. No organization of its own: the refusal
+    reads the identity alone, and a second organization row would trip the bootstrap's foreign-tenancy
+    guard before the route runs.
+    """
+    identity = User(email=email)
+    db_session.add(identity)
+    db_session.commit()
+    identity.email_verified_at = datetime.now(UTC)
+    identity.email_proven_at = None
+    db_session.add(identity)
+    db_session.commit()
+    return identity
+
+
+def test_inviting_a_recorded_address_says_who_has_to_prove_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The refusal is about the invited address, so the inviter is told their own account is not at fault."""
+    _address_a_first_organization_recorded(db_session, "recorded@example.com")
+
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "recorded@example.com", "role": "owner"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["code"] == "member_address_unproven"
+    assert "recorded@example.com" in body["detail"]
+    # Read as an instruction about the caller's own account, this refusal sends an admin to reset
+    # their password, which is what the wording exists to prevent.
+    assert "your own account" in body["detail"]
+
+
+def test_a_bulk_invite_carries_the_recorded_address_code(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A refused address in a batch answers the same code the single invite does, so a client maps one value."""
+    _address_a_first_organization_recorded(db_session, "recorded@example.com")
+
+    result = _bulk_invite(client, master_key_header, ["recorded@example.com", "fresh@example.com"])
+
+    assert [row["email"] for row in result["invited"]] == ["fresh@example.com"]
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["code"] == "member_address_unproven"
+
+
 def test_bulk_invite_refuses_an_empty_list(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/organizations/me/member-invitations/bulk",
@@ -1211,9 +1276,7 @@ def test_an_organization_name_with_a_control_character_is_refused(
 def _mail_on(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
     """Configure a deployment whose email reaches the invitee, and collect what it delivers.
 
-    Not the console transport, which shows a message to the deployment operator and
-    delivers it to nobody, so a link it carries is still hand-carried. Only the socket
-    is replaced, so readiness, rendering and the off-loaded send all run.
+    Only the socket is replaced, so readiness, rendering and the off-loaded send all run.
     """
     delivered: list[MailEnvelope] = []
     monkeypatch.setattr(test_config, "mail_transport", "smtp")
@@ -1408,32 +1471,29 @@ def test_a_deactivated_invitee_cannot_use_a_link_issued_before_the_deactivation(
     assert _roster_row(client, master_key_header, "dee@example.com")["status"] == "invited"
 
 
-def test_a_console_transport_hands_the_invite_link_back_rather_than_claiming_a_send(
+def test_a_deployment_that_cannot_deliver_hands_the_invite_link_back_rather_than_claiming_a_send(
     client: TestClient,
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The console transport shows a message to the deployment operator and reaches no mailbox.
-
-    So an invitation it carries is hand-carried, exactly as one on a deployment with no mail.
-    """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    """An invitation it carries reached no mailbox, so it is hand-carried."""
+    monkeypatch.setattr(test_config, "mail_transport", "none")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
-    result = _invite(client, master_key_header, email="console@example.com")
+    result = _invite(client, master_key_header, email="undelivered@example.com")
 
     assert result["mail_sent"] is False
     assert result["accept_link"] is not None
 
 
-def test_a_console_transport_offers_no_password_reset_as_a_way_in(
+def test_a_deployment_that_cannot_deliver_offers_no_password_reset_as_a_way_in(
     client: TestClient,
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A reset link the console transport logs reaches no mailbox, so the page must not offer one."""
+    """A reset link that reaches no mailbox is no way in, so the page must not offer one."""
     _invite(client, master_key_header, email="new@example.com")
     created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
     _switch(client, master_key_header, created.json()["id"])
@@ -1441,7 +1501,7 @@ def test_a_console_transport_offers_no_password_reset_as_a_way_in(
 
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "mail_transport", "none")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()

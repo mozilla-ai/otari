@@ -298,7 +298,7 @@ The models.dev catalog is refreshed as follows:
   models.dev's v2 catalog (still experimental at models.dev), and its v1
   catalog when v2 cannot be fetched or read, logging one warning when it falls
   back. Both give the same limits, capabilities and prices.
-- Both are read from `models_dev_base_url`, by default Mozilla.ai's fork of
+- Both are read from `models_dev_base_url`, by default Mozilla AI's fork of
   models.dev, which serves models.dev's catalog plus the models it does not
   list yet. See [Configuration](configuration.md#keeping-the-defaults-current).
 - When neither can be read, the last good copy stays in use and the gateway
@@ -728,7 +728,11 @@ Selection uses these signals:
 
 - **Health:** recent upstream 429s, 5xx responses, connection failures and timeouts
   put an offering behind healthy alternatives for 15 seconds, doubling with each
-  consecutive failure up to 10 minutes; a success resets it. A 402 or a rejected
+  consecutive failure up to 10 minutes; a success resets it. A stream whose first
+  output took more than 15 seconds still answers its caller, but counts as such a
+  failure, so the next request starts elsewhere and the session is not kept on
+  that offering; a stream running the gateway's own tools is exempt, since its
+  first output also waits on them. A 402 or a rejected
   credential cools every model served on that credential the same way, for the
   workspace that saw it. An offering the deployment refuses to serve a caller on its
   credential ranks last for that caller for 5 minutes, and one whose provider says it
@@ -788,7 +792,9 @@ if none fits, the request is refused without an upstream call.
 State and scope:
 
 - Feedback is local to each gateway worker, bounded to 10,000 health entries and
-  10,000 conversation digests, and reset on restart. It measures traffic through
+  10,000 conversation digests (at most 1,000 per organization, so one
+  organization's new conversations replace its own oldest rather than another's),
+  and reset on restart. It measures traffic through
   that worker, not a provider's global utilization. Existing rate-limit
   admission still enforces capacity, including shared Redis limits.
 - Session affinity is scoped to the authenticated workspace, user, key and API;
@@ -830,10 +836,16 @@ model's own vendor, then the cheapest) and falls back to the next when one
 fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
-of the offering tried first, and `owned_by` is the model's vendor. A limit the
-offering tried first does not know, such as the context length of a model a vLLM
-server also serves, is the smallest one the model's other offerings report. An
-output limit filled that way is capped at the entry's context window.
+of the offering tried first, and `owned_by` is the model's vendor. A limit or a
+capability the offering tried first does not know, such as the context length of
+a model a vLLM server also serves, comes from the model's other offerings: the
+smallest limit, or the parameters the first of them reports. An
+output limit filled that way is capped at the entry's context window. A field
+no offering reports is read from models.dev's entry for the model, preferring
+the vendor's own: a model served on an organization's key to an
+OpenAI-compatible endpoint (a LiteLLM proxy, a reseller) is stored under
+`openai`, which models.dev lists none of those models under, so only that entry
+describes it.
 
 The caller's aliases and routing policies are listed beside the models, under
 their own names: the configured ones, and the stored ones of the key's

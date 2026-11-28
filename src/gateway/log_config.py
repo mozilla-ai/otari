@@ -13,10 +13,6 @@ logger = logging.getLogger("gateway")
 # a style tag and print nothing.
 _LOG_PLACEHOLDER = "<redacted>"
 
-# Pass as ``extra`` on a record that prints a credential on purpose (the console
-# mail transport's links), which the filter then leaves alone.
-CARRIES_CREDENTIAL: dict[str, object] = {"carries_credential": True}
-
 
 class CredentialMaskingFilter(logging.Filter):
     """Mask credentials in a record's message and traceback before any handler prints them.
@@ -27,8 +23,6 @@ class CredentialMaskingFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if getattr(record, "carries_credential", False):
-            return True
         message = record.getMessage()
         masked = mask_credentials(message, _LOG_PLACEHOLDER)
         if masked != message and not _mask_args(record):

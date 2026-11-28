@@ -16,8 +16,6 @@ every key is not a milestone. ``record_action`` is the opposite contract: one
 call per thing created, and none for an edit or a refused write.
 """
 
-import logging
-import re
 import uuid
 from collections.abc import Callable, Generator, Mapping
 from datetime import UTC, datetime, timedelta
@@ -31,8 +29,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
@@ -149,9 +147,9 @@ def growth(client: TestClient) -> RecordingGrowthAdapter:
 
 
 @pytest.fixture
-def mail(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+def mail(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, recorded_mail: RecordingTransport) -> None:
     """Signup refuses before writing anything unless the link can be mailed."""
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
 
@@ -305,19 +303,11 @@ def test_a_first_password_from_an_invitation_link_notifies_the_signup(
     assert growth.of("signup")[0]["full_name"] == "Ida Wells"
 
 
-def _complete_a_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> None:
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    caplog.clear()
-    try:
-        requested = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+def _complete_a_reset(client: TestClient, mail: RecordingTransport, *, email: str) -> None:
+    requested = client.post(f"{API_ROOT}/auth/password/reset", json={"email": email})
     assert requested.status_code == status.HTTP_200_OK, requested.text
-    match = re.search(r"token=([\w-]+)", caplog.text)
-    assert match, caplog.text
     confirmed = client.post(
-        f"{API_ROOT}/auth/password/reset/confirm", json={"token": match.group(1), "new_password": PASSWORD}
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": token_in(mail.last), "new_password": PASSWORD}
     )
     assert confirmed.status_code == status.HTTP_204_NO_CONTENT, confirmed.text
 
@@ -327,12 +317,12 @@ def test_a_reset_that_claims_an_added_address_notifies_the_signup_and_a_later_re
     master_key_header: dict[str, str],
     growth: RecordingGrowthAdapter,
     mail: None,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
     _add_member(client, master_key_header, email="ada@example.com")
 
-    _complete_a_reset(client, caplog, email="ada@example.com")
-    _complete_a_reset(client, caplog, email="ada@example.com")
+    _complete_a_reset(client, recorded_mail, email="ada@example.com")
+    _complete_a_reset(client, recorded_mail, email="ada@example.com")
 
     assert [signup["email"] for signup in growth.of("signup")] == ["ada@example.com"], growth.calls
 

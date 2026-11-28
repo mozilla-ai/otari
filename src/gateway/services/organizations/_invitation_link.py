@@ -1,4 +1,4 @@
-"""What an invitation link still opens, and what it proves about the address it names."""
+"""What an invitation link still opens, and whether it allows an account."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from gateway.core.addresses import same_address
 from gateway.core.tokens import hash_token, is_shared_token
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.identity import AddressAuthority
 from gateway.models.organizations import OrganizationInvitation
 from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.repositories.organizations import OrganizationRepositories
@@ -18,8 +17,8 @@ from gateway.services.organizations._delivery_rule import DeliveryRule
 class InvitationLink(SignupInvitePort):
     """Answers what an invitation link still opens, for everybody who holds one.
 
-    One reader for the whole question, so a link the deployment refuses cannot go on proving an
-    address somewhere else.
+    One reader for the whole question, so a link the deployment refuses cannot go on allowing an
+    account somewhere else.
     """
 
     def __init__(
@@ -34,38 +33,56 @@ class InvitationLink(SignupInvitePort):
     ) -> None:
         self._uow = uow
         self._invitations = repositories.invitations
+        self._organizations = repositories.organizations
         self._blocked = blocked
         self._delivery = delivery
         self._mailer = mailer
         self._clock = clock
 
-    async def open(self, token: str) -> OrganizationInvitation | None:
+    async def open(self, token: str, *, lock: bool = False) -> OrganizationInvitation | None:
         """The invitation this token still opens, or None where none does.
 
         The only answer to that question. An invitation that has expired or been declined opens
         nothing, and neither does one whose address this deployment refuses.
 
+        ``lock`` holds the invitation until the caller's transaction ends, so a cancellation or a
+        decline of it waits.
+
         NOTE: Callers must call this inside an open Unit of Work block.
         """
+        invitation = await self._invitations.get_by_token_hash(hash_token(token), lock=lock)
+        # The clock is read after the lookup, which waits when another transaction holds the row.
         now = self._clock()
-        invitation = await self._invitations.get_by_token_hash(hash_token(token))
         if invitation is None or now >= invitation.expires_at or invitation.declined_at is not None:
             return None
         if await self._refuses_the_address(invitation, hand_carried=is_shared_token(token), now=now):
             return None
         return invitation
 
-    async def proof_for(self, token: str, *, claimed_address: str) -> AddressAuthority | None:
-        """Which proof of ``claimed_address`` this token carries, or None where it carries none.
+    async def allows_an_account(self, token: str, *, claimed_address: str) -> bool:
+        """Whether this token allows an account for ``claimed_address``.
 
-        A link this deployment would refuse proves nothing, which is what keeps a signup from
-        recording an address that acceptance then turns away.
+        A link carried by hand reached no mailbox, so it allows none. Nor does a link whose
+        address this deployment refuses, nor one naming an organization whose members arrive
+        through its own connection.
         """
+        if is_shared_token(token):
+            return False
         async with self._uow:
             invitation = await self.open(token)
             if invitation is None or not same_address(invitation.email, claimed_address):
-                return None
-        return AddressAuthority.ORGANIZATION if is_shared_token(token) else AddressAuthority.MAILBOX
+                return False
+            # The lock comes before the read, because turning the requirement on takes the same lock.
+            await self._organizations.lock_settings(invitation.organization_id)
+            settings = await self._organizations.sso_settings(invitation.organization_id)
+            # The second read takes a row lock the caller holds until it commits, so a cancellation
+            # cannot be honored against a link this already allowed. The organization lock comes
+            # first, because every writer of these rows takes them in that order.
+            if await self.open(token, lock=True) is None:
+                return False
+        # Only the requirement itself can apply here. The account does not exist yet, so it holds
+        # no link to the connection and claims no exemption. Acceptance asks the whole rule again.
+        return settings is None or not settings.required
 
     async def _refuses_the_address(
         self, invitation: OrganizationInvitation, *, hand_carried: bool, now: datetime

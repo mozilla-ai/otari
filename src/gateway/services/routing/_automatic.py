@@ -36,6 +36,8 @@ _LIMIT = 10000
 _COOLDOWN = 15.0
 _MAX_COOLDOWN = 600.0
 _REFUSAL_TTL = 300.0
+# A stream whose first output took longer than this served its caller, but cools its offering like a failure.
+_SLOW_FIRST_OUTPUT = 15.0
 # A model still missing once its refusal lapses is refused for longer, up to the last step.
 _MISSING_MODEL_STEPS = (3600.0, 3 * 3600.0, 12 * 3600.0)
 # How a provider's message says the model is not served on this credential. Request text a provider
@@ -49,6 +51,8 @@ _MISSING_MODEL = re.compile(
 _REQUEST_RESOURCE = re.compile(
     r"\b(file|batch|response|conversation|thread|vector[ _]store|container)s?\b", re.IGNORECASE
 )
+# Session bindings one organization may hold, so it cannot evict another's.
+_TENANT_AFFINITY_LIMIT = 1000
 _CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
 _ACCOUNT_FIELDS = frozenset(
     {
@@ -137,6 +141,8 @@ class AutomaticSelection:
     mode: str
     scope: str = ""
     tenant: str = ""
+    organization: str = ""
+    ttl: float = _TTL
     observations: list[AutomaticObservation] = field(default_factory=list)
     origins: dict[str, Attempt] = field(default_factory=dict)
 
@@ -165,7 +171,7 @@ class AutomaticSelection:
         """Remove the session binding only if it still points to this credential fingerprint."""
         previous = self.router.affinities.get(self.affinity) if self.affinity else None
         if self.affinity and previous and previous[0] == key:
-            del self.router.affinities[self.affinity]
+            self.router.unbind(self.affinity)
 
     def close(self) -> None:
         """Release every outstanding observation without recording success or failure."""
@@ -197,12 +203,19 @@ class AutomaticObservation:
     health: _Health | None
     started: float
     first_at: float | None = None
+    # Whether the gateway's own work, such as running tools, came before the first output.
+    first_waited_on_gateway: bool = False
     finished: bool = False
 
-    def first_response(self) -> None:
-        """Record the first output time once for streaming latency feedback."""
+    def first_response(self, *, waited_on_gateway: bool = False) -> None:
+        """Record the first output time once for streaming latency feedback.
+
+        ``waited_on_gateway`` marks a first output that also waited on the gateway's own work, which
+        a slow start must not be blamed on the provider for.
+        """
         if self.first_at is None:
             self.first_at = self.selection.router.clock()
+            self.first_waited_on_gateway = waited_on_gateway
 
     def finish(
         self, *, success: bool = False, unhealthy: bool = False, account: bool = False, missing: bool = False
@@ -212,6 +225,8 @@ class AutomaticObservation:
         ``account`` marks a failure of the credential itself (exhausted quota or funds, a rejected key),
         which cools every model served on it rather than this one alone. It applies only with ``unhealthy``,
         so a gateway-side refusal that carries the same status never cools a shared credential.
+        A stream whose first output took longer than ``_SLOW_FIRST_OUTPUT`` succeeds for the caller but counts as a
+        failure of the offering, so the next request starts elsewhere instead of waiting as long.
         ``missing`` marks a model the credential does not serve, which ranks last for the workspace for a while
         (:meth:`AutomaticRouter.remember_missing`) instead of counting against the offering's health or credential.
         """
@@ -224,11 +239,17 @@ class AutomaticObservation:
             unhealthy = account = False
             router.remember_missing(self.selection.tenant, self.selection.mode, self.key)
             self.selection.forget_key(self.key)
+        slow = (
+            success
+            and self.first_at is not None
+            and not self.first_waited_on_gateway
+            and self.first_at - self.started > _SLOW_FIRST_OUTPUT
+        )
         # A failed credential is the account's, not the offering's: it cools the account alone.
         credential = account and unhealthy
         if self.health is not None:
             self.health.active = max(0, self.health.active - 1)
-            if unhealthy and not credential:
+            if (unhealthy and not credential) or slow:
                 self.health.failures = _consecutive(self.health.failures, self.health.cooldown, now)
                 self.health.cooldown = now + _backoff(self.health.failures)
             if success:
@@ -237,6 +258,7 @@ class AutomaticObservation:
                 old = self.health.latency.get(self.selection.mode)
                 value = 0.8 * old[0] + 0.2 * elapsed if old and now - old[1] < _TTL else elapsed
                 self.health.latency[self.selection.mode] = (value, now)
+            if success and not slow:
                 self.health.cooldown = 0
                 self.health.failures = 0
         if credential:
@@ -244,13 +266,10 @@ class AutomaticObservation:
         elif success:
             router.accounts.pop(self.account, None)
             router.missing.pop(router._digest(("missing", self.selection.tenant, self.selection.mode, self.key)), None)
-        if unhealthy:
+        if unhealthy or slow:
             self.selection.forget_key(self.key)
-        if success and self.selection.affinity:
-            router.affinities[self.selection.affinity] = (self.key, now)
-            router.affinities.move_to_end(self.selection.affinity)
-            while len(router.affinities) > _LIMIT:
-                router.affinities.popitem(last=False)
+        if success and not slow and self.selection.affinity:
+            router.bind(self.selection.affinity, self.selection.organization, self.key, now, self.selection.ttl)
 
 
 class AutomaticRouter:
@@ -265,7 +284,8 @@ class AutomaticRouter:
         self.clock = clock
         self._salt = secrets.token_bytes(32)
         self.health: OrderedDict[str, _Health] = OrderedDict()
-        self.affinities: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self.affinities: OrderedDict[str, tuple[str, float, str]] = OrderedDict()
+        self._tenant_affinities: dict[str, OrderedDict[str, None]] = {}
         # Credential-wide cooldowns as (until, consecutive failures), and per-caller refusals as expiry times.
         self.accounts: OrderedDict[str, tuple[float, int]] = OrderedDict()
         self.refusals: OrderedDict[str, float] = OrderedDict()
@@ -278,6 +298,39 @@ class AutomaticRouter:
         # Keyed, process-local fingerprints are never persisted as password verifiers.
         # codeql[py/weak-sensitive-data-hashing]
         return hmac.new(self._salt, payload, hashlib.sha256).hexdigest()
+
+    def bind(self, affinity: str, tenant: str, key: str, now: float, ttl: float) -> None:
+        """Bind a session to a credential, never evicting another tenant's live binding.
+
+        A full table gives up an expired binding first, then the tenant's own oldest; with
+        neither, the session goes unbound.
+        """
+        self.unbind(affinity)
+        own = self._tenant_affinities.setdefault(tenant, OrderedDict())
+        if len(own) >= _TENANT_AFFINITY_LIMIT:
+            self.unbind(next(iter(own)))
+        elif len(self.affinities) >= _LIMIT:
+            oldest = next(iter(self.affinities))
+            if now - self.affinities[oldest][1] >= ttl:
+                self.unbind(oldest)
+            elif own:
+                self.unbind(next(iter(own)))
+            else:
+                del self._tenant_affinities[tenant]
+                return
+        self.affinities[affinity] = (key, now, tenant)
+        self._tenant_affinities.setdefault(tenant, OrderedDict())[affinity] = None
+
+    def unbind(self, affinity: str) -> None:
+        """Drop a session binding, if any."""
+        previous = self.affinities.pop(affinity, None)
+        if previous is None:
+            return
+        own = self._tenant_affinities.get(previous[2])
+        if own is not None:
+            own.pop(affinity, None)
+            if not own:
+                del self._tenant_affinities[previous[2]]
 
     def candidate_key(self, attempt: Attempt) -> str:
         """Identify the actual credential, including one resolved at dispatch."""
@@ -379,6 +432,7 @@ class AutomaticRouter:
         settings: AutomaticRouting,
         costs: Mapping[str, Decimal | None],
         scope: str,
+        organization: str = "",
         anchor: str,
         region: Region | None,
         mode: str,
@@ -391,6 +445,7 @@ class AutomaticRouter:
         ``own`` holds the selectors the caller's organization serves on its own provider keys. A priced,
         healthy own key leads every other offering, so the organization's key is used before one the
         deployment pays for; the other signals order the offerings within each tier.
+        ``organization`` owns the session binding for its share of the table.
         """
         from gateway.services.routing.compiler import DroppedCandidate
 
@@ -468,7 +523,7 @@ class AutomaticRouter:
             else:
                 bound = None
         if affinity and previous and bound is None:
-            self.affinities.pop(affinity, None)
+            self.unbind(affinity)
         ordered = ranked[:limit]
         attempts = [
             replace(a, position=i, selection_reason="catalog" if i == 1 else "on_failure")
@@ -477,7 +532,9 @@ class AutomaticRouter:
         return replace(
             plan,
             attempts=attempts,
-            automatic=AutomaticSelection(self, affinity, mode, scope, tenant),
+            automatic=AutomaticSelection(
+                self, affinity, mode, scope, tenant, self._digest(organization), settings.session_ttl_seconds
+            ),
             dropped=[
                 *plan.dropped,
                 *(

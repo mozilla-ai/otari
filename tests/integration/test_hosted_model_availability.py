@@ -14,6 +14,7 @@ import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 
+from _mail_support import RecordingTransport, configure_mail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import ModelCache, ProviderDiscovery
@@ -46,7 +47,7 @@ class _Outbox:
 
     async def __call__(self, *, to: str, message: MailMessage) -> MailDelivery:
         self.sent.append((to, message))
-        return MailDelivery(delivered=True, transport="console", reason=None)
+        return MailDelivery(delivered=True, transport="smtp", reason=None)
 
 
 @pytest.fixture(autouse=True)
@@ -124,9 +125,13 @@ def _until_switched_off(client: TestClient, headers: dict[str, str], model: str)
 
 
 def test_a_model_its_provider_refuses_is_switched_off_and_the_operators_are_told_once(
-    client: TestClient, hosted: dict[str, str], test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    hosted: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    recorded_mail: RecordingTransport,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
     settings = client.patch(
         f"{API_ROOT}/health-checks/settings", json={"alert_emails": ["ops@example.com"]}, headers=hosted

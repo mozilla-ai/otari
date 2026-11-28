@@ -25,12 +25,11 @@ import type { OAuthProvider } from "./oauthProviders"
  * Whether a page's flow can work at all on this deployment.
  *
  * `mail` means the flow starts by sending a message: `POST /v1/auth/signup`,
- * `/resend-verification` and `/password/reset` each call `require_ready()` and
- * refuse with a 503 when this gateway has no transport or no public URL of its
- * own to put in a link. The bootstrap's `mail` publishes the same fact, so the
- * affordance is hidden rather than offered and then refused, the way otari#648
- * already settled it for the invitation form. A transport that delivers to
- * nobody still passes, because these endpoints accept the request either way.
+ * `/resend-verification` and `/password/reset` each call `require_can_deliver()`
+ * and refuse with a 503 unless a link reaches a mailbox, which needs a transport
+ * and a public URL of this gateway's own to put in the link. The bootstrap's
+ * `mail` publishes the same fact, so the affordance is hidden rather than offered
+ * and then refused, as the invitation form already is.
  *
  * `oauth` means the flow needs the page's own provider configured on this
  * deployment: the bootstrap's `oauth_providers` lists one entry per provider
@@ -180,7 +179,7 @@ export function oauthCallbackProvider(path: PublicAuthPath): string | null {
 
 /** What the deployment offers, as the availability check below reads it. */
 export interface PublicAuthDeployment {
-  mailCanSend: boolean
+  mailDelivers: boolean
   /** The bootstrap's `oauth_providers`, verbatim. */
   oauthProviders: readonly string[]
 }
@@ -194,7 +193,7 @@ export function isPublicAuthPageAvailable(
     case "none":
       return true
     case "mail":
-      return deployment.mailCanSend
+      return deployment.mailDelivers
     case "oauth": {
       const provider = oauthCallbackProvider(path)
       return provider !== null && deployment.oauthProviders.includes(provider)

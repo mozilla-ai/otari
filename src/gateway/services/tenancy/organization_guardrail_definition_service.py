@@ -132,7 +132,7 @@ _BEDROCK_KEY_PAIR = ("aws_access_key_id", "aws_secret_access_key")
 # subdomain per resource.
 _VENDOR_HOSTS: dict[str, frozenset[str]] = {
     # any-guardrail 0.7.7 sets no default endpoint and Alinia publishes no API
-    # host (the vendor site, alinia.ai, and mozilla.ai's integration post use a
+    # host (the vendor site, alinia.ai, and Mozilla AI's integration post use a
     # placeholder), so no address a definition names can be checked against one.
     GuardrailName.ALINIA.value: frozenset(),
     # any-guardrail 0.7.7 default ``https://api.lakera.ai/v2/guard``; the regional

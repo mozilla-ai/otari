@@ -121,7 +121,7 @@ A plan is personal. It covers only requests made with the subscriber's own API k
 
 **When the allowance runs out.** Requests the plan covered stop until it renews, and the error says why. To keep going, turn on **Pay as you go** on the Billing page, and further requests are paid from the balance at standard prices plus the top-up fee, or upgrade. [Budgets](budgets.md) count every request at list price, including usage the plan covers. Only the subscriber or the organization's owner can turn it on.
 
-**Changing or cancelling.** An upgrade to Otari Pro starts a new month at once with Pro's full allowance, charged at Pro's price minus a credit for the unused days of Go. The upgrade dialog shows the amount charged today before you confirm. A downgrade takes effect at the next renewal. A cancelled plan stays active until the end of the paid month and is not refunded. Only the subscriber or the owner can change or cancel the plan.
+**Changing or cancelling.** An upgrade to Otari Pro starts a new month at once with Pro's allowance minus what Go's month already used (usage and tool calls), charged at Pro's price minus a credit for the unused days of Go. The upgrade dialog shows the amount charged today before you confirm. A downgrade takes effect at the next renewal. A cancelled plan stays active until the end of the paid month and is not refunded. Only the subscriber or the owner can change or cancel the plan.
 
 **Payments and leaving.** If a renewal payment fails, the plan covers nothing until Stripe collects it; pay as you go keeps requests going meanwhile. If the subscriber leaves the organization, the plan ends with its paid month and they are emailed.
 

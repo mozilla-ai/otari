@@ -13,7 +13,6 @@ appearing in B is auto-join's doing and nothing else's, and Ada staying pointed
 at A is the "never moves the pointer" rule observed from outside.
 """
 
-import logging
 import re
 import uuid
 from typing import Any
@@ -25,8 +24,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from _mail_support import RecordingTransport, configure_mail, token_in
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
 from gateway.repositories.identity import DashboardSessionRepository
 from gateway.services.tenancy import organization_domain_service as domain_service
@@ -44,7 +43,9 @@ _TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 
 @pytest.fixture
-def mail_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+def mail_configured(
+    test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, recorded_mail: RecordingTransport
+) -> None:
     """What ``POST /api/v1/auth/signup`` needs before it will send anything.
 
     Both settings, because the route refuses on either alone: the transport
@@ -53,7 +54,7 @@ def mail_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch)
     serves the passkey test, whose relying party has to be the host TestClient
     answers on.
     """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+    configure_mail(monkeypatch, test_config)
     monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
 
 
@@ -135,22 +136,13 @@ def _rostered_identity(client: TestClient, master_key_header: dict[str, str], *,
 
 def _claim_password(
     client: TestClient,
-    caplog: pytest.LogCaptureFixture,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """Sign up on the rostered address and verify it, so a password sign-in works."""
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": ADDRESS, "password": PASSWORD})
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": ADDRESS, "password": PASSWORD})
     assert signed_up.status_code == 200, signed_up.text
-    token = _TOKEN_IN_LINK.search(caplog.text)
-    assert token, caplog.text
-    assert (
-        client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1), "password": PASSWORD}).status_code
-        == 200
-    )
+    token = token_in(recorded_mail.last)
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token, "password": PASSWORD}).status_code == 200
 
 
 def _memberships(client: TestClient) -> list[dict[str, Any]]:
@@ -194,13 +186,13 @@ def _assert_joined(client: TestClient, signed_in: Any, *, beta: str, home: str) 
 def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],
-    caplog: pytest.LogCaptureFixture,
     mail_configured: None,
     claiming_organization: str,
+    recorded_mail: RecordingTransport,
 ) -> None:
     home = _active_organization(client, master_key_header)
     _rostered_identity(client, master_key_header, not_in=claiming_organization)
-    _claim_password(client, caplog)
+    _claim_password(client, recorded_mail)
     client.cookies.clear()
 
     signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
@@ -276,13 +268,13 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
 def test_a_passkey_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],
-    caplog: pytest.LogCaptureFixture,
     mail_configured: None,
     claiming_organization: str,
+    recorded_mail: RecordingTransport,
 ) -> None:
     home = _active_organization(client, master_key_header)
     _rostered_identity(client, master_key_header, not_in=claiming_organization)
-    _claim_password(client, caplog)
+    _claim_password(client, recorded_mail)
     client.cookies.clear()
 
     # Ada registers a passkey against her own session, then signs in with it
@@ -312,10 +304,10 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     client: TestClient,
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     test_db: Session,
     mail_configured: None,
     claiming_organization: str,
+    recorded_mail: RecordingTransport,
 ) -> None:
     """The transactional claim, which nothing else exercises.
 
@@ -324,7 +316,7 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     told their sign-in failed must not have quietly gained access to a tenant.
     """
     user_id = _rostered_identity(client, master_key_header, not_in=claiming_organization)
-    _claim_password(client, caplog)
+    _claim_password(client, recorded_mail)
     client.cookies.clear()
 
     # Fails the first attempt only, rather than patching and then calling

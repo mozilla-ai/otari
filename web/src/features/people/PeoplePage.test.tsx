@@ -122,7 +122,6 @@ describe("People", () => {
 
   it.each([
     ["delivers", /They get an email with an invitation link/],
-    ["sends_only", /reaches an inbox, so you get a link to share/],
     ["none", /reaches an inbox, so you get a link to share/],
   ] as const)(
     "says how an invitee is reached when mail is %s",

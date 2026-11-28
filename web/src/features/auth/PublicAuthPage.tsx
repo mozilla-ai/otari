@@ -1,4 +1,4 @@
-import { mailCanSend } from "@/shared/helpers/bootstrap"
+import { mailDelivers } from "@/shared/helpers/bootstrap"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { CheckEmailPage } from "./CheckEmailPage"
@@ -55,7 +55,7 @@ export function PublicAuthPage({
 
   if (
     !isPublicAuthPageAvailable(path, {
-      mailCanSend: mailCanSend(mail),
+      mailDelivers: mailDelivers(mail),
       oauthProviders: oauth_providers,
     })
   ) {

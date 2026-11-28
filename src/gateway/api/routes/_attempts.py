@@ -16,7 +16,10 @@ classifier it needs from there is imported where it is called.
 from __future__ import annotations
 
 import asyncio
+import errno
 import math
+import os
+import ssl
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -52,7 +55,7 @@ from gateway.services.provider_kwargs import (
     no_candidate_configured_detail,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_retrieval_backend import WebSearchNotReachableError
+from gateway.services.web_retrieval_network import PinnedTransportError
 from gateway.types.attempt import Attempt
 
 T = TypeVar("T")
@@ -67,6 +70,43 @@ LOCKED_IN_DETAIL = (
     "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
     "and a tool loop cannot move to another provider."
 )
+
+
+def _transport_detail(exc: BaseException) -> str | None:
+    """What may be logged of a transport failure: fields a network stack fills in, never a peer's text."""
+    if isinstance(exc, PinnedTransportError):
+        # Worded by the gateway's own address checks.
+        return str(exc)
+    if isinstance(exc, ssl.SSLError):
+        # Set only on OpenSSL's own error path.
+        reason = getattr(exc, "reason", None)
+        return reason if isinstance(reason, str) else None
+    if isinstance(exc, OSError) and isinstance(exc.errno, int):
+        # The text comes from the errno, not ``strerror``, which any caller can set.
+        name = errno.errorcode.get(exc.errno)
+        return f"{name} {os.strerror(exc.errno)}" if name else f"errno {exc.errno}"
+    return None
+
+
+def failure_cause(exc: BaseException) -> str:
+    """The innermost exception behind ``exc``, for the operator's log.
+
+    A provider SDK raises its own connection error with a fixed message ("Connection
+    error."), so why the connection failed is only on the exception it was raised from.
+    A provider's error text can echo the request, so the exception is named by its type,
+    plus only the transport details ``_transport_detail`` allows.
+    """
+    current = exc
+    seen = {id(current)}
+    while True:
+        context = None if current.__suppress_context__ else current.__context__
+        parent = getattr(current, "original_exception", None) or current.__cause__ or context
+        if not isinstance(parent, BaseException) or id(parent) in seen:
+            break
+        seen.add(id(parent))
+        current = parent
+    detail = _transport_detail(current)
+    return f"{type(current).__name__}: {detail}" if detail else type(current).__name__
 
 
 def provider_failure_http_exc(
@@ -497,7 +537,7 @@ async def walk_attempts(
             if on_terminal is not None:
                 on_terminal(attempt)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        except (SandboxNotReachableError, WebSearchNotReachableError):
+        except SandboxNotReachableError:
             raise
         except asyncio.CancelledError:
             # The catch below is `BaseException` so a provider client raising
@@ -512,7 +552,7 @@ async def walk_attempts(
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
             logger.warning(
-                "Attempt failed policy=%s position=%d instance=%s model=%s error=%s retryable=%s locked_in=%s",
+                "Attempt failed policy=%s position=%d instance=%s model=%s error=%s retryable=%s locked_in=%s cause=%s",
                 policy_name,
                 attempt.position,
                 attempt.instance,
@@ -520,6 +560,7 @@ async def walk_attempts(
                 error_class,
                 retryable,
                 locked_in,
+                failure_cause(exc),
             )
             last_exc = exc
             last_failed = attempt
