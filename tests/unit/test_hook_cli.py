@@ -267,13 +267,11 @@ def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.Monke
     assert captured["paths"] == []
 
 
-def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
-    monkeypatch: pytest.MonkeyPatch, repo: Path
-) -> None:
-    """The Hook Server 422s a command over its limit, and a 422 fails the whole
-    check open, taking every path gate in the same policy with it. A
-    Bash call carrying a heredoc clears that limit routinely, so the head is
-    sent (where a tool name lives) instead of the request being lost.
+def test_an_oversize_bash_command_is_split_rather_than_rejected(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The evaluator rejects a command over its limit, and that rejection fails
+    the whole check open. A Bash call carrying a long argument clears the limit
+    routinely, so the command is submitted in pieces that fit, not dropped and
+    not reduced to its head.
     """
     captured: dict[str, Any] = {}
 
@@ -292,9 +290,201 @@ def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
     sent = captured["commands"]
-    assert len(sent[0]) == hook_cli._HOOK_MAX_COMMAND_LENGTH
-    assert sent[0].startswith("npm install ")
-    assert "checking only the first" in result.output
+    assert sent
+    assert all(len(piece) <= hook_cli._HOOK_MAX_COMMAND_LENGTH for piece in sent)
+    assert "npm install" in sent
+    assert "checking only the first" not in result.output
+
+
+_FORCE_PUSH_GATE = (
+    'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+    "  - id: no-force-push\n"
+    "    type: command\n"
+    "    runs: [pre_tool_use.command]\n"
+    "    enforcement: required\n"
+    '    forbidden: ["git push --force"]\n'
+    "    message: Force-pushing rewrites shared history.\n"
+)
+
+
+def _heredoc_then(tail: str, *, filler: str = "a", count: int = 4200) -> str:
+    """A heredoc longer than the per-command cap, then `tail` on the following lines."""
+    return f"cat <<'EOF'\n{filler * count}\nEOF\n{tail}"
+
+
+def test_pretooluse_blocks_a_forbidden_command(repo: Path) -> None:
+    """The short command from the issue's table still blocks."""
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force"},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 2, result.output
+    assert "no-force-push" in result.output
+
+
+def test_pretooluse_blocks_a_forbidden_command_after_a_long_heredoc(repo: Path) -> None:
+    """A required command gate sees past a heredoc that used to hide the tail.
+
+    The command is longer than 4,096 characters, and `git push --force` is on
+    the line after the heredoc. Checking only the head used to exit 0.
+    """
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    command = _heredoc_then("git push --force")
+    assert len(command) > hook_cli._HOOK_MAX_COMMAND_LENGTH
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 2, result.output
+    assert "no-force-push" in result.output
+    assert "checking only the first" not in result.output
+
+
+def test_pretooluse_allows_an_ordinary_command(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert "no-force-push" not in result.output
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(_heredoc_then("git status"), id="heredoc-then-status"),
+        pytest.param(_heredoc_then("echo ok\ngit status"), id="multiline-after-heredoc"),
+        pytest.param(_heredoc_then("echo ok", filler="é"), id="unicode-heredoc"),
+        pytest.param("echo " + "a" * 5000 + "; git push --force-with-lease", id="long-line-safer-flag"),
+        pytest.param('echo "' + "a" * 5000 + ' git push --force"; echo ok', id="phrase-inside-quotes"),
+        pytest.param("echo café && git status", id="unicode-ordinary"),
+    ],
+)
+def test_pretooluse_allows_commands_that_do_not_run_the_forbidden_phrase(repo: Path, command: str) -> None:
+    """Long and ordinary commands that do not run the forbidden phrase still pass."""
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 0, result.output
+
+
+def test_a_forbidden_phrase_inside_a_long_heredoc_body_is_not_a_command(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    command = f"cat <<'EOF'\n{'a' * 4200}\ngit push --force\nEOF\necho ok"
+    assert len(command) > hook_cli._HOOK_MAX_COMMAND_LENGTH
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("echo " + "a" * 5000 + "; git push --force", id="long-line"),
+        pytest.param(("echo step\n" * 500) + "git push --force", id="many-lines"),
+        pytest.param(_heredoc_then("git push --force", filler="é"), id="unicode-heredoc"),
+        pytest.param(_heredoc_then("git -C repo push --force"), id="git-global-option"),
+        pytest.param("word " * 900 + "git push --force", id="phrase-past-the-old-cut"),
+    ],
+)
+def test_pretooluse_blocks_a_forbidden_command_past_the_length_cap(repo: Path, command: str) -> None:
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    assert len(command) > hook_cli._HOOK_MAX_COMMAND_LENGTH
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 2, result.output
+    assert "no-force-push" in result.output
+
+
+def test_a_phrase_longer_than_the_cap_does_not_pass_a_required_gate_silently(repo: Path) -> None:
+    """What still cannot be matched inside a shorter piece fails closed, visibly."""
+    phrase = "a" * (hook_cli._HOOK_MAX_COMMAND_LENGTH + 1)
+    _guardrail_path(repo).write_text(
+        'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+        "  - id: no-long-word\n"
+        "    type: command\n"
+        "    runs: [pre_tool_use.command]\n"
+        "    enforcement: required\n"
+        f"    forbidden: [{phrase!r}]\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": phrase},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 2, result.output
+    assert "phrase is too long" in result.output
+    assert "systemMessage" in result.stdout
+
+
+def test_a_long_quoted_argument_does_not_block_an_unrelated_required_gate(repo: Path) -> None:
+    """A long argument is not a forbidden phrase, so quoting it past the cap does not fail the gate closed."""
+    _guardrail_path(repo).write_text(_FORCE_PUSH_GATE, encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo " + "é" * 5000},
+    }
+    result = _invoke(payload, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert "phrase is too long" not in result.output
+    assert "cannot be checked" not in result.output
+
+
+def test_stop_event_submits_a_command_after_a_long_heredoc(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """The Stop transcript scan keeps a command that follows a long heredoc."""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    command = _heredoc_then("npm test")
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(command=command) + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
+
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert "npm test" in captured["commands"]
+    assert "checking only the first" not in result.output
 
 
 def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:

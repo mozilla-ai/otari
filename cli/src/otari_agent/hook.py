@@ -32,7 +32,7 @@ import yaml
 from otari_agent.claude_code_paths import claude_user_settings_path
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.definitions import GateDefinition, bounded, definition_digest
-from otari_agent.domain.evaluators import matched_changed_paths
+from otari_agent.domain.evaluators import _command_segments, matched_changed_paths, tokenize_phrase
 from otari_agent.domain.policy import (
     MAX_POLICY_FILES,
     PolicyError,
@@ -219,21 +219,21 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
 
 # Mirrors the evaluator's own per-command bound
 # (otari_agent.domain.check's _MAX_COMMAND_LENGTH), which raises
-# `PolicyCheckError` on anything over it. Truncating here means an oversize
-# command still gets checked, just with its tail cut, rather than failing the
-# whole check open.
+# `PolicyCheckError` on anything over it. A longer command is submitted as
+# pieces within this cap (`_prepare_hook_commands`), so the tail is still
+# checked and the whole check does not fail open.
 _HOOK_MAX_COMMAND_LENGTH = 4096
 
 # Mirror otari_agent.domain.check's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS,
-# for the same reason _HOOK_MAX_COMMAND_LENGTH does: per-command truncation
-# alone does not bound the total. A Stop event now submits every Bash
+# for the same reason _HOOK_MAX_COMMAND_LENGTH does: splitting one command
+# into pieces does not bound the total. A Stop event submits every Bash
 # command the whole session ran, not the single command a PreToolUse call
 # would carry, so reaching this aggregate is a real, not pathological,
-# outcome of a long session with several long commands (501 commands
-# truncated to _HOOK_MAX_COMMAND_LENGTH each already clears 2,000,000
-# characters). Left unbounded, the evaluator raises on the whole check, and
-# that failure is total: it takes every gate in the policy with it, path
-# included, not just the command-evidence ones.
+# outcome of a long session with several long commands (501 commands of
+# `_HOOK_MAX_COMMAND_LENGTH` each already clears 2,000,000 characters). Left
+# unbounded, the evaluator raises on the whole check, and that failure is
+# total: it takes every gate in the policy with it, path included, not just
+# the command-evidence ones.
 _HOOK_MAX_COMMANDS = 10_000
 _HOOK_MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
@@ -242,44 +242,151 @@ def _bound_commands_for_submission(commands: list[str]) -> list[str] | None:
     """Keep a Stop event's collected commands within the evaluator's own bounds,
     or submit no command evidence at all rather than an arbitrary subset of it.
 
-    Dropping whole commands, unlike truncating one to its head
-    (`_HOOK_MAX_COMMAND_LENGTH`, applied before this is called), loses each
-    one entirely: which commands survive is an accident of chronological
-    order with no relationship to which one a gate actually cared about. A
-    dropped forbidden command would read as a false pass; a dropped required
-    one would read as a false fail. Evidence the caller could not submit in
-    full is None, the same principle `evaluators.py`'s own module docstring
-    already states for a missing evidence list altogether: a required
-    `command`/`command_if_changed` gate then resolves `unknown` and
-    blocks, rather than risking either outcome on data known to be
-    incomplete.
+    Dropping whole commands loses each one entirely: which commands survive is
+    an accident of chronological order with no relationship to which one a gate
+    actually cared about. A dropped forbidden command would read as a false
+    pass; a dropped required one would read as a false fail. Evidence the
+    caller could not submit in full is None, the same principle
+    `evaluators.py`'s own module docstring already states for a missing
+    evidence list altogether: a required `command`/`command_if_changed` gate
+    then resolves `unknown` and blocks, rather than risking either outcome on
+    data known to be incomplete.
 
-    This does not revisit `_HOOK_MAX_COMMAND_LENGTH`'s own, separately
-    reasoned trade-off: keeping the head of one oversize command (rather
-    than dropping it, or the whole submission, outright) is deliberate,
-    since a Bash call carrying a heredoc clears that limit routinely and a
-    forbidden/required phrase is usually near a command's own head, its own
-    invocation.
+    Each command has already been split into pieces within
+    `_HOOK_MAX_COMMAND_LENGTH` (`_prepare_hook_commands`). This only applies
+    when that full set still does not fit.
     """
     if len(commands) > _HOOK_MAX_COMMANDS:
-        click.echo(
-            f"otari hook: session ran {len(commands):,} commands, over the {_HOOK_MAX_COMMANDS:,} "
-            "limit; submitting no command evidence rather than an arbitrary subset of it.",
-            err=True,
+        _hook_not_enforcing(
+            f"session ran {len(commands):,} commands, over the {_HOOK_MAX_COMMANDS:,} "
+            "limit; submitting no command evidence rather than an arbitrary subset of it."
         )
         return None
 
     total_chars = sum(len(command) for command in commands)
     if total_chars > _HOOK_MAX_TOTAL_COMMAND_CHARS:
-        click.echo(
-            f"otari hook: session command evidence totals {total_chars:,} characters, over the "
+        _hook_not_enforcing(
+            f"session command evidence totals {total_chars:,} characters, over the "
             f"{_HOOK_MAX_TOTAL_COMMAND_CHARS:,} limit; submitting no command evidence rather than an "
-            "arbitrary subset of it.",
-            err=True,
+            "arbitrary subset of it."
         )
         return None
 
     return commands
+
+
+def _hook_command_phrases(spec: PolicySpec) -> tuple[str, ...]:
+    """Every phrase a command-evidence gate matches, in first-seen order."""
+    seen: dict[str, None] = {}
+    for gate in spec.gates:
+        phrases: tuple[str, ...] = ()
+        if isinstance(gate, CommandGate):
+            phrases = gate.forbidden
+        elif isinstance(gate, CommandIfChangedGate):
+            phrases = gate.require
+        for phrase in phrases:
+            seen.setdefault(phrase, None)
+    return tuple(seen)
+
+
+def _phrase_fits_in_command_limit(phrase: str) -> bool:
+    """Whether `phrase` can match inside one command the evaluator will accept.
+
+    A phrase longer than `_HOOK_MAX_COMMAND_LENGTH`, once quoted the way a
+    submitted piece is, can never appear whole in a piece of that length.
+    """
+    if len(phrase) > _HOOK_MAX_COMMAND_LENGTH:
+        return False
+    try:
+        tokens = tokenize_phrase(phrase)
+    except ValueError:
+        return False
+    return len(shlex.join(tokens)) <= _HOOK_MAX_COMMAND_LENGTH
+
+
+def _pieces_of_segment(tokens: list[str], *, overlap: int) -> list[str]:
+    """Token runs of `tokens` that each fit the evaluator, covering every phrase that can.
+
+    A token whose quoted form exceeds the cap is left out. No phrase that itself
+    fits in the cap can name that token, and leaving it out splits the runs on
+    either side so they are not matched as though the token were absent.
+    """
+    runs: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if len(shlex.quote(token)) > _HOOK_MAX_COMMAND_LENGTH:
+            if current:
+                runs.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        runs.append(current)
+
+    pieces: list[str] = []
+    for run in runs:
+        quoted_run = [shlex.quote(token) for token in run]
+        start = 0
+        count = len(quoted_run)
+        while start < count:
+            total = len(quoted_run[start])
+            end = start + 1
+            while end < count and total + 1 + len(quoted_run[end]) <= _HOOK_MAX_COMMAND_LENGTH:
+                total += 1 + len(quoted_run[end])
+                end += 1
+            pieces.append(" ".join(quoted_run[start:end]))
+            if end == count:
+                break
+            next_start = end - overlap
+            if next_start <= start:
+                next_start = start + 1
+            start = next_start
+    return pieces
+
+
+def _pieces_of_command(command: str, *, phrase_token_count: int) -> list[str]:
+    """The command as pieces the evaluator will accept, covering what a gate matches.
+
+    A command within the cap is returned unchanged. A longer one is split into
+    the simple commands `_command_segments` already compares separately (so a
+    heredoc body, which that split drops, is not matched, and a command after
+    the heredoc is). Each piece is rendered so it tokenizes back to the same
+    words.
+    """
+    if len(command) <= _HOOK_MAX_COMMAND_LENGTH:
+        return [command]
+    overlap = max(phrase_token_count - 1, 0)
+    pieces: list[str] = []
+    for segment in _command_segments(command):
+        pieces.extend(_pieces_of_segment(segment, overlap=overlap))
+    return pieces
+
+
+def _prepare_hook_commands(commands: list[str], spec: PolicySpec) -> list[str] | None:
+    """Command evidence to submit, or None when it cannot be submitted in full.
+
+    The evaluator rejects one command over `_HOOK_MAX_COMMAND_LENGTH`, and that
+    rejection fails the whole check open. Keeping only the head of a longer
+    command fails a required gate open instead: a heredoc clears the cap
+    routinely, and the forbidden or required text is then past the cut. Pieces
+    cover the whole command. What still cannot be covered submits nothing, so
+    a required command gate resolves `unknown` and blocks, and the miss is
+    reported where a person can see it.
+    """
+    if all(len(command) <= _HOOK_MAX_COMMAND_LENGTH for command in commands):
+        return _bound_commands_for_submission(commands)
+    phrases = _hook_command_phrases(spec)
+    if any(not _phrase_fits_in_command_limit(phrase) for phrase in phrases):
+        _hook_not_enforcing(
+            f"a command exceeds {_HOOK_MAX_COMMAND_LENGTH:,} characters and a phrase is too long "
+            "to match inside a shorter piece; submitting no command evidence rather than a partial check."
+        )
+        return None
+    phrase_token_count = max((len(tokenize_phrase(phrase)) for phrase in phrases), default=1)
+    pieces: list[str] = []
+    for command in commands:
+        pieces.extend(_pieces_of_command(command, phrase_token_count=phrase_token_count))
+    return _bound_commands_for_submission(pieces)
 
 
 def _hook_find_repo_root(start: Path) -> Path | None:
@@ -2768,23 +2875,12 @@ def hook(
             path_source = "pre_tool_use.read_target"
         elif command_field:
             command = tool_input.get(command_field)
-            if not command:
+            if not isinstance(command, str) or not command:
                 return
-            # Truncated rather than checked whole: the evaluator raises on
-            # an oversize command, which fails the *whole* check open, taking
-            # every path gate in the same policy with it.
-            # A Bash call carrying a heredoc clears this limit routinely, so
-            # that is the common case rather than a pathological one. A tool
-            # name is argv[0], so keeping the head is what preserves detection
-            # for the shape this gate is actually for.
-            if len(command) > _HOOK_MAX_COMMAND_LENGTH:
-                click.echo(
-                    f"otari hook: command is {len(command):,} characters, checking only the first "
-                    f"{_HOOK_MAX_COMMAND_LENGTH:,}.",
-                    err=True,
-                )
-                command = command[:_HOOK_MAX_COMMAND_LENGTH]
-            commands = [command]
+            # Pieces, not a truncated head: the evaluator raises on an oversize
+            # command, which fails the whole check open, and cutting the tail
+            # lets a forbidden command after a long heredoc through.
+            commands = _prepare_hook_commands([command], spec)
             path_source = "pre_tool_use.command"
         else:
             return  # A tool this harness integration does not check yet.
@@ -2821,22 +2917,11 @@ def hook(
             commands = collect_transcript_commands(Path(transcript_path)) if transcript_path else None
         command_scope = "session"
         if commands:
-            # Same truncation the PreToolUse Bash branch applies to its one
-            # command, applied per command here: a whole session's worth of
-            # transcript-collected commands makes it more likely, not less,
-            # that at least one clears _HOOK_MAX_COMMAND_LENGTH (a heredoc
-            # anywhere in the session, not just in the single command a
-            # PreToolUse call would carry), and one oversize entry would
-            # otherwise fail the whole check open.
-            oversize = sum(1 for command in commands if len(command) > _HOOK_MAX_COMMAND_LENGTH)
-            if oversize:
-                click.echo(
-                    f"otari hook: {oversize} command(s) from the transcript exceeded "
-                    f"{_HOOK_MAX_COMMAND_LENGTH:,} characters, checking only the first that many of each.",
-                    err=True,
-                )
-                commands = [command[:_HOOK_MAX_COMMAND_LENGTH] for command in commands]
-            commands = _bound_commands_for_submission(commands)
+            # Same preparation as a PreToolUse command, per transcript command:
+            # a long heredoc anywhere in the session is past the per-command
+            # cap, and one oversize entry would otherwise fail the whole check
+            # open.
+            commands = _prepare_hook_commands(commands, spec)
 
         max_gates, cap_notice = _hook_judge_gate_cap(max_judges)
         if cap_notice is not None:
