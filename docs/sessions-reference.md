@@ -140,7 +140,9 @@ recorded without a name.
 - **Tools the gateway runs** (web search, web fetch, code execution, MCP tools)
   are timed as they run. An MCP tool called through
   [caller-orchestrated MCP](mcp.md#execution) also names the access rule that
-  allowed or refused it.
+  allowed or refused it. A failed call records why as its error class (a
+  failure tag or an exception class, never a message), with the upstream HTTP
+  status and the provider it reached where known.
 - **Tools the client runs** (a shell, a file read) are recorded from the request
   that carries their result: name, whether it returned an error, and when. Their
   duration is approximate.

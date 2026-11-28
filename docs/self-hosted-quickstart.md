@@ -44,7 +44,8 @@ export OTARI_MASTER_KEY=$(grep '^OTARI_MASTER_KEY=' .env | cut -d= -f2-)
 - `OTARI_MASTER_KEY` is the key you manage the gateway with.
 - `OTARI_SECRET_KEY` encrypts the provider credentials Otari stores.
 - `OTARI_PROVIDER_ACCOUNT_PEPPER` names the provider accounts that hold copies
-  of attached files. Compose requires it.
+  of attached files. Without it, Otari turns provider copies off and logs a
+  warning.
 
 The last command puts the master key in your shell for steps 4 and 5; run it
 again in a new shell. If `.env` already existed, check that it sets all six

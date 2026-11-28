@@ -115,7 +115,10 @@ cp config.example.yml config.yml
 uv run otari serve --config config.yml
 ```
 
-For hot reload: `make dev`.
+For hot reload: `make dev`. Where Docker is running, it also starts the
+development mail sink that `.env.example` points at, so signup verification, a
+password reset and an invitation can be followed through its inbox at
+`http://localhost:8025` (see [Mail](docs/configuration.md#mail)).
 
 The `otari` command itself is owned by the workspace member at `cli/` (the
 `otari-agent` distribution), which holds the laptop-side commands (`hook`,
