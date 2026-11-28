@@ -54,7 +54,8 @@ call.
 ## What comes back
 
 A `SearchResult`: the provider's name, a list of `SearchHit`s (`url`, `title`, `snippet`, the page
-`text` when the provider returned it, `published`, and the provider's own item as `raw`), the
+`text` when the provider returned it, `published`, an `image` and a `favicon` when the provider
+returned them, and the provider's own item as `raw`), the
 `cost` in USD the provider reported with `cost_source` (`reported` or `none`), an `error` when the
 provider signaled one inside a successful response, and the provider's whole response as `raw`.
 `raw` is left out of `repr`.
@@ -206,6 +207,7 @@ any-search exa "latest stable python release" -o 'contents={"highlights": true}'
 | `snippet` | `highlights`, joined; empty unless `contents` asks for highlights |
 | `text` | `text` |
 | `published` | `publishedDate`, a date or a date-time; UTC when it has no zone |
+| `image`, `favicon` | `image`, `favicon`, when Exa returns them |
 
 The cost is `costDollars.total`. `max_results` becomes `numResults`, at most 100; the `numResults`
 option, capped the same way, applies only when `max_results` is not passed. `time_range` becomes
@@ -218,8 +220,8 @@ or `RATE_LIMIT_EXCEEDED`. Exa signals no error inside a successful search.
 
 Every field read from a successful search is checked, so a change on Exa's side fails the call
 rather than degrading it: an answer without `results` or an item's `url` or `title`, or with any
-of these, `text`, `highlights`, `publishedDate` or `costDollars.total` of the wrong type, or a date
-that does not parse, raises `ProviderError` with the tag `unexpected_response`. Exa documents its
+of these, `text`, `highlights`, `publishedDate`, `image`, `favicon` or `costDollars.total` of the
+wrong type, or a date that does not parse, raises `ProviderError` with the tag `unexpected_response`. Exa documents its
 cost as optional, so an answer without one reports none; the live tests check that it reports
 one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
 
@@ -514,7 +516,7 @@ network or a monkeypatch:
 
 | Option | Effect |
 |---|---|
-| `hits` | The hits to answer with, each an object with `url` and optionally `title`, `snippet`, `text` and `published`. An item without `url` is dropped. Three canned hits when unset. |
+| `hits` | The hits to answer with, each an object with `url` and optionally `title`, `snippet`, `text`, `published`, `image` and `favicon`. An item without `url` is dropped. Three canned hits when unset. |
 | `cost` | A cost in USD to report. |
 | `delay` | Seconds to wait before answering, to hold a call open. |
 | `error` | Fail the call with a `ProviderError` of this tag. |

@@ -26450,6 +26450,30 @@
             "description": "The page's date, as the provider gave it.",
             "title": "Date"
           },
+          "favicon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The site's favicon, when the provider returned one.",
+            "title": "Favicon"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A preview image for the result, when the provider returned one.",
+            "title": "Image"
+          },
           "last_updated": {
             "anyOf": [
               {

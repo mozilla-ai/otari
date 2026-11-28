@@ -69,6 +69,8 @@ _HIT = {
     "title": "Otari",
     "snippet": "An OpenAI-compatible LLM gateway.",
     "published": "2026-01-02T00:00:00Z",
+    "image": "https://example.com/otari.png",
+    "favicon": "https://example.com/favicon.ico",
 }
 _PAGE_HIT = {"url": "https://example.org/page", "title": "Page", "snippet": "short", "text": "The page text."}
 
@@ -173,6 +175,8 @@ def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str])
             # The fake gives no date string of its own, so the parsed date in ISO form.
             "date": "2026-01-02T00:00:00+00:00",
             "last_updated": None,
+            "image": "https://example.com/otari.png",
+            "favicon": "https://example.com/favicon.ico",
         }
     ]
     assert "raw" not in data

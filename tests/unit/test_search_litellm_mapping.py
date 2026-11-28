@@ -184,6 +184,23 @@ def test_exa_filters_its_own_domains() -> None:
     assert len(litellm_results("exa", SearchQuery(query="q", domain_filter=("arxiv.org",)), hits)) == 1
 
 
+def test_a_hits_image_and_favicon_pass_through() -> None:
+    carried = _hit(image="https://example.com/a.png", favicon="https://example.com/favicon.ico")
+    bare = _hit("https://example.com/b")
+    results = litellm_results("exa", _Q, [carried, bare])
+    assert (results[0].image, results[0].favicon) == ("https://example.com/a.png", "https://example.com/favicon.ico")
+    assert (results[1].image, results[1].favicon) == (None, None)
+
+
+def test_a_non_http_image_or_favicon_is_dropped() -> None:
+    """A client renders these, so a page-supplied data: or javascript: URL is not passed on."""
+    hit = _hit(image="data:image/png;base64,AAAA", favicon="javascript:alert(1)")
+    plain_http = _hit("https://example.com/b", image="http://example.com/a.png")
+    results = litellm_results("exa", _Q, [hit, plain_http])
+    assert (results[0].image, results[0].favicon) == (None, None)
+    assert results[1].image == "http://example.com/a.png"
+
+
 # --------------------------------------------------------------------------- #
 # The domain filter
 # --------------------------------------------------------------------------- #

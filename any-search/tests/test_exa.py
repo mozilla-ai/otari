@@ -149,6 +149,7 @@ async def test_reads_the_recorded_answer() -> None:
     assert first.snippet == " ".join(part.strip() for part in recorded[0]["highlights"])
     assert first.text == recorded[0]["text"]
     assert first.published == datetime(2025, 10, 1, tzinfo=UTC)
+    assert first.image == recorded[0]["image"]
     assert first.raw == recorded[0]
     # Exa answered this one with an empty title and no date.
     assert (second.title, second.published) == ("", None)
@@ -175,6 +176,8 @@ def _answer() -> dict[str, Any]:
                 "text": f"page {SENTINEL}",
                 "highlights": [" one ", "", "two"],
                 "publishedDate": "2026-02-03",
+                "image": "https://example.com/a.png",
+                "favicon": "https://example.com/favicon.ico",
             }
         ],
         "costDollars": {"total": 0.005},
@@ -187,21 +190,32 @@ async def test_a_full_answer_is_read() -> None:
     (hit,) = result.hits
     assert (hit.snippet, hit.text) == ("one two", f"page {SENTINEL}")
     assert hit.published == datetime(2026, 2, 3, tzinfo=UTC)
+    assert (hit.image, hit.favicon) == ("https://example.com/a.png", "https://example.com/favicon.ico")
 
 
 @pytest.mark.asyncio
 async def test_the_optional_fields_may_be_absent_and_unread_ones_are_ignored() -> None:
     body = _answer()
     item = body["results"][0]
-    for name in ("text", "highlights", "publishedDate"):
+    for name in ("text", "highlights", "publishedDate", "image", "favicon"):
         del item[name]
-    item.update(author=None, favicon=7, newField={"any": "thing"})
+    item.update(author=None, newField={"any": "thing"})
     body["costDollars"]["search"] = "unread"
     body["newTopLevel"] = []
     result, _ = await _search(httpx.Response(200, json=body))
     (hit,) = result.hits
     assert (hit.snippet, hit.text, hit.published) == ("", None, None)
+    assert (hit.image, hit.favicon) == (None, None)
     assert (result.cost, result.cost_source) == (Decimal("0.005"), "reported")
+
+
+@pytest.mark.asyncio
+async def test_an_empty_image_or_favicon_reads_as_none() -> None:
+    body = _answer()
+    body["results"][0].update(image="", favicon="")
+    result, _ = await _search(httpx.Response(200, json=body))
+    (hit,) = result.hits
+    assert (hit.image, hit.favicon) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -276,6 +290,8 @@ def _setting(value: Any, *path: str | int) -> Any:
         pytest.param(_setting(["one", 3], "results", 0, "highlights"), id="highlight-not-a-string"),
         pytest.param(_setting(20260203, "results", 0, "publishedDate"), id="date-not-a-string"),
         pytest.param(_setting(f"not a date {SENTINEL}", "results", 0, "publishedDate"), id="date-unparsable"),
+        pytest.param(_setting(7, "results", 0, "image"), id="image-not-a-string"),
+        pytest.param(_setting(7, "results", 0, "favicon"), id="favicon-not-a-string"),
         pytest.param(_setting(0.005, "costDollars"), id="cost-not-an-object"),
         pytest.param(_setting("0.005", "costDollars", "total"), id="total-a-string"),
         pytest.param(_setting(True, "costDollars", "total"), id="total-a-boolean"),
