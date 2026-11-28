@@ -251,6 +251,14 @@ def test_a_token_cannot_make_a_provider_call_through_a_read(client: TestClient, 
     assert response.json()["detail"] == "Access tokens cannot use this endpoint"
 
 
+@pytest.mark.parametrize("path", ["/providers/health", "/models/discoverable"])
+def test_a_token_cannot_force_every_provider_to_be_dialed(client: TestClient, world: _World, path: str) -> None:
+    token = _mint(client, world, "alpha_operator")["token"]
+    response = client.get(f"{API_ROOT}{path}", params={"refresh": "true"}, headers=_bearer(token))
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access tokens cannot use this endpoint"
+
+
 def test_a_password_change_ends_the_tokens_minted_before_it(client: TestClient, world: _World) -> None:
     token = _mint(client, world, "alpha_member")["token"]
     changed = client.put(

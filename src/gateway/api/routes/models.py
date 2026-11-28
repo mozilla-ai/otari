@@ -3,7 +3,7 @@
 import uuid
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from gateway.api.deps import (
     get_config,
     get_db,
     get_session_identity,
+    refuse_access_tokens,
     require_deployment_operator,
     verify_catalog_reader,
 )
@@ -284,6 +285,7 @@ async def _listing(
 # that is accepted, and such a model is still listed by GET /api/v1/models.
 @operator_router.get("/models/discoverable")
 async def list_discoverable_models(
+    request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     hosted: HostedProviderServiceDep,
     refresh: Annotated[
@@ -307,7 +309,10 @@ async def list_discoverable_models(
     the call does not wait on a slow or unreachable provider. Each provider
     carries the ``checked_at`` its result was produced at; a null one has not been
     dialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.
+    An access token may not, as on the other reads that dial a provider.
     """
+    if refresh:
+        refuse_access_tokens(request)
     serve_stale = background_discovery_enabled(config) and not refresh
     discoveries = await discover_models_with_status(
         config, hosted=hosted.discovery_dials, serve_stale=serve_stale, force=refresh

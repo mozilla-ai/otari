@@ -3363,6 +3363,7 @@ export interface paths {
          *     the call does not wait on a slow or unreachable provider. Each provider
          *     carries the ``checked_at`` its result was produced at; a null one has not been
          *     dialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.
+         *     An access token may not, as on the other reads that dial a provider.
          */
         get: operations["models-list_discoverable_models"];
         put?: never;
@@ -6743,7 +6744,7 @@ export interface paths {
          *     when its credentials can list models. Results are served from the discovery
          *     cache (cheap enough to poll), so ``checked_at`` reflects when each provider
          *     was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
-         *     provider.
+         *     provider. An access token may not, as on the other reads that dial a provider.
          *
          *     A provider whose backend serves no model-listing endpoint cannot be verified
          *     this way, but it is not unreachable either: it is reported with

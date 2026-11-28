@@ -104,6 +104,11 @@ A token is refused on every other method with `403`, and it is not an API key:
 it cannot call models or tools. The access token an MCP client signs in with is
 refused here with `401`, since it works only through `/mcp`.
 
+Some reads do more than read, because they make Otari dial a provider: asking a
+provider which models its credential serves, and `refresh=true` on provider
+health and model discovery, which re-dials every provider. Those refuse any
+access token with `403`, so an agent holding one cannot drive live provider calls.
+
 ## When a token stops working
 
 A token stops at once when you delete it or when it expires. Every token and
