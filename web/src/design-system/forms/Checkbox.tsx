@@ -98,6 +98,7 @@ export function Checkbox({
   onChange,
   isDisabled = false,
   ariaLabel,
+  ariaDescribedBy,
   hasTouchTarget = false,
   isIndeterminate = false,
   className = "",
@@ -118,6 +119,11 @@ export function Checkbox({
    */
   ariaLabel?: string
   /**
+   * The id of text that says more about the choice, read after its name: what
+   * picking it does, where the label alone does not say.
+   */
+  ariaDescribedBy?: string
+  /**
    * A 44px target for a box that is 16px. For a list whose only other control
    * is at the far edge of the row, where `CopyButton`'s pseudo-element bleed
    * cannot be used: a 14px bleed each way would overlap the row above and
@@ -134,6 +140,7 @@ export function Checkbox({
   return (
     <AriaCheckbox
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       isSelected={isSelected}
       isIndeterminate={isIndeterminate}
       onChange={onChange}

@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 from typing import ClassVar, Protocol
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
-from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
     McpCatalogServerNotListedError,
@@ -28,11 +27,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.log_config import logger
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import McpServerRequest, McpServerRequestStatus
-from gateway.repositories.tools import (
-    McpServerRequestConflict,
-    McpServerRequestRepository,
-    WorkspaceMcpServerRepository,
-)
+from gateway.repositories.tools import McpServerRequestConflict, McpServerRequestRepository
 from gateway.schemas.mcp_catalog import McpCatalogServerPublic
 from gateway.schemas.tools import (
     McpServerRequestCreate,
@@ -47,6 +42,7 @@ from gateway.schemas.tools import (
     McpServerRequestStatusValue,
 )
 from gateway.services.mail import Mailer, MailMessage, render_email
+from gateway.services.tools._workspace_mcp_server_urls import WorkspaceMcpServerUrls
 
 # How many requests one member may have waiting in a workspace, and how many they may make there in
 # a day. The second also bounds the mail a member can cause: each request mails the managers once.
@@ -61,6 +57,8 @@ MAX_REQUESTERS_LISTED = 5
 MAX_REQUESTERS_PAGE = 100
 # The most of a member's own requests one page holds.
 MAX_OWN_PAGE = 100
+# The most workspaces one query of an approval names; an organization's server answers every workspace's requests.
+_WORKSPACES_PER_QUERY = 1000
 
 SERVERS_PAGE = "/tools/mcp-servers"
 
@@ -178,7 +176,7 @@ class McpServerRequestService:
         self,
         uow: UnitOfWork,
         requests: McpServerRequestRepository,
-        servers: WorkspaceMcpServerRepository,
+        servers: WorkspaceMcpServerUrls,
         workspaces: RequestWorkspaces,
         catalog: CatalogEntries,
         mailer: Mailer,
@@ -215,7 +213,7 @@ class McpServerRequestService:
         async with self._uow:
             # Serializes with a manager adding the server, and makes the two counts below exact.
             await self._workspaces.lock_workspace(workspace.id)
-            if await self._servers.has_url(workspace.id, entry.url):
+            if await self._servers.has_url(workspace.id, entry.url, workspace.organization_id):
                 raise McpServerAlreadyAddedError
             if await self._requests.has_pending(workspace.id, entry.name, user.id):
                 raise McpServerAlreadyRequestedError
@@ -379,28 +377,42 @@ class McpServerRequestService:
             answered = self._answer(rows, McpServerRequestStatus.DECLINED, decided_by=user.id, reason=reason)
             await self._requests.save()
         logger.info("MCP server requests declined workspace_id=%s count=%d", workspace.id, len(answered))
-        await self._mail_requesters(workspace.name, answered, approved=False, reason=reason, decided_by=user.id)
+        await self._mail_requesters(
+            [(workspace.name, requester, title) for requester, title in answered],
+            approved=False,
+            reason=reason,
+            decided_by=user.id,
+        )
         return McpServerRequestsDeclined(declined=len(answered))
 
     async def server_added(
-        self, *, workspace_id: uuid.UUID, workspace_name: str, server_id: uuid.UUID, url: str, added_by: uuid.UUID
+        self, *, workspaces: Mapping[uuid.UUID, str], server_id: uuid.UUID, url: str, added_by: uuid.UUID
     ) -> int:
-        """Approve every pending request for the server a workspace just stored, and tell each requester.
+        """Approve every pending request in these workspaces for the server they now reach, and tell each requester.
 
-        Matched by URL, so it holds however the server was added: from a request, from the catalog,
-        or by pasting its URL. Runs in the transaction that stores the server and commits it.
-        Returns how many requests it approved.
+        ``workspaces`` names each workspace that reaches the server by its name. Matched by URL, so it holds
+        however the server was added: from a request, from the catalog, or by pasting its URL. Runs in the
+        transaction that stores the server and commits it, approvals and all, and mails once that has
+        committed. Returns how many requests it approved.
         """
+        ids = list(workspaces)
+        answered: list[tuple[str, uuid.UUID, str]] = []
         async with self._uow:
-            rows = await self._requests.pending_for_server(workspace_id, urls=url_spellings(url))
-            answered = self._answer(rows, McpServerRequestStatus.APPROVED, decided_by=added_by, server_id=server_id)
-            if rows:
-                await self._requests.save()
-            # The server is here now, so an earlier decline of it no longer says anything true.
-            await self._requests.acknowledge_declined(workspace_id, at=self._clock(), urls=url_spellings(url))
+            for start in range(0, len(ids), _WORKSPACES_PER_QUERY):
+                batch = ids[start : start + _WORKSPACES_PER_QUERY]
+                rows = await self._requests.pending_at_url(batch, url)
+                approved = self._answer(rows, McpServerRequestStatus.APPROVED, decided_by=added_by, server_id=server_id)
+                answered += [
+                    (workspaces[row.workspace_id], requester, title)
+                    for row, (requester, title) in zip(rows, approved, strict=True)
+                ]
+                if rows:
+                    await self._requests.save()
+                # The server is here now, so an earlier decline of it no longer says anything true.
+                await self._requests.acknowledge_declined_at_url(batch, url, at=self._clock())
         if answered:
-            logger.info("MCP server requests approved workspace_id=%s count=%d", workspace_id, len(answered))
-            await self._mail_requesters(workspace_name, answered, approved=True, reason=None, decided_by=added_by)
+            logger.info("MCP server requests approved server_id=%s count=%d", server_id, len(answered))
+            await self._mail_requesters(answered, approved=True, reason=None, decided_by=added_by)
         return len(answered)
 
     def _answer(
@@ -457,24 +469,24 @@ class McpServerRequestService:
 
     async def _mail_requesters(
         self,
-        workspace_name: str,
-        answered: Sequence[tuple[uuid.UUID, str]],
+        answered: Sequence[tuple[str, uuid.UUID, str]],
         *,
         approved: bool,
         reason: str | None,
         decided_by: uuid.UUID,
     ) -> None:
+        """Tell each requester the answer; ``answered`` holds their workspace's name, the requester and the title."""
         if not answered or not self._mailer.can_deliver_links:
             return
         try:
             async with self._uow:
-                found = await self._workspaces.people({requester for requester, _ in answered})
+                found = await self._workspaces.people({requester for _, requester, _ in answered})
         except DATABASE_ERRORS as exc:
             logger.warning("MCP server request mail not sent reason=recipients error=%s", describe_database_error(exc))
             return
         people = {person.id: person for person in found}
         deliveries: list[tuple[str, MailMessage]] = []
-        for requester_id, title in answered:
+        for workspace_name, requester_id, title in answered:
             person = people.get(requester_id)
             # Whoever answered knows the answer.
             if person is None or not person.email or not person.is_active or requester_id == decided_by:

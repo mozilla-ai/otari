@@ -169,8 +169,10 @@ from gateway.api.deps.tools import (
     WorkspaceMcpServersDep,
     WorkspaceWebSearchPoliciesDep,
     WorkspaceWebSearchServiceDep,
+    build_mcp_server_fold,
     build_search_tool_refresh,
     build_search_tool_service,
+    build_workspace_mcp_server_urls,
     get_code_execution_environment_service,
     get_direct_tool_availability,
     get_direct_tool_service,
@@ -342,7 +344,6 @@ from gateway.services.tools import (
     McpServerRequestService,
     McpSignedInServers,
     McpWorkspaceServers,
-    WorkspaceMcpServerUrls,
 )
 from gateway.services.update_check import UpdateCheckService
 from gateway.services.usage_and_telemetry import VideoUsageWriter
@@ -870,7 +871,7 @@ def build_mcp_catalog_service(
         McpCatalogSyncStateRepository(uow),
         workspaces,
         config,
-        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+        workspace_servers=build_workspace_mcp_server_urls(uow),
     )
 
 
@@ -931,7 +932,7 @@ def get_mcp_server_request_service(
     return McpServerRequestService(
         uow,
         McpServerRequestRepository(uow),
-        WorkspaceMcpServerRepository(uow),
+        build_workspace_mcp_server_urls(uow),
         workspaces,
         catalog,
         Mailer(config),
@@ -950,7 +951,9 @@ def get_workspace_mcp_server_service(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceMcpServerService:
     """Build the service on the request's session, with the keys its access lists name and the sign-ins it starts."""
-    return WorkspaceMcpServerService(db, api_keys, connections=connections, requests=requests, config=config)
+    return WorkspaceMcpServerService(
+        db, api_keys, connections=connections, requests=requests, fold=build_mcp_server_fold(db), config=config
+    )
 
 
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
@@ -1313,6 +1316,8 @@ __all__ = [
     "build_trace_service",
     "build_unavailable_model_reporter",
     "build_update_check_service",
+    "build_mcp_server_fold",
+    "build_workspace_mcp_server_urls",
     "catalog_reader_operates_deployment",
     "catalog_reader_organization",
     "cookie_may_authenticate",

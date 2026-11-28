@@ -38,6 +38,30 @@ async def test_a_stored_url_matches_whatever_whitespace_surrounds_it(db: AsyncSe
 
     servers = WorkspaceMcpServerRepository(db)
 
-    assert await servers.has_url(workspace_id, URL)
-    assert await servers.has_url(workspace_id, f"{URL}/ ")
-    assert not await servers.has_url(workspace_id, "https://93.184.216.35/mcp")
+    assert len(await servers.at_url(workspace_id, URL)) == 1
+    assert len(await servers.at_url(workspace_id, f"{URL}/ ")) == 1
+    assert await servers.at_url(workspace_id, "https://93.184.216.35/mcp") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "asked", "matches"),
+    [
+        (f"{URL}/?project=blue", f"{URL}?project=blue", True),
+        (f"{URL}?project=blue/", f"{URL}?project=blue", False),
+        (f"{URL} /", URL, False),
+        (f"{URL}\u00a0/", URL, False),
+        (f"{URL}/\u00a0", URL, True),
+        ("https://93.184.216.34/m%cp", "https://93.184.216.34/m_cp", False),
+        ("https://93.184.216.34/m_cp", "https://93.184.216.34/m%cp", False),
+    ],
+)
+async def test_a_url_is_matched_as_python_reads_it_with_its_query_kept_whole(
+    db: AsyncSession, stored: str, asked: str, matches: bool
+) -> None:
+    """Only the path's trailing slashes and the whitespace around the URL are set aside, the same on SQLite."""
+    workspace_id = uuid.uuid4()
+    db.add(WorkspaceMcpServer(organization_id=uuid.uuid4(), workspace_id=workspace_id, name="drive", url=stored))
+    await db.commit()
+
+    assert bool(await WorkspaceMcpServerRepository(db).at_url(workspace_id, asked)) is matches

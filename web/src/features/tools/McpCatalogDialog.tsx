@@ -1,6 +1,11 @@
 import { useState } from "react"
 
-import type { McpCredentialMode, WorkspaceMcpServer } from "@/client"
+import type {
+  CreateWorkspaceMcpServerRequest,
+  McpCredentialMode,
+  McpServerFoldCandidate,
+  WorkspaceMcpServer,
+} from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
@@ -14,6 +19,7 @@ import { SecretField } from "@/design-system/forms/SecretField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { McpCatalogBrowser } from "@/features/tools/McpCatalogBrowser"
 import { McpCatalogSyncNotice } from "@/features/tools/McpCatalogSyncNotice"
+import { McpFoldChoices } from "@/features/tools/McpFoldChoices"
 import { McpServerLogo } from "@/features/tools/McpServerLogo"
 import {
   AVAILABILITY_OPTIONS,
@@ -26,15 +32,33 @@ import {
   type CatalogPick,
   describeAdded,
   describeRefusal,
+  describeUnconfirmed,
   findFreeName,
+  isUnconfirmed,
   suggestMode,
 } from "@/features/tools/mcpCatalog"
 import {
+  defaultFoldIds,
+  foldableIds,
+  MAX_FOLD_COPIES,
+  offerEachCopyOnce,
+  settleAtMost,
+} from "@/features/tools/mcpFold"
+import {
+  ADD_TARGET_LABEL,
+  addTargetOptions,
   CREDENTIAL_MODE_COPY,
+  type McpAddTarget,
   SIGN_IN_MODE_LABEL,
   SIGN_IN_MODES,
 } from "@/features/tools/mcpServerForm"
 import { isMcpCatalogSyncing, useMcpCatalogSync } from "@/shared/api/mcpCatalog"
+import {
+  type McpServerCopiesOf,
+  useCreateOrganizationMcpServer,
+  useReadMcpServerCopies,
+  useRefreshAfterOrganizationServer,
+} from "@/shared/api/organizationMcpServers"
 import {
   useCreateWorkspaceMcpServer,
   useMcpServerProbes,
@@ -43,13 +67,15 @@ import {
 // Adding servers from the catalog: pick, confirm, see what was added. Each pick becomes a
 // stored server through the same create a pasted URL goes through, one request
 // per server, so the URL check, the workspace's cap and the unique-name rule
-// are the gateway's and every row reports what the gateway said about it.
+// are the gateway's and every row reports what the gateway said about it. An
+// organization owner or admin adds for the whole organization by default, and
+// is first offered the workspaces' own copies of each pick to fold into it.
 //
 // The catalog's description is shown and never stored. A purpose hint is
 // prepended to the system message, and text from a public registry does not
 // belong there unread.
 
-type Step = "browse" | "review" | "results"
+type Step = "browse" | "review" | "fold" | "results"
 
 interface Draft {
   pick: CatalogPick
@@ -64,6 +90,21 @@ interface Result {
   name: string
   outcome: AddOutcome
 }
+
+/** The workspaces' own copies of one pick, offered to fold into the organization's server. */
+interface Fold {
+  pickName: string
+  title: string
+  /** Whether the organization's server will be on. */
+  enabled: boolean
+  /** How the organization's server will sign in. */
+  mode: McpCredentialMode
+  candidates: McpServerFoldCandidate[]
+  selected: string[]
+}
+
+/** How many picks' copies are read at once: picks persist across catalog pages, so a batch can be long. */
+const COPY_READS_AT_ONCE = 4
 
 const TONE_DOT: Record<AddTone, string> = {
   success: "bg-success",
@@ -96,6 +137,7 @@ export function McpCatalogDialog({
   onAddByUrl,
   initialPicks,
   signInUnavailable,
+  canAddForOrganization = false,
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
@@ -109,9 +151,38 @@ export function McpCatalogDialog({
   initialPicks?: CatalogPick[]
   /** Why this deployment cannot sign anyone in to a server yet, as the gateway words it; absent when it can. */
   signInUnavailable?: string | null
+  /**
+   * Whether the caller may add the servers for the whole organization
+   * instead: an organization owner or admin is asked, with the organization
+   * preselected.
+   */
+  canAddForOrganization?: boolean
 }) {
   const sync = useMcpCatalogSync(isOpen)
   const create = useCreateWorkspaceMcpServer()
+  const createForOrganization = useCreateOrganizationMcpServer()
+  const readCopies = useReadMcpServerCopies()
+  const refreshAfterUnconfirmed = useRefreshAfterOrganizationServer()
+  // The organization is preselected only where the choice is there from the
+  // start: access granted while the batch is open leaves it where it was going.
+  const [target, setTarget] = useState<McpAddTarget>(
+    canAddForOrganization ? "organization" : "workspace",
+  )
+  // Once the choice was offered, the batch keeps the destination picked, even
+  // if organization access ends: it is then refused rather than added to the
+  // workspace, until the admin picks the workspace themselves.
+  const [wasOffered, setWasOffered] = useState(canAddForOrganization)
+  if (canAddForOrganization && !wasOffered) setWasOffered(true)
+  const forOrganization = wasOffered && target === "organization"
+  const lostOrganization = forOrganization && !canAddForOrganization
+  const targetName = forOrganization ? "your organization" : workspaceName
+  // Settled when the copies are read, so the fold step adds what it was shown.
+  const [settledModes, setSettledModes] = useState<McpCredentialMode[]>([])
+  const [folds, setFolds] = useState<Fold[]>([])
+  const [isReading, setReading] = useState(false)
+  const [readError, setReadError] = useState<unknown>()
+  // Where the last batch went, which the results step names.
+  const [addedTo, setAddedTo] = useState("")
 
   const startsOnReview = (initialPicks?.length ?? 0) > 0
   const draftsFor = (chosen: CatalogPick[]): Draft[] => {
@@ -153,6 +224,7 @@ export function McpCatalogDialog({
 
   const review = () => {
     setDrafts(draftsFor(picks))
+    setReadError(undefined)
     setStep("review")
   }
 
@@ -196,40 +268,133 @@ export function McpCatalogDialog({
   // One at a time, in order: the gateway locks the workspace per create, and a
   // refusal of one server (a name in use, the workspace's cap) must not stop
   // the ones after it from being tried and reported.
-  const addAll = async () => {
+  const addAll = async (
+    modes: McpCredentialMode[],
+    foldIds: Record<string, string[]>,
+    toOrganization: boolean,
+  ) => {
+    setAddedTo(toOrganization ? "your organization" : workspaceName)
     setIsAdding(true)
-    // Settled before the first create, so a probe landing mid-add changes nothing.
-    const modes = drafts.map((draft, index) => modeOf(index, draft))
     const outcomes: Result[] = []
+    let unconfirmed = false
     for (const [index, draft] of drafts.entries()) {
       const name = draft.name.trim()
       const mode = modes[index]
       // A pasted token often ends in a newline, which would be stored and then refused.
       const token = mode === "shared" ? draft.token.trim() : ""
+      const body: CreateWorkspaceMcpServerRequest = {
+        name,
+        url: draft.pick.url,
+        ...(token ? { authorization_token: token } : {}),
+        credential_mode: mode,
+        ...availabilityFields(draft.availability),
+      }
+      const folded = foldIds[draft.pick.name]
       try {
-        const server = await create.mutateAsync({
-          workspaceId,
-          body: {
-            name,
-            url: draft.pick.url,
-            ...(token ? { authorization_token: token } : {}),
-            credential_mode: mode,
-            ...availabilityFields(draft.availability),
-          },
-        })
+        const server = toOrganization
+          ? await createForOrganization.mutateAsync(
+              folded ? { ...body, fold_server_ids: folded } : body,
+            )
+          : await create.mutateAsync({ workspaceId, body })
         outcomes.push({ name, outcome: describeAdded(server) })
       } catch (error) {
-        outcomes.push({ name, outcome: describeRefusal(errorMessage(error)) })
+        const message = errorMessage(error)
+        // A lost answer is not a refusal: the server, and its folded copies, may be stored.
+        unconfirmed ||= isUnconfirmed(error)
+        outcomes.push({
+          name,
+          outcome: isUnconfirmed(error)
+            ? describeUnconfirmed(message)
+            : describeRefusal(message),
+        })
       }
       setResults([...outcomes])
     }
+    if (unconfirmed) refreshAfterUnconfirmed()
     setIsAdding(false)
     setStep("results")
   }
 
-  const addedCount = results.filter(
-    (result) => result.outcome.tone !== "danger",
-  ).length
+  // For the whole organization, the workspaces' own copies of each pick are
+  // read first, and offered to fold when there are any. The target is settled
+  // here too, so the fold step adds where it was reviewed for.
+  const confirm = async () => {
+    // Settled before anything is stored, so a probe landing later changes nothing.
+    const modes = drafts.map((draft, index) => modeOf(index, draft))
+    if (!forOrganization) {
+      await addAll(modes, {}, false)
+      return
+    }
+    // Every pick is read again on each Confirm, the ones that answered last
+    // time too: another admin may have added a copy since.
+    const reads = drafts.map((draft, index) => {
+      const of: McpServerCopiesOf = {
+        url: draft.pick.url,
+        credentialMode: modes[index],
+        withToken: modes[index] === "shared" && draft.token.trim() !== "",
+      }
+      return { title: draft.name.trim() || draft.pick.title, of }
+    })
+    setReadError(undefined)
+    setReading(true)
+    const outcomes = await settleAtMost(reads, COPY_READS_AT_ONCE, (read) =>
+      readCopies(read.of),
+    )
+    setReading(false)
+    const read: McpServerFoldCandidate[][] = []
+    const failed: { title: string; reason: unknown }[] = []
+    for (const [index, outcome] of outcomes.entries()) {
+      if (outcome.status === "fulfilled") {
+        read.push(outcome.value)
+      } else {
+        failed.push({ title: reads[index].title, reason: outcome.reason })
+      }
+    }
+    if (failed.length > 0) {
+      setReadError(
+        new Error(
+          `Could not look for copies of ${failed
+            .map((each) => each.title)
+            .join(
+              ", ",
+            )}: ${errorMessage(failed[0].reason)} Nothing was added. Confirm looks again.`,
+        ),
+      )
+      return
+    }
+    const enabled = drafts.map(
+      (draft) => availabilityFields(draft.availability).enabled,
+    )
+    const found = offerEachCopyOnce(read, enabled)
+    const withCopies = drafts.flatMap((draft, index) => {
+      return found[index].length > 0
+        ? [
+            {
+              pickName: draft.pick.name,
+              title: reads[index].title,
+              enabled: enabled[index],
+              mode: modes[index],
+              candidates: found[index],
+              selected: defaultFoldIds(found[index], enabled[index]),
+            },
+          ]
+        : []
+    })
+    if (withCopies.length === 0) {
+      await addAll(modes, {}, true)
+      return
+    }
+    setSettledModes(modes)
+    setFolds(withCopies)
+    setStep("fold")
+  }
+
+  const reviewTitle =
+    drafts.length === 1
+      ? `Add ${drafts[0].pick.title} to ${targetName}`
+      : `Add ${drafts.length} servers to ${targetName}`
+
+  const addedCount = results.filter((result) => result.outcome.isStored).length
 
   if (step === "results") {
     return (
@@ -237,7 +402,7 @@ export function McpCatalogDialog({
         isOpen={isOpen}
         onOpenChange={onOpenChange}
         size="lg"
-        title={`${addedCount} of ${results.length} added to ${workspaceName}`}
+        title={`${addedCount} of ${results.length} added to ${addedTo}`}
         description="Each server was checked as it was stored."
         actions={
           <Button variant="primary" onPress={() => onOpenChange(false)}>
@@ -271,19 +436,99 @@ export function McpCatalogDialog({
     )
   }
 
-  if (step === "review") {
+  if (step === "fold") {
+    const foldIds = Object.fromEntries(
+      folds.map((fold) => [
+        fold.pickName,
+        foldableIds(fold.candidates, fold.selected, fold.enabled),
+      ]),
+    )
+    const isOverLimit = Object.values(foldIds).some(
+      (ids) => ids.length > MAX_FOLD_COPIES,
+    )
     return (
       <Dialog
         isOpen={isOpen}
         onOpenChange={onOpenChange}
         isDismissable={!isAdding}
         size="lg"
-        title={
-          drafts.length === 1
-            ? `Add ${drafts[0].pick.title} to ${workspaceName}`
-            : `Add ${drafts.length} servers to ${workspaceName}`
+        title={reviewTitle}
+        description="Some workspaces have their own server at the same URL. Pick the ones to fold into the organization's."
+        footerStart={
+          isAdding
+            ? `Adding ${results.length + 1} of ${drafts.length}`
+            : undefined
         }
-        description={`Every key in ${workspaceName} may use a server once it is added. Change that on the server's page.`}
+        actions={
+          <>
+            <Button isDisabled={isAdding} onPress={() => setStep("review")}>
+              Back
+            </Button>
+            <Button
+              variant="primary"
+              isDisabled={lostOrganization || isOverLimit}
+              isPending={isAdding}
+              onPress={() => void addAll(settledModes, foldIds, true)}
+            >
+              Confirm
+            </Button>
+          </>
+        }
+      >
+        {/* Organization access ended while the step was open: nothing is added anywhere else instead. */}
+        {lostOrganization ? (
+          <DialogSection>
+            <InfoBanner tone="warning">
+              You can no longer add servers for the whole organization. Go back
+              to add them to {workspaceName} instead.
+            </InfoBanner>
+          </DialogSection>
+        ) : null}
+        {folds.map((fold) => (
+          <DialogSection key={fold.pickName}>
+            <section
+              aria-label={`Copies of ${fold.title}`}
+              className="flex flex-col gap-3"
+            >
+              <span className="font-medium break-words">{fold.title}</span>
+              <McpFoldChoices
+                label={`Workspace copies of ${fold.title}`}
+                candidates={fold.candidates}
+                selected={foldIds[fold.pickName]}
+                targetEnabled={fold.enabled}
+                targetMode={fold.mode}
+                isDisabled={isAdding || lostOrganization}
+                onChange={(selected) =>
+                  setFolds((current) =>
+                    current.map((other) =>
+                      other.pickName === fold.pickName
+                        ? { ...other, selected }
+                        : other,
+                    ),
+                  )
+                }
+              />
+            </section>
+          </DialogSection>
+        ))}
+      </Dialog>
+    )
+  }
+
+  if (step === "review") {
+    const isBusy = isAdding || isReading
+    return (
+      <Dialog
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+        isDismissable={!isBusy}
+        size="lg"
+        title={reviewTitle}
+        description={
+          forOrganization
+            ? "Each server is added for the whole organization, and its access rules decide who can use it. Change them on the server's page."
+            : `Every key in ${workspaceName} may use a server once it is added. Change that on the server's page.`
+        }
         footerStart={
           isAdding
             ? `Adding ${results.length + 1} of ${drafts.length}`
@@ -292,25 +537,45 @@ export function McpCatalogDialog({
         actions={
           <>
             {startsOnReview ? (
-              <Button isDisabled={isAdding} onPress={() => onOpenChange(false)}>
+              <Button isDisabled={isBusy} onPress={() => onOpenChange(false)}>
                 Cancel
               </Button>
             ) : (
-              <Button isDisabled={isAdding} onPress={() => setStep("browse")}>
+              <Button isDisabled={isBusy} onPress={() => setStep("browse")}>
                 Back
               </Button>
             )}
             <Button
               variant="primary"
-              isDisabled={!canAdd}
-              isPending={isAdding}
-              onPress={() => void addAll()}
+              isDisabled={!canAdd || lostOrganization}
+              isPending={isBusy}
+              onPress={() => void confirm()}
             >
               Confirm
             </Button>
           </>
         }
       >
+        {wasOffered || readError ? (
+          <DialogSection>
+            <ErrorBanner error={readError} />
+            {lostOrganization ? (
+              <InfoBanner tone="warning">
+                You can no longer add servers for the whole organization. Choose
+                This workspace to add them to {workspaceName} instead.
+              </InfoBanner>
+            ) : null}
+            {wasOffered ? (
+              <RadioGroup
+                label={ADD_TARGET_LABEL}
+                value={target}
+                options={addTargetOptions(workspaceName)}
+                isDisabled={isBusy}
+                onChange={(next) => setTarget(next as McpAddTarget)}
+              />
+            ) : null}
+          </DialogSection>
+        ) : null}
         {signInUnavailable ? (
           <DialogSection>
             <InfoBanner>{signInUnavailable}</InfoBanner>
@@ -341,7 +606,7 @@ export function McpCatalogDialog({
                   label="Name"
                   value={draft.name}
                   isRequired
-                  isDisabled={isAdding}
+                  isDisabled={isBusy}
                   isInvalid={problem !== undefined}
                   errorMessage={problem}
                   onChange={(name) => editDraft(draft.pick.name, { name })}
@@ -356,7 +621,7 @@ export function McpCatalogDialog({
                   orientation="horizontal"
                   value={mode}
                   options={signInUnavailable ? MODES_WITHOUT_SIGN_IN : MODES}
-                  isDisabled={isAdding}
+                  isDisabled={isBusy}
                   description={
                     draft.mode === undefined && suggestion.reason
                       ? `${CREDENTIAL_MODE_COPY[mode].help} ${suggestion.reason}`
@@ -380,7 +645,7 @@ export function McpCatalogDialog({
                         : "Optional. To sign in for everyone instead, leave this blank and set the account up on the server's page after adding."
                     }
                     value={draft.token}
-                    isDisabled={isAdding}
+                    isDisabled={isBusy}
                     onChange={(token) => editDraft(draft.pick.name, { token })}
                   />
                 ) : null}
@@ -388,7 +653,7 @@ export function McpCatalogDialog({
                   label="Availability"
                   value={draft.availability}
                   options={AVAILABILITY_OPTIONS}
-                  isDisabled={isAdding}
+                  isDisabled={isBusy}
                   onChange={(next) =>
                     editDraft(draft.pick.name, {
                       availability: next as McpAvailability,

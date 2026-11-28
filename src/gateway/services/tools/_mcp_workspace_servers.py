@@ -129,19 +129,27 @@ class McpWorkspaceServers:
 
         Also returns the id each given id names: itself, or for an old id of a folded workspace copy the
         organization's server it was folded into. Callers check :attr:`McpServerInWorkspace.attach_by_default`.
+
+        An id the workspace's own server had, folded or promoted since, whose server is now turned off for the
+        workspace names nothing: a request naming it skipped that server while it was off, and still does, before
+        any access rule is read. So does any other id of a server turned off for the workspace.
         """
         named = list(dict.fromkeys(server_ids))
         rows = await self._servers.for_request(workspace_id, organization_id, named, attached=attached)
+        views = await self.seen_from(workspace_id, rows, include_hidden=True)
+        hidden = {view.id for view in views if not view.visible}
         found = {row.id for row in rows}
-        missing = [server_id for server_id in named if server_id not in found]
-        # Only an id naming nothing is looked up, so a request that names live ids reads no alias.
-        targets = await self._aliases.targets(workspace_id, missing) if missing else {}
-        if targets:
+        # Only an id naming nothing, or a server turned off here, is looked up, so one naming live ids reads no alias.
+        unseen = [server_id for server_id in named if server_id not in found or server_id in hidden]
+        targets = await self._aliases.targets(workspace_id, unseen) if unseen else {}
+        if any(target not in found for target in targets.values()):
             swapped = list(dict.fromkeys(targets.get(server_id, server_id) for server_id in named))
             rows = await self._servers.for_request(workspace_id, organization_id, swapped, attached=attached)
-        return await self.seen_from(workspace_id, rows), {
-            server_id: targets.get(server_id, server_id) for server_id in named
-        }
+            views = await self.seen_from(workspace_id, rows, include_hidden=True)
+            hidden = {view.id for view in views if not view.visible}
+        skipped = {given for given, target in targets.items() if target in hidden}
+        names = {server_id: targets.get(server_id, server_id) for server_id in named if server_id not in skipped}
+        return [view for view in views if view.visible], names
 
     async def swap_aliases(self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """These ids in their order, each old id of a folded copy swapped for the server it names in the workspace."""

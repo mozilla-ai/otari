@@ -846,6 +846,12 @@ export type OrganizationMcpServerWorkspaces =
   Schemas["OrganizationMcpServerWorkspaces"]
 export type OrganizationMcpServerLimitRequest =
   Schemas["OrganizationMcpServerLimit"]
+// A workspace's own server at the URL an organization server is added or
+// promoted at, and what folding it into that server would do; and the body
+// that promotes a workspace's server.
+export type McpServerFoldCandidate = Schemas["McpServerFoldCandidate"]
+export type McpServerFoldCandidates = Schemas["McpServerFoldCandidates"]
+export type PromoteMcpServerRequest = Schemas["McpServerPromote"]
 
 // The catalog of remote MCP servers a workspace can add, the logos it knows,
 // and the sync that fills it from the MCP Registry.

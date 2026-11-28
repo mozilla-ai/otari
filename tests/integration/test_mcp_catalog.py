@@ -14,6 +14,7 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.api.deps import build_workspace_mcp_server_urls
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.mcp_catalog_exceptions import (
@@ -37,7 +38,6 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import WorkspaceMcpServerRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
 from gateway.services.mcp_catalog import Logo, McpCatalogService, RegistryError, RegistryPage
 from gateway.services.mcp_catalog import _extras as extras_list
@@ -46,7 +46,6 @@ from gateway.services.mcp_catalog import _service as catalog_service
 from gateway.services.mcp_catalog._registry import entry_from_registry_item
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tools import WorkspaceMcpServerUrls
 
 from .conftest import _to_async_url, build_test_client
 
@@ -169,7 +168,7 @@ def _service(
         McpCatalogSyncStateRepository(uow),
         WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         config,
-        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+        workspace_servers=build_workspace_mcp_server_urls(uow),
         fetcher=fetcher or _Fetcher(),
         look_budget=budget or catalog_service.LogoLookBudget(),
         clock=clock,

@@ -80,6 +80,10 @@ class McpServerNameTakenError(TenancyConflictError):
         super().__init__(f"An MCP server named '{name}' is already available to this organization's workspaces")
 
 
+class McpServerFoldError(TenancyValidationError):
+    """A fold that cannot be: only an organization's server takes the place of workspaces' copies."""
+
+
 class McpServerIsOrganizationsError(TenancyConflictError):
     """A workspace route was asked to change its organization's server, which the organization defines."""
 
@@ -767,6 +771,7 @@ __all__ = [
     "McpSignInRequiredError",
     "McpServerNameTakenError",
     "McpServerIsOrganizationsError",
+    "McpServerFoldError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",

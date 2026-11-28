@@ -11,7 +11,7 @@ from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Never
 
-from sqlalchemy import ColumnElement, case, delete, event, func, select
+from sqlalchemy import ColumnElement, case, delete, event, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,8 @@ from gateway.repositories.base_repository import BaseRepository
 
 # The most connections one removal reads to revoke; the rest are counted.
 REVOCABLE_PAGE = 500
+# The most connections one statement moves.
+_MOVE_BATCH = 1000
 
 
 class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never]):
@@ -100,6 +102,46 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
             .limit(limit)
         )
         return list(rows.scalars().all())
+
+    async def every_for_server(self, server_id: uuid.UUID, *, lock: bool = False) -> list[McpUserConnection]:
+        """Every user's connection to a server, oldest first; ``lock`` reads and holds them as :meth:`find` does."""
+        query = (
+            select(McpUserConnection)
+            .where(McpUserConnection.server_id == server_id)
+            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+        )
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return list((await self.db.execute(query)).scalars().all())
+
+    async def every_for_servers(self, server_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, list[McpUserConnection]]:
+        """Every user's connection to each of these servers, by server, oldest first, in one read."""
+        if not server_ids:
+            return {}
+        rows = await self.db.execute(
+            select(McpUserConnection)
+            .where(McpUserConnection.server_id.in_(list(server_ids)))
+            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+        )
+        grouped: dict[uuid.UUID, list[McpUserConnection]] = {}
+        for connection in rows.scalars().all():
+            grouped.setdefault(connection.server_id, []).append(connection)
+        return grouped
+
+    async def signed_in_users(self, server_id: uuid.UUID) -> set[str]:
+        """Who holds a connection to a server, read as the ids alone rather than as every row."""
+        rows = await self.db.execute(select(McpUserConnection.user_id).where(McpUserConnection.server_id == server_id))
+        return set(rows.scalars().all())
+
+    async def move(self, connection_ids: Collection[uuid.UUID], server_id: uuid.UUID) -> None:
+        """Stage these connections' move to another server, which they then belong to as they are."""
+        ids = list(connection_ids)
+        for start in range(0, len(ids), _MOVE_BATCH):
+            await self.db.execute(
+                update(McpUserConnection)
+                .where(McpUserConnection.id.in_(ids[start : start + _MOVE_BATCH]))
+                .values(server_id=server_id)
+            )
 
     async def revocable(
         self,

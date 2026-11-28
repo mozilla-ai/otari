@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   McpCatalogServer,
   McpCatalogSyncStatus,
+  McpServerFoldCandidate,
   WorkspaceMcpServer,
   WorkspaceMcpServerHealth,
 } from "@/client"
@@ -13,6 +14,7 @@ import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
 import {
   mcpCatalogServer,
   mcpCatalogSyncStatus,
+  mcpServerFoldCandidate,
   workspaceMcpServer,
   workspaceMcpServerHealth,
 } from "@/tests/fixtures"
@@ -38,6 +40,8 @@ const LINEAR = mcpCatalogServer({
   description: "Issues and projects.",
   url: "https://mcp.linear.example/mcp",
 })
+
+const LOOKUP = "/api/v1/organizations/me/mcp-servers/same-url"
 
 const LOADED = mcpCatalogSyncStatus({
   outcome: "complete",
@@ -67,6 +71,7 @@ function mockApi({
   probes = {},
   created = {},
   inWorkspace = [],
+  copies = {},
 }: {
   status?: McpCatalogSyncStatus
   afterRequest?: McpCatalogSyncStatus
@@ -76,6 +81,8 @@ function mockApi({
   created?: Record<string, WorkspaceMcpServer | string>
   /** Catalog names the workspace already has, which the gateway leaves out as it does. */
   inWorkspace?: string[]
+  /** The workspaces' own copies of a server, by its URL, as the fold step reads them. */
+  copies?: Record<string, McpServerFoldCandidate[]>
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -111,6 +118,9 @@ function mockApi({
         count: matching.length,
       })
     }
+    if (method === "POST" && url === LOOKUP) {
+      return Response.json({ data: copies[String(body?.url)] ?? [] })
+    }
     if (url.endsWith("/mcp-servers/check")) {
       return Response.json(
         probes[String(body?.url)] ?? workspaceMcpServerHealth(),
@@ -135,6 +145,7 @@ function renderDialog(
   existing: WorkspaceMcpServer[] = [],
   onAddByUrl?: () => void,
   signInUnavailable?: string,
+  canAddForOrganization?: boolean,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -149,6 +160,7 @@ function renderDialog(
         existing={existing}
         onAddByUrl={onAddByUrl}
         signInUnavailable={signInUnavailable}
+        canAddForOrganization={canAddForOrganization}
       />
     </QueryClientProvider>,
   )
@@ -764,5 +776,435 @@ describe("McpCatalogDialog", () => {
         "Server 27",
       ),
     ).toBeInTheDocument()
+  })
+  it("asks a workspace's own admin nothing, and adds to the workspace", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    expect(screen.queryByRole("radiogroup", { name: "Add to" })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls).map((call) => call.url)).toEqual([
+      `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("adds for the whole organization by default, folding the copies on the same account", async () => {
+    const keeps = mcpServerFoldCandidate({
+      server_id: "aaaaaaaa-0000-0000-0000-000000000001",
+      workspace_name: "Beta",
+      name: "sentry",
+      credential_mode: "shared",
+      same_credential: true,
+      signed_in: 0,
+      keep_sign_in: 0,
+    })
+    const ownToken = mcpServerFoldCandidate({
+      server_id: "aaaaaaaa-0000-0000-0000-000000000002",
+      workspace_id: "bbbbbbbb-0000-0000-0000-000000000002",
+      workspace_name: "Gamma",
+      name: "errors",
+      credential_mode: "shared",
+      same_credential: false,
+      signed_in: 0,
+      keep_sign_in: 0,
+      replaces_shared_credential: true,
+    })
+    const calls = mockApi({ copies: { [SENTRY.url]: [keeps, ownToken] } })
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    expect(
+      screen.getByRole("heading", { name: "Add Sentry to your organization" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("radio", { name: /Whole organization/ }),
+    ).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const copies = await screen.findByRole("list", {
+      name: "Workspace copies of Sentry",
+    })
+    expect(
+      within(copies).getByRole("checkbox", { name: "Beta: sentry" }),
+    ).toBeChecked()
+    expect(
+      within(copies).getByRole("checkbox", { name: "Gamma: errors" }),
+    ).not.toBeChecked()
+    expect(
+      within(copies).getByText(
+        "Its shared account or token will be replaced by the organization's.",
+      ),
+    ).toBeVisible()
+    expect(calls.filter((call) => call.url === LOOKUP)).toEqual([
+      {
+        url: LOOKUP,
+        method: "POST",
+        body: { url: SENTRY.url, credential_mode: "shared", with_token: false },
+      },
+    ])
+    expect(creates(calls)).toEqual([])
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", {
+      name: "1 of 1 added to your organization",
+    })
+    expect(creates(calls)).toEqual([
+      expect.objectContaining({
+        url: "/api/v1/organizations/me/mcp-servers",
+        body: expect.objectContaining({
+          name: "Sentry",
+          fold_server_ids: [keeps.server_id],
+        }),
+      }),
+    ])
+  })
+
+  it("adds for the whole organization with no fold step when no workspace has a copy", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", {
+      name: "1 of 1 added to your organization",
+    })
+    expect(creates(calls).map((call) => call.url)).toEqual([
+      "/api/v1/organizations/me/mcp-servers",
+    ])
+    expect(creates(calls)[0].body).not.toHaveProperty("fold_server_ids")
+  })
+
+  it("adds to the workspace when an organization admin picks it, reading no copies", async () => {
+    const calls = mockApi({
+      copies: { [SENTRY.url]: [mcpServerFoldCandidate()] },
+    })
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    expect(
+      screen.getByRole("heading", { name: "Add Sentry to Alpha" }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls).map((call) => call.url)).toEqual([
+      `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("reads every pick's copies again on each Confirm, the ones that answered before too", async () => {
+    const added = mcpServerFoldCandidate({
+      server_id: "aaaaaaaa-0000-0000-0000-000000000001",
+      workspace_name: "Beta",
+      name: "sentry",
+      credential_mode: "shared",
+      same_credential: true,
+      signed_in: 0,
+      keep_sign_in: 0,
+    })
+    const calls = mockApi()
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    let linearFails = true
+    let sentryCopies: McpServerFoldCandidate[] = []
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      const body = JSON.parse(String(init?.body ?? "{}"))
+      if (url === LOOKUP && body.url === LINEAR.url && linearFails) {
+        calls.push({ url, method: "POST", body })
+        return Response.json({ detail: "Try later." }, { status: 503 })
+      }
+      if (url === LOOKUP && body.url === SENTRY.url) {
+        calls.push({ url, method: "POST", body })
+        return Response.json({ data: sentryCopies })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const reads = (url: string) =>
+      calls.filter((call) => call.url === LOOKUP && call.body?.url === url)
+        .length
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
+    await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    expect(
+      await screen.findByText(
+        "Could not look for copies of Linear: Try later. Nothing was added. Confirm looks again.",
+      ),
+    ).toBeVisible()
+    expect(creates(calls)).toEqual([])
+
+    // Another admin's workspace adds a copy of Sentry meanwhile.
+    sentryCopies = [added]
+    linearFails = false
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const copies = await screen.findByRole("list", {
+      name: "Workspace copies of Sentry",
+    })
+    expect(
+      within(copies).getByRole("checkbox", { name: "Beta: sentry" }),
+    ).toBeChecked()
+    expect(reads(SENTRY.url)).toBe(2)
+    expect(reads(LINEAR.url)).toBe(2)
+    expect(creates(calls)).toEqual([])
+  })
+
+  it("says an add whose answer was lost may have been made, apart from a refused one", async () => {
+    const calls = mockApi({ created: { Linear: "Name in use." } })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}"))
+      if (String(input).endsWith("/mcp-servers") && body.name === "Sentry") {
+        calls.push({ url: String(input), method: "POST", body })
+        throw new TypeError("Failed to fetch")
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
+    await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const added = await screen.findByRole("list", { name: "What was added" })
+    const rows = within(added).getAllByRole("listitem")
+    expect(rows[0]).toHaveTextContent("NOT CONFIRMED")
+    expect(rows[0]).toHaveTextContent(/may have been added anyway/)
+    expect(rows[1]).toHaveTextContent("NOT ADDED")
+    expect(rows[1]).toHaveTextContent("Name in use.")
+    // Neither is counted as added: one was refused, and the other is not known to be stored.
+    expect(
+      screen.getByRole("heading", {
+        name: "0 of 2 added to your organization",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps a batch going to the workspace when organization access arrives mid-review", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (canAddForOrganization: boolean) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          canAddForOrganization={canAddForOrganization}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(dialog(false))
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    rerender(dialog(true))
+
+    expect(screen.getByRole("radio", { name: /This workspace/ })).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls)).toEqual([
+      expect.objectContaining({
+        url: `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+      }),
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("keeps a batch reviewed for the organization there once that access ends, until the admin picks the workspace", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (canAddForOrganization: boolean) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          canAddForOrganization={canAddForOrganization}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(dialog(true))
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    rerender(dialog(false))
+
+    expect(
+      screen.getByText(
+        /You can no longer add servers for the whole organization/,
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled()
+
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls)).toEqual([
+      expect.objectContaining({
+        url: `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+      }),
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("offers a workspace copy under only the first of two picks at its URL", async () => {
+    const twin = mcpCatalogServer({
+      id: "66666666-6666-6666-6666-666666666666",
+      name: "io.example/sentry-eu",
+      title: "Sentry EU",
+      url: SENTRY.url,
+    })
+    const copy = mcpServerFoldCandidate({
+      server_id: "aaaaaaaa-0000-0000-0000-000000000001",
+      workspace_name: "Beta",
+      name: "sentry",
+      credential_mode: "shared",
+      same_credential: true,
+      signed_in: 0,
+      keep_sign_in: 0,
+    })
+    const calls = mockApi({
+      popular: [SENTRY, twin],
+      servers: [SENTRY, twin],
+      copies: { [SENTRY.url]: [copy] },
+    })
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("checkbox", { name: "Select Sentry EU" }))
+    await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("list", { name: "Workspace copies of Sentry" })
+    expect(
+      screen.queryByRole("list", { name: "Workspace copies of Sentry EU" }),
+    ).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", {
+      name: "2 of 2 added to your organization",
+    })
+    expect(creates(calls).map((call) => call.body?.fold_server_ids)).toEqual([
+      [copy.server_id],
+      undefined,
+    ])
+  })
+
+  it("does not add to the workspace a batch reviewed for the organization once that access ends", async () => {
+    const calls = mockApi({
+      copies: {
+        [SENTRY.url]: [mcpServerFoldCandidate({ credential_mode: "shared" })],
+      },
+    })
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (canAddForOrganization: boolean) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          canAddForOrganization={canAddForOrganization}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(dialog(true))
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("list", { name: "Workspace copies of Sentry" })
+    rerender(dialog(false))
+
+    expect(
+      screen.getByText(
+        /You can no longer add servers for the whole organization/,
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled()
+    expect(creates(calls)).toEqual([])
+  })
+
+  it("tells the copy lookup when a pick brings a token of its own", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.type(
+      screen.getByLabelText("Authorization token for Sentry"),
+      "sntrys_token",
+    )
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", {
+      name: "1 of 1 added to your organization",
+    })
+    expect(calls.find((call) => call.url === LOOKUP)?.body).toEqual({
+      url: SENTRY.url,
+      credential_mode: "shared",
+      with_token: true,
+    })
   })
 })

@@ -164,6 +164,32 @@ export const Visuals: Story = {
 }
 
 /**
+ * `ariaDescribedBy` when what picking it does is written beside the label:
+ * the name stays short, and the consequence is read after it rather than only
+ * seen.
+ */
+export const DescribedConsequence: Story = {
+  render: () => {
+    const [on, setOn] = useState(false)
+    return (
+      <Checkbox
+        isSelected={on}
+        onChange={setOn}
+        ariaLabel="Beta: github"
+        ariaDescribedBy="fold-consequence"
+      >
+        <span className="flex flex-col gap-1">
+          <span>Beta: github</span>
+          <span id="fold-consequence" className="text-caption">
+            2 people will need to sign in again.
+          </span>
+        </span>
+      </Checkbox>
+    )
+  },
+}
+
+/**
  * `ariaLabel` when the visible label alone does not say which control it is.
  *
  * These three read "Allowed" on screen, which is all a column heading needs;

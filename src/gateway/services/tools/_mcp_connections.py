@@ -198,9 +198,28 @@ def _approved(pinned: str | None, recorded: str | None, client: McpOAuthClient) 
     client with one sends nothing while the pin is unset (the client was saved again since) or
     names another endpoint.
     """
+    return _endpoint_approved(pinned, recorded, has_secret=client.client_secret is not None)
+
+
+def _endpoint_approved(pinned: str | None, recorded: str | None, *, has_secret: bool) -> bool:
+    """:func:`_approved`, for a client known only by whether it has a secret."""
     if recorded is None:
         return False
-    return client.client_secret is None or pinned == recorded
+    return not has_secret or pinned == recorded
+
+
+def renews_through(server: WorkspaceMcpServer, connection: McpUserConnection) -> bool:
+    """Whether ``server`` can renew ``connection``: it holds a refresh token, ``server``'s client issued it and can
+    authenticate the renewal as the sign-in did, a secret where it sent one, and :func:`_approved` admits the
+    endpoint."""
+    stored = stored_oauth_client(server)
+    if connection.encrypted_refresh_token is None or stored is None or stored.client_id != connection.client_id:
+        return False
+    if connection.client_auth_method != _mcp_oauth.AUTH_METHOD_NONE and not stored.encrypted_secret:
+        return False
+    return _endpoint_approved(
+        server.oauth_client_token_endpoint, connection.token_endpoint, has_secret=bool(stored.encrypted_secret)
+    )
 
 
 def _revocation(
@@ -1424,8 +1443,10 @@ class McpConnectionService:
                     logger.info("MCP shared sign-in refused reason=account_ended server_id=%s", pending.server_id)
                     refusal = "The server's shared account was ended while you were signing in. Start it again."
                 elif pending.identity_id is None or not (
-                    await self._eligibility.may_manage(workspace_id, pending.identity_id)
-                    if workspace_id is not None
+                    # Whoever manages the server as it is now: a promotion during the exchange makes it the
+                    # organization's, whose account a workspace's manager may not set.
+                    await self._eligibility.may_manage(current.workspace_id, pending.identity_id)
+                    if current.workspace_id is not None
                     else await self._eligibility.may_manage_organization(current.organization_id, pending.identity_id)
                 ):
                     logger.info("MCP shared sign-in refused reason=no_longer_manager server_id=%s", pending.server_id)
@@ -1546,16 +1567,25 @@ class McpConnectionService:
             await self._flows.remove_for_user(user_id)
         revoke_in_background(revocations, unread=unread)
 
-    async def disconnect(self, *, server_id: uuid.UUID, user_id: str) -> None:
+    async def disconnect(
+        self,
+        *,
+        server_id: uuid.UUID,
+        user_id: str,
+        still_managed: Callable[[WorkspaceMcpServer | None], object] | None = None,
+    ) -> None:
         """End a user's connection to a server: drop its tokens, and ask the authorization server to end them.
 
         The revocation is best effort. The tokens are gone from here whether or not the remote side
-        confirms it.
+        confirms it. A manager ending another person's names ``still_managed``, which is asked of the
+        server once locked and raises where a promotion has since taken it out of their hands.
 
         Raises:
             McpConnectionNotFoundError: the user has no connection to this server.
         """
         async with self._uow:
+            if still_managed is not None:
+                still_managed(await self._servers.find(server_id, lock=True))
             # Locked, so a renewal in flight finishes first and it is the token it stored that is revoked.
             connection = await self._connections.find(server_id, user_id, lock=True)
             if connection is None:
@@ -1569,16 +1599,21 @@ class McpConnectionService:
         logger.info("MCP connection ended server_id=%s user_id=%s", server_id, user_id)
         await self._revoke_now(server, revocation_endpoint, encrypted_token, client_id, auth_method)
 
-    async def disconnect_shared(self, *, server_id: uuid.UUID) -> None:
+    async def disconnect_shared(
+        self, *, server_id: uuid.UUID, still_managed: Callable[[WorkspaceMcpServer | None], object]
+    ) -> None:
         """End a shared server's account: drop its tokens, and ask the authorization server to end them.
 
-        The health recorded with the account goes too. The caller has decided that the person asking may.
+        The health recorded with the account goes too. The caller has decided that the person asking may,
+        and ``still_managed`` asks again of the server once locked, raising where a promotion has since
+        taken it out of their hands.
 
         Raises:
             McpConnectionNotFoundError: the server has no shared account.
         """
         async with self._uow:
             server = await self._servers.find(server_id, lock=True)
+            still_managed(server)
             connection = await self._connections.find_shared(server_id, lock=True)
             if connection is None or server is None:
                 raise McpConnectionNotFoundError(server_id)
@@ -1980,6 +2015,7 @@ __all__ = [
     "UserAliases",
     "McpRevocation",
     "McpServerRef",
+    "renews_through",
     "revocations_for",
     "collect_revocations",
     "revoke_in_background",

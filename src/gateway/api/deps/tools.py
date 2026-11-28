@@ -51,11 +51,14 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
+    McpOAuthFlowRepository,
     McpServerAliasRepository,
+    McpServerRequestRepository,
     McpUserConnectionRepository,
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
@@ -106,6 +109,7 @@ from gateway.services.tools import (
     DirectToolRate,
     DirectToolService,
     DirectToolUsage,
+    McpServerFold,
     McpToolListings,
     McpUserTokens,
     McpWorkspaceServers,
@@ -116,6 +120,7 @@ from gateway.services.tools import (
     WebSearchKeyService,
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
+    WorkspaceMcpServerUrls,
     WorkspaceSearchKeys,
     web_search_configured,
 )
@@ -691,3 +696,27 @@ def get_mcp_workspace_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> M
 
 
 McpWorkspaceServersDep = Annotated[McpWorkspaceServers, Depends(get_mcp_workspace_servers)]
+
+
+def build_workspace_mcp_server_urls(uow: UnitOfWork) -> WorkspaceMcpServerUrls:
+    """Build the read of where a workspace's MCP servers are, its organization's too, on a Unit of Work."""
+    return WorkspaceMcpServerUrls(
+        WorkspaceMcpServerRepository(uow),
+        McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
+        WorkspaceRepository(uow).get_organization_id,
+    )
+
+
+def build_mcp_server_fold(db: AsyncSession) -> McpServerFold:
+    """Build the fold of workspaces' copies into an organization's MCP server, on the caller's session."""
+    return McpServerFold(
+        servers=WorkspaceMcpServerRepository(db),
+        grants=WorkspaceMcpServerGrantRepository(db),
+        overrides=WorkspaceMcpServerOverrideRepository(db),
+        aliases=McpServerAliasRepository(db),
+        connections=McpUserConnectionRepository(db),
+        flows=McpOAuthFlowRepository(db),
+        requests=McpServerRequestRepository(db),
+    )

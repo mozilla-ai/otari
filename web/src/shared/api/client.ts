@@ -611,6 +611,11 @@ const TIMEOUT_MESSAGE = `The gateway did not respond within ${REQUEST_TIMEOUT_MS
 // prevent.
 export const LONG_REQUEST_TIMEOUT_MS = 5 * 60_000
 
+/** A caller's own cancellation, still bounded by the deadline every management call has. */
+export function withRequestDeadline(signal: AbortSignal): AbortSignal {
+  return AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+}
+
 /** Signal for a request whose duration scales with the data, not with one hop. */
 export function longRequestSignal(): AbortSignal {
   return AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS)
