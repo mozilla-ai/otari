@@ -394,6 +394,16 @@ All attempts share a `request_group_id`, which is the request's `Otari-Request-I
 Absorbed rows have no settled model cost and do not increase request or error
 totals; the final row represents the caller-visible request.
 
+Each row also records why the plan looked the way it did, in `routing_plan`: the
+candidates left out before dispatch, each with a reason (`not_allowed`,
+`unresolvable`, `country_not_supported`, `duplicate`, `over_cap`) and a sentence
+for an operator, and the router's own words when it was asked and declined. A
+candidate left out never became an attempt, so no row exists for it, which makes
+this the only record that a policy compiled down for that caller. The reasons
+depend on the caller's allow-list, its country and what its providers resolve
+to, so they cannot be recomputed from the policy afterwards. The field is null
+when nothing was left out and no router declined.
+
 Every successful Chat Completions, Messages, and Responses response, routed or
 not, carries these headers:
 
@@ -498,3 +508,7 @@ The Routing page manages stored policies.
   of the policy back unchanged.
 - A policy from `config.yml`, or one using options the page cannot show, opens
   read-only with its spec in full.
+- **Activity** shows the plan behind a routed request in its detail panel: every
+  attempt in order, what selected it and how it went, then the candidates left
+  out before dispatch and, when a router declined, why. That is the answer to
+  "a fallback served, so what happened to my primary".

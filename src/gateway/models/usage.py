@@ -225,6 +225,13 @@ class UsageLog(Base):
     attempt_position: Mapped[int | None] = mapped_column()
     attempt_count: Mapped[int | None] = mapped_column()
     request_group_id: Mapped[str | None] = mapped_column(index=True)
+    # Why this request's plan looked the way it did: the candidates the compiler
+    # left out and why, and the router's own reason for declining. Null on an
+    # unrouted row and on a routed one whose plan dropped nothing and whose router
+    # did not decline, so the common case costs no payload. The reasons depend on
+    # the caller (its allow-list, its country), so they cannot be recomputed from
+    # the policy after the fact.
+    routing_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     # HTTP status that classifies a failure, so failures can be grouped with a
     # GROUP BY instead of substring-matching provider-specific error prose. It is

@@ -13947,6 +13947,18 @@ export interface components {
             provider: string;
         };
         /**
+         * DroppedCandidateRecord
+         * @description One candidate a request's plan left out before dispatch, and why.
+         */
+        DroppedCandidateRecord: {
+            /** Detail */
+            detail: string;
+            /** Reason */
+            reason: string;
+            /** Selector */
+            selector: string;
+        };
+        /**
          * DroppedResponse
          * @description A candidate that was filtered out, and why.
          */
@@ -21892,6 +21904,25 @@ export interface components {
             master_key: string;
         };
         /**
+         * RoutingPlanRecord
+         * @description Why a request's plan looked the way it did, as its row recorded it.
+         *
+         *     Written only when there is something to say, so a routed request whose plan
+         *     dropped nothing and whose router did not decline carries null instead.
+         */
+        RoutingPlanRecord: {
+            /**
+             * Declined
+             * @description The router's own reason for not choosing, when it was asked and declined.
+             */
+            declined?: string | null;
+            /**
+             * Dropped
+             * @description The candidates that never became attempts, each with the reason it was left out.
+             */
+            dropped?: components["schemas"]["DroppedCandidateRecord"][];
+        };
+        /**
          * SandboxCredentialPublic
          * @description Where the key a hosted sandbox provider leases with comes from. Never the key itself.
          */
@@ -24394,6 +24425,7 @@ export interface components {
             request_group_id?: string | null;
             /** Requested Model */
             requested_model?: string | null;
+            routing_plan?: components["schemas"]["RoutingPlanRecord"] | null;
             /** Selection Reason */
             selection_reason?: string | null;
             /** Source */

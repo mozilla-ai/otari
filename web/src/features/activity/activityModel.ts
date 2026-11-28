@@ -545,8 +545,18 @@ export function describeAttempt(
   const position = entry.attempt_position
   const total = entry.attempt_count
   // A policy with one candidate has no plan to place the row in, so the only thing
-  // worth saying is why that candidate was picked.
-  if (position == null || total == null || total <= 1) return reason
+  // worth saying is why that candidate was picked. One exception: a lone
+  // `on_failure` attempt means the primary never ran, which reads very differently
+  // from "a fallback served" when nothing was tried first.
+  if (position == null || total == null || total <= 1) {
+    if (
+      entry.selection_reason === "on_failure" &&
+      (entry.routing_plan?.dropped?.length ?? 0) > 0
+    ) {
+      return "a fallback candidate; the primary was left out before dispatch"
+    }
+    return reason
+  }
   const attempt = `attempt ${position} of ${total}`
   if (isSkippedAttempt(entry)) {
     return outcome?.servedBy

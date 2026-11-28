@@ -128,4 +128,48 @@ describe("RoutingPlan", () => {
       ),
     ).toBeInTheDocument()
   })
+
+  it("lists the candidates that never became attempts", async () => {
+    mockApi({ groupRows: [failed, served] })
+    renderPage(
+      <RoutingPlan
+        entry={entry({
+          ...failed,
+          routing_plan: {
+            dropped: [
+              {
+                selector: "openai:gpt-5",
+                reason: "not_allowed",
+                detail: "is not in allowed_models for this caller",
+              },
+            ],
+          },
+        })}
+      />,
+    )
+    await flushRouter()
+
+    expect(await screen.findByText("Left out")).toBeInTheDocument()
+    expect(screen.getByText("openai:gpt-5")).toBeInTheDocument()
+    expect(
+      screen.getByText(/is not in allowed_models for this caller/),
+    ).toBeInTheDocument()
+  })
+
+  it("says the router declined and why", async () => {
+    mockApi({ groupRows: [failed, served] })
+    renderPage(
+      <RoutingPlan
+        entry={entry({
+          ...failed,
+          routing_plan: { declined: "caller sent Otari-Router: off" },
+        })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText(/The router did not choose/)).toHaveTextContent(
+      "caller sent Otari-Router: off",
+    )
+  })
 })

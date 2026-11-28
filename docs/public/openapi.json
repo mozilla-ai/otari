@@ -8891,6 +8891,30 @@
         "title": "DiscoverableProvider",
         "type": "object"
       },
+      "DroppedCandidateRecord": {
+        "description": "One candidate a request's plan left out before dispatch, and why.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "reason",
+          "detail"
+        ],
+        "title": "DroppedCandidateRecord",
+        "type": "object"
+      },
       "DroppedResponse": {
         "description": "A candidate that was filtered out, and why.",
         "properties": {
@@ -25512,6 +25536,33 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
+      "RoutingPlanRecord": {
+        "description": "Why a request's plan looked the way it did, as its row recorded it.\n\nWritten only when there is something to say, so a routed request whose plan\ndropped nothing and whose router did not decline carries null instead.",
+        "properties": {
+          "declined": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The router's own reason for not choosing, when it was asked and declined.",
+            "title": "Declined"
+          },
+          "dropped": {
+            "description": "The candidates that never became attempts, each with the reason it was left out.",
+            "items": {
+              "$ref": "#/components/schemas/DroppedCandidateRecord"
+            },
+            "title": "Dropped",
+            "type": "array"
+          }
+        },
+        "title": "RoutingPlanRecord",
+        "type": "object"
+      },
       "SandboxCredentialPublic": {
         "description": "Where the key a hosted sandbox provider leases with comes from. Never the key itself.",
         "properties": {
@@ -31094,6 +31145,16 @@
               }
             ],
             "title": "Requested Model"
+          },
+          "routing_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutingPlanRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "selection_reason": {
             "anyOf": [
