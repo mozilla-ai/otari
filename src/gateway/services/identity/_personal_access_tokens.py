@@ -1,7 +1,5 @@
 """Personal access tokens: a person's own read-only credential for one organization's management API."""
 
-import hashlib
-import secrets
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -13,6 +11,7 @@ from gateway.auth.models import (
     PERSONAL_ACCESS_TOKEN_PREFIX,
     key_suffix,
 )
+from gateway.core.tokens import generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     PersonalAccessTokenBlockedError,
@@ -34,10 +33,6 @@ MCP_ACCESS_TOKEN_LIFETIME = timedelta(hours=1)
 # How stale ``last_used_at`` may get before a request writes it again, so a busy
 # agent does not turn every read into a write.
 _TOUCH_INTERVAL = timedelta(minutes=1)
-
-
-def _hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -80,7 +75,7 @@ class PersonalAccessTokenService:
             PersonalAccessTokenNoOrganizationError: the account is acting in no organization.
             PersonalAccessTokenSessionEndedError: the account or the session asking ended meanwhile.
         """
-        token = PERSONAL_ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        token = PERSONAL_ACCESS_TOKEN_PREFIX + generate_token()
         now = self.clock()
         async with self.uow:
             # The blocklist's lock before any row lock, as a sign-in takes it: a block commits either
@@ -90,14 +85,14 @@ class PersonalAccessTokenService:
             owner = await self._make_room(user.id, now)
             if owner is None or not owner.is_active:
                 raise PersonalAccessTokenSessionEndedError()
-            if session_token is not None and not await self.sessions.is_live(_hash(session_token), owner.id, now):
+            if session_token is not None and not await self.sessions.is_live(hash_token(session_token), owner.id, now):
                 raise PersonalAccessTokenSessionEndedError()
             if owner.active_organization_id is None:
                 raise PersonalAccessTokenNoOrganizationError()
             row = await self.tokens.add(
                 user_id=owner.id,
                 name=name,
-                token_hash=_hash(token),
+                token_hash=hash_token(token),
                 token_suffix=key_suffix(token),
                 created_at=now,
                 expires_at=now + lifetime,
@@ -119,7 +114,7 @@ class PersonalAccessTokenService:
         Raises:
             PersonalAccessTokenLimitReachedError: the account already holds the most it may.
         """
-        access, refresh = MCP_ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32), _new_refresh_token()
+        access, refresh = MCP_ACCESS_TOKEN_PREFIX + generate_token(), MCP_REFRESH_TOKEN_PREFIX + generate_token()
         now = self.clock()
         async with self.uow:
             owner = await self.users.get_locked(user_id)
@@ -131,14 +126,14 @@ class PersonalAccessTokenService:
             await self.tokens.add(
                 user_id=user_id,
                 name=name[:MAX_ACCESS_TOKEN_NAME_LENGTH],
-                token_hash=_hash(access),
+                token_hash=hash_token(access),
                 token_suffix=key_suffix(access),
                 created_at=now,
                 expires_at=expires_at,
                 organization_id=organization_id,
                 client_id=client_id,
                 access_expires_at=access_expires_at,
-                refresh_token_hash=_hash(refresh),
+                refresh_token_hash=hash_token(refresh),
             )
         return McpSignIn(access, refresh, int((access_expires_at - now).total_seconds()))
 
@@ -149,8 +144,8 @@ class PersonalAccessTokenService:
         still be in use (OAuth 2.0 Security BCP, section 4.14).
         """
         now = self.clock()
-        presented = _hash(refresh_token)
-        access, refresh = MCP_ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32), _new_refresh_token()
+        presented = hash_token(refresh_token)
+        access, refresh = MCP_ACCESS_TOKEN_PREFIX + generate_token(), MCP_REFRESH_TOKEN_PREFIX + generate_token()
         async with self.uow:
             row = await self.tokens.find_by_refresh_hash_locked(presented)
             if row is None:
@@ -158,16 +153,15 @@ class PersonalAccessTokenService:
                 return None
             if row.client_id != client_id or row.expires_at is None or row.expires_at <= now:
                 return None
-            owner = await self.users.get(row.user_id)
-            if owner is None or not owner.is_active or not await self._membership_is_live(row):
+            if await self._live_owner(row) is None:
                 return None
             access_expires_at = min(now + MCP_ACCESS_TOKEN_LIFETIME, row.expires_at)
             await self.tokens.rotate(
                 row.id,
-                token_hash=_hash(access),
+                token_hash=hash_token(access),
                 token_suffix=key_suffix(access),
                 access_expires_at=access_expires_at,
-                refresh_token_hash=_hash(refresh),
+                refresh_token_hash=hash_token(refresh),
                 previous_refresh_token_hash=presented,
             )
         return McpSignIn(access, refresh, int((access_expires_at - now).total_seconds()))
@@ -184,8 +178,8 @@ class PersonalAccessTokenService:
             raise PersonalAccessTokenLimitReachedError(MAX_PERSONAL_ACCESS_TOKENS)
         return owner
 
-    async def _membership_is_live(self, token: PersonalAccessToken) -> bool:
-        """Whether the account is still a member of the organization the token reads.
+    async def _live_owner(self, token: PersonalAccessToken) -> User | None:
+        """The token's account, or None where it is gone, deactivated or no longer a member of the token's organization.
 
         The binding is the token's organization, put on the account for the request only. Every
         read resolves its organization from that pointer and falls back to another organization
@@ -193,9 +187,12 @@ class PersonalAccessTokenService:
         to the read: a token reads one organization, and stops when that membership does.
         """
         if token.organization_id is None:
-            return False
+            return None
+        owner = await self.users.get(token.user_id)
+        if owner is None or not owner.is_active:
+            return None
         membership = await self.members.get_active_by_organization_and_user(token.organization_id, token.user_id)
-        return membership is not None
+        return owner if membership is not None else None
 
     async def list(self, user: User) -> Sequence[PersonalAccessToken]:
         """The account's own tokens and MCP sign-ins, newest first."""
@@ -215,7 +212,7 @@ class PersonalAccessTokenService:
     async def revoke_presented(self, token: str) -> None:
         """Delete the token presented, or the sign-in a refresh token renews; an unknown token is a no-op."""
         async with self.uow:
-            await self.tokens.delete_by_hash(_hash(token))
+            await self.tokens.delete_by_hash(hash_token(token))
 
     async def authenticate(self, token: str) -> User | None:
         """The account a live token speaks for, acting in the token's organization, or None.
@@ -225,20 +222,16 @@ class PersonalAccessTokenService:
         """
         now = self.clock()
         async with self.uow:
-            row = await self.tokens.find_by_hash(_hash(token))
+            row = await self.tokens.find_by_hash(hash_token(token))
             if row is None or _ended(row.expires_at, now) or _ended(row.access_expires_at, now):
                 return None
-            owner = await self.users.get(row.user_id)
-            if owner is None or not owner.is_active or not await self._membership_is_live(row):
+            owner = await self._live_owner(row)
+            if owner is None:
                 return None
             if row.last_used_at is None or now - row.last_used_at >= _TOUCH_INTERVAL:
                 await self.tokens.touch(row.id, now)
             self.users.act_in(owner, row.organization_id)
             return owner
-
-
-def _new_refresh_token() -> str:
-    return MCP_REFRESH_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
 def _ended(moment: datetime | None, now: datetime) -> bool:
