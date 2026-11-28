@@ -133,6 +133,15 @@ def test_describe_shows_the_allowed_values_the_documented_defaults_and_the_base_
     assert "Final URL: the URL as asked, even after a redirect" in out
 
 
+def test_describe_says_a_provider_renders_javascript_and_reports_the_final_url(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _describe("firecrawl", capsys)
+    assert "Renders JavaScript: yes" in out
+    assert "Final URL: after redirects" in out
+    assert '  parsers (array), default [{"type": "pdf", "maxPages": 100}, "image"]' in out
+
+
 def test_describe_shows_defaults_as_json_and_the_test_tier(capsys: pytest.CaptureFixture[str]) -> None:
     out = _describe("fake", capsys)
     assert "For tests:" in out

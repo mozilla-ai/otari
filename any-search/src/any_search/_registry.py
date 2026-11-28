@@ -19,6 +19,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
     from any_search.providers.deepseek import DeepSeekProvider
     from any_search.providers.exa import ExaProvider
     from any_search.providers.fake import FakeProvider
+    from any_search.providers.firecrawl import FirecrawlProvider
     from any_search.providers.keenable import KeenableProvider
     from any_search.providers.mojeek import MojeekProvider
     from any_search.providers.perplexity import PerplexityProvider
@@ -35,6 +36,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
             DeepSeekProvider,
             ExaProvider,
             FakeProvider,
+            FirecrawlProvider,
             KeenableProvider,
             MojeekProvider,
             PerplexityProvider,

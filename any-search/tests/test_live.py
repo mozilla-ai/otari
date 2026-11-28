@@ -53,6 +53,8 @@ EXPECTED: dict[str, Expected] = {
     # DeepSeek returns page text only on request, so the snippet is what a hit says by default.
     "deepseek": Expected(dated={}, snippets=True),
     "exa": Expected(dated={"category": "news"}),
+    # Firecrawl returns highlights as the snippet by default, page text only under scrapeOptions, and dates no hit.
+    "firecrawl": Expected(snippets=True),
     # Keenable returns a snippet and no page text, and dates the hits it knows a publish date for. Without
     # KEENABLE_API_KEY it searches keyless, within a limit per IP address.
     "keenable": Expected(

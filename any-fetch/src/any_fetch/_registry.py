@@ -19,6 +19,7 @@ def _providers() -> dict[str, type["AnyFetch"]]:
     from any_fetch.providers.deepseek import DeepSeekProvider
     from any_fetch.providers.exa import ExaProvider
     from any_fetch.providers.fake import FakeProvider
+    from any_fetch.providers.firecrawl import FirecrawlProvider
     from any_fetch.providers.tabstack import TabstackProvider
     from any_fetch.providers.youdotcom import YouDotComProvider
 
@@ -29,6 +30,7 @@ def _providers() -> dict[str, type["AnyFetch"]]:
             DeepSeekProvider,
             ExaProvider,
             FakeProvider,
+            FirecrawlProvider,
             TabstackProvider,
             YouDotComProvider,
         )

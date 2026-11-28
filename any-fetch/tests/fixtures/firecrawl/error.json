@@ -1,0 +1,7 @@
+{
+  "status": 401,
+  "body": {
+    "success": false,
+    "error": "Unauthorized: Invalid token"
+  }
+}

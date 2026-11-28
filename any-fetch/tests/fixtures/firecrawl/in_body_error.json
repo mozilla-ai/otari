@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "body": {
+    "success": false,
+    "code": "SCRAPE_DNS_RESOLUTION_ERROR",
+    "error": "DNS resolution failed for hostname \"no-such-domain-any-fetch.example\". This means the domain name could not be translated to an IP address. Possible causes: (1) The domain name is misspelled (check for typos), (2) The domain does not exist or has expired, (3) The DNS servers are temporarily unavailable, or (4) The domain was recently registered and DNS has not propagated yet. Please verify the URL is correct and the website exists.",
+    "jobId": "01a21281-9160-71cd-a16b-936a15a45788"
+  }
+}

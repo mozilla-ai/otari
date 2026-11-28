@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "body": {
+    "success": true,
+    "data": {
+      "markdown": "",
+      "metadata": {
+        "scrapeId": "01a21281-8ef2-77cc-9f07-4199307dac30",
+        "sourceURL": "https://httpbin.org/status/500",
+        "url": "https://httpbin.org/status/500",
+        "statusCode": 500,
+        "error": "Internal Server Error",
+        "contentType": "text/html; charset=utf-8",
+        "proxyUsed": "basic",
+        "cacheState": "hit",
+        "cachedAt": "2026-11-25T10:41:13.630Z",
+        "creditsUsed": 1,
+        "concurrencyLimited": false
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://devguide.python.org/versions/",
+          "title": "Status of Python versions",
+          "description": "New binaries are built and released roughly every two months. The release cycle is frozen; no further changes are allowed.",
+          "position": 1
+        },
+        {
+          "url": "https://endoflife.date/python",
+          "title": "Python",
+          "description": "Check end-of-life, release policy and support schedule for Python. (09 Oct 2026) Ends in 1 year and 10 months (09 Oct 2028) Ends in 4 years and ...",
+          "position": 2
+        }
+      ]
+    },
+    "creditsUsed": 2,
+    "id": "01a21281-8880-7408-ba91-9635a95dea22"
+  }
+}

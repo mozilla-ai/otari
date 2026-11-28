@@ -881,6 +881,28 @@ Each provider's limits are in the
   fails the fetch.
 - **Exa** (`exa`) needs an API key, read from the instance's `api_key`, and
   reports what each fetch costs (`costDollars.total`).
+- **Firecrawl** (`firecrawl`) needs an API key, read from the instance's
+  `api_key`, such as `${FIRECRAWL_API_KEY}`, the key a Firecrawl search tool takes
+  too. Name the instance apart from a Firecrawl search tool, such as
+  `firecrawl-fetch`, since names are unique across `search_tools` and
+  `fetch_tools`. It reports Firecrawl credits, not dollars, so a fetch is billed at
+  the instance's own rate (its `price_per_call`, or a `fetch` price set on the
+  dashboard's Web search page or through the API). Firecrawl's
+  [pricing](https://www.firecrawl.dev/pricing) and
+  [billing](https://docs.firecrawl.dev/billing) pages, read 2026-11-25, put
+  a page at 1 Firecrawl credit, and a Firecrawl credit on the published plans costs
+  from $0.0006 (Scale, billed yearly) to $0.005 (the Hobby plan's extra credits). A PDF adds 1 Firecrawl credit per page
+  parsed, so Otari sends `parsers: [{type: pdf, maxPages: 100}, image]` unless the
+  instance's `options` or the request set `parsers`: a fetch then parses at most the
+  first 100 pages of a PDF, the page limit Otari's own fetch applies, and costs at
+  most 101 Firecrawl credits. `parsers` is not a cost tier, so a workspace or a
+  request can set it, a higher `maxPages` included; set the instance's rate with
+  that in mind. Firecrawl answers with the URL it
+  found the page at after redirects, so the domain policy holds on the page a
+  redirect led to. A page Firecrawl cannot read, such as a zero-byte file or a
+  private address, fails the fetch, and a site's error page comes back as its text.
+  Firecrawl may spend up to 60 seconds on a page unless the instance's `options`
+  set its `timeout` (milliseconds), so give the instance a `timeout` to match.
 - **Tabstack** (`tabstack`) needs an API key, read from the instance's
   `api_key`, such as `${TABSTACK_API_KEY}`. It reports no cost, so a fetch is
   billed at the instance's own rate (its `price_per_call`, or a `fetch` price set
@@ -1240,6 +1262,31 @@ refuse such a value when a tool is saved.
   10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
   can cost. A search with no results reported a cost of 0 when the adapter was
   written.
+- **Firecrawl** (`firecrawl`) needs an API key, read from the tool's `api_key`,
+  such as `${FIRECRAWL_API_KEY}`. It reports Firecrawl credits, not dollars, so a
+  search is billed at the tool's own rate (its `price_per_call`, or a `search`
+  price set on the dashboard's Web search page or through the API). Firecrawl's
+  [pricing](https://www.firecrawl.dev/pricing) and
+  [billing](https://docs.firecrawl.dev/billing) pages, read 2026-11-25, put
+  a search at 2 Firecrawl credits per 10 results, rounded up per 10, and a
+  Firecrawl credit on the published plans costs from $0.0006 (Scale, billed
+  yearly) to $0.005 (the Hobby plan's extra credits), so a search for 10 results
+  costs $0.0012 to $0.01. Every 10 results past the first 10 add 2 Firecrawl
+  credits, so a workspace's `max_results` ceiling bounds the base charge of one
+  search. To bound the whole charge, an operator must also bound
+  `scrapeOptions`, since a PDF it scrapes adds 1 Firecrawl credit per page parsed
+  and the search adapter sets no page ceiling. `scrapeOptions`, which returns
+  each result's page as text, adds 1 Firecrawl credit per page scraped, plus the
+  scrape options' own, so a scraped search for 10 results costs 12 Firecrawl
+  credits. `scrapeOptions` is not a cost tier, so a workspace or a request can set
+  it; set the tool's rate with that in mind. A search returns 10 results
+  unless asked for more, and at most 100,
+  and its hits carry query-relevant highlights as the snippet, which Otari cuts
+  before a model or a direct search sees them; `highlights: false` returns each
+  site's shorter description. Its hits carry no date, and page text only under
+  `scrapeOptions`. Firecrawl may spend up to 60 seconds on a search unless the
+  tool's `options` set its `timeout` (milliseconds), so give the tool a `timeout`
+  to match.
 - **Keenable** (`keenable`) takes an API key but needs none. Without one, a tool
   searches Keenable's free endpoint, which allows 1,000 searches an hour and 10 a
   second per IP address, shared with everything else calling from the gateway's

@@ -223,6 +223,57 @@ that does not parse, raises `ProviderError` with the tag `unexpected_response`. 
 cost as optional, so an answer without one reports none; the live tests check that it reports
 one. Fields the adapter does not read are ignored, so a field Exa adds breaks nothing.
 
+## Firecrawl
+
+`firecrawl` calls Firecrawl's [Search API](https://docs.firecrawl.dev/api-reference/endpoint/search),
+`POST /v2/search`, with the key as a Bearer token, read from `FIRECRAWL_API_KEY` when not passed.
+The query travels in the JSON body. Its base URL is `https://api.firecrawl.dev`; `api_base` points
+it at another Firecrawl deployment, such as a self-hosted one.
+
+It sends the query and the native options passed. `max_results` becomes `limit`, sent only when
+passed, as in Firecrawl's Python SDK;
+Firecrawl's own default is 10 results. Firecrawl spends up to 60 seconds on a search unless the
+`timeout` option says otherwise.
+
+| `SearchHit` | From Firecrawl |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `data.web`; a result without an http or https `url` is dropped |
+| `snippet` | `description`: query-relevant highlights of the page by default, the site's own description under `highlights=False` |
+| `text` | `markdown`, the page as Markdown, only when `scrapeOptions` asks Firecrawl to scrape the results; `markdown` is always among their `formats` |
+| `published` | always `None`: Firecrawl dates no web result |
+
+Firecrawl reports Firecrawl credits (`creditsUsed`), not dollars, so it reports no cost; the figure
+stays in `raw`. `max_results` is at most 100, and the hits are cut to it,
+or to 10 when it is unset. `time_range` becomes `tbs` (`qdr:d`, `qdr:w`, `qdr:m` or `qdr:y`) and wins
+over the `tbs` option. The other native options are Firecrawl's own: `categories`,
+`includeDomains`, `excludeDomains`, `location`, `country`, `safe`, `highlights`,
+`ignoreInvalidURLs`, `timeout` (milliseconds) and `scrapeOptions`; `--describe firecrawl` lists
+them. Each page `scrapeOptions` scrapes adds a Firecrawl credit, and its
+`formats` always include `markdown`: missing or empty `formats` become `["markdown"]`, because
+Firecrawl scrapes nothing without one. An option set to `None` is not sent. `sources` is not offered: the adapter reads web results,
+while news, images and [Firecrawl Alexandria](https://alexandria.firecrawl.dev/) data tools
+come back in fields of their own.
+
+Highlights can run to a few thousand characters a result, so pass `highlights=False` for the
+shorter description, or `scrapeOptions` for each page's full text:
+
+```python
+await engine.search(query, highlights=False)
+await engine.search(query, scrapeOptions={"formats": ["markdown"]})  # 1 more Firecrawl credit per page scraped
+```
+
+Any status from 400 raises `ProviderError`: `unauthorized` (401), `payment_required` (402) and
+`rate_limited` (429) by status, since those bodies are a sentence; any other status takes the
+body's `code` when it has one, such as `CATEGORY_REMOVED`, else `http_error`. The `error`
+sentence, which can quote the request, never reaches the error. `success: false` in a 200 is
+`SearchResult.error`, tagged with its `code`, else `unsuccessful`.
+
+Every field read from a successful answer is checked: a `success` that is missing or not a boolean, an answer
+without a `data` object, a `data.web` that is not a list, or an item whose `url` is missing or not
+a string, whose `title` or `description` is not a string, or whose `markdown` is neither a string
+nor null, raises `ProviderError` with the tag `unexpected_response`. Without `data.web` there are
+no hits. Fields the adapter does not read are ignored.
+
 ## Keenable
 
 `keenable` calls Keenable's [search API](https://docs.keenable.ai/api-reference/search) with or
